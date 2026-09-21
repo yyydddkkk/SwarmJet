@@ -1,0 +1,62 @@
+# 分布式执行节点
+
+## 目标与边界
+
+控制面集中部署：控制台 API、Temporal、PostgreSQL 保留在一处，负责项目配置、任务状态、流程编排和 GitLab 交互。执行节点承载真正的资源消耗：任务工作区、Agent 容器、Compose 联调环境、报告以及任务级清理。
+
+第一阶段只做「固定节点归属」，不做跨节点自动迁移：任务在创建时分配到某个在线且有余量的节点，之后该任务的准备、开发、验证、审查、合并、取消和清理都必须在同一节点完成。节点失联时保留归属与现场，任务进入 blocked 并给出明确提示，不会静默漂移到另一台机器重复执行。Kubernetes 后端不在本阶段实现，但流程层不再直接依赖 Docker。
+
+本机开发方式保持不变：未注册任何执行节点时任务不写 nodeId，控制面 Worker 直接使用进程内的 workspace / agent / integration 管理器，也就是原来的单机行为。
+
+## 数据模型
+
+- `domain.Task.NodeID`：任务固定的执行节点；空值表示使用控制面本机后端。
+- `nodes(id, address, capacity, version, last_seen)`：执行节点注册表。节点每 10 秒向控制面心跳一次。
+- 节点在线时间窗为 `domain.NodeOnlineAfter`（30 秒）。任务在 `tasks.node_id` 保存归属，供调度统计和保留期清理读取。
+
+## 调度
+
+`Store.CreateTaskScheduled` 在事务内用 advisory lock 串行化分配：统计每个节点的非终态任务数，选择在线、running < capacity 且负载最低的节点（并列按 id 升序），一次写死。运行中的任务不会因为节点变忙而改派。
+
+所有接单入口共用同一策略：控制台 `POST /api/tasks` 与自动扫描（Webhook 只是唤醒扫描，不单独创建任务）都调用 `CreateTaskScheduled` 并传入同一个 `RequireNode` 开关。`EXECUTION_MODE=local` 时没有可用节点就回退控制面本机；`distributed` 时控制台返回 503，自动扫描跳过该 Issue 并在下一轮重试，绝不会落到控制面本机。
+
+## 传输与凭证
+
+控制面通过 HTTP 调用执行节点的 `POST /execute`，请求体是 `{method, params}`。每次请求带：
+
+- `X-SwarmJet-Timestamp`：Unix 秒；
+- `X-SwarmJet-Request-ID`：随机 16 字节十六进制；
+- `X-SwarmJet-Signature`：`HMAC-SHA256(secret, timestamp + "\n" + requestID + "\n" + body)`。
+
+节点校验时间窗（±2 分钟）与签名，requestID 参与签名，因此重放无法篡改它。requestID 在 dispatch 前原子登记：同一 ID 并发到达时只有一个执行，其余等待同一个结果。去重标记的寿命取 `nodeTimeout(method) + 4 分钟`，覆盖该调用允许的全部重试时间（最长 30 分钟）与时间偏差，所以响应在网络中滞留数分钟后、用相同 requestID 和更新后的时间戳重试，仍不会重复执行。响应体只保留 4 分钟以限制内存，过期后重复请求返回 `replay_unavailable`；超大响应同样只保留标记。缓存不会为了腾空间删除仍在有效期内的记录，容量不足时拒绝新请求（503），既不执行也不淘汰。返回缓存结果时在缓存锁内取一次一致快照，因此清理释放响应体不会让重复请求拿到空的成功响应。
+
+客户端对同一次调用的瞬时失败（连接错误、5xx/503）用同一个 requestID 重试（最多 4 次），所以“响应丢失”不会让节点执行两次；而轮询或新操作是新的调用，使用新的 requestID 并重新执行。客户端的 HTTP Client 禁用重定向跟随，节点或代理返回 307/308 时直接报错，凭证请求体不会被转发到其他地址。
+
+每个远程调用都有独立超时（Agent 观察/取消 2 分钟，工作区/联调/退役 30 分钟等）。节点故障会在超时后把 Activity 判失败并释放并发槽，而不是占住到两小时 Activity 上限。
+
+服务端错误带结构化 `code`：例如目标分支推进（`workspace.ErrNeedsSync`）映射为 `needs_sync`，客户端重建为同一类型，流程因此回到开发阶段同步代码，而不是 blocked。
+
+调用方在请求参数中传入解析后的 GitLab token 与允许的模型环境变量。节点只在本次调用使用这些值，不写入磁盘、不记日志，也不进入 Temporal 历史。AgentRequest.Env 因此不参与 Temporal 序列化；远程协议单独设计，而不是把 AgentRequest 直接塞进 Activity 参数。
+
+凭证助手路径与联调环境变量属于执行主机配置：控制面只对本机后端发送 `GIT_ASKPASS`，远程节点忽略调用方提供的该变量并始终使用自己的配置；`INTEGRATION_ENV_ALLOWLIST` 解析出的值同样只在控制面本机生效。生产环境要求 HTTPS。
+
+## 节点职责
+
+每个节点运行独立 `DATA_DIR` 与 Docker，实现 `execution.Node`：
+
+- 工作区准备、检查、目标分支刷新与释放；
+- Agent 的启动、观察、取消和任务级执行记录（沿用稳定执行 ID 与重试接管契约）；
+- 联调 Compose 的启动、验证与停止；
+- 报告读取（供控制台 artifacts 接口代理）；
+- 任务级清理与过期任务退役（停止联调、释放工作区、删除本节点的任务目录与 supervisor 记录）。
+
+## 节点失联
+
+远程调用失败或超时会作为 Activity 错误返回，流程把任务置为 blocked，保留 nodeId 与工作区。重试成功后使用相同执行 ID 接管已有 Agent 容器。自动跨节点接管需要工作区/会话恢复与执行权校验，本阶段明确不实现。
+
+## 尚未实施
+
+- 跨节点自动迁移、工作区与会话恢复、重复执行防护；
+- Kubernetes 执行后端；
+- 每节点 runtime-admin 模型登录终端的控制台路由；
+- 控制台只读镜像与节点本地报告的集中存储（当前由控制面按节点代理读取）。

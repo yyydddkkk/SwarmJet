@@ -18,6 +18,7 @@ import (
 var schema string
 var ErrConflict = errors.New("conflict: stale version or active task already exists")
 var ErrNotFound = errors.New("not found")
+var ErrNoNode = errors.New("no execution node with spare capacity")
 
 type Store struct{ Pool *pgxpool.Pool }
 
@@ -148,24 +149,77 @@ func (s *Store) SaveProject(ctx context.Context, p domain.Project) (domain.Proje
 	return p, tx.Commit(ctx)
 }
 func (s *Store) CreateTask(ctx context.Context, t domain.Task) error {
+	_, e := s.createTask(ctx, t, false)
+	return e
+}
+
+// CreateTaskScheduled stores a task and pins it to an online execution node
+// with spare capacity. Assignment happens once, under an advisory lock, and is
+// never recomputed: later phases route to the node recorded here.
+func (s *Store) CreateTaskScheduled(ctx context.Context, t domain.Task, requireNode bool) (domain.Task, error) {
+	return s.createTask(ctx, t, requireNode)
+}
+
+func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool) (domain.Task, error) {
 	tx, e := s.Pool.Begin(ctx)
 	if e != nil {
-		return e
+		return t, e
 	}
 	defer tx.Rollback(ctx)
+	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84261302)"); e != nil {
+		return t, e
+	}
+	node, found, e := pickNode(ctx, tx)
+	if e != nil {
+		return t, e
+	}
+	if found {
+		t.NodeID = node
+	} else if requireNode {
+		return t, ErrNoNode
+	}
 	b, _ := json.Marshal(t)
 	source := fmt.Sprintf("%s/%d/%d", domain.GitLabIdentity(t.Project.GitLabURL), t.Issue.ProjectID, t.Issue.IID)
-	_, e = tx.Exec(ctx, "INSERT INTO tasks(id,project_id,source,stage,body) VALUES($1,$2,$3,$4,$5)", t.ID, t.Project.ID, source, t.Stage, b)
+	var nodeID any
+	if t.NodeID != "" {
+		nodeID = t.NodeID
+	}
+	_, e = tx.Exec(ctx, "INSERT INTO tasks(id,project_id,source,stage,node_id,body) VALUES($1,$2,$3,$4,$5,$6)", t.ID, t.Project.ID, source, t.Stage, nodeID, b)
 	if e != nil {
-		return mapErr(e)
+		return t, mapErr(e)
 	}
 	c := domain.Command{ID: "start-" + t.ID, Kind: "start"}
 	cb, _ := json.Marshal(c)
 	_, e = tx.Exec(ctx, "INSERT INTO commands(id,task_id,body) VALUES($1,$2,$3)", c.ID, t.ID, cb)
 	if e != nil {
-		return e
+		return t, e
 	}
-	return tx.Commit(ctx)
+	return t, tx.Commit(ctx)
+}
+
+// pickNode chooses the least loaded online node with spare capacity. Ties break
+// by id so consecutive assignments are deterministic.
+func pickNode(ctx context.Context, tx pgx.Tx) (string, bool, error) {
+	rows, e := tx.Query(ctx, `SELECT n.id
+		FROM nodes n
+		LEFT JOIN (
+			SELECT node_id, count(*) AS running FROM tasks
+			WHERE NOT terminal AND node_id IS NOT NULL GROUP BY node_id
+		) r ON r.node_id = n.id
+		WHERE n.last_seen > now() - $1::interval AND COALESCE(r.running,0) < n.capacity
+		ORDER BY COALESCE(r.running,0) ASC, n.id ASC LIMIT 1`, fmt.Sprintf("%f seconds", domain.NodeOnlineAfter.Seconds()))
+	if e != nil {
+		return "", false, e
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return "", false, rows.Err()
+	}
+	var id string
+	if e = rows.Scan(&id); e != nil {
+		return "", false, e
+	}
+	return id, true, rows.Err()
 }
 func (s *Store) Task(ctx context.Context, id string) (domain.Task, error) {
 	var b []byte
@@ -309,4 +363,69 @@ func (s *Store) Lease(ctx context.Context, name, owner string, ttl time.Duration
 func (s *Store) ReleaseLeases(ctx context.Context, owner string) error {
 	_, e := s.Pool.Exec(ctx, "DELETE FROM leases WHERE owner=$1", owner)
 	return e
+}
+
+// HeartbeatNode registers or refreshes one execution node. A node that stops
+// heartbeating simply stops receiving new tasks; its existing assignments stay.
+func (s *Store) HeartbeatNode(ctx context.Context, n domain.Node) error {
+	if n.Capacity < 1 {
+		n.Capacity = 1
+	}
+	_, e := s.Pool.Exec(ctx, `INSERT INTO nodes(id,address,capacity,version,last_seen)
+		VALUES($1,$2,$3,$4,now())
+		ON CONFLICT(id) DO UPDATE SET address=excluded.address, capacity=excluded.capacity, version=excluded.version, last_seen=now()`, n.ID, n.Address, n.Capacity, n.Version)
+	return e
+}
+
+func (s *Store) Node(ctx context.Context, id string) (domain.Node, error) {
+	var n domain.Node
+	e := s.Pool.QueryRow(ctx, "SELECT id,address,capacity,version,last_seen FROM nodes WHERE id=$1", id).Scan(&n.ID, &n.Address, &n.Capacity, &n.Version, &n.LastSeen)
+	return n, mapErr(e)
+}
+
+// NodeAddress returns the base URL used to reach a registered node.
+func (s *Store) NodeAddress(ctx context.Context, id string) (string, error) {
+	n, e := s.Node(ctx, id)
+	return n.Address, e
+}
+
+func (s *Store) Nodes(ctx context.Context) ([]domain.Node, error) {
+	rows, e := s.Pool.Query(ctx, "SELECT id,address,capacity,version,last_seen FROM nodes ORDER BY id")
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []domain.Node{}
+	for rows.Next() {
+		var n domain.Node
+		if e = rows.Scan(&n.ID, &n.Address, &n.Capacity, &n.Version, &n.LastSeen); e != nil {
+			return nil, e
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) NodeStatuses(ctx context.Context) ([]domain.NodeStatus, error) {
+	rows, e := s.Pool.Query(ctx, `SELECT n.id,n.address,n.capacity,n.version,n.last_seen,
+		COALESCE(r.running,0), (n.last_seen > now() - $1::interval) AS online
+		FROM nodes n
+		LEFT JOIN (
+			SELECT node_id, count(*) AS running FROM tasks
+			WHERE NOT terminal AND node_id IS NOT NULL GROUP BY node_id
+		) r ON r.node_id = n.id
+		ORDER BY n.id`, fmt.Sprintf("%f seconds", domain.NodeOnlineAfter.Seconds()))
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []domain.NodeStatus{}
+	for rows.Next() {
+		var v domain.NodeStatus
+		if e = rows.Scan(&v.Node.ID, &v.Node.Address, &v.Node.Capacity, &v.Node.Version, &v.Node.LastSeen, &v.Running, &v.Online); e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }

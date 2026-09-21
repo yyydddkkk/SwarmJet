@@ -88,6 +88,18 @@ services:
 
 Worker 执行保留期清理：`FAILED_KEEP_DAYS=7` 用于已取消任务的现场，`REPORT_KEEP_DAYS=30` 用于已完成任务。运行中、暂停中和 blocked 任务不会因这些配置自动清除，任务记录与审计信息仍在 PostgreSQL。设置 `GITLAB_WEBHOOK_SECRET` 后可接收 `/api/webhooks/gitlab`；GitLab webhook 配置使用相同的 secret token。
 
+## 分布式执行节点
+
+控制面（API、Worker、PostgreSQL、Temporal）保持集中；资源消耗大的任务工作区、Agent、Compose 联调和报告可以放在独立执行节点。任务在创建时固定归属到某个在线且有余量的节点，后续阶段不会换节点。
+
+控制面设置 `NODE_SECRET`（至少 32 字符，两端一致），并把 `EXECUTION_MODE` 设为 `distributed`。`local` 是默认的单机回退：没有注册节点时任务在本机 Worker 执行。
+
+执行节点在独立主机运行 `swarmjet node`（可使用 `deploy/compose.node.yaml`）。它需要自己的绝对 `NODE_DATA_DIR`、Docker socket、与项目一致的 Agent 镜像，以及和 Worker 相同的 GitLab/模型环境变量。`NODE_ADVERTISE_URL` 必须是控制面可访问的地址，生产使用 HTTPS。节点向控制面的 `POST /api/nodes` 心跳注册，`GET /api/nodes` 返回在线状态与负载。
+
+同一任务的准备、开发、验证、审查、合并、取消和清理都通过节点协议在归属节点完成；报告由 API 按节点代理读取；保留期退役在该节点删除本机任务目录。节点失联时任务进入 blocked 并保留 `nodeId` 与现场，不会自动改派到其他节点；节点恢复后重试会用相同执行 ID 接管已有容器。
+
+本地开发不受影响：不注册节点时任务 `nodeId` 为空，继续使用宿主机进程内的 workspace / agent / integration 管理器，也不要求 `NODE_SECRET`。
+
 ## 检查与备份
 
 以下命令均在 `deploy/` 目录执行。
