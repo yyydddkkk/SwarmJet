@@ -14,8 +14,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"swarmjet/internal/domain"
+	"swarmjet/internal/managedmeta"
+	"syscall"
 )
 
 type Manager struct {
@@ -198,6 +199,24 @@ func validURL(url string) error {
 	}
 	return errors.New("unsupported repository URL protocol")
 }
+
+// metaURL resolves the Meta-Repo location. Managed repositories are derived
+// from the validated project ID and are never a caller-supplied path, so the
+// existing file:// restriction for user input is not bypassed here.
+func (m *Manager) metaURL(p domain.Project) (string, error) {
+	if p.ManagedMeta() {
+		root, err := managedmeta.New(m.DataDir).Root(p.ID)
+		if err != nil {
+			return "", err
+		}
+		if _, err = os.Stat(filepath.Join(root, ".git")); err != nil {
+			return "", errors.New("managed Meta-Repo is not initialized")
+		}
+		return root, nil
+	}
+	return p.MetaURL, nil
+}
+
 func (m *Manager) taskSource(task string) string {
 	return filepath.Join(m.DataDir, "task-sources", task, "meta")
 }
@@ -399,6 +418,10 @@ func (m *Manager) Prepare(ctx context.Context, taskID string, p domain.Project) 
 		return empty, e
 	}
 	primary := filepath.Join(m.DataDir, "projects", p.ID, "meta")
+	metaURL, metaErr := m.metaURL(p)
+	if metaErr != nil {
+		return empty, metaErr
+	}
 	if fresh {
 		seen := map[string]bool{}
 		for _, r := range p.Repositories {
@@ -419,10 +442,10 @@ func (m *Manager) Prepare(ctx context.Context, taskID string, p domain.Project) 
 			seen[r.Path] = true
 			seen["id:"+r.ID] = true
 		}
-		if e = m.clone(ctx, p.MetaURL, primary); e != nil {
+		if e = m.clone(ctx, metaURL, primary); e != nil {
 			return empty, e
 		}
-		sha, err := m.fetch(ctx, primary, p.MetaURL, p.MetaRef)
+		sha, err := m.fetch(ctx, primary, metaURL, p.MetaRef)
 		if err != nil {
 			return empty, err
 		}
@@ -465,7 +488,7 @@ func (m *Manager) Prepare(ctx context.Context, taskID string, p domain.Project) 
 		}
 		s = state{Source: m.taskSource(taskID), Aliases: aliases, Project: p, MetaBranch: "bot/" + taskID, MetaHead: sha, Workspace: domain.Workspace{TaskID: taskID, Root: filepath.Join(m.taskSource(taskID), ".worktrees", taskID), MetaSHA: sha}}
 		for _, r := range p.Repositories {
-			if (r.Path != "." && entries[r.Path] != r.URL) || (r.Path == "." && r.URL != p.MetaURL) {
+			if (r.Path != "." && entries[r.Path] != r.URL) || (r.Path == "." && r.URL != metaURL) {
 				return empty, fmt.Errorf("manifest URL/path mismatch for %s", r.ID)
 			}
 			dir := filepath.Join(primary, r.Path)
@@ -498,7 +521,7 @@ func (m *Manager) Prepare(ctx context.Context, taskID string, p domain.Project) 
 		return s.Workspace, errors.New("legacy shared workspace requires migration to private task sources")
 	}
 	cache := primary
-	if e = m.privateClone(ctx, cache, s.Source, p.MetaURL); e != nil {
+	if e = m.privateClone(ctx, cache, s.Source, metaURL); e != nil {
 		return s.Workspace, e
 	}
 	for _, r := range p.Repositories {
@@ -848,7 +871,10 @@ func (m *Manager) RefreshTargets(ctx context.Context, ws domain.Workspace, p dom
 		if r.InitialSHA == "" {
 			r.InitialSHA = r.BaseSHA
 		}
-		url := s.Project.MetaURL
+		url, metaErr := m.metaURL(s.Project)
+		if metaErr != nil {
+			return ws, metaErr
+		}
 		for _, repo := range s.Project.Repositories {
 			if repo.ID == r.RepositoryID {
 				url = repo.URL

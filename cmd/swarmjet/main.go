@@ -20,10 +20,15 @@ import (
 	"go.temporal.io/sdk/workflow"
 	"swarmjet/internal/agent"
 	"swarmjet/internal/api"
+	"swarmjet/internal/credentials"
+	"swarmjet/internal/domain"
+	"swarmjet/internal/initflow"
 	"swarmjet/internal/integration"
 	"swarmjet/internal/maintenance"
+	"swarmjet/internal/managedmeta"
 	"swarmjet/internal/pipeline"
 	"swarmjet/internal/runtimeadmin"
+	"swarmjet/internal/secretbox"
 	"swarmjet/internal/service"
 	"swarmjet/internal/store"
 	"swarmjet/internal/workspace"
@@ -103,16 +108,35 @@ func run() error {
 	if e = os.MkdirAll(data, 0700); e != nil {
 		return e
 	}
+	// The master key is deployment-managed and must be stable: a new key on
+	// startup would make previously saved connection tokens undecryptable.
+	box, boxErr := secretbox.New(os.Getenv("SWARMJET_MASTER_KEY"))
+	if boxErr != nil {
+		slog.Warn("saved GitLab connections disabled; set SWARMJET_MASTER_KEY to a stable 32-byte key", "reason", boxErr.Error())
+		box = nil
+	}
+	resolver := &credentials.Resolver{Store: s, Box: box, Env: os.Getenv}
+	// bound resolves a project token and refuses to send a saved connection to a
+	// GitLab address different from the one it was verified against.
+	bound := func(p domain.Project, merge bool) (string, error) {
+		ref := p.CredentialReference()
+		if merge {
+			ref = p.MergeCredentialReference()
+		}
+		return resolver.ResolveFor(ref, p.GitLabURL)
+	}
+	boundProject := func(p domain.Project) (string, error) { return bound(p, false) }
 	if mode == "serve" {
 		adminUser := env("ADMIN_USERNAME", "admin")
 		password := required("ADMIN_PASSWORD")
 		if len(password) < 12 {
 			return fmt.Errorf("ADMIN_PASSWORD must contain at least 12 characters")
 		}
-		handler := api.New(s, api.Config{Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: pipeline.EnvironmentCredential, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET")})
-		svc := &service.Service{Store: s, Temporal: tc, ResolveCredential: pipeline.EnvironmentCredential, Wake: make(chan struct{}, 1)}
+		initializer := &initflow.Manager{Store: s, DataDir: data, Managed: managedmeta.New(data), Credential: resolver.Resolve, CredentialFor: boundProject, Logger: slog.Default()}
+		handler := api.New(s, api.Config{Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET")})
+		svc := &service.Service{Store: s, Temporal: tc, ResolveCredential: resolver.Resolve, ProjectCredential: bound, Initializer: initializer, Wake: make(chan struct{}, 1)}
 		go svc.Run(ctx)
-		a := &pipeline.Activities{Store: s, Credential: pipeline.EnvironmentCredential}
+		a := &pipeline.Activities{Store: s, Credential: resolver.Resolve, ProjectCredential: bound}
 		go svc.Sync(ctx, a)
 		routes := http.NewServeMux()
 		routes.Handle("/api/webhooks/gitlab", svc.Webhook(os.Getenv("GITLAB_WEBHOOK_SECRET")))
@@ -161,7 +185,10 @@ func run() error {
 		}
 	}
 	localAgents := agent.New(data)
-	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: localAgents, Integration: im, DataDir: data, Concurrency: n, Credential: pipeline.EnvironmentCredential, AgentEnv: agentEnv}
+	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: localAgents, Integration: im, DataDir: data, Concurrency: n, Credential: resolver.Resolve, ProjectCredential: bound, AgentEnv: agentEnv}
+	// Initialization is resumed here so a worker restart recovers running jobs.
+	initMgr := &initflow.Manager{Store: s, DataDir: data, Managed: managedmeta.New(data), Credential: resolver.Resolve, CredentialFor: boundProject, Agents: localAgents, VerifyImage: os.Getenv("INIT_VERIFY_IMAGE"), Logger: slog.Default()}
+	go initMgr.Run(ctx)
 	if secret := os.Getenv("RUNTIME_ADMIN_SECRET"); secret != "" {
 		if len(secret) < 32 {
 			return fmt.Errorf("RUNTIME_ADMIN_SECRET must contain at least 32 characters")

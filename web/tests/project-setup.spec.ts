@@ -90,6 +90,36 @@ const configuredProject = (): Project => ({
   maxReworks: 3,
   requireCI: true,
 });
+const blankDraft = (): Project => ({
+  ...configuredProject(),
+  id: "draft-project",
+  name: "",
+  metaUrl: "",
+  metaRef: "",
+  version: 1,
+  enabled: false,
+  gitlabUrl: "",
+  repositories: [],
+  development: {
+    adapter: "opencode",
+    model: "",
+    image: "swarmjet-agent:configured",
+    timeoutSeconds: 5400,
+  },
+  review: {
+    adapter: "opencode",
+    model: "",
+    image: "swarmjet-agent:configured",
+    timeoutSeconds: 5400,
+  },
+  integration: { composeFile: "", checks: [], startupTimeoutSeconds: 180 },
+});
+const blankImported = (): Project => ({
+  ...blankDraft(),
+  id: "imported-draft",
+  metaUrl: discovery.metaUrl,
+  gitlabUrl: discovery.gitlabUrl,
+});
 async function setupAPI(page: Page, initial?: Project) {
   let project = initial ? structuredClone(initial) : undefined;
   let failImport = false;
@@ -162,8 +192,8 @@ async function completeExecutionAndChecks(page: Page) {
 test("draft only needs name and Meta URL and never enables incomplete execution", async ({
   page,
 }) => {
-  const state = await setupAPI(page);
-  await page.goto("/#/projects/new");
+  const state = await setupAPI(page, blankDraft());
+  await page.goto("/#/projects/draft-project");
   await page.getByLabel("项目名称", { exact: true }).fill("先记录工作区");
   await page
     .getByLabel("Meta-Repo 地址", { exact: true })
@@ -187,8 +217,8 @@ test("draft only needs name and Meta URL and never enables incomplete execution"
 test("import fills identity, paths and dependencies but missing dev needs explicit creation basis", async ({
   page,
 }) => {
-  const state = await setupAPI(page);
-  await page.goto("/#/projects/new");
+  const state = await setupAPI(page, blankImported());
+  await page.goto("/#/projects/imported-draft");
   await page
     .getByLabel("Meta-Repo 地址", { exact: true })
     .fill(discovery.metaUrl);
@@ -223,7 +253,7 @@ test("import fills identity, paths and dependencies but missing dev needs explic
     credentialRef: "GITLAB_TOKEN",
   });
   expect(state.saves[0]).toMatchObject({
-    id: "workspace",
+    id: "imported-draft",
     enabled: true,
     metaRef: "trunk",
     development: { model: "example/development", adapter: "opencode" },
@@ -322,8 +352,8 @@ for (const source of ["Meta-Repo 地址", "Meta 分支"] as const) {
 test("configured model catalog populates choices and links to executor setup", async ({
   page,
 }) => {
-  await setupAPI(page);
-  await page.goto("/#/projects/new");
+  await setupAPI(page, blankImported());
+  await page.goto("/#/projects/imported-draft");
   await expect(
     page.getByRole("link", { name: "登录与 provider 配置" }),
   ).toHaveAttribute("href", "#/runtime");
@@ -388,9 +418,9 @@ for (const viewport of [
   test(`project setup remains within viewport ${viewport.width} and captures review screenshot`, async ({
     page,
   }, testInfo) => {
-    await setupAPI(page);
+    await setupAPI(page, blankImported());
     await page.setViewportSize(viewport);
-    await page.goto("/#/projects/new");
+    await page.goto("/#/projects/imported-draft");
     await page
       .getByLabel("Meta-Repo 地址", { exact: true })
       .fill(discovery.metaUrl);

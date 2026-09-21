@@ -31,3 +31,13 @@ Activity 通过 `internal/execution.AgentBackend` 调用 Agent 的启动、观�
 - 节点失联时保留任务归属并等待恢复；若增加自动接管，必须实现工作区/会话恢复和执行权校验，防止旧节点恢复后重复推送或合并。
 
 Kubernetes 后端应通过 Kubernetes API 管理 Pod/Job 和存储，由 Kubernetes 调度资源；Temporal 继续管理业务流程。本地开发保留本机进程加 Docker 的运行方式。
+
+## 项目接入、连接与初始化
+
+普通用户不需要理解 Meta-Repo。项目有两种来源：`managed` 由系统在 `DATA_DIR/managed-meta/<projectID>/work` 创建并托管的内部 Git 仓库；`imported`（旧项目的空值）指向已有远程 Meta-Repo。受管模式不接受调用方提供的 MetaURL，也不暴露任意服务器路径：Workspace 只用校验过的项目 ID 推导内部仓库位置，因此没有绕过既有 `file://` 校验的入口。
+
+GitLab 连接以 `Connection` 保存：地址、验证过的用户名、Token 指纹和加密后的密文。`internal/secretbox` 用 AES-256-GCM 加密，密钥只来自部署配置 `SWARMJET_MASTER_KEY`，与数据库分开管理。密钥必须稳定并单独备份：更换或丢失后旧密文无法解密，需要重新录入 Token。项目与任务快照只保存 `connectionId`（或环境变量名），Token 不进入 URL、日志、错误正文、Temporal 历史或浏览器持久存储。服务端校验 Token 适用的 GitLab 地址，客户端不跟随重定向。默认一个连接 Token 同时用于开发与合并；可选的独立合并 Token 在高级设置中单独验证。单 Token 模式不具备独立 Token 的权限隔离。保留环境变量凭证方式，兼容已有项目。
+
+初始化是持久化、可恢复的任务，由 worker 侧的 `internal/initflow` 协调，状态写入 `initializations` 表，并用按项目的数据库租约保证单一执行者。阶段为 connect → analyze → verify，状态区分“仓库已连接”“分析完成”“可以接收开发任务”。稳定执行 ID（`init-<projectID>-analyze-<attempt>`）、幂等的受管 Meta 提交和按需重新克隆，保证重试与服务重启不会重复创建 Meta-Repo，也不会覆盖人工修订。分析副本固定在各仓库提交上且只读，生成目录是唯一可写目录，由容器挂载强制执行，而不是只靠提示词；初始化角色 `init` 不注入 GitLab Token。验证命令只在 `INIT_VERIFY_IMAGE` 指定的隔离容器中执行（无网络、只读根、丢弃 capability）；未配置时验证被阻断，绝不以 Worker 进程身份运行模型生成的命令。受管项目只有在持久化的 `readyForTasks` 为真时才能启用、接单；启用、建单和 Issue 扫描三条路径都做服务端校验。缺少信息时保存具体问题并等待回答；无法识别或未通过验证时项目标记为“尚未完成验证”，不会自动接单。
+
+自动合并是项目级开关。`autoMerge` 为 null 表示旧项目的既有行为（开启），新项目显式默认关闭。关闭时 workflow 在审查通过后进入 `waiting_manual_merge`，只创建/审查 MR，并在观察到全部 MR 被人工合并后才收尾关单。“等待敏感变更批准”是独立门禁，批准不能越过关闭的开关。该决策通过 `workflow.GetVersion("auto-merge-switch", DefaultVersion, 1)` 版本化，已保存的旧历史按原决策顺序重放。

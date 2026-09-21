@@ -7,6 +7,8 @@ x-app-environment: &app-environment
   DATA_DIR: ${DATA_DIR:?Set DATA_DIR to an absolute host path}
   GITLAB_TOKEN: ${GITLAB_TOKEN:-}
   GITLAB_MERGE_TOKEN: ${GITLAB_MERGE_TOKEN:-}
+  # Must be identical for api (seals tokens) and worker (decrypts them).
+  SWARMJET_MASTER_KEY: ${SWARMJET_MASTER_KEY:-}
 x-app: &app
   image: ${IMAGE:-swarmjet:local}
   restart: unless-stopped
@@ -131,6 +133,7 @@ services:
       TASK_CONCURRENCY: ${TASK_CONCURRENCY:-2}
       FAILED_KEEP_DAYS: ${FAILED_KEEP_DAYS:-7}
       REPORT_KEEP_DAYS: ${REPORT_KEEP_DAYS:-30}
+      INIT_VERIFY_IMAGE: ${INIT_VERIFY_IMAGE:-}
       INTEGRATION_ENV_ALLOWLIST: ${INTEGRATION_ENV_ALLOWLIST:-}
       AGENT_ENV_ALLOWLIST: ${AGENT_ENV_ALLOWLIST:-OPENAI_API_KEY,ANTHROPIC_API_KEY,DEEPSEEK_API_KEY,OPENCODE_CONFIG_CONTENT}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

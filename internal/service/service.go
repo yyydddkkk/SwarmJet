@@ -22,11 +22,27 @@ import (
 	"swarmjet/internal/store"
 )
 
+// InitReadiness reports whether a managed project has completed initialization
+// verification. It gates issue scanning so a project that is not ready can never
+// accept work, even if it was enabled earlier.
+type InitReadiness interface {
+	ReadyForTasks(ctx context.Context, projectID string) bool
+}
+
 type Service struct {
 	Store             *store.Store
 	Temporal          client.Client
 	ResolveCredential func(string) (string, error)
+	ProjectCredential func(domain.Project, bool) (string, error)
+	Initializer       InitReadiness
 	Wake              chan struct{}
+}
+
+func (s *Service) projectCredential(p domain.Project) (string, error) {
+	if s.ProjectCredential != nil {
+		return s.ProjectCredential(p, false)
+	}
+	return s.ResolveCredential(p.CredentialReference())
 }
 
 func ID() string {
@@ -134,7 +150,11 @@ func (s *Service) Scan(ctx context.Context) error {
 		if !p.Enabled {
 			continue
 		}
-		token, e := s.ResolveCredential(p.CredentialRef)
+		if p.ManagedMeta() && (s.Initializer == nil || !s.Initializer.ReadyForTasks(ctx, p.ID)) {
+			slog.Warn("managed project initialization not ready; skipping issue scan", "project", p.ID)
+			continue
+		}
+		token, e := s.projectCredential(p)
 		if e != nil {
 			slog.Error("project credential unavailable", "project", p.ID)
 			continue

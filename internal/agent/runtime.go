@@ -243,7 +243,7 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 	if !identifier.MatchString(req.ExecutionID) || !identifier.MatchString(req.TaskID) {
 		return domain.Execution{}, errors.New("invalid task or execution ID")
 	}
-	if req.Role != "dev" && req.Role != "review" && req.Role != "merge" {
+	if req.Role != "dev" && req.Role != "review" && req.Role != "merge" && req.Role != "init" {
 		return domain.Execution{}, errors.New("invalid agent role")
 	}
 	workspace, err := filepath.Abs(req.Workspace)
@@ -251,6 +251,9 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 		return domain.Execution{}, err
 	}
 	taskRoot := filepath.Join(r.DataDir, "task-sources", req.TaskID)
+	if req.Role == "init" {
+		taskRoot = filepath.Join(r.DataDir, "initializations", req.TaskID)
+	}
 	if err = safeDirectory(taskRoot, false); err != nil {
 		return domain.Execution{}, fmt.Errorf("task source directory: %w", err)
 	}
@@ -260,6 +263,20 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 	}
 	if err = safeDirectory(workspace, false); err != nil {
 		return domain.Execution{}, fmt.Errorf("workspace: %w", err)
+	}
+	generated := ""
+	if req.Role == "init" {
+		generated, err = filepath.Abs(req.GeneratedDir)
+		if err != nil {
+			return domain.Execution{}, err
+		}
+		grel, gerr := filepath.Rel(taskRoot, generated)
+		if gerr != nil || grel == "." || grel == ".." || strings.HasPrefix(grel, ".."+string(os.PathSeparator)) {
+			return domain.Execution{}, errors.New("generated directory must be inside this initialization")
+		}
+		if err = safeDirectory(generated, true); err != nil {
+			return domain.Execution{}, fmt.Errorf("generated directory: %w", err)
+		}
 	}
 	unlock, err := r.lock(ctx)
 	if err != nil {
@@ -302,7 +319,14 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 	if !originalStart.IsZero() {
 		rec.StartedAt = originalStart
 	}
-	args := []string{"create", "--name", rec.Execution.ContainerID, "--label", "swarmjet.execution=" + req.ExecutionID, "--mount", bindMount(taskRoot, false), "--mount", bindMount(dir, false), "--workdir", workspace}
+	args := []string{"create", "--name", rec.Execution.ContainerID, "--label", "swarmjet.execution=" + req.ExecutionID, "--mount", bindMount(dir, false), "--workdir", workspace}
+	if req.Role == "init" {
+		// The analyzed business sources are read-only; only the generated
+		// directory is writable. This is enforced by mounts, not by prompt text.
+		args = append(args, "--mount", bindMount(workspace, true), "--mount", bindMount(generated, false))
+	} else {
+		args = append(args, "--mount", bindMount(taskRoot, false))
+	}
 	// Match the supervisor so native workers can read/reuse agent-created files.
 	args = append(args, "--user", strconv.Itoa(os.Getuid())+":"+strconv.Itoa(os.Getgid()))
 	reports := filepath.Join(r.DataDir, "runs", req.TaskID, "integration")
@@ -374,6 +398,8 @@ func outcomes(role string) string {
 		return "approved, changes_requested, blocked"
 	case "merge":
 		return "merged, blocked"
+	case "init":
+		return "ready, needs_input, blocked"
 	}
 	return ""
 }

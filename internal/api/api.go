@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -19,8 +20,10 @@ import (
 	"sync"
 	"time"
 
+	"swarmjet/internal/credentials"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/gitlab"
+	"swarmjet/internal/secretbox"
 	"swarmjet/internal/store"
 )
 
@@ -30,9 +33,16 @@ type Config struct {
 	RuntimeURL, RuntimeSecret                             string
 	SecureCookies                                         bool
 	ResolveCredential                                     func(string) (string, error)
+	// Box encrypts saved connection tokens. nil disables connection storage
+	// while deployment environment credentials keep working.
+	Box *secretbox.Box
+	// Initializer runs the durable managed-Meta initialization. nil disables the
+	// initialization endpoints.
+	Initializer Initializer
 }
 type server struct {
 	s        *store.Store
+	conns    connectionStore
 	cfg      Config
 	mu       sync.Mutex
 	attempts map[string]attempt
@@ -44,6 +54,9 @@ type attempt struct {
 
 func New(s *store.Store, cfg Config) http.Handler {
 	a := &server{s: s, cfg: cfg, attempts: map[string]attempt{}}
+	if s != nil {
+		a.conns = s
+	}
 	return http.HandlerFunc(a.serve)
 }
 func respond(w http.ResponseWriter, status int, v any) {
@@ -177,6 +190,16 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		respond(w, 200, map[string]string{"username": a.cfg.Username})
 		return
+	case "/api/connections":
+		a.connections(w, r)
+		return
+	case "/api/connections/verify":
+		if r.Method != "POST" {
+			problem(w, 405, "method not allowed")
+			return
+		}
+		a.verifyConnection(w, r)
+		return
 	case "/api/project-defaults":
 		if r.Method != "GET" {
 			problem(w, 405, "method not allowed")
@@ -205,6 +228,9 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/"), "/")
 	if len(parts) >= 2 && domain.IDPattern.MatchString(parts[1]) {
 		switch parts[0] {
+		case "connections":
+			a.connection(w, r, parts[1], parts[2:])
+			return
 		case "projects":
 			a.project(w, r, parts[1], parts[2:])
 			return
@@ -299,9 +325,36 @@ func (a *server) projects(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Project) {
+	// A saved connection is bound to the GitLab address it was verified against.
+	if p.ConnectionID != "" {
+		if a.conns == nil {
+			problem(w, 503, "连接存储未启用：请在部署中配置 SWARMJET_MASTER_KEY。")
+			return
+		}
+		connection, err := a.conns.Connection(r.Context(), p.ConnectionID)
+		if err != nil {
+			problem(w, 400, "connectionId 引用了不存在的连接。")
+			return
+		}
+		if p.GitLabURL == "" {
+			p.GitLabURL = connection.GitLabURL
+		}
+		if domain.GitLabIdentity(connection.GitLabURL) != domain.GitLabIdentity(p.GitLabURL) {
+			problem(w, 400, "项目 GitLab 地址与所选连接不一致，已拒绝保存。")
+			return
+		}
+	}
 	if err := domain.ValidateProjectForSave(p); err != nil {
 		problem(w, 400, err.Error())
 		return
+	}
+	// Managed projects can only be enabled after initialization has verified the
+	// analysis; this gate is enforced server-side, not only in the console.
+	if p.Enabled && p.ManagedMeta() {
+		if a.cfg.Initializer == nil || !a.cfg.Initializer.ReadyForTasks(r.Context(), p.ID) {
+			problem(w, 409, "初始化尚未完成验证，不能启用项目。请先完成初始化或重试验证。")
+			return
+		}
 	}
 
 	p, err := a.s.SaveProject(r.Context(), p)
@@ -336,6 +389,10 @@ func (a *server) project(w http.ResponseWriter, r *http.Request, id string, tail
 		}
 		return
 	}
+	if len(tail) >= 1 && tail[0] == "initialization" {
+		a.initialization(w, r, id, tail[1:])
+		return
+	}
 	if len(tail) == 1 && tail[0] == "check" && r.Method == "POST" {
 		p, err := a.s.Project(r.Context(), id)
 		if err != nil {
@@ -348,6 +405,11 @@ func (a *server) project(w http.ResponseWriter, r *http.Request, id string, tail
 	problem(w, 404, "API route not found")
 }
 func (a *server) credential(ref string) (string, error) {
+	// Saved connections are resolved locally so the console never depends on a
+	// deployment environment variable for a token the user typed in.
+	if id, merge := credentials.UseMerge(ref); id != "" {
+		return a.connectionToken(id, merge)
+	}
 	if a.cfg.ResolveCredential != nil {
 		return a.cfg.ResolveCredential(ref)
 	}
@@ -358,11 +420,35 @@ func (a *server) credential(ref string) (string, error) {
 	return value, nil
 }
 func (a *server) client(p domain.Project) (*gitlab.Client, error) {
-	token, err := a.credential(p.CredentialRef)
+	token, err := a.projectCredential(p)
 	if err != nil {
 		return nil, err
 	}
 	return gitlab.New(p.GitLabURL, token), nil
+}
+
+// projectCredential resolves a project token and enforces that a saved
+// connection is only used with the GitLab address it was verified against.
+func (a *server) projectCredential(p domain.Project) (string, error) {
+	if p.ConnectionID == "" {
+		return a.credential(p.CredentialReference())
+	}
+	if strings.TrimSpace(p.GitLabURL) == "" {
+		return "", errors.New("saved connection requires the project GitLab address")
+	}
+	if a.conns == nil {
+		return "", errors.New("connection storage is not enabled")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	connection, err := a.conns.Connection(ctx, p.ConnectionID)
+	if err != nil {
+		return "", errors.New("saved connection is unavailable")
+	}
+	if domain.GitLabIdentity(connection.GitLabURL) != domain.GitLabIdentity(p.GitLabURL) {
+		return "", errors.New("saved connection does not match the project GitLab address")
+	}
+	return a.credential(p.CredentialReference())
 }
 func validDependencies(refs []domain.IssueRef, self domain.IssueRef) bool {
 	seen := map[domain.IssueRef]bool{}
@@ -407,6 +493,10 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 		}
 		if !p.Enabled || !registered || req.IssueIID < 1 || !validDependencies(req.Dependencies, domain.IssueRef{ProjectID: req.IssueProjectID, IID: req.IssueIID}) {
 			problem(w, 400, "enabled registered issue project and valid dependencies required")
+			return
+		}
+		if p.ManagedMeta() && (a.cfg.Initializer == nil || !a.cfg.Initializer.ReadyForTasks(r.Context(), p.ID)) {
+			problem(w, 409, "项目初始化尚未完成验证，暂不能接单。")
 			return
 		}
 		client, err := a.client(p)

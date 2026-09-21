@@ -20,6 +20,77 @@ export interface Check {
   command: string[] | null;
   required: boolean;
 }
+export interface Connection {
+  id: string;
+  name: string;
+  gitlabUrl: string;
+  username: string;
+  version: number;
+  hasMergeToken: boolean;
+  fingerprint: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface ConnectionRepository {
+  id: number;
+  name: string;
+  pathWithNamespace: string;
+  defaultBranch: string;
+  httpUrlToRepo: string;
+  webUrl: string;
+  archived: boolean;
+  description: string;
+}
+export interface RepositoryPage {
+  projects: ConnectionRepository[] | null;
+  page: number;
+  perPage: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+export interface InitQuestion {
+  id: string;
+  question: string;
+  answer?: string;
+  answered: boolean;
+}
+export interface InitReport {
+  path: string;
+  description: string;
+  verified: boolean;
+}
+export interface InitVerification {
+  name: string;
+  command: string[] | null;
+  passed: boolean;
+  exitCode: number;
+  report: string;
+  dryRun?: boolean;
+}
+export interface Initialization {
+  id: string;
+  projectId: string;
+  status: string;
+  stage: string;
+  progress: number;
+  message: string;
+  repositoriesConnected: boolean;
+  analysisComplete: boolean;
+  readyForTasks: boolean;
+  questions: InitQuestion[] | null;
+  reports: InitReport[] | null;
+  verification: InitVerification[] | null;
+  metaSha: string;
+  repositoryShas: Record<string, string> | null;
+  executionId: string;
+  sessionId?: string;
+  attempts: number;
+  error?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  agentStopped?: boolean;
+}
 export interface Project {
   id: string;
   name: string;
@@ -30,6 +101,10 @@ export interface Project {
   gitlabUrl: string;
   credentialRef: string;
   mergeCredentialRef: string;
+  connectionId?: string;
+  metaMode?: string;
+  autoMerge?: boolean;
+  initStatus?: string;
   repositories: Repository[] | null;
   development: AgentConfig;
   review: AgentConfig;

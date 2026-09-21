@@ -32,15 +32,30 @@ type Activities struct {
 	DataDir     string
 	Concurrency int
 	Credential  func(string) (string, error)
-	AgentEnv    map[string]string
+	// ProjectCredential resolves a project token with its GitLab address binding.
+	ProjectCredential func(domain.Project, bool) (string, error)
+	AgentEnv          map[string]string
+}
+
+// credentialFor resolves a project token. The bound resolver refuses to send a
+// saved connection token to a different GitLab address.
+func (a *Activities) credentialFor(p domain.Project, merge bool) (string, error) {
+	if a.ProjectCredential != nil {
+		return a.ProjectCredential(p, merge)
+	}
+	name := p.CredentialReference()
+	if merge {
+		name = p.MergeCredentialReference()
+	}
+	return a.Credential(name)
 }
 
 func (a *Activities) client(p domain.Project, merge bool) (*gitlab.Client, error) {
-	name := p.CredentialRef
+	name := p.CredentialReference()
 	if merge {
-		name = p.MergeCredentialRef
+		name = p.MergeCredentialReference()
 	}
-	token, e := a.Credential(name)
+	token, e := a.credentialFor(p, merge)
 	if e != nil {
 		return nil, temporal.NewNonRetryableApplicationError("credential unavailable: "+name, "configuration", e)
 	}
@@ -272,7 +287,7 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			return out, e
 		}
 		t.Issue = fresh
-		if requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
+		if t.Project.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
 			t.Stage = "waiting_approval"
 			out.Ready = false
 			break
@@ -312,6 +327,56 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			if !out.Ready {
 				_ = a.Store.ReleaseLeases(ctx, t.ID)
 			}
+		}
+	case "waiting_manual_merge":
+		// Auto-merge is off. Required verification must still be current for the
+		// reviewed revision set, then the task waits until every changed MR is
+		// actually merged before the workflow closes the source issue.
+		if t.ReviewDigest == "" || t.ReviewDigest != domain.Digest(t.Workspace.Revisions) {
+			t.Message = "审查摘要已变化，需要重新验证"
+			out.Task = t
+			out.Rework = true
+			return out, nil
+		}
+		required := 0
+		for _, v := range t.Verification {
+			if !v.Required {
+				continue
+			}
+			required++
+			if !v.Passed || v.RevisionDigest != t.ReviewDigest {
+				t.Message = "必需验收未通过或已过期，需要重新验证"
+				out.Task = t
+				out.Rework = true
+				return out, nil
+			}
+		}
+		if required == 0 {
+			return out, temporal.NewNonRetryableApplicationError("no required verification executed", "verification", nil)
+		}
+		allMerged := true
+		for i, r := range t.Workspace.Revisions {
+			if !r.Changed {
+				continue
+			}
+			mr, e := c.GetMR(ctx, r.ProjectID, r.MRIID)
+			if e != nil {
+				return out, e
+			}
+			if !sameMR(mr, r) {
+				return out, temporal.NewNonRetryableApplicationError("MR identity changed after review", "stale_review", nil)
+			}
+			if mr.State == "merged" {
+				t.Workspace.Revisions[i].Merged = true
+				continue
+			}
+			allMerged = false
+		}
+		if allMerged {
+			out.Ready = true
+		} else {
+			out.Ready = false
+			t.Message = "自动合并已关闭，等待人工合并全部 MR"
 		}
 	case "merging", "partial_merge":
 		// Reconcile completed remote merges before retrying any agent action.
@@ -396,7 +461,7 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			return out, e
 		}
 		t.Issue = fresh
-		if requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
+		if t.Project.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
 			t.Stage = "waiting_approval"
 			out.Task = t
 			out.Ready = false
@@ -561,11 +626,7 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 	}
 	// Review has no merge credential. Only the approved merge phase receives it.
 	if role == "dev" || role == "merge" {
-		ref := t.Project.CredentialRef
-		if role == "merge" {
-			ref = t.Project.MergeCredentialRef
-		}
-		token, e := a.Credential(ref)
+		token, e := a.credentialFor(t.Project, role == "merge")
 		if e != nil {
 			return domain.Execution{}, e
 		}
@@ -825,7 +886,7 @@ func (a *Activities) resourceSlot(ctx context.Context, owner string) (context.Co
 }
 
 func (a *Activities) workspaceManager(p domain.Project) (*workspace.Manager, error) {
-	token, e := a.Credential(p.CredentialRef)
+	token, e := a.credentialFor(p, false)
 	if e != nil {
 		return nil, e
 	}

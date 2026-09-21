@@ -3,6 +3,7 @@ import type { AgentConfig, Check, Project, Repository } from "./types";
 import { api } from "./api";
 import { ErrorBox, Field } from "./App";
 import { formatCommand, parseCommand } from "./commands";
+import "./wizard.css";
 
 const agent = (): AgentConfig => ({
   adapter: "opencode",
@@ -84,6 +85,7 @@ export function ProjectEditor({
     ),
   );
   const existing = p.version > 0;
+  const managed = p.metaMode === "managed";
   useEffect(() => {
     if (initial.version > 0) return;
     let live = true;
@@ -271,9 +273,9 @@ export function ProjectEditor({
     });
   const connectionReady = !!(
     p.name.trim() &&
-    p.metaUrl.trim() &&
     p.metaRef.trim() &&
-    p.gitlabUrl.trim()
+    p.gitlabUrl.trim() &&
+    (managed || p.metaUrl.trim())
   );
   const readiness = [
     { id: "connection", label: "Meta-Repo 信息", ok: connectionReady },
@@ -286,8 +288,12 @@ export function ProjectEditor({
   async function save(enabled: boolean) {
     setError("");
     setSaved("");
-    if (!p.name.trim() || !p.metaUrl.trim()) {
-      setError("请填写项目名称和 Meta-Repo 地址，再保存草稿。");
+    if (!p.name.trim() || (!managed && !p.metaUrl.trim())) {
+      setError(
+        managed
+          ? "请填写项目名称，再保存草稿。"
+          : "请填写项目名称和 Meta-Repo 地址，再保存草稿。",
+      );
       return;
     }
     if (enabled && !ready) {
@@ -410,6 +416,13 @@ export function ProjectEditor({
                 <span className="setup-label">必填</span>
               </div>
               <div className="panel-padding">
+                {managed && (
+                  <div className="setup-warning" role="status">
+                    这是系统托管的 Meta-Repo：仓库清单与说明由初始化生成，不需要填写
+                    Meta-Repo 地址。
+                  </div>
+                )}
+                {!managed && (
                 <div className="meta-import-row">
                   <Field label="Meta-Repo 地址">
                     <input
@@ -433,6 +446,7 @@ export function ProjectEditor({
                         : "读取仓库清单"}
                   </button>
                 </div>
+                )}
                 <div className="form-grid">
                   <Field
                     label="项目名称"
@@ -1142,6 +1156,37 @@ export function ProjectEditor({
             </div>
           </aside>
         </div>
+        <section className="panel setup-section" id="merge-policy">
+          <div className="setup-section-head">
+            <div>
+              <h2>合并策略</h2>
+              <p>项目级自动合并开关；配置变更对新任务生效。</p>
+            </div>
+          </div>
+          <div className="panel-padding">
+            <div className="wizard-toggle">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={p.autoMerge ?? true}
+                  onChange={(e) => set("autoMerge", e.target.checked)}
+                />
+                <span>
+                  <strong>自动合并</strong>
+                  <small>
+                    关闭后系统仍会开发、验证、创建 MR 和审查，但不会发起合并；需要在
+                    GitLab 人工合并全部 MR 后才会收尾并关闭来源 Issue。
+                  </small>
+                </span>
+              </label>
+              <p className="wizard-hint">
+                {(p.autoMerge ?? true)
+                  ? "沿用现有自动合并门禁：有效审查、当前提交验证、CI、目标分支检查，以及敏感变更的人工作业批准。"
+                  : "当前为人工合并；关闭开关与“等待敏感变更批准”是不同概念，批准不能越过关闭的开关。"}
+              </p>
+            </div>
+          </div>
+        </section>
         <footer className="save-bar setup-save">
           <span>
             {existing

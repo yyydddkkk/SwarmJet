@@ -74,6 +74,20 @@ Git HTTPS 认证使用 `/usr/local/bin/swarmjet-askpass`，用户名为 `oauth2`
 
 管理终端不保存录屏、输入内容或 shell 历史，只记录打开/关闭操作。登录配置检测与模型清单不代表模型额度或实际请求权限已经通过验证。
 
+## GitLab 连接与初始化
+
+保存用户在 Web 输入的 GitLab Token 需要 `SWARMJET_MASTER_KEY`。生成一次并长期保持不变：
+
+```sh
+openssl rand -hex 32
+```
+
+把结果填入 `deploy/.env` 的 `SWARMJET_MASTER_KEY`。API 用它加密新 Token，Worker 用同一把密钥解密以执行克隆；两边必须一致。密钥只存在于部署配置和备份中，不写入数据库。丢失或更换密钥后旧密文无法解密，必须在控制台重新录入 Token。备份 PostgreSQL 的同时单独备份这把密钥，不要把密钥和备份放在同一份文件中。留空时浏览器连接的保存接口返回“连接存储未启用”，使用 `GITLAB_TOKEN` / `GITLAB_MERGE_TOKEN` 的已有项目不受影响。
+
+初始化验证命令必须在隔离容器中执行：构建包含项目所需工具链的派生 agent 镜像，并在 `.env` 中设置 `INIT_VERIFY_IMAGE`。未配置时验证被直接阻断（项目停在“未完成验证”状态），绝不会以 Worker 进程身份运行模型生成的命令。验证容器无网络、只读根文件系统、丢弃全部 capability，只挂载独立的可写副本。验证失败、缺少命令或缺少联调配置时项目保持可重试的 blocked，不能启用或接单。
+
+受管 Meta-Repo 位于 `DATA_DIR/managed-meta/<projectID>/work`，初始化分析副本位于 `DATA_DIR/initializations/<projectID>`；两者都必须纳入 `DATA_DIR` 的备份，且不会被单任务保留期清理删除。删除项目前应确认不再需要这些仓库。
+
 `.env` 用于 Compose 插值，不会自动把所有变量透传进容器。新增模型 key 或验收环境变量时，既要填写对应 allowlist，也要在同目录 `compose.override.yaml` 中显式传值，例如：
 
 ```yaml
@@ -100,7 +114,7 @@ docker compose exec -T api swarmjet doctor
 docker compose exec -T postgres pg_dumpall -U swarmjet > backup.sql
 ```
 
-备份 PostgreSQL 与 `DATA_DIR`；后者包含任务工作区、Git 对象、执行日志和 OpenCode 会话。备份中可能有私有源代码和认证会话，按凭证数据管理。恢复时保留 `DATA_DIR` 的绝对路径，并恢复相同 Temporal namespace。旧版本 `state.json` 只能通过 `swarmjet legacy-inventory <file>` 生成人工接管清单；不要直接启用旧 Issue 的 `autonomous` 标签造成重复任务。
+备份 PostgreSQL 与 `DATA_DIR`；后者包含任务工作区、受管 Meta-Repo、初始化副本、Git 对象、执行日志和 OpenCode 会话。备份中可能有私有源代码和认证会话，按凭证数据管理。单独备份 `SWARMJET_MASTER_KEY`：没有它，数据库中保存的连接 Token 无法恢复。恢复时保留 `DATA_DIR` 的绝对路径，并恢复相同 Temporal namespace。旧版本 `state.json` 只能通过 `swarmjet legacy-inventory <file>` 生成人工接管清单；不要直接启用旧 Issue 的 `autonomous` 标签造成重复任务。
 
 在仓库根目录执行 `VALIDATE_DEPLOY=1 scripts/test.sh`：Go race tests、React build、发布镜像与源码构建两种 Compose 配置验证。有 `TEST_DATABASE_URL` 时运行独立临时 schema 的 PostgreSQL 集成测试；`RUN_BROWSER_TESTS=1` 额外运行浏览器测试。测试脚本要求本地安装 Go 和 Node.js。可用 `SWARMJET_TEMPORAL_ADDRESS` 与 `SWARMJET_TEMPORAL_NAMESPACE` 指向独立测试 Temporal，运行持久化/Worker 重启测试；该测试使用专属 task queue，不需要模型 key。原生工具链下还可用 `SWARMJET_DOCKER_SMOKE=1` 和 `SWARMJET_META_BIN` 启用实际 Docker / Meta 检查。
 
