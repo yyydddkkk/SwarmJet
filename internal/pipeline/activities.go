@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,8 +12,8 @@ import (
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
-	"swarmjet/internal/agent"
 	"swarmjet/internal/domain"
+	"swarmjet/internal/execution"
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/store"
 	"swarmjet/internal/workspace"
@@ -28,7 +27,7 @@ type IntegrationRunner interface {
 type Activities struct {
 	Store       *store.Store
 	Workspace   *workspace.Manager
-	Agents      *agent.Runtime
+	Agents      execution.AgentBackend
 	Integration IntegrationRunner
 	DataDir     string
 	Concurrency int
@@ -571,23 +570,7 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 			return domain.Execution{}, e
 		}
 		env["GITLAB_TOKEN"] = token
-		u, e := url.Parse(t.Project.GitLabURL)
-		if e != nil {
-			return domain.Execution{}, e
-		}
-		env["GITLAB_HOST"] = u.Host
 		env["GITLAB_URI"] = t.Project.GitLabURL
-		env["GIT_ASKPASS"] = "/usr/local/bin/swarmjet-askpass"
-		env["GIT_TERMINAL_PROMPT"] = "0"
-		configDir := filepath.Join(a.DataDir, "runs", t.ID, "executions", in.ExecutionID, "glab")
-		if e = os.MkdirAll(configDir, 0700); e != nil {
-			return domain.Execution{}, e
-		}
-		content := fmt.Sprintf("host: %q\ntelemetry: false\nhosts:\n  %q:\n    api_protocol: %q\n    git_protocol: https\n", u.Host, u.Host, u.Scheme)
-		if e = os.WriteFile(filepath.Join(configDir, "config.yml"), []byte(content), 0600); e != nil {
-			return domain.Execution{}, e
-		}
-		env["GLAB_CONFIG_DIR"] = configDir
 	}
 	prior := t.Executions[role]
 	if role == "merge" {

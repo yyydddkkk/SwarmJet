@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"swarmjet/internal/domain"
+	"swarmjet/internal/execution"
 )
 
 // TaskExecutions enumerates supervisor-owned records, never agent-owned artifacts.
@@ -120,6 +121,8 @@ type Runtime struct {
 	DockerBinary string
 	Executor     Executor
 }
+
+var _ execution.AgentBackend = (*Runtime)(nil)
 
 func New(dataDir string) *Runtime {
 	p, _ := filepath.Abs(dataDir)
@@ -283,6 +286,10 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 	}
 	dir := filepath.Join(r.DataDir, "runs", req.TaskID, "executions", req.ExecutionID)
 	if err = safeDirectory(dir, true); err != nil {
+		return domain.Execution{}, err
+	}
+	req.Env, err = prepareEnvironment(dir, req.Env)
+	if err != nil {
 		return domain.Execution{}, err
 	}
 	resultPath := filepath.Join(dir, "result.json")

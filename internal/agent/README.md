@@ -3,6 +3,18 @@
 `New(dataDir)` exposes `Start(ctx, AgentRequest)`, `Inspect(ctx, executionID)`,
 `Resume(ctx, AgentRequest)`, and `Cancel(ctx, executionID)`.
 
+The pipeline depends on `execution.AgentBackend` rather than `*agent.Runtime`.
+This runtime is the local Docker implementation. Its lifecycle contract includes
+task-wide enumeration/cancellation so recovery also accounts for old rework runs.
+`Resume` remains a convenience method; the interface resumes an exact session by
+passing `SessionID` to `Start`.
+
+When `AgentRequest.Env` includes `GITLAB_URI`, the runtime prepares private glab
+configuration inside the execution directory and supplies the image's Git
+credential-helper path. The pipeline supplies the URL and phase-specific token,
+not a path to a configuration file created on the orchestration host. The request
+environment is copied before adding runtime-specific values.
+
 Requests require adapter `opencode`, an explicit container image containing the
 `opencode` executable, a `provider/model` model, an absolute workspace beneath
 `dataDir`, stable task/execution IDs, and role `dev`, `review`, or `merge`.

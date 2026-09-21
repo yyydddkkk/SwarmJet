@@ -160,7 +160,8 @@ func run() error {
 			agentEnv[k] = v
 		}
 	}
-	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: agent.New(data), Integration: im, DataDir: data, Concurrency: n, Credential: pipeline.EnvironmentCredential, AgentEnv: agentEnv}
+	localAgents := agent.New(data)
+	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: localAgents, Integration: im, DataDir: data, Concurrency: n, Credential: pipeline.EnvironmentCredential, AgentEnv: agentEnv}
 	if secret := os.Getenv("RUNTIME_ADMIN_SECRET"); secret != "" {
 		if len(secret) < 32 {
 			return fmt.Errorf("RUNTIME_ADMIN_SECRET must contain at least 32 characters")
@@ -183,7 +184,7 @@ func run() error {
 	if failedDays < 1 || reportDays < 1 {
 		return fmt.Errorf("retention days must be positive")
 	}
-	cleaner := &maintenance.Manager{Store: s, Workspace: wm, Agents: a.Agents, DataDir: data, FailedDays: failedDays, ReportDays: reportDays}
+	cleaner := &maintenance.Manager{Store: s, Workspace: wm, Agents: localAgents, DataDir: data, FailedDays: failedDays, ReportDays: reportDays}
 	go cleaner.Run(ctx)
 	w := worker.New(tc, pipeline.Queue, worker.Options{MaxConcurrentActivityExecutionSize: n*8 + 8, WorkerStopTimeout: 30 * time.Second})
 	w.RegisterWorkflowWithOptions(pipeline.WorkTask, workflow.RegisterOptions{Name: pipeline.WorkflowName})
