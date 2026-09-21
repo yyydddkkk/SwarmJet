@@ -108,6 +108,7 @@ type fixture struct {
 	clones  []string
 	runs    []string
 	project domain.Project
+	clients func(domain.Project) (*gitlab.Client, error)
 }
 
 func managedProject() domain.Project {
@@ -134,12 +135,13 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(server.Close)
 	f := &fixture{repo: newFakeRepo(), agents: &fakeAgents{}, project: managedProject()}
 	f.repo.projects[f.project.ID] = f.project
+	f.clients = func(domain.Project) (*gitlab.Client, error) { return gitlab.New(server.URL, "token"), nil }
 	f.m = &Manager{
 		Store:   f.repo,
 		DataDir: dir,
 		Agents:  f.agents,
 		Managed: managedmeta.New(dir),
-		Clients: func(domain.Project) (*gitlab.Client, error) { return gitlab.New(server.URL, "token"), nil },
+		Clients: f.clients,
 		Cloner: func(_ context.Context, _ domain.Project, repo domain.Repository, dest, sha string) error {
 			f.clones = append(f.clones, repo.ID+":"+sha)
 			if err := os.MkdirAll(dest, 0700); err != nil {

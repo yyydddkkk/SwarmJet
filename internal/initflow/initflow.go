@@ -57,6 +57,9 @@ type Manager struct {
 	Cloner Cloner
 	// Runner executes verification. Defaults to a bounded host process.
 	Runner Runner
+	// Docker runs a docker CLI command for isolated verification and container
+	// cleanup. Tests inject a fake; production uses the docker binary.
+	Docker func(context.Context, []string) ([]byte, error)
 	// VerifyImage, when non-empty, runs verification inside this image with no
 	// network instead of directly on the worker host.
 	VerifyImage string
@@ -194,6 +197,9 @@ func (m *Manager) sweep(ctx context.Context) {
 }
 
 func (m *Manager) stopCancelled(ctx context.Context, init domain.Initialization) {
+	// Verification containers are owned by this coordinator, not the agent
+	// backend, so they are cleaned even when the agent was already stopped.
+	m.cleanupVerifyContainers(init.ProjectID)
 	if init.AgentStopped || m.Agents == nil {
 		return
 	}
@@ -343,10 +349,16 @@ func (m *Manager) Retry(ctx context.Context, projectID string) error {
 	init.ExecutionID = ""
 	init.Questions = nil
 	init.AgentStopped = false
-	if executableVerification(init.Verification) {
+	switch {
+	case !init.RepositoriesConnected:
+		// The connect step never completed, so there are no pinned revisions.
+		// Resume there instead of starting an analysis that must fail again.
+		init.Stage = "connect"
+		init.Message = "准备重新连接仓库"
+	case executableVerification(init.Verification):
 		init.Stage = "verify"
 		init.Message = "准备重试验证"
-	} else {
+	default:
 		init.Stage = "analyze"
 		init.Message = "准备重新分析"
 	}

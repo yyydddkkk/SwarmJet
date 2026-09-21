@@ -265,6 +265,12 @@ func (a *server) saveConnection(w http.ResponseWriter, r *http.Request, id strin
 			problem(w, http.StatusBadRequest, "Access Token 不能为空。")
 			return
 		}
+		// Keeping the stored token while changing the GitLab address would send
+		// the old token to a different origin. Require a freshly verified token.
+		if domain.GitLabIdentity(existing.GitLabURL) != domain.GitLabIdentity(base) {
+			problem(w, http.StatusBadRequest, "更换 GitLab 地址必须重新提供并验证 Access Token。")
+			return
+		}
 		sealed, err = a.conns.ConnectionSecrets(ctx, id)
 		if err != nil {
 			failure(w, err)

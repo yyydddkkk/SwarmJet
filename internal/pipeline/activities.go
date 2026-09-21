@@ -15,6 +15,7 @@ import (
 	"swarmjet/internal/domain"
 	"swarmjet/internal/execution"
 	"swarmjet/internal/gitlab"
+	"swarmjet/internal/managedmeta"
 	"swarmjet/internal/store"
 	"swarmjet/internal/workspace"
 )
@@ -25,13 +26,15 @@ type IntegrationRunner interface {
 	Stop(context.Context, domain.Workspace, domain.IntegrationConfig) error
 }
 type Activities struct {
-	Store       *store.Store
-	Workspace   *workspace.Manager
-	Agents      execution.AgentBackend
-	Integration IntegrationRunner
-	DataDir     string
-	Concurrency int
-	Credential  func(string) (string, error)
+	Store          *store.Store
+	Workspace      *workspace.Manager
+	Agents         execution.AgentBackend
+	Integration    IntegrationRunner
+	Nodes          execution.NodeResolver
+	IntegrationEnv map[string]string
+	DataDir        string
+	Concurrency    int
+	Credential     func(string) (string, error)
 	// ProjectCredential resolves a project token with its GitLab address binding.
 	ProjectCredential func(domain.Project, bool) (string, error)
 	AgentEnv          map[string]string
@@ -60,6 +63,52 @@ func (a *Activities) client(p domain.Project, merge bool) (*gitlab.Client, error
 		return nil, temporal.NewNonRetryableApplicationError("credential unavailable: "+name, "configuration", e)
 	}
 	return gitlab.New(p.GitLabURL, token), nil
+}
+
+// node resolves the execution environment for a task. An empty NodeID keeps the
+// in-process managers, which is the local development and single-host default.
+func (a *Activities) node(ctx context.Context, t domain.Task) (execution.Node, error) {
+	if t.NodeID != "" {
+		if a.Nodes == nil {
+			return nil, fmt.Errorf("task %s is assigned to node %s but no node transport is configured", t.ID, t.NodeID)
+		}
+		return a.Nodes.Node(ctx, t.NodeID)
+	}
+	return &execution.LocalNode{AgentBackend: a.Agents, Workspace: a.Workspace, Integration: a.Integration, DataDir: a.DataDir}, nil
+}
+
+// gitEnv resolves the phase credential into the Git environment used on the
+// execution host. It never reaches Temporal history because it stays inside the
+// Activity.
+func (a *Activities) gitEnv(t domain.Task) (map[string]string, error) {
+	token, e := a.credentialFor(t.Project, false)
+	if e != nil {
+		return nil, temporal.NewNonRetryableApplicationError("credential unavailable: "+t.Project.CredentialReference(), "configuration", e)
+	}
+	env := map[string]string{"GITLAB_TOKEN": token, "GIT_TERMINAL_PROMPT": "0"}
+	// The execution host decides its own credential-helper path. Only the local
+	// host uses the control plane's path; a remote node keeps its own.
+	if t.NodeID == "" {
+		if a.Workspace != nil && a.Workspace.Env["GIT_ASKPASS"] != "" {
+			env["GIT_ASKPASS"] = a.Workspace.Env["GIT_ASKPASS"]
+		} else {
+			env["GIT_ASKPASS"] = "/usr/local/bin/swarmjet-askpass"
+		}
+	}
+	return env, nil
+}
+
+func (a *Activities) integrationEnv(t domain.Task) map[string]string {
+	// Integration variables belong to the execution host. A remote node uses its
+	// own allowlist instead of receiving the control plane's values.
+	if t.NodeID != "" || len(a.IntegrationEnv) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for k, v := range a.IntegrationEnv {
+		out[k] = v
+	}
+	return out
 }
 func (a *Activities) SaveTask(ctx context.Context, t domain.Task) error {
 	old, e := a.Store.Task(ctx, t.ID)
@@ -96,17 +145,21 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		}
 	}(ctx)
 	if in.Phase == "recover" {
-		executions, e := a.Agents.TaskExecutions(ctx, t.ID)
+		n, e := a.node(ctx, t)
+		if e != nil {
+			return out, e
+		}
+		executions, e := n.TaskExecutions(ctx, t.ID)
 		if e != nil {
 			return out, e
 		}
 		for _, ex := range executions {
 			if ex.ID == in.ExecutionID || strings.HasPrefix(ex.ID, in.ExecutionID+"-") {
 				if ex.Status == "running" || ex.Status == "starting" {
-					if e = a.Agents.Cancel(ctx, ex.ID); e != nil {
+					if e = n.Cancel(ctx, ex.ID); e != nil {
 						return out, e
 					}
-					ex, e = a.Agents.Inspect(ctx, ex.ID)
+					ex, e = n.Inspect(ctx, ex.ID)
 					if e != nil {
 						return out, e
 					}
@@ -118,11 +171,15 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		return out, nil
 	}
 	if in.Phase == "stop" || in.Phase == "stopping" {
-		if e := a.Agents.CancelTask(ctx, t.ID); e != nil {
+		n, e := a.node(ctx, t)
+		if e != nil {
+			return out, e
+		}
+		if e := n.CancelTask(ctx, t.ID); e != nil {
 			return out, e
 		}
 		if t.Workspace.Root != "" {
-			if e := a.Integration.Stop(ctx, t.Workspace, t.Project.Integration); e != nil {
+			if e := n.StopIntegration(ctx, t.Workspace, t.Project.Integration, a.integrationEnv(t)); e != nil {
 				return out, e
 			}
 		}
@@ -162,11 +219,22 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 				return out, e
 			}
 		}
-		wm, e := a.workspaceManager(t.Project)
+		env, e := a.gitEnv(t)
 		if e != nil {
 			return out, e
 		}
-		w, e := wm.Prepare(ctx, t.ID, t.Project)
+		n, e := a.node(ctx, t)
+		if e != nil {
+			return out, e
+		}
+		// A managed Meta-Repo is owned by the control plane. Push it to the
+		// assigned execution node before its workspace is prepared.
+		if t.Project.ManagedMeta() && t.NodeID != "" {
+			if e := a.syncManagedMeta(ctx, n, t.Project); e != nil {
+				return out, e
+			}
+		}
+		w, e := n.PrepareWorkspace(ctx, t.ID, t.Project, env)
 		if e != nil {
 			return out, e
 		}
@@ -195,7 +263,11 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		}
 		if in.Phase == "publishing" {
 			before := domain.Digest(t.Workspace.Revisions)
-			w, e := a.Workspace.Inspect(ctx, t.Workspace, t.Project)
+			n, e := a.node(ctx, t)
+			if e != nil {
+				return out, e
+			}
+			w, e := n.InspectWorkspace(ctx, t.Workspace, t.Project, nil)
 			if e != nil {
 				return out, e
 			}
@@ -222,7 +294,11 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			}
 		}
 		if in.Phase == "reviewing" {
-			w, e := a.Workspace.Inspect(ctx, t.Workspace, t.Project)
+			n, e := a.node(ctx, t)
+			if e != nil {
+				return out, e
+			}
+			w, e := n.InspectWorkspace(ctx, t.Workspace, t.Project, nil)
 			if e != nil {
 				return out, e
 			}
@@ -239,11 +315,15 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		}
 		defer release()
 		ctx = resourceCtx
-		wm, e := a.workspaceManager(t.Project)
+		env, e := a.gitEnv(t)
 		if e != nil {
 			return out, e
 		}
-		w, e := wm.RefreshTargets(ctx, t.Workspace, t.Project)
+		n, e := a.node(ctx, t)
+		if e != nil {
+			return out, e
+		}
+		w, e := n.RefreshTargets(ctx, t.Workspace, t.Project, env)
 		if errors.Is(e, workspace.ErrNeedsSync) {
 			t.Message = "目标分支已前进，先同步目标分支再验证"
 			out.Task = t
@@ -253,15 +333,15 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		if e != nil {
 			return out, e
 		}
-		w, e = wm.Inspect(ctx, w, t.Project)
+		w, e = n.InspectWorkspace(ctx, w, t.Project, env)
 		if e != nil {
 			return out, e
 		}
 		t.Workspace = w
-		if e = a.Integration.Start(ctx, w, t.Project.Integration); e != nil {
+		if e = n.StartIntegration(ctx, w, t.Project.Integration, a.integrationEnv(t)); e != nil {
 			return out, e
 		}
-		checks, e := a.Integration.Verify(ctx, w, t.Project.Integration)
+		checks, e := n.VerifyIntegration(ctx, w, t.Project.Integration, a.integrationEnv(t))
 		if e != nil {
 			return out, e
 		}
@@ -278,7 +358,7 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			return out, temporal.NewNonRetryableApplicationError("no required verification executed", "verification", nil)
 		}
 		// Release running services while review or a human decision is pending; reports persist.
-		if e = a.Integration.Stop(ctx, w, t.Project.Integration); e != nil {
+		if e = n.StopIntegration(ctx, w, t.Project.Integration, a.integrationEnv(t)); e != nil {
 			return out, e
 		}
 	case "acquiring_merge":
@@ -479,20 +559,14 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 				return out, fmt.Errorf("cannot close Issue before MR %s merged", r.MRURL)
 			}
 		}
-		// Once cleanup is recorded, a failed close API call must not require deleted files.
-		marker := filepath.Join(a.DataDir, "runs", t.ID, "cleanup-complete")
-		if _, err := os.Stat(marker); errors.Is(err, os.ErrNotExist) {
-			if e = a.Integration.Stop(ctx, t.Workspace, t.Project.Integration); e != nil {
-				return out, e
-			}
-			if e = a.Workspace.Release(ctx, t.Workspace); e != nil {
-				return out, e
-			}
-			if e = os.WriteFile(marker, []byte("complete\n"), 0600); e != nil {
-				return out, e
-			}
-		} else if err != nil {
-			return out, err
+		// Cleanup is idempotent on the owning node so a failed close API call can
+		// be retried without needing the deleted files.
+		n, e := a.node(ctx, t)
+		if e != nil {
+			return out, e
+		}
+		if _, e = n.Cleanup(ctx, t.ID, t.Workspace, t.Project.Integration, a.integrationEnv(t)); e != nil {
+			return out, e
 		}
 		if e = c.CloseIssue(ctx, t.Issue); e != nil {
 			return out, e
@@ -615,6 +689,10 @@ func (a *Activities) executeMerge(ctx context.Context, in StepInput, t domain.Ta
 	return a.runAgent(ctx, in, t, &r)
 }
 func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, merge *domain.Revision) (domain.Execution, error) {
+	n, e := a.node(ctx, t)
+	if e != nil {
+		return domain.Execution{}, e
+	}
 	role := roleFor(in.Phase)
 	cfg := t.Project.Development
 	if role != "dev" {
@@ -670,13 +748,13 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 		}
 	}
 	defer a.Store.ReleaseLeases(context.WithoutCancel(ctx), in.ExecutionID)
-	priorRuns, e := a.Agents.TaskExecutions(ctx, t.ID)
+	priorRuns, e := n.TaskExecutions(ctx, t.ID)
 	if e != nil {
 		return domain.Execution{}, e
 	}
 	for _, old := range priorRuns {
 		if old.ID != req.ExecutionID && (old.Status == "running" || old.Status == "starting") {
-			if e = a.Agents.Cancel(ctx, old.ID); e != nil {
+			if e = n.Cancel(ctx, old.ID); e != nil {
 				return old, fmt.Errorf("cannot supersede live execution: %w", e)
 			}
 		}
@@ -697,7 +775,7 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 			return domain.Execution{}, fmt.Errorf("merge no longer ready: %s", reason)
 		}
 	}
-	ex, e := a.Agents.Start(ctx, req)
+	ex, e := n.Start(ctx, req)
 	if e != nil {
 		return ex, e
 	}
@@ -706,7 +784,7 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 		if ex.Status == "running" || ex.Status == "starting" {
 			cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			_ = a.Agents.Cancel(cleanup, req.ExecutionID)
+			_ = n.Cancel(cleanup, req.ExecutionID)
 		}
 	}()
 	if e = a.Store.Execution(ctx, t.ID, role, ex); e != nil {
@@ -716,13 +794,13 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 		select {
 		case <-ctx.Done():
 			cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			_ = a.Agents.Cancel(cleanup, req.ExecutionID)
+			_ = n.Cancel(cleanup, req.ExecutionID)
 			cancel()
 			return ex, ctx.Err()
 		case <-time.After(2 * time.Second):
 		}
 		if ok, err := a.Store.Lease(ctx, slot, in.ExecutionID, 3*time.Minute); err != nil || !ok {
-			_ = a.Agents.Cancel(context.WithoutCancel(ctx), req.ExecutionID)
+			_ = n.Cancel(context.WithoutCancel(ctx), req.ExecutionID)
 			return ex, errors.New("agent slot lease lost")
 		}
 		if role == "merge" {
@@ -730,13 +808,13 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 				if r.Changed && !r.Merged {
 					ok, e := a.Store.Lease(ctx, mergeLock(t, r), t.ID, 3*time.Minute)
 					if e != nil || !ok {
-						_ = a.Agents.Cancel(context.WithoutCancel(ctx), req.ExecutionID)
+						_ = n.Cancel(context.WithoutCancel(ctx), req.ExecutionID)
 						return ex, errors.New("merge lease lost")
 					}
 				}
 			}
 		}
-		ex, e = a.Agents.Inspect(ctx, req.ExecutionID)
+		ex, e = n.Inspect(ctx, req.ExecutionID)
 		if e != nil {
 			return ex, e
 		}
@@ -883,6 +961,20 @@ func (a *Activities) resourceSlot(ctx context.Context, owner string) (context.Co
 		defer c()
 		_ = a.Store.ReleaseLeases(cleanup, owner)
 	}, nil
+}
+
+// syncManagedMeta exports the control-plane owned managed Meta-Repo and
+// installs it on the task's execution node. The transfer is bounded and
+// idempotent, so a retried activity cannot lose or duplicate the repository.
+func (a *Activities) syncManagedMeta(ctx context.Context, n execution.Node, p domain.Project) error {
+	if a.DataDir == "" {
+		return temporal.NewNonRetryableApplicationError("managed Meta-Repo transfer requires a data directory", "managed_meta", nil)
+	}
+	bundle, e := managedmeta.New(a.DataDir).Bundle(ctx, p.ID)
+	if e != nil {
+		return temporal.NewNonRetryableApplicationError("managed Meta-Repo bundle unavailable: "+e.Error(), "managed_meta", e)
+	}
+	return n.SyncManagedMeta(ctx, p.ID, p.MetaRef, bundle)
 }
 
 func (a *Activities) workspaceManager(p domain.Project) (*workspace.Manager, error) {

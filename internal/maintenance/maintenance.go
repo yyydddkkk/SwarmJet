@@ -12,12 +12,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
-	"time"
 	"swarmjet/internal/agent"
 	"swarmjet/internal/domain"
+	"swarmjet/internal/execution"
 	"swarmjet/internal/store"
 	"swarmjet/internal/workspace"
+	"syscall"
+	"time"
 )
 
 type DockerExecutor func(context.Context, []string) ([]byte, error)
@@ -25,6 +26,7 @@ type Manager struct {
 	Store                  *store.Store
 	Workspace              *workspace.Manager
 	Agents                 *agent.Runtime
+	Nodes                  execution.NodeResolver
 	DataDir                string
 	FailedDays, ReportDays int
 	Docker                 DockerExecutor
@@ -285,93 +287,25 @@ func (m *Manager) cleanup(ctx context.Context, t domain.Task) error {
 	if t.Paused || (t.Stage != "completed" && t.Stage != "cancelled") {
 		return errors.New("active or paused task cannot be retired")
 	}
-	if m.Agents == nil {
-		return errors.New("agent supervisor is required")
-	}
-	paths := []string{}
-	for _, category := range []string{"task-sources", "opencode", "runs"} {
-		p, e := m.path(category, t.ID)
+	// Assigned tasks own their local artifacts on an execution node; the control
+	// plane cannot delete them directly and must ask the owning node.
+	if t.NodeID != "" {
+		if m.Nodes == nil {
+			return errors.New("execution node transport is required for assigned tasks")
+		}
+		n, e := m.Nodes.Node(ctx, t.NodeID)
 		if e != nil {
 			return e
 		}
-		paths = append(paths, p)
+		return n.Retire(ctx, t)
 	}
-	// Read only supervisor-owned execution records; task JSON may omit old rework runs.
-	executions, e := m.Agents.TaskExecutions(ctx, t.ID)
-	if e != nil {
-		return e
+	var execs execution.Executions
+	if m.Agents != nil {
+		execs = m.Agents
 	}
-	containers := []string{}
-	records := []string{}
-	for _, ex := range executions {
-		present, e := m.stopped(ctx, ex)
-		if e != nil {
-			return e
-		}
-		if present {
-			containers = append(containers, ex.ContainerID)
-		}
-		p, e := m.path("agent-executions", ex.ID)
-		if e != nil {
-			return e
-		}
-		p += ".json"
-		st, e := os.Lstat(p)
-		if e != nil {
-			return e
-		}
-		if !st.Mode().IsRegular() {
-			return errors.New("supervisor record must be a regular file")
-		}
-		b, e := os.ReadFile(p)
-		if e != nil {
-			return e
-		}
-		var rec struct {
-			TaskID    string           `json:"taskId"`
-			Execution domain.Execution `json:"execution"`
-		}
-		if e = json.Unmarshal(b, &rec); e != nil {
-			return e
-		}
-		if rec.TaskID != t.ID || rec.Execution.ID != ex.ID || rec.Execution.ContainerID != ex.ContainerID {
-			return errors.New("supervisor record ownership mismatch")
-		}
-		records = append(records, p)
+	var ws execution.WorkspaceReleaser
+	if m.Workspace != nil {
+		ws = m.Workspace
 	}
-	if t.Stage == "cancelled" {
-		if t.Workspace.Root != "" {
-			if t.Workspace.TaskID != t.ID || filepath.Clean(t.Workspace.Root) != filepath.Join(paths[0], "meta", ".worktrees", t.ID) {
-				return errors.New("cancelled workspace identity/path mismatch")
-			}
-			if _, e = os.Stat(t.Workspace.Root); e == nil {
-				if m.Workspace == nil {
-					return errors.New("workspace manager is required")
-				}
-				if e = m.Workspace.Release(ctx, t.Workspace); e != nil {
-					return fmt.Errorf("cancelled workspace retained: %w", e)
-				}
-			} else if !errors.Is(e, os.ErrNotExist) {
-				return e
-			}
-		} else if _, e = os.Stat(paths[0]); e == nil {
-			return errors.New("cancelled task sources have no workspace ownership snapshot")
-		}
-	}
-	for _, name := range containers {
-		if b, e := m.docker(ctx, "container", "rm", name); e != nil {
-			return fmt.Errorf("remove stopped container: %w: %s", e, strings.TrimSpace(string(b)))
-		}
-	}
-	for _, p := range paths {
-		if e = os.RemoveAll(p); e != nil {
-			return e
-		}
-	}
-	for _, p := range records {
-		if e = os.Remove(p); e != nil && !errors.Is(e, os.ErrNotExist) {
-			return e
-		}
-	}
-	return nil
+	return execution.RetireTask(ctx, execution.RetireConfig{DataDir: m.DataDir, Executions: execs, Workspace: ws, Docker: m.Docker}, t)
 }

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/managedmeta"
 )
@@ -379,9 +380,6 @@ func readVerificationSpec(generated string) (verificationSpec, bool, error) {
 }
 
 // verify runs the analyzed build/test commands in a separate writable copy of
-// the pinned revisions. A missing command list is reported as unfinished rather
-// than silently passing.
-// verify runs the analyzed build/test commands in a separate writable copy of
 // the pinned revisions. Missing commands and a missing isolated runtime block
 // the verification instead of silently passing; a failed run stays retryable.
 func (m *Manager) verify(ctx context.Context, init domain.Initialization, project domain.Project) (domain.Initialization, error) {
@@ -396,9 +394,11 @@ func (m *Manager) verify(ctx context.Context, init domain.Initialization, projec
 	// blocked so an operator can review and complete it. Readiness is taken from
 	// the persisted project so a manually configured integration also counts.
 	m.applyIntegration(ctx, project, spec)
+	// Readiness requires the referenced compose file to exist at the pinned Meta
+	// commit with valid services for every check, not just non-empty fields.
 	integrationReady := false
 	if current, err := m.Store.Project(ctx, project.ID); err == nil {
-		integrationReady = strings.TrimSpace(current.Integration.ComposeFile) != "" && len(current.Integration.Checks) > 0
+		integrationReady = m.integrationIsUsable(current)
 	}
 	if !present || len(spec.Commands) == 0 {
 		init.AnalysisComplete = true
@@ -420,6 +420,8 @@ func (m *Manager) verify(ctx context.Context, init domain.Initialization, projec
 		init.Verification = []domain.InitVerification{{Name: "verification", Passed: false, DryRun: true, Report: init.Error}}
 		return m.save(ctx, init, project)
 	}
+	// Remove any verification container left behind by a crash or timeout.
+	m.cleanupVerifyContainers(project.ID)
 	verifyRoot := filepath.Join(m.initDir(project.ID), "verify")
 	if err = os.RemoveAll(verifyRoot); err != nil {
 		init.Status = domain.InitBlocked
@@ -439,7 +441,7 @@ func (m *Manager) verify(ctx context.Context, init domain.Initialization, projec
 	}
 	results := []domain.InitVerification{}
 	allPassed := true
-	for _, command := range spec.Commands {
+	for index, command := range spec.Commands {
 		name := strings.TrimSpace(command.Name)
 		if name == "" {
 			name = strings.Join(command.Argv, " ")
@@ -468,7 +470,7 @@ func (m *Manager) verify(ctx context.Context, init domain.Initialization, projec
 			timeout = 10 * time.Minute
 		}
 		runCtx, cancel := context.WithTimeout(ctx, timeout)
-		code, output, runErr := m.runCommand(runCtx, dir, command.Argv)
+		code, output, runErr := m.runCommand(runCtx, project.ID, index, dir, command.Argv)
 		cancel()
 		passed := runErr == nil && code == 0
 		allPassed = allPassed && passed
@@ -503,21 +505,35 @@ func (m *Manager) verify(ctx context.Context, init domain.Initialization, projec
 
 // runCommand uses the injected runner in tests and an isolated container in
 // production. There is deliberately no host fallback.
-func (m *Manager) runCommand(ctx context.Context, dir string, argv []string) (int, string, error) {
+func (m *Manager) runCommand(ctx context.Context, projectID string, index int, dir string, argv []string) (int, string, error) {
 	if m.Runner != nil {
 		return m.Runner(ctx, dir, argv)
 	}
 	if m.VerifyImage == "" {
 		return -1, "", errVerificationUnavailable
 	}
-	return m.dockerRun(ctx, dir, argv)
+	return m.dockerRun(ctx, projectID, index, dir, argv)
 }
 
-// dockerRun executes one command in a throwaway container that has no network,
-// no added capabilities and only the writable verification copy mounted.
-func (m *Manager) dockerRun(ctx context.Context, dir string, argv []string) (int, string, error) {
+// dockerRun executes one command in an isolated container with a deterministic
+// name. The name is recorded before the run so cancellation, timeout and a
+// worker restart can stop and remove the container even if the docker client is
+// killed: killing the CLI alone would leave the container running.
+func (m *Manager) dockerRun(ctx context.Context, projectID string, index int, dir string, argv []string) (int, string, error) {
+	name := verifyContainerName(projectID, index)
+	// Remove a container left behind by an earlier attempt with the same name.
+	stale, cancelStale := context.WithTimeout(context.Background(), 30*time.Second)
+	_, _ = m.runDocker(stale, "rm", "-f", name)
+	cancelStale()
+	m.recordVerifyContainer(projectID, name)
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_, _ = m.runDocker(cleanup, "rm", "-f", name)
+		m.forgetVerifyContainer(projectID, name)
+	}()
 	args := []string{
-		"run", "--rm",
+		"run", "--name", name,
 		"--network", "none",
 		"--read-only",
 		"--tmpfs", "/tmp",
@@ -530,21 +546,129 @@ func (m *Manager) dockerRun(ctx context.Context, dir string, argv []string) (int
 		m.VerifyImage,
 	}
 	args = append(args, argv...)
+	output, runErr := m.runDocker(ctx, args...)
+	if runErr != nil {
+		if ctx.Err() != nil {
+			return -1, string(output), ctx.Err()
+		}
+		var exit *exec.ExitError
+		if errors.As(runErr, &exit) {
+			return exit.ExitCode(), string(output), nil
+		}
+		return -1, string(output) + newline + runErr.Error(), fmt.Errorf("容器化验证失败：%w", runErr)
+	}
+	return 0, string(output), nil
+}
+
+func (m *Manager) runDocker(ctx context.Context, args ...string) ([]byte, error) {
+	if m.Docker != nil {
+		return m.Docker(ctx, args)
+	}
 	command := exec.CommandContext(ctx, "docker", args...)
 	command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(m.DataDir, "git-home"), "DOCKER_HOST=" + os.Getenv("DOCKER_HOST")}
 	var out cappedBuffer
 	command.Stdout, command.Stderr = &out, &out
-	if err := command.Run(); err != nil {
-		if ctx.Err() != nil {
-			return -1, out.String(), ctx.Err()
+	err := command.Run()
+	return out.Bytes(), err
+}
+
+type verifyRegistry struct {
+	Containers []string `json:"containers"`
+}
+
+func (m *Manager) verifyRegistryPath(projectID string) string {
+	return filepath.Join(m.initDir(projectID), "verify-containers.json")
+}
+
+func verifyContainerName(projectID string, index int) string {
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '.', r == '_':
+			return r
+		default:
+			return '-'
 		}
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			return exit.ExitCode(), out.String(), nil
+	}, projectID)
+	return "sj-init-verify-" + safe + "-" + strconv.Itoa(index)
+}
+
+func (m *Manager) recordVerifyContainer(projectID, name string) {
+	path := m.verifyRegistryPath(projectID)
+	names := readVerifyRegistry(path)
+	for _, existing := range names {
+		if existing == name {
+			return
 		}
-		return -1, out.String() + newline + err.Error(), fmt.Errorf("容器化验证失败：%w", err)
 	}
-	return 0, out.String(), nil
+	writeVerifyRegistry(path, append(names, name))
+}
+
+func (m *Manager) forgetVerifyContainer(projectID, name string) {
+	path := m.verifyRegistryPath(projectID)
+	names := readVerifyRegistry(path)
+	kept := names[:0]
+	for _, existing := range names {
+		if existing != name {
+			kept = append(kept, existing)
+		}
+	}
+	if len(kept) == 0 {
+		_ = os.Remove(path)
+		return
+	}
+	writeVerifyRegistry(path, kept)
+}
+
+// cleanupVerifyContainers stops and removes every recorded verification
+// container. It uses a fresh context so it still runs after cancellation.
+func (m *Manager) cleanupVerifyContainers(projectID string) {
+	path := m.verifyRegistryPath(projectID)
+	names := readVerifyRegistry(path)
+	_ = os.Remove(path)
+	for _, name := range names {
+		if !strings.HasPrefix(name, "sj-init-verify-") {
+			continue
+		}
+		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		_, _ = m.runDocker(cleanup, "rm", "-f", name)
+		cancel()
+	}
+}
+
+func readVerifyRegistry(path string) []string {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var registry verifyRegistry
+	if json.Unmarshal(body, &registry) != nil {
+		return nil
+	}
+	return registry.Containers
+}
+
+func writeVerifyRegistry(path string, names []string) {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return
+	}
+	body, err := json.Marshal(verifyRegistry{Containers: names})
+	if err != nil {
+		return
+	}
+	temp, err := os.CreateTemp(filepath.Dir(path), ".verify-registry-*")
+	if err != nil {
+		return
+	}
+	name := temp.Name()
+	if err = temp.Chmod(0600); err == nil {
+		_, err = temp.Write(body)
+	}
+	_ = temp.Close()
+	if err != nil {
+		_ = os.Remove(name)
+		return
+	}
+	_ = os.Rename(name, path)
 }
 
 type cappedBuffer struct{ bytes.Buffer }
@@ -624,6 +748,44 @@ func (m *Manager) applyIntegration(ctx context.Context, project domain.Project, 
 	if _, err := m.Store.SaveProject(ctx, candidate); err != nil {
 		m.log("save proposed integration config", err)
 	}
+}
+
+// integrationIsUsable requires the referenced compose file to exist at the
+// pinned Meta commit with a valid services section for every required check.
+func (m *Manager) integrationIsUsable(project domain.Project) bool {
+	if m.Managed == nil {
+		return false
+	}
+	integration := project.Integration
+	if strings.TrimSpace(integration.ComposeFile) == "" || len(integration.Checks) == 0 {
+		return false
+	}
+	required := false
+	for _, check := range integration.Checks {
+		if strings.TrimSpace(check.Name) == "" || strings.TrimSpace(check.Service) == "" || len(check.Command) == 0 {
+			return false
+		}
+		required = required || check.Required
+	}
+	if !required {
+		return false
+	}
+	body, err := m.Managed.ReadFile(context.Background(), project.ID, project.MetaRef, integration.ComposeFile)
+	if err != nil {
+		return false
+	}
+	var doc struct {
+		Services map[string]any `yaml:"services"`
+	}
+	if yaml.Unmarshal(body, &doc) != nil || len(doc.Services) == 0 {
+		return false
+	}
+	for _, check := range integration.Checks {
+		if _, ok := doc.Services[check.Service]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func safeRelative(p string) bool {

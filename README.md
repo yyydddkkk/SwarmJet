@@ -1,6 +1,6 @@
 # SwarmJet
 
-可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab + OpenCode 集成，默认通过单机 Docker Compose 部署；尚不支持跨宿主机调度 Agent 容器。一个开发 Agent 在独立工作区内修改一组仓库，完成联调后由独立审查 Agent 审查，并自动合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录及人工操作。
+可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab + OpenCode 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务创建后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，完成联调后由独立审查 Agent 审查，并自动合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录及人工操作。
 
 ## 架构
 
@@ -107,9 +107,9 @@ SWARMJET_DOCKER_TEST=1 go test ./internal/integration
 
 ## 部署与迁移
 
-步骤见 [deploy/README.md](deploy/README.md)。管理程序支持 `serve`、`worker`、`migrate`、`doctor`、`legacy-inventory`。
+步骤见 [deploy/README.md](deploy/README.md)。管理程序支持 `serve`、`worker`、`node`、`migrate`、`doctor`、`legacy-inventory`。
 
-Worker 经 Docker socket 创建同宿主机的任务容器，`DATA_DIR` 必须是宿主机与容器内一致的绝对路径。Agent 仅挂载自己的私有 Git 副本、当前执行目录、角色会话及只读报告；共享缓存和调度记录不暴露给 Agent。
+Worker 经 Docker socket 创建同宿主机的任务容器，`DATA_DIR` 必须是宿主机与容器内一致的绝对路径。Agent 仅挂载自己的私有 Git 副本、当前执行目录、角色会话及只读报告；共享缓存和调度记录不暴露给 Agent。需要多机时，启动 `swarmjet node` 执行节点并在控制面设置 `EXECUTION_MODE=distributed`，任务会固定归属到节点；节点失联保留现场并 blocked，不自动迁移。
 
 本仓库从独立源码起步，不包含旧实现的 Git 历史。切换前停止旧版取单、备份数据，用 `swarmjet legacy-inventory /path/to/state.json` 生成手工接管清单。扫描跳过 `ai:working`、`ai:mr-opened`、`ai:needs-human`，确认存量分支/MR 后再调整标签。两套调度器不同时处理同一批任务。
 

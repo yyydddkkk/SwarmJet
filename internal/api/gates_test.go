@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -84,5 +85,32 @@ func managedEnabledProject() domain.Project {
 		Integration: domain.IntegrationConfig{ComposeFile: "integration/compose.yaml",
 			Checks: []domain.Check{{Name: "t", Service: "runner", Command: []string{"true"}, Required: true}}},
 		MaxReworks: 3, RequireCI: true,
+	}
+}
+
+// Keeping the stored token while changing the GitLab address would send the old
+// token to a different origin; a re-verified token is required.
+func TestConnectionUpdateRejectsAddressChangeWithoutToken(t *testing.T) {
+	box := newConnectionBox(t)
+	sealed, err := box.Seal(mustJSON(t, credentials.Payload{Token: "glpat-old"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conns := newFakeConnections()
+	conns.items["c1"] = domain.Connection{ID: "c1", Name: "n", GitLabURL: "https://gitlab-a.example", Username: "u", Version: 1}
+	conns.secrets["c1"] = sealed
+	a := &server{cfg: Config{Box: box}, conns: conns}
+	update := func(w http.ResponseWriter, r *http.Request) { a.connection(w, r, "c1", nil) }
+	rec := callHandler(t, "PUT", "/api/connections/c1", map[string]any{"name": "n", "gitlabUrl": "https://gitlab-b.example", "version": 1}, update)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "Token") {
+		t.Fatalf("address change with the old token accepted: %d %s", rec.Code, rec.Body)
+	}
+	remote := gitlabUserServer(t, 200, "operator")
+	rec = callHandler(t, "PUT", "/api/connections/c1", map[string]any{"name": "n", "gitlabUrl": remote.URL, "version": 1, "token": "glpat-new"}, update)
+	if rec.Code != 200 {
+		t.Fatalf("verified token with a new address rejected: %d %s", rec.Code, rec.Body)
+	}
+	if conns.secrets["c1"] == sealed {
+		t.Fatal("credential was not replaced after a verified address change")
 	}
 }
