@@ -1,0 +1,10 @@
+{
+  "composeFile": "integration/http-check/compose.yaml",
+  "startupTimeoutSeconds": 180,
+  "checks": [{
+    "name": "http-health",
+    "service": "verifier",
+    "command": ["python", "-c", "import urllib.request; r = urllib.request.urlopen('http://app:8000/healthz', timeout=10); assert r.status == 200; assert r.read() == b'ok'; print('PASS http-health')"],
+    "required": true
+  }]
+}

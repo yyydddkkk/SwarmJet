@@ -1,0 +1,198 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/worker"
+	"go.temporal.io/sdk/workflow"
+	"swarmjet/internal/agent"
+	"swarmjet/internal/api"
+	"swarmjet/internal/integration"
+	"swarmjet/internal/maintenance"
+	"swarmjet/internal/pipeline"
+	"swarmjet/internal/runtimeadmin"
+	"swarmjet/internal/service"
+	"swarmjet/internal/store"
+	"swarmjet/internal/workspace"
+)
+
+func env(k, d string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return d
+}
+func required(k string) string {
+	v := os.Getenv(k)
+	if v == "" {
+		slog.Error("missing environment", "name", k)
+		os.Exit(2)
+	}
+	return v
+}
+func main() {
+	if err := run(); err != nil {
+		slog.Error("swarmjet stopped", "error", err)
+		os.Exit(1)
+	}
+}
+func run() error {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	mode := "serve"
+	if len(os.Args) > 1 {
+		mode = os.Args[1]
+	}
+	if mode == "help" || mode == "--help" {
+		fmt.Println("swarmjet serve | worker | migrate | doctor | legacy-inventory <state.json>")
+		return nil
+	}
+	if mode == "legacy-inventory" {
+		if len(os.Args) != 3 {
+			return fmt.Errorf("provide legacy state.json")
+		}
+		b, e := os.ReadFile(os.Args[2])
+		if e != nil {
+			return e
+		}
+		var old map[string]any
+		if e = json.Unmarshal(b, &old); e != nil {
+			return e
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"mode": "manual-takeover", "entries": old, "instructions": "Inspect existing branches and MRs before removing ai:* labels or enabling autonomous; existing executions are not automatically resumed."})
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	s, e := store.Open(ctx, required("DATABASE_URL"))
+	if e != nil {
+		return e
+	}
+	defer s.Close()
+	if mode == "migrate" {
+		return s.Migrate(ctx)
+	}
+	tc, e := client.Dial(client.Options{HostPort: env("TEMPORAL_ADDRESS", "localhost:7233"), Namespace: env("TEMPORAL_NAMESPACE", "default")})
+	if e != nil {
+		return e
+	}
+	defer tc.Close()
+	if mode == "doctor" {
+		_, e = tc.CheckHealth(ctx, &client.CheckHealthRequest{})
+		if e != nil {
+			return e
+		}
+		fmt.Println("PostgreSQL and Temporal reachable; use console project checks for repository configuration")
+		return nil
+	}
+	data, e := filepath.Abs(env("DATA_DIR", "./data"))
+	if e != nil {
+		return e
+	}
+	if e = os.MkdirAll(data, 0700); e != nil {
+		return e
+	}
+	if mode == "serve" {
+		adminUser := env("ADMIN_USERNAME", "admin")
+		password := required("ADMIN_PASSWORD")
+		if len(password) < 12 {
+			return fmt.Errorf("ADMIN_PASSWORD must contain at least 12 characters")
+		}
+		handler := api.New(s, api.Config{Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: pipeline.EnvironmentCredential, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET")})
+		svc := &service.Service{Store: s, Temporal: tc, ResolveCredential: pipeline.EnvironmentCredential, Wake: make(chan struct{}, 1)}
+		go svc.Run(ctx)
+		a := &pipeline.Activities{Store: s, Credential: pipeline.EnvironmentCredential}
+		go svc.Sync(ctx, a)
+		routes := http.NewServeMux()
+		routes.Handle("/api/webhooks/gitlab", svc.Webhook(os.Getenv("GITLAB_WEBHOOK_SECRET")))
+		routes.Handle("/", handler)
+		server := &http.Server{Addr: env("LISTEN_ADDRESS", ":8080"), Handler: routes, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
+		go func() {
+			<-ctx.Done()
+			c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = server.Shutdown(c)
+		}()
+		slog.Info("console listening", "address", server.Addr)
+		e = server.ListenAndServe()
+		if e == http.ErrServerClosed {
+			return nil
+		}
+		return e
+	}
+	if mode != "worker" {
+		return fmt.Errorf("unknown mode %s", mode)
+	}
+	wm := workspace.New(data, env("META_COMMAND", "meta"))
+	wm.Env = map[string]string{"GIT_ASKPASS": env("SWARMJET_GIT_ASKPASS", "/usr/local/bin/swarmjet-askpass")}
+	im := integration.New(data)
+	im.Env = map[string]string{}
+	for _, k := range strings.Split(os.Getenv("INTEGRATION_ENV_ALLOWLIST"), ",") {
+		k = strings.TrimSpace(k)
+		if k != "" {
+			im.Env[k] = os.Getenv(k)
+		}
+	}
+	n, e := strconv.Atoi(env("TASK_CONCURRENCY", "2"))
+	if e != nil || n < 1 {
+		return fmt.Errorf("invalid TASK_CONCURRENCY")
+	}
+	agentEnv := map[string]string{}
+	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		if v := os.Getenv(k); v != "" {
+			agentEnv[k] = v
+		}
+	}
+	for _, k := range strings.Split(env("AGENT_ENV_ALLOWLIST", "OPENAI_API_KEY,ANTHROPIC_API_KEY,DEEPSEEK_API_KEY,OPENCODE_CONFIG_CONTENT"), ",") {
+		k = strings.TrimSpace(k)
+		if v := os.Getenv(k); k != "" && v != "" {
+			agentEnv[k] = v
+		}
+	}
+	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: agent.New(data), Integration: im, DataDir: data, Concurrency: n, Credential: pipeline.EnvironmentCredential, AgentEnv: agentEnv}
+	if secret := os.Getenv("RUNTIME_ADMIN_SECRET"); secret != "" {
+		if len(secret) < 32 {
+			return fmt.Errorf("RUNTIME_ADMIN_SECRET must contain at least 32 characters")
+		}
+		admin := &http.Server{Addr: env("RUNTIME_ADMIN_LISTEN", ":8091"), Handler: runtimeadmin.New(runtimeadmin.Config{DataDir: data, Image: env("AGENT_IMAGE", "swarmjet-agent:local"), Secret: secret, Env: agentEnv}), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
+		go func() {
+			if err := admin.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("runtime admin stopped", "error", err)
+				stop()
+			}
+		}()
+		defer func() {
+			c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = admin.Shutdown(c)
+		}()
+	}
+	failedDays, _ := strconv.Atoi(env("FAILED_KEEP_DAYS", "7"))
+	reportDays, _ := strconv.Atoi(env("REPORT_KEEP_DAYS", "30"))
+	if failedDays < 1 || reportDays < 1 {
+		return fmt.Errorf("retention days must be positive")
+	}
+	cleaner := &maintenance.Manager{Store: s, Workspace: wm, Agents: a.Agents, DataDir: data, FailedDays: failedDays, ReportDays: reportDays}
+	go cleaner.Run(ctx)
+	w := worker.New(tc, pipeline.Queue, worker.Options{MaxConcurrentActivityExecutionSize: n*8 + 8, WorkerStopTimeout: 30 * time.Second})
+	w.RegisterWorkflowWithOptions(pipeline.WorkTask, workflow.RegisterOptions{Name: pipeline.WorkflowName})
+	w.RegisterActivityWithOptions(a.Step, activity.RegisterOptions{Name: "Step"})
+	w.RegisterActivityWithOptions(a.SaveTask, activity.RegisterOptions{Name: "SaveTask"})
+	if e = w.Start(); e != nil {
+		return e
+	}
+	defer w.Stop()
+	<-ctx.Done()
+	return nil
+}

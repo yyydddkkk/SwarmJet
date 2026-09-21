@@ -1,0 +1,154 @@
+name: ${COMPOSE_PROJECT_NAME:-swarmjet}
+x-app-environment: &app-environment
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-swarmjet}
+  RUNTIME_ADMIN_SECRET: ${RUNTIME_ADMIN_SECRET:-}
+  DATA_DIR: ${DATA_DIR:?Set DATA_DIR to an absolute host path}
+  GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+  GITLAB_MERGE_TOKEN: ${GITLAB_MERGE_TOKEN:-}
+x-app: &app
+  image: ${IMAGE:-swarmjet:local}
+  restart: unless-stopped
+  stop_grace_period: 45s
+  logging:
+    driver: json-file
+    options: {max-size: 20m, max-file: '5'}
+services:
+  postgres:
+    image: postgres:18.1-alpine3.23
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: swarmjet
+      POSTGRES_DB: swarmjet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./temporal/postgres-init.sql:/docker-entrypoint-initdb.d/10-temporal.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U swarmjet -d swarmjet']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  temporal-schema:
+    image: temporalio/admin-tools:1.32.0
+    restart: 'no'
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: swarmjet
+      SQL_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./temporal/schema.sh:/scripts/schema.sh:ro
+    entrypoint: [/bin/sh, /scripts/schema.sh]
+  temporal:
+    image: temporalio/server:1.32.0
+    restart: unless-stopped
+    depends_on:
+      temporal-schema: {condition: service_completed_successfully}
+    environment:
+      POSTGRES_USER: swarmjet
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      BIND_ON_IP: 0.0.0.0
+      TEMPORAL_SERVER_CONFIG_FILE_PATH: /etc/temporal/config/swarmjet.yaml
+      TEMPORAL_ALLOW_NO_AUTH: 'true'
+    volumes:
+      - ./temporal/config_template.yaml:/etc/temporal/config/swarmjet.yaml:ro
+      - ./temporal/dynamicconfig.yaml:/etc/temporal/config/dynamicconfig/swarmjet.yaml:ro
+    healthcheck:
+      test: [CMD, nc, -z, localhost, '7233']
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 20s
+  temporal-namespace:
+    image: temporalio/admin-tools:1.32.0
+    restart: 'no'
+    depends_on:
+      temporal: {condition: service_healthy}
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-swarmjet}
+    volumes:
+      - ./temporal/namespace.sh:/scripts/namespace.sh:ro
+    entrypoint: [/bin/sh, /scripts/namespace.sh]
+  temporal-ui:
+    image: temporalio/ui:2.54.1
+    restart: unless-stopped
+    depends_on:
+      temporal-namespace: {condition: service_completed_successfully}
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_DEFAULT_NAMESPACE: ${TEMPORAL_NAMESPACE:-swarmjet}
+      TEMPORAL_CORS_ORIGINS: ${TEMPORAL_UI_ORIGIN:-http://localhost:8333}
+    ports:
+      - '127.0.0.1:${TEMPORAL_UI_PORT:-8333}:8080'
+  migrate:
+    <<: *app
+    restart: 'no'
+    command: [migrate]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+  api:
+    <<: *app
+    command: [serve]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      temporal-namespace: {condition: service_completed_successfully}
+    environment:
+      <<: *app-environment
+      AGENT_IMAGE: ${AGENT_IMAGE:-swarmjet-agent:local}
+      RUNTIME_ADMIN_URL: http://worker:8091
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD with at least 12 characters}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8180}
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
+    ports:
+      - '${LISTEN_HOST:-127.0.0.1}:${HTTP_PORT:-8180}:8080'
+    volumes:
+      - type: bind
+        source: ${DATA_DIR:?Set absolute DATA_DIR}
+        target: ${DATA_DIR:?Set absolute DATA_DIR}
+        read_only: true
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://localhost:8180/healthz]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+  worker:
+    <<: *app
+    command: [worker]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      temporal-namespace: {condition: service_completed_successfully}
+    environment:
+      <<: *app-environment
+      AGENT_IMAGE: ${AGENT_IMAGE:-swarmjet-agent:local}
+      TASK_CONCURRENCY: ${TASK_CONCURRENCY:-2}
+      FAILED_KEEP_DAYS: ${FAILED_KEEP_DAYS:-7}
+      REPORT_KEEP_DAYS: ${REPORT_KEEP_DAYS:-30}
+      INTEGRATION_ENV_ALLOWLIST: ${INTEGRATION_ENV_ALLOWLIST:-}
+      AGENT_ENV_ALLOWLIST: ${AGENT_ENV_ALLOWLIST:-OPENAI_API_KEY,ANTHROPIC_API_KEY,DEEPSEEK_API_KEY,OPENCODE_CONFIG_CONTENT}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENCODE_CONFIG_CONTENT: ${OPENCODE_CONFIG_CONTENT:-}
+      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-swarmjet}
+      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-swarmjet@example.invalid}
+      GIT_COMMITTER_NAME: ${GIT_AUTHOR_NAME:-swarmjet}
+      GIT_COMMITTER_EMAIL: ${GIT_AUTHOR_EMAIL:-swarmjet@example.invalid}
+    volumes:
+      - type: bind
+        source: ${DATA_DIR:?Set absolute DATA_DIR}
+        target: ${DATA_DIR:?Set absolute DATA_DIR}
+      - /var/run/docker.sock:/var/run/docker.sock
+  agent-image:
+    image: ${AGENT_IMAGE:-swarmjet-agent:local}
+    profiles: [tools]
+    command: [--version]
+volumes:
+  postgres-data:

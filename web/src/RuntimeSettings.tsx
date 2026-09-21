@@ -1,0 +1,595 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { api } from "./api";
+import "@xterm/xterm/css/xterm.css";
+import "./runtime-settings.css";
+
+type RuntimeStatus = {
+  profile: string;
+  image: string;
+  available: boolean;
+  toolsChecked?: boolean;
+  opencode: {
+    installed: boolean;
+    configured: boolean;
+    providers: string[] | null;
+  };
+  codex: {
+    installed: boolean;
+    configured: boolean;
+    executionSupported: boolean;
+  };
+  message?: string;
+};
+type ModelEntry = string | { id: string; name?: string; provider?: string };
+type RuntimeModels = {
+  models: ModelEntry[] | null;
+  providers: string[] | null;
+  warnings: string[] | null;
+};
+type ConnectionState = "disconnected" | "connecting" | "connected";
+type TerminalSession = {
+  socket: WebSocket;
+  terminal: Terminal;
+  fit: FitAddon;
+  observer: ResizeObserver;
+  disposables: { dispose(): void }[];
+  frame: number;
+};
+const commands = [
+  { command: "opencode auth login", label: "登录 OpenCode" },
+  { command: "opencode auth list", label: "查看 OpenCode 登录配置" },
+  { command: "opencode models", label: "查看模型" },
+  { command: "codex login --device-auth", label: "登录 Codex" },
+  { command: "codex login status", label: "查看 Codex 登录状态" },
+];
+
+function modelID(model: ModelEntry): string {
+  if (typeof model === "string") return model;
+  if (!model?.id) return "";
+  return model.provider && !model.id.includes("/")
+    ? `${model.provider}/${model.id}`
+    : model.id;
+}
+
+export default function RuntimeSettings() {
+  const [status, setStatus] = useState<RuntimeStatus | null>(null);
+  const [models, setModels] = useState<RuntimeModels | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [statusError, setStatusError] = useState("");
+  const [modelsError, setModelsError] = useState("");
+  const [terminalError, setTerminalError] = useState("");
+  const [connection, setConnection] = useState<ConnectionState>("disconnected");
+  const [terminalNotice, setTerminalNotice] = useState("");
+  const [selection, setSelection] = useState(false);
+  const [search, setSearch] = useState("");
+  const [copyNotice, setCopyNotice] = useState("");
+  const host = useRef<HTMLDivElement>(null);
+  const session = useRef<TerminalSession | null>(null);
+  const mounted = useRef(true);
+  const requests = useRef(new Set<AbortController>());
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+
+  const refreshStatus = useCallback(async () => {
+    const controller = new AbortController();
+    requests.current.add(controller);
+    setLoading(true);
+    setStatusError("");
+    try {
+      const result = await api<RuntimeStatus>(
+        "/runtime/status",
+        "GET",
+        undefined,
+        controller.signal,
+      );
+      if (!controller.signal.aborted) setStatus(result);
+    } catch (error) {
+      if (!controller.signal.aborted) setStatusError((error as Error).message);
+    } finally {
+      requests.current.delete(controller);
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  }, []);
+  const refreshModels = useCallback(async () => {
+    const controller = new AbortController();
+    requests.current.add(controller);
+    setModelsLoading(true);
+    setModelsError("");
+    try {
+      const result = await api<RuntimeModels>(
+        "/runtime/models",
+        "GET",
+        undefined,
+        controller.signal,
+      );
+      if (!controller.signal.aborted) setModels(result);
+    } catch (error) {
+      if (!controller.signal.aborted) setModelsError((error as Error).message);
+    } finally {
+      requests.current.delete(controller);
+      if (!controller.signal.aborted) setModelsLoading(false);
+    }
+  }, []);
+
+  const disposeSession = useCallback(() => {
+    const current = session.current;
+    session.current = null;
+    if (!current) return;
+    current.socket.onopen = null;
+    current.socket.onmessage = null;
+    current.socket.onerror = null;
+    current.socket.onclose = null;
+    current.observer.disconnect();
+    cancelAnimationFrame(current.frame);
+    current.disposables.forEach((item) => item.dispose());
+    current.socket.close();
+    current.terminal.reset();
+    current.terminal.dispose();
+    host.current?.replaceChildren();
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    void refreshStatus();
+    return () => {
+      mounted.current = false;
+      requests.current.forEach((request) => request.abort());
+      requests.current.clear();
+      clearTimeout(noticeTimer.current);
+      disposeSession();
+    };
+  }, [disposeSession, refreshStatus]);
+
+  function disconnect(message = "连接已断开，当前终端内容已清空。") {
+    disposeSession();
+    setConnection("disconnected");
+    setSelection(false);
+    setTerminalNotice(message);
+  }
+
+  function connect() {
+    if (!host.current || session.current || !status?.available) return;
+    setTerminalError("");
+    setTerminalNotice("");
+    setConnection("connecting");
+    let pendingTerminal: Terminal | null = null;
+    let pendingSocket: WebSocket | null = null;
+    try {
+      const terminal = new Terminal({
+        cursorBlink: true,
+        fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+        fontSize: 13,
+        lineHeight: 1.35,
+        scrollback: 1500,
+        convertEol: false,
+        screenReaderMode: true,
+        theme: {
+          background: "#172331",
+          foreground: "#e2e9f3",
+          cursor: "#c1d3ef",
+          selectionBackground: "#42628b",
+          black: "#172331",
+          red: "#f2a399",
+          green: "#9cd0ab",
+          yellow: "#efd28d",
+          blue: "#8fb6f4",
+          magenta: "#c2ace8",
+          cyan: "#95d8de",
+          white: "#e2e9f3",
+        },
+      });
+      pendingTerminal = terminal;
+      const fit = new FitAddon();
+      terminal.loadAddon(fit);
+      terminal.open(host.current);
+      terminal.textarea?.setAttribute("aria-label", "执行器配置终端输入");
+      terminal.attachCustomKeyEventHandler((event) => {
+        // Let the browser copy selected output without sending Ctrl-C to the shell.
+        if (
+          (event.ctrlKey || event.metaKey) &&
+          event.key.toLowerCase() === "c" &&
+          terminal.hasSelection()
+        )
+          return false;
+        return true;
+      });
+      const url = new URL("/api/runtime/terminal", window.location.href);
+      url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const socket = new WebSocket(url);
+      pendingSocket = socket;
+      socket.binaryType = "arraybuffer";
+      const observer = new ResizeObserver(() => {
+        const current = session.current;
+        if (!current || current.socket !== socket) return;
+        cancelAnimationFrame(current.frame);
+        current.frame = requestAnimationFrame(() => {
+          if (session.current?.socket === socket) fit.fit();
+        });
+      });
+      const send = (data: unknown) => {
+        if (socket.readyState === WebSocket.OPEN)
+          socket.send(JSON.stringify(data));
+      };
+      const disposables = [
+        terminal.onData((data) => send({ type: "input", data })),
+        terminal.onResize(({ cols, rows }) =>
+          send({ type: "resize", cols, rows }),
+        ),
+        terminal.onSelectionChange(() => setSelection(terminal.hasSelection())),
+      ];
+      session.current = {
+        socket,
+        terminal,
+        fit,
+        observer,
+        disposables,
+        frame: 0,
+      };
+      pendingTerminal = null;
+      pendingSocket = null;
+      observer.observe(host.current);
+      socket.onopen = () => {
+        if (session.current?.socket !== socket) return;
+        setConnection("connected");
+        fit.fit();
+        send({ type: "resize", cols: terminal.cols, rows: terminal.rows });
+        terminal.focus();
+        void refreshStatus();
+      };
+      socket.onmessage = (event: MessageEvent) => {
+        if (session.current?.socket !== socket) return;
+        if (event.data instanceof ArrayBuffer) {
+          terminal.write(new Uint8Array(event.data));
+          return;
+        }
+        if (typeof event.data !== "string") return;
+        try {
+          const message = JSON.parse(event.data) as {
+            type?: string;
+            message?: string;
+          };
+          if (message.type === "error") {
+            setTerminalError(
+              message.message || "终端连接失败，请检查执行器服务。",
+            );
+            disconnect("终端连接已结束。修复后可重新连接。");
+            return;
+          }
+          if (message.type === "exit") {
+            disconnect("配置进程已退出，当前终端内容已清空。");
+            void refreshStatus();
+            return;
+          }
+        } catch {
+          // Plain text output is supported alongside the binary terminal protocol.
+        }
+        terminal.write(event.data);
+      };
+      socket.onerror = () => {
+        if (session.current?.socket !== socket) return;
+        setTerminalError(
+          "无法连接配置终端。请确认登录会话和执行器服务可用，然后重新连接。",
+        );
+        disconnect("连接未建立。");
+      };
+      socket.onclose = (event) => {
+        if (session.current?.socket !== socket) return;
+        if (!event.wasClean)
+          setTerminalError(
+            "终端连接意外断开，请检查网络或执行器状态后重新连接。",
+          );
+        disconnect("连接已结束，当前终端内容已清空。");
+      };
+    } catch {
+      disposeSession();
+      pendingSocket?.close();
+      pendingTerminal?.dispose();
+      host.current?.replaceChildren();
+      setConnection("disconnected");
+      setTerminalError("无法初始化终端，请刷新页面重试。");
+    }
+  }
+
+  function fillCommand(command: string) {
+    const current = session.current;
+    if (!current || current.socket.readyState !== WebSocket.OPEN) return;
+    // No newline: the operator reviews the input and presses Enter themselves.
+    current.terminal.paste(command);
+    current.terminal.focus();
+    setTerminalNotice("命令已填入终端，请确认当前输入后按 Enter 执行。");
+  }
+  async function copy(text: string, message: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      if (!mounted.current) return;
+      setCopyNotice(message);
+    } catch {
+      if (!mounted.current) return;
+      setCopyNotice("浏览器未允许复制，请选中文字后使用系统复制快捷键。");
+    }
+    clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setCopyNotice(""), 4000);
+  }
+
+  const allModels = [
+    ...new Set((models?.models || []).map(modelID).filter(Boolean)),
+  ];
+  const filteredModels = allModels.filter((model) =>
+    model.toLowerCase().includes(search.toLowerCase()),
+  );
+  const providers = models?.providers || status?.opencode?.providers || [];
+
+  return (
+    <div className="runtime-page">
+      <div className="page-head">
+        <div>
+          <div className="eyebrow">EXECUTOR ENVIRONMENT</div>
+          <h1>执行器环境</h1>
+          <p>配置工具登录与模型服务，供新任务复用。每个任务的会话独立保存。</p>
+        </div>
+        <button onClick={() => void refreshStatus()} disabled={loading}>
+          {loading ? "正在检查…" : "刷新状态"}
+        </button>
+      </div>
+
+      {statusError && (
+        <div className="error" role="alert">
+          {statusError}
+          <button onClick={() => void refreshStatus()}>重试</button>
+        </div>
+      )}
+      {status?.message && (
+        <div className="runtime-message">{status.message}</div>
+      )}
+      <div className="runtime-tool-grid">
+        {(["opencode", "codex"] as const).map((tool) => {
+          const info = status?.[tool];
+          return (
+            <section
+              className="panel runtime-tool-card"
+              key={tool}
+              aria-label={
+                tool === "opencode" ? "OpenCode 环境状态" : "Codex 环境状态"
+              }
+            >
+              <div className="runtime-tool-top">
+                <div className="runtime-tool-mark" aria-hidden="true">
+                  {tool === "opencode" ? ">_" : "C/"}
+                </div>
+                <span
+                  className={`status ${tool === "opencode" ? "completed" : "paused"}`}
+                >
+                  {tool === "opencode" ? "当前任务执行器" : "可配置登录"}
+                </span>
+              </div>
+              <h2>{tool === "opencode" ? "OpenCode" : "Codex"}</h2>
+              <p>
+                {tool === "opencode"
+                  ? "任务开发、审查和合并使用此执行器。"
+                  : "可在环境中完成登录，任务适配器尚未实现。"}
+              </p>
+              <div className="runtime-tool-state">
+                <span>工具安装</span>
+                <strong>
+                  {!status
+                    ? "尚未检查"
+                    : status.toolsChecked === false
+                      ? "打开终端后检测"
+                      : info?.installed
+                        ? "已安装"
+                        : "未检测到工具"}
+                </strong>
+              </div>
+              <div className="runtime-tool-state">
+                <span>登录配置</span>
+                <strong>
+                  {!status
+                    ? "尚未检查"
+                    : info?.configured
+                      ? "检测到登录配置"
+                      : "未检测到登录配置"}
+                </strong>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      <section
+        className="panel runtime-terminal-panel"
+        aria-labelledby="runtime-terminal-title"
+      >
+        <div className="panel-head">
+          <div>
+            <h2 id="runtime-terminal-title">配置终端</h2>
+            <p>在隔离的配置环境中完成登录，退出后配置仍会保留。</p>
+          </div>
+          <div className="actions">
+            <span
+              className={`status ${connection === "connected" ? "completed" : "paused"}`}
+            >
+              {connection === "connected"
+                ? "已连接"
+                : connection === "connecting"
+                  ? "连接中"
+                  : "未连接"}
+            </span>
+            {connection === "disconnected" ? (
+              <button
+                className="primary"
+                disabled={!status?.available || loading}
+                onClick={connect}
+              >
+                打开配置终端
+              </button>
+            ) : (
+              <button onClick={() => disconnect()}>断开连接</button>
+            )}
+          </div>
+        </div>
+        {terminalError && (
+          <div className="error runtime-inline-error" role="alert">
+            {terminalError}
+          </div>
+        )}
+        <div className="runtime-commands">
+          <span>填入命令</span>
+          <div>
+            {commands.map(({ command, label }) => (
+              <button
+                type="button"
+                key={command}
+                disabled={connection !== "connected"}
+                title={`${label}；仅填入，不自动执行`}
+                onClick={() => fillCommand(command)}
+              >
+                <code>{command}</code>
+              </button>
+            ))}
+          </div>
+          <small>点击后追加到当前终端输入；确认后按 Enter 执行。</small>
+        </div>
+        <div className="runtime-terminal-stage">
+          <div
+            ref={host}
+            className="runtime-terminal-host"
+            data-testid="runtime-terminal"
+          />
+          {connection !== "connected" && (
+            <div className="runtime-terminal-placeholder">
+              <div className="runtime-terminal-symbol" aria-hidden="true">
+                $ _
+              </div>
+              <strong>
+                {connection === "connecting"
+                  ? "正在连接执行器…"
+                  : "准备好后，打开配置终端"}
+              </strong>
+              <p>
+                {!status?.available && status
+                  ? "执行器当前不可用，请检查服务后刷新状态。"
+                  : "通过工具的交互式登录流程配置服务。"}
+              </p>
+            </div>
+          )}
+        </div>
+        <div className="runtime-terminal-footer">
+          <span role="status">
+            {terminalNotice ||
+              "选中终端文字可复制登录链接。终端内容仅保留在当前页面内存中。"}
+          </span>
+          <button
+            disabled={!selection || connection !== "connected"}
+            onClick={() => {
+              const text = session.current?.terminal.getSelection();
+              if (text) void copy(text, "已复制所选终端文字。");
+            }}
+          >
+            复制选中内容
+          </button>
+        </div>
+      </section>
+
+      <section
+        className="panel runtime-models-panel"
+        aria-labelledby="runtime-models-title"
+      >
+        <div className="panel-head">
+          <div>
+            <h2 id="runtime-models-title">
+              模型标识 <span className="count">{allModels.length}</span>
+            </h2>
+            <p>登录后刷新列表，复制标识到项目的模型配置。</p>
+          </div>
+          <button
+            onClick={() => void refreshModels()}
+            disabled={modelsLoading || !status?.available}
+          >
+            {modelsLoading ? "正在读取…" : "刷新模型列表"}
+          </button>
+        </div>
+        {modelsError && (
+          <div className="error runtime-inline-error" role="alert">
+            {modelsError}
+          </div>
+        )}
+        {(models?.warnings || []).map((warning, index) => (
+          <p className="runtime-message" key={index}>
+            {warning}
+          </p>
+        ))}
+        <div className="runtime-model-toolbar">
+          <div className="runtime-providers">
+            <span>服务商</span>
+            {providers.length ? (
+              providers.map((provider) => (
+                <span className="tag" key={provider}>
+                  {provider}
+                </span>
+              ))
+            ) : (
+              <span className="muted">尚未读取</span>
+            )}
+          </div>
+          <label className="runtime-search">
+            <span className="runtime-visually-hidden">搜索模型标识</span>
+            <input
+              placeholder="搜索 provider/model…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+        </div>
+        {filteredModels.length ? (
+          <ul className="runtime-model-list">
+            {filteredModels.map((id) => (
+              <li key={id}>
+                <code>{id}</code>
+                <button
+                  aria-label={`复制模型 ${id}`}
+                  onClick={() => void copy(id, `已复制模型标识 ${id}`)}
+                >
+                  复制
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="runtime-model-empty">
+            {modelsLoading
+              ? "正在读取模型列表…"
+              : !models
+                ? "模型列表尚未读取。完成登录后点击“刷新模型列表”。"
+                : search
+                  ? "没有匹配的模型标识。"
+                  : "未发现可用模型标识，请在配置终端中检查登录和服务商配置。"}
+          </div>
+        )}
+        <p className="runtime-model-help">
+          检测到配置或模型名称，不代表凭据仍有效、账号有余额或当前请求可用。
+        </p>
+      </section>
+      <div className="runtime-copy-notice" role="status" aria-live="polite">
+        {copyNotice}
+      </div>
+      <details className="runtime-advanced">
+        <summary>环境详情</summary>
+        <dl>
+          <dt>配置档案</dt>
+          <dd>{status?.profile || "default"}</dd>
+          <dt>默认执行器镜像</dt>
+          <dd>
+            <code>{status?.image || "尚未读取"}</code>
+          </dd>
+        </dl>
+        <p>
+          默认镜像由部署配置管理。新任务读取更新后的登录配置，已有任务继续使用自己的会话。
+        </p>
+      </details>
+    </div>
+  );
+}

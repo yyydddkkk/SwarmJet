@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS schema_version(version integer PRIMARY KEY);
+INSERT INTO schema_version VALUES (1) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS projects(id text PRIMARY KEY, version integer NOT NULL, body jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS tasks(id text PRIMARY KEY, project_id text NOT NULL REFERENCES projects(id), source text NOT NULL, stage text NOT NULL, terminal boolean NOT NULL DEFAULT false, body jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_issue ON tasks(source) WHERE NOT terminal;
+CREATE TABLE IF NOT EXISTS commands(id text PRIMARY KEY, task_id text NOT NULL REFERENCES tasks(id), body jsonb NOT NULL, delivered boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS pending_commands ON commands(created_at) WHERE NOT delivered;
+CREATE TABLE IF NOT EXISTS events(id bigserial PRIMARY KEY, task_id text NOT NULL, kind text NOT NULL, message text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS task_events ON events(task_id,id);
+CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY, expires_at timestamptz NOT NULL);
+CREATE TABLE IF NOT EXISTS leases(name text PRIMARY KEY, owner text NOT NULL, expires_at timestamptz NOT NULL);

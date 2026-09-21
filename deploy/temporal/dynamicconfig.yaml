@@ -1,0 +1,3 @@
+# Single-node deployment; SQL visibility is configured in the static template.
+# Keep namespace retention in namespace.sh and do not use development rate limits.
+{}

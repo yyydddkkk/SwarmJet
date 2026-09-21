@@ -1,0 +1,20 @@
+node_modules
+data/
+.env
+.env.*
+!.env.example
+!.env.development.example
+.cache/
+bin/
+web/dist/
+web/test-results/
+web/playwright-report/
+coverage.out
+/swarmjet
+*.test
+__pycache__/
+# Runtime artifacts and local backups
+runs/
+build-cache/
+*.log
+backups/
