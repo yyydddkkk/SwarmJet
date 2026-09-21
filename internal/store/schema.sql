@@ -9,3 +9,6 @@ CREATE TABLE IF NOT EXISTS events(id bigserial PRIMARY KEY, task_id text NOT NUL
 CREATE INDEX IF NOT EXISTS task_events ON events(task_id,id);
 CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY, expires_at timestamptz NOT NULL);
 CREATE TABLE IF NOT EXISTS leases(name text PRIMARY KEY, owner text NOT NULL, expires_at timestamptz NOT NULL);
+CREATE TABLE IF NOT EXISTS nodes(id text PRIMARY KEY, address text NOT NULL, capacity integer NOT NULL, version text NOT NULL DEFAULT '', last_seen timestamptz NOT NULL);
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS node_id text;
+CREATE INDEX IF NOT EXISTS tasks_by_node ON tasks(node_id) WHERE NOT terminal;
