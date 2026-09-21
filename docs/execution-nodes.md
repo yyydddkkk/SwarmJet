@@ -56,7 +56,7 @@
 
 ## 受管 Meta-Repo 的节点传输
 
-系统托管的 Meta-Repo 由控制面拥有。任务在 `preparing` 阶段按固定归属路由到执行节点后，控制面先用 `git bundle` 导出受管仓库，并通过 `syncManagedMeta` 节点调用传给该节点；节点用确定性路径 `<node DATA_DIR>/managed-meta/<projectID>/work` 物化并推进到 `metaRef`。传输有大小上限、幂等且可重试，因此受管项目不依赖创建它的那台机器的本地目录，也不会因为节点重试而重复或丢失仓库。任务未分配节点（空 `NodeID`）时控制面本机后端共享 `DATA_DIR`，无需传输。
+系统托管的 Meta-Repo 由控制面拥有。任务在 `preparing` 阶段按固定归属路由到执行节点后，控制面先用 `git bundle` 导出受管仓库，并通过 `syncManagedMeta` 节点调用传给该节点；节点用确定性路径 `<node DATA_DIR>/managed-meta/<projectID>/work` 物化并推进到 `metaRef`。传输有大小上限、幂等且可重试，因此受管项目不依赖创建它的那台机器的本地目录，也不会因为节点重试而重复或丢失仓库。同一节点上多个任务并发安装时，使用按项目的文件锁串行化：首次安装克隆到临时目录后原子发布，工作区读取持同一把锁，因此读者不会看到半成品或被误删的目录。任务未分配节点（空 `NodeID`）时控制面本机后端共享 `DATA_DIR`，无需传输。
 
 ## 尚未实施
 

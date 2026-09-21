@@ -2,7 +2,9 @@ package initflow
 
 import (
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -59,5 +61,66 @@ func TestDockerRunTracksNamedContainer(t *testing.T) {
 	}
 	if _, err := os.Stat(f.m.verifyRegistryPath("p1")); !os.IsNotExist(err) {
 		t.Fatal("container registry was not cleared after the run")
+	}
+}
+
+func TestCleanupKeepsRecordWhenRemovalFails(t *testing.T) {
+	f := newFixture(t)
+	f.m.Docker = func(context.Context, []string) ([]byte, error) {
+		return nil, errors.New("docker daemon unavailable")
+	}
+	name := verifyContainerName("p1", 0)
+	if err := f.m.recordVerifyContainer("p1", name); err != nil {
+		t.Fatal(err)
+	}
+	f.m.cleanupVerifyContainers("p1")
+	names := readVerifyRegistry(f.m.verifyRegistryPath("p1"))
+	if len(names) != 1 || names[0] != name {
+		t.Fatalf("record was dropped after a failed cleanup: %v", names)
+	}
+}
+
+func TestDockerRunKeepsRecordWhenCleanupFails(t *testing.T) {
+	f := newFixture(t)
+	f.m.VerifyImage = "verify:test"
+	f.m.Docker = func(_ context.Context, args []string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "run" {
+			return []byte("ok"), nil
+		}
+		return nil, errors.New("docker daemon unavailable")
+	}
+	dir := t.TempDir()
+	if code, _, err := f.m.dockerRun(context.Background(), "p1", 0, dir, []string{"true"}); err != nil || code != 0 {
+		t.Fatalf("dockerRun failed: code=%d err=%v", code, err)
+	}
+	names := readVerifyRegistry(f.m.verifyRegistryPath("p1"))
+	if len(names) != 1 || names[0] != verifyContainerName("p1", 0) {
+		t.Fatalf("record was dropped although the container may still run: %v", names)
+	}
+}
+
+func TestDockerRunAbortsWhenRegistrationFails(t *testing.T) {
+	f := newFixture(t)
+	f.m.VerifyImage = "verify:test"
+	var ran bool
+	f.m.Docker = func(_ context.Context, args []string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "run" {
+			ran = true
+		}
+		return nil, nil
+	}
+	// Make the registry directory uncreatable by placing a regular file there.
+	dir := f.m.initDir("p1")
+	if err := os.MkdirAll(filepath.Dir(dir), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir, []byte("blocked"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.m.dockerRun(context.Background(), "p1", 0, t.TempDir(), []string{"true"}); err == nil {
+		t.Fatal("dockerRun started a container without a durable record")
+	}
+	if ran {
+		t.Fatal("verification container was started even though registration failed")
 	}
 }
