@@ -20,14 +20,11 @@ Activity 通过 `internal/execution.AgentBackend` 调用 Agent 的启动、观�
 
 执行后端负责在执行主机上创建启动所需的文件。GitLab CLI 配置、镜像内凭证助手路径由本机后端准备，Activity 只选择当前阶段允许使用的凭证和 GitLab 地址。请求环境含凭证且不参与普通 JSON 序列化；未来远程协议必须单独设计认证及凭证传递，不能直接序列化 `AgentRequest` 后发送，也不能将凭证写入 Temporal 历史。
 
-当前仍只支持单执行宿主机，尚未实现远程服务、Kubernetes 后端或跨节点故障接管。新增接口不改变 Temporal task queue、任务记录格式和本地开发命令。不能仅通过设置远程 `DOCKER_HOST` 或增加不同主机的 Worker 来启用分布式。
+当前已实现「控制面集中 + 多执行节点、任务固定归属」：`swarmjet node` 在独立 `DATA_DIR` 与 Docker 上提供服务，控制面的 `execution.Pool` 通过带时间戳与 HMAC 的 HTTP 协议调用节点。任务在 `CreateTaskScheduled` 中按在线状态与容量分配一次并写入 `tasks.node_id`；工作区、Agent、联调、报告读取和任务级退役都按该归属路由。节点失联时任务 blocked 并保留现场，不自动漂移。本机开发仍使用空 `NodeID` 走进程内管理器。
 
-后续应以整套任务执行环境为分配单位，包括私有 Git 工作区、Agent 会话和联调容器。接入第二种后端前，需要一起处理：
+接入自动接管前仍需处理：
 
-- 持久化任务的执行节点归属；准备、开发、验证、审查、取消和清理必须路由到同一任务现场。现有 Activity 共用队列与全局并发槽不能直接充当节点分配机制。
-- 将 Workspace 管理和 Compose 联调放到执行节点；`Workspace.Root`、`Execution.LogPath` 目前仍是本机路径，不能作为跨机器可访问地址。
-- 为报告和日志提供按节点访问或集中存储；API 当前读取本机 `DATA_DIR`。配置终端及模型登录 profile 也需要明确节点归属和凭证分发方式。
-- 迁移保留期清理。`maintenance.Manager` 当前直接检查 Docker 容器与本地记录，只能与本机后端一起使用，不能用于远程执行记录。
-- 节点失联时保留任务归属并等待恢复；若增加自动接管，必须实现工作区/会话恢复和执行权校验，防止旧节点恢复后重复推送或合并。
-
+- 节点失联后的工作区/会话恢复与执行权校验，防止旧节点恢复后重复推送或合并；目前只支持等待原节点恢复或转人工。
+- 报告集中存储；API 目前按节点代理读取，历史报告依赖节点在线。
+- 每节点 runtime-admin 模型登录终端的控制台路由与凭证分发。
 Kubernetes 后端应通过 Kubernetes API 管理 Pod/Job 和存储，由 Kubernetes 调度资源；Temporal 继续管理业务流程。本地开发保留本机进程加 Docker 的运行方式。

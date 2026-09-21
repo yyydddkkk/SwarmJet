@@ -4,6 +4,7 @@ x-app-environment: &app-environment
   TEMPORAL_ADDRESS: temporal:7233
   TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-swarmjet}
   RUNTIME_ADMIN_SECRET: ${RUNTIME_ADMIN_SECRET:-}
+  NODE_SECRET: ${NODE_SECRET:-}
   DATA_DIR: ${DATA_DIR:?Set DATA_DIR to an absolute host path}
   GITLAB_TOKEN: ${GITLAB_TOKEN:-}
   GITLAB_MERGE_TOKEN: ${GITLAB_MERGE_TOKEN:-}
@@ -107,6 +108,7 @@ services:
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8180}
       SECURE_COOKIES: ${SECURE_COOKIES:-false}
       GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
+      EXECUTION_MODE: ${EXECUTION_MODE:-local}
     ports:
       - '${LISTEN_HOST:-127.0.0.1}:${HTTP_PORT:-8180}:8080'
     volumes:

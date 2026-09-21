@@ -26,6 +26,7 @@ type Service struct {
 	Store             *store.Store
 	Temporal          client.Client
 	ResolveCredential func(string) (string, error)
+	RequireNode       bool
 	Wake              chan struct{}
 }
 
@@ -165,8 +166,15 @@ func (s *Service) Scan(ctx context.Context) error {
 				}
 				now := time.Now().UTC()
 				t := domain.Task{ID: ID(), Project: p, Issue: issue, Stage: "queued", Executions: map[string]domain.Execution{}, CreatedAt: now, UpdatedAt: now}
-				if e = s.Store.CreateTask(ctx, t); e != nil && !errors.Is(e, store.ErrConflict) {
-					return e
+				if _, e = s.Store.CreateTaskScheduled(ctx, t, s.RequireNode); e != nil {
+					if errors.Is(e, store.ErrNoNode) {
+						// Distributed mode: leave the issue unclaimed until a node has capacity.
+						slog.Warn("no execution node available; task deferred", "project", p.ID, "issue", issue.IID)
+						continue
+					}
+					if !errors.Is(e, store.ErrConflict) {
+						return e
+					}
 				}
 			}
 		}

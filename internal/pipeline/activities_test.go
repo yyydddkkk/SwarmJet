@@ -182,3 +182,30 @@ func TestMergeActivityRejectsUnreviewedAlreadyMergedMR(t *testing.T) {
 		t.Fatal("unreviewed merged MR accepted")
 	}
 }
+
+func TestGitEnvKeepsAskpassOnTheOwningHost(t *testing.T) {
+	manager := workspace.New(t.TempDir(), "meta")
+	manager.Env = map[string]string{"GIT_ASKPASS": "/native/scripts/askpass.sh"}
+	a := Activities{Workspace: manager, Credential: func(string) (string, error) { return "test-token", nil }}
+	local, err := a.gitEnv(domain.Task{ID: "t", Project: domain.Project{CredentialRef: "GITLAB_TOKEN"}})
+	if err != nil || local["GIT_ASKPASS"] != "/native/scripts/askpass.sh" || local["GITLAB_TOKEN"] != "test-token" {
+		t.Fatalf("local env=%v err=%v", local, err)
+	}
+	remote, err := a.gitEnv(domain.Task{ID: "t", NodeID: "node-a", Project: domain.Project{CredentialRef: "GITLAB_TOKEN"}})
+	if err != nil || remote["GITLAB_TOKEN"] != "test-token" {
+		t.Fatalf("remote env=%v err=%v", remote, err)
+	}
+	if _, ok := remote["GIT_ASKPASS"]; ok {
+		t.Fatal("control plane must not send its askpass path to a remote node")
+	}
+}
+
+func TestIntegrationEnvStaysControlPlaneLocal(t *testing.T) {
+	a := Activities{IntegrationEnv: map[string]string{"INTEGRATION_TEST_TOKEN": "value"}}
+	if got := a.integrationEnv(domain.Task{ID: "t"}); got["INTEGRATION_TEST_TOKEN"] != "value" {
+		t.Fatalf("local integration env=%v", got)
+	}
+	if got := a.integrationEnv(domain.Task{ID: "t", NodeID: "node-a"}); got != nil {
+		t.Fatalf("remote integration env=%v", got)
+	}
+}

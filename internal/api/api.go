@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"swarmjet/internal/domain"
+	"swarmjet/internal/execution"
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/store"
 )
@@ -28,6 +30,9 @@ type Config struct {
 	Username, Password, AllowedOrigin, StaticDir, DataDir string
 	DefaultAgentImage                                     string
 	RuntimeURL, RuntimeSecret                             string
+	NodeSecret                                            string
+	RequireNode                                           bool
+	Nodes                                                 execution.NodeResolver
 	SecureCookies                                         bool
 	ResolveCredential                                     func(string) (string, error)
 }
@@ -142,6 +147,10 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	if r.URL.Path == "/api/nodes" && r.Method == "POST" {
+		a.nodeHeartbeat(w, r)
+		return
+	}
 	if r.Method != "GET" && r.Method != "HEAD" && !csrfAllowed(r, a.cfg.AllowedOrigin) {
 		problem(w, 403, "same-origin swarmjet request required")
 		return
@@ -200,6 +209,9 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	case "/api/tasks":
 		a.tasks(w, r)
+		return
+	case "/api/nodes":
+		a.nodes(w, r)
 		return
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/"), "/")
@@ -434,11 +446,16 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 		}
 		now := time.Now().UTC()
 		t := domain.Task{ID: id, Project: p, Issue: issue, Dependencies: req.Dependencies, Stage: "queued", Executions: map[string]domain.Execution{}, Verification: []domain.Verification{}, Assumptions: []string{}, Notes: []string{}, CreatedAt: now, UpdatedAt: now}
-		if err = a.s.CreateTask(r.Context(), t); err != nil {
+		scheduled, err := a.s.CreateTaskScheduled(r.Context(), t, a.cfg.RequireNode)
+		if errors.Is(err, store.ErrNoNode) {
+			problem(w, 503, "没有可用的执行节点，请先启动执行节点或稍后重试")
+			return
+		}
+		if err != nil {
 			failure(w, err)
 			return
 		}
-		respond(w, 202, t)
+		respond(w, 202, scheduled)
 	default:
 		problem(w, 405, "method not allowed")
 	}
@@ -642,6 +659,26 @@ func safeArtifact(dataDir, taskID, relative string) (string, error) {
 	return resolved, nil
 }
 func (a *server) artifact(w http.ResponseWriter, r *http.Request, id string) {
+	if a.s != nil && a.cfg.Nodes != nil {
+		if t, e := a.s.Task(r.Context(), id); e == nil && t.NodeID != "" {
+			n, e := a.cfg.Nodes.Node(r.Context(), t.NodeID)
+			if e != nil {
+				problem(w, 502, "execution node unavailable")
+				return
+			}
+			relative := r.URL.Query().Get("path")
+			body, e := n.ReadReport(r.Context(), id, relative)
+			if e != nil {
+				problem(w, 404, "artifact not found")
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(relative)))
+			http.ServeContent(w, r, filepath.Base(relative), time.Time{}, bytes.NewReader(body))
+			return
+		}
+	}
 	path, err := safeArtifact(a.cfg.DataDir, id, r.URL.Query().Get("path"))
 	if err != nil {
 		problem(w, 404, "artifact not found")
