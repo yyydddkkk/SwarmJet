@@ -32,6 +32,14 @@ func TestManualIntegrationSatisfiesReadiness(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(req.GeneratedDir, "verification.json"), spec, 0600); err != nil {
 			return domain.Execution{}, err
 		}
+		if err := os.MkdirAll(filepath.Join(req.GeneratedDir, "integration"), 0700); err != nil {
+			return domain.Execution{}, err
+		}
+		nl := string(byte(10))
+		compose := "services:" + nl + "  runner:" + nl + "    image: alpine" + nl
+		if err := os.WriteFile(filepath.Join(req.GeneratedDir, "integration", "compose.yaml"), []byte(compose), 0600); err != nil {
+			return domain.Execution{}, err
+		}
 		return domain.Execution{ID: req.ExecutionID, Status: "succeeded", Result: &domain.AgentResult{Outcome: "ready", Summary: "done"}}, nil
 	}
 	init := f.drive(t, 12)

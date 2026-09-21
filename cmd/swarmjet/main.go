@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,6 +24,7 @@ import (
 	"swarmjet/internal/api"
 	"swarmjet/internal/credentials"
 	"swarmjet/internal/domain"
+	"swarmjet/internal/execution"
 	"swarmjet/internal/initflow"
 	"swarmjet/internal/integration"
 	"swarmjet/internal/maintenance"
@@ -54,6 +57,95 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// runNode starts an execution node: it owns its DATA_DIR and Docker, and the
+// control plane reaches it over the authenticated HTTP protocol. It does not
+// need PostgreSQL or Temporal; it only registers with the control plane.
+func runNode(ctx context.Context) error {
+	id := required("NODE_ID")
+	if !domain.IDPattern.MatchString(id) {
+		return fmt.Errorf("invalid NODE_ID")
+	}
+	secret := required("NODE_SECRET")
+	if len(secret) < 32 {
+		return fmt.Errorf("NODE_SECRET must contain at least 32 characters")
+	}
+	advertise := required("NODE_ADVERTISE_URL")
+	control := env("CONTROL_PLANE_URL", "http://127.0.0.1:8080")
+	data, e := filepath.Abs(env("DATA_DIR", "./data"))
+	if e != nil {
+		return e
+	}
+	if e = os.MkdirAll(data, 0700); e != nil {
+		return e
+	}
+	capacity, e := strconv.Atoi(env("NODE_CAPACITY", "2"))
+	if e != nil || capacity < 1 {
+		return fmt.Errorf("invalid NODE_CAPACITY")
+	}
+	wm := workspace.New(data, env("META_COMMAND", "meta"))
+	wm.Env = map[string]string{"GIT_ASKPASS": env("SWARMJET_GIT_ASKPASS", "/usr/local/bin/swarmjet-askpass")}
+	im := integration.New(data)
+	im.Env = map[string]string{}
+	for _, k := range strings.Split(os.Getenv("INTEGRATION_ENV_ALLOWLIST"), ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			im.Env[k] = os.Getenv(k)
+		}
+	}
+	local := &execution.LocalNode{NodeID: id, AgentBackend: agent.New(data), Workspace: wm, Integration: im, DataDir: data}
+	// MaxBody accommodates a base64 managed Meta-Repo bundle in addition to the
+	// small agent and integration requests.
+	server := &http.Server{Addr: env("NODE_LISTEN_ADDRESS", ":8092"), Handler: &execution.Handler{Node: local, Secret: secret, MaxBody: 32 << 20}, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
+	go func() {
+		<-ctx.Done()
+		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = server.Shutdown(c)
+	}()
+	heartbeat := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	go func() {
+		send := func() {
+			b, _ := json.Marshal(domain.Node{ID: id, Address: advertise, Capacity: capacity, Version: "swarmjet-node"})
+			hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			req, err := http.NewRequestWithContext(hctx, http.MethodPost, strings.TrimRight(control, "/")+"/api/nodes", bytes.NewReader(b))
+			if err != nil {
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-SwarmJet-Node-Secret", secret)
+			resp, err := heartbeat.Do(req)
+			if err != nil {
+				slog.Warn("node heartbeat failed", "error", err)
+				return
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				slog.Warn("node heartbeat rejected", "status", resp.StatusCode)
+			}
+		}
+		send()
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				send()
+			}
+		}
+	}()
+	slog.Info("execution node listening", "id", id, "address", server.Addr, "advertise", advertise, "capacity", capacity)
+	e = server.ListenAndServe()
+	if e == http.ErrServerClosed {
+		return nil
+	}
+	return e
+}
 func run() error {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	mode := "serve"
@@ -61,7 +153,7 @@ func run() error {
 		mode = os.Args[1]
 	}
 	if mode == "help" || mode == "--help" {
-		fmt.Println("swarmjet serve | worker | migrate | doctor | legacy-inventory <state.json>")
+		fmt.Println("swarmjet serve | worker | node | migrate | doctor | legacy-inventory <state.json>")
 		return nil
 	}
 	if mode == "legacy-inventory" {
@@ -80,6 +172,9 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if mode == "node" {
+		return runNode(ctx)
+	}
 	s, e := store.Open(ctx, required("DATABASE_URL"))
 	if e != nil {
 		return e
@@ -88,6 +183,24 @@ func run() error {
 	if mode == "migrate" {
 		return s.Migrate(ctx)
 	}
+	// The master key is deployment-managed and must be stable: a new key on
+	// startup would make previously saved connection tokens undecryptable.
+	box, boxErr := secretbox.New(os.Getenv("SWARMJET_MASTER_KEY"))
+	if boxErr != nil {
+		slog.Warn("saved GitLab connections disabled; set SWARMJET_MASTER_KEY to a stable 32-byte key", "reason", boxErr.Error())
+		box = nil
+	}
+	resolver := &credentials.Resolver{Store: s, Box: box, Env: os.Getenv}
+	// bound resolves a project token and refuses to send a saved connection to a
+	// GitLab address different from the one it was verified against.
+	bound := func(p domain.Project, merge bool) (string, error) {
+		ref := p.CredentialReference()
+		if merge {
+			ref = p.MergeCredentialReference()
+		}
+		return resolver.ResolveFor(ref, p.GitLabURL)
+	}
+	boundProject := func(p domain.Project) (string, error) { return bound(p, false) }
 	tc, e := client.Dial(client.Options{HostPort: env("TEMPORAL_ADDRESS", "localhost:7233"), Namespace: env("TEMPORAL_NAMESPACE", "default")})
 	if e != nil {
 		return e
@@ -108,24 +221,6 @@ func run() error {
 	if e = os.MkdirAll(data, 0700); e != nil {
 		return e
 	}
-	// The master key is deployment-managed and must be stable: a new key on
-	// startup would make previously saved connection tokens undecryptable.
-	box, boxErr := secretbox.New(os.Getenv("SWARMJET_MASTER_KEY"))
-	if boxErr != nil {
-		slog.Warn("saved GitLab connections disabled; set SWARMJET_MASTER_KEY to a stable 32-byte key", "reason", boxErr.Error())
-		box = nil
-	}
-	resolver := &credentials.Resolver{Store: s, Box: box, Env: os.Getenv}
-	// bound resolves a project token and refuses to send a saved connection to a
-	// GitLab address different from the one it was verified against.
-	bound := func(p domain.Project, merge bool) (string, error) {
-		ref := p.CredentialReference()
-		if merge {
-			ref = p.MergeCredentialReference()
-		}
-		return resolver.ResolveFor(ref, p.GitLabURL)
-	}
-	boundProject := func(p domain.Project) (string, error) { return bound(p, false) }
 	if mode == "serve" {
 		adminUser := env("ADMIN_USERNAME", "admin")
 		password := required("ADMIN_PASSWORD")
@@ -133,8 +228,8 @@ func run() error {
 			return fmt.Errorf("ADMIN_PASSWORD must contain at least 12 characters")
 		}
 		initializer := &initflow.Manager{Store: s, DataDir: data, Managed: managedmeta.New(data), Credential: resolver.Resolve, CredentialFor: boundProject, Logger: slog.Default()}
-		handler := api.New(s, api.Config{Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET")})
-		svc := &service.Service{Store: s, Temporal: tc, ResolveCredential: resolver.Resolve, ProjectCredential: bound, Initializer: initializer, Wake: make(chan struct{}, 1)}
+		handler := api.New(s, api.Config{Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET")}})
+		svc := &service.Service{Store: s, Temporal: tc, ResolveCredential: resolver.Resolve, ProjectCredential: bound, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Wake: make(chan struct{}, 1)}
 		go svc.Run(ctx)
 		a := &pipeline.Activities{Store: s, Credential: resolver.Resolve, ProjectCredential: bound}
 		go svc.Sync(ctx, a)
@@ -185,7 +280,8 @@ func run() error {
 		}
 	}
 	localAgents := agent.New(data)
-	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: localAgents, Integration: im, DataDir: data, Concurrency: n, Credential: resolver.Resolve, ProjectCredential: bound, AgentEnv: agentEnv}
+	nodes := &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET")}
+	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: localAgents, Integration: im, Nodes: nodes, IntegrationEnv: im.Env, DataDir: data, Concurrency: n, Credential: resolver.Resolve, ProjectCredential: bound, AgentEnv: agentEnv}
 	// Initialization is resumed here so a worker restart recovers running jobs.
 	initMgr := &initflow.Manager{Store: s, DataDir: data, Managed: managedmeta.New(data), Credential: resolver.Resolve, CredentialFor: boundProject, Agents: localAgents, VerifyImage: os.Getenv("INIT_VERIFY_IMAGE"), Logger: slog.Default()}
 	go initMgr.Run(ctx)
@@ -211,7 +307,7 @@ func run() error {
 	if failedDays < 1 || reportDays < 1 {
 		return fmt.Errorf("retention days must be positive")
 	}
-	cleaner := &maintenance.Manager{Store: s, Workspace: wm, Agents: localAgents, DataDir: data, FailedDays: failedDays, ReportDays: reportDays}
+	cleaner := &maintenance.Manager{Store: s, Workspace: wm, Agents: localAgents, Nodes: nodes, DataDir: data, FailedDays: failedDays, ReportDays: reportDays}
 	go cleaner.Run(ctx)
 	w := worker.New(tc, pipeline.Queue, worker.Options{MaxConcurrentActivityExecutionSize: n*8 + 8, WorkerStopTimeout: 30 * time.Second})
 	w.RegisterWorkflowWithOptions(pipeline.WorkTask, workflow.RegisterOptions{Name: pipeline.WorkflowName})

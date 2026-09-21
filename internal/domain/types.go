@@ -140,6 +140,7 @@ type AgentRequest struct {
 type Task struct {
 	Checkpoint     *WorkflowCheckpoint  `json:"checkpoint,omitempty"`
 	ID             string               `json:"id"`
+	NodeID         string               `json:"nodeId,omitempty"`
 	Project        Project              `json:"project"`
 	Issue          Issue                `json:"issue"`
 	Dependencies   []IssueRef           `json:"dependencies"`
@@ -180,3 +181,24 @@ type Event struct {
 	Message   string    `json:"message"`
 	CreatedAt time.Time `json:"createdAt"`
 }
+
+// Node is one registered execution host. Running work is derived from tasks
+// pinned to the node; LastSeen drives liveness.
+type Node struct {
+	ID       string    `json:"id"`
+	Address  string    `json:"address"`
+	Capacity int       `json:"capacity"`
+	Version  string    `json:"version"`
+	LastSeen time.Time `json:"lastSeen"`
+}
+
+// NodeStatus combines a node with its current load for the console and the
+// scheduler.
+type NodeStatus struct {
+	Node    Node `json:"node"`
+	Running int  `json:"running"`
+	Online  bool `json:"online"`
+}
+
+// NodeOnlineAfter is how recently a node must have heartbeated to receive work.
+const NodeOnlineAfter = 30 * time.Second
