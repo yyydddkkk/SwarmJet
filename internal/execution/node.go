@@ -9,6 +9,7 @@ import (
 
 	"swarmjet/internal/domain"
 	"swarmjet/internal/integration"
+	"swarmjet/internal/managedmeta"
 	"swarmjet/internal/workspace"
 )
 
@@ -30,6 +31,9 @@ type IntegrationRunner interface {
 type Node interface {
 	AgentBackend
 	ID() string
+	// SyncManagedMeta installs the control-plane owned managed Meta-Repo on this
+	// execution host before a managed task's workspace is prepared.
+	SyncManagedMeta(context.Context, string, string, []byte) error
 	PrepareWorkspace(context.Context, string, domain.Project, map[string]string) (domain.Workspace, error)
 	InspectWorkspace(context.Context, domain.Workspace, domain.Project, map[string]string) (domain.Workspace, error)
 	RefreshTargets(context.Context, domain.Workspace, domain.Project, map[string]string) (domain.Workspace, error)
@@ -59,6 +63,15 @@ type LocalNode struct {
 }
 
 func (n *LocalNode) ID() string { return n.NodeID }
+
+// SyncManagedMeta installs a managed Meta-Repo bundle on this host. The
+// control-plane local backend shares DATA_DIR and already owns the repository.
+func (n *LocalNode) SyncManagedMeta(ctx context.Context, projectID, ref string, bundle []byte) error {
+	if n.NodeID == "" {
+		return nil
+	}
+	return managedmeta.New(n.DataDir).Install(ctx, projectID, ref, bundle)
+}
 
 func (n *LocalNode) workspace(env map[string]string) *workspace.Manager {
 	w := *n.Workspace

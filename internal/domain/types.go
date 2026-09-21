@@ -30,21 +30,32 @@ type IntegrationConfig struct {
 	StartupTimeoutSeconds int     `json:"startupTimeoutSeconds"`
 }
 type Project struct {
-	ID                 string            `json:"id"`
-	Name               string            `json:"name"`
-	MetaURL            string            `json:"metaUrl"`
-	MetaRef            string            `json:"metaRef"`
-	Version            int               `json:"version"`
-	Enabled            bool              `json:"enabled"`
-	GitLabURL          string            `json:"gitlabUrl"`
-	CredentialRef      string            `json:"credentialRef"`
-	MergeCredentialRef string            `json:"mergeCredentialRef"`
-	Repositories       []Repository      `json:"repositories"`
-	Development        AgentConfig       `json:"development"`
-	Review             AgentConfig       `json:"review"`
-	Integration        IntegrationConfig `json:"integration"`
-	MaxReworks         int               `json:"maxReworks"`
-	RequireCI          bool              `json:"requireCI"`
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	MetaURL            string `json:"metaUrl"`
+	MetaRef            string `json:"metaRef"`
+	Version            int    `json:"version"`
+	Enabled            bool   `json:"enabled"`
+	GitLabURL          string `json:"gitlabUrl"`
+	CredentialRef      string `json:"credentialRef"`
+	MergeCredentialRef string `json:"mergeCredentialRef"`
+	// ConnectionID references a saved GitLab connection. Its token is stored
+	// encrypted outside the project snapshot; only the reference is persisted.
+	ConnectionID string `json:"connectionId,omitempty"`
+	// MetaMode is "managed" for a system-created Meta-Repo, "imported" (or empty
+	// for legacy projects) when MetaURL points at an existing remote repository.
+	MetaMode string `json:"metaMode,omitempty"`
+	// AutoMerge is a project-level switch. A nil value means the legacy default
+	// (enabled) so existing projects keep their behavior across upgrades.
+	AutoMerge *bool `json:"autoMerge,omitempty"`
+	// InitStatus tracks the managed-Meta initialization funnel.
+	InitStatus   string            `json:"initStatus,omitempty"`
+	Repositories []Repository      `json:"repositories"`
+	Development  AgentConfig       `json:"development"`
+	Review       AgentConfig       `json:"review"`
+	Integration  IntegrationConfig `json:"integration"`
+	MaxReworks   int               `json:"maxReworks"`
+	RequireCI    bool              `json:"requireCI"`
 }
 type IssueRef struct {
 	ProjectID int64 `json:"projectId"`
@@ -100,6 +111,8 @@ type AgentResult struct {
 	Assumptions []string  `json:"assumptions"`
 	Findings    []Finding `json:"findings"`
 	NeedsHelp   string    `json:"needsHelp"`
+	// Questions carries concrete missing-information prompts for the init role.
+	Questions []string `json:"questions,omitempty"`
 }
 type Execution struct {
 	ID            string       `json:"id"`
@@ -112,14 +125,17 @@ type Execution struct {
 	Result        *AgentResult `json:"result,omitempty"`
 }
 type AgentRequest struct {
-	ExecutionID string            `json:"executionId"`
-	TaskID      string            `json:"taskId"`
-	Role        string            `json:"role"`
-	Workspace   string            `json:"workspace"`
-	Prompt      string            `json:"prompt"`
-	SessionID   string            `json:"sessionId"`
-	Config      AgentConfig       `json:"config"`
-	Env         map[string]string `json:"-"`
+	ExecutionID string      `json:"executionId"`
+	TaskID      string      `json:"taskId"`
+	Role        string      `json:"role"`
+	Workspace   string      `json:"workspace"`
+	Prompt      string      `json:"prompt"`
+	SessionID   string      `json:"sessionId"`
+	Config      AgentConfig `json:"config"`
+	// GeneratedDir is the only writable directory for an init analysis. It is a
+	// backend-local path and is never serialized into workflow history.
+	GeneratedDir string            `json:"-"`
+	Env          map[string]string `json:"-"`
 }
 type Task struct {
 	Checkpoint     *WorkflowCheckpoint  `json:"checkpoint,omitempty"`

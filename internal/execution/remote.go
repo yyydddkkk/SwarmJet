@@ -116,6 +116,7 @@ var nodeTimeouts = map[string]time.Duration{
 	"agentCancelTask":     2 * time.Minute,
 	"agentTaskExecutions": 2 * time.Minute,
 	"readReport":          2 * time.Minute,
+	"syncManagedMeta":     10 * time.Minute,
 	"releaseWorkspace":    5 * time.Minute,
 	"prepareWorkspace":    30 * time.Minute,
 	"refreshTargets":      30 * time.Minute,
@@ -170,6 +171,12 @@ type workspaceParams struct {
 	Project   domain.Project    `json:"project"`
 	Workspace domain.Workspace  `json:"workspace,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
+}
+
+type syncManagedMetaParams struct {
+	ProjectID string `json:"projectId"`
+	Ref       string `json:"ref"`
+	Bundle    []byte `json:"bundle"`
 }
 
 type idParams struct {
@@ -326,6 +333,9 @@ func (n *RemoteNode) attempt(ctx context.Context, requestID string, body []byte,
 	return false, nil
 }
 
+func (n *RemoteNode) SyncManagedMeta(ctx context.Context, projectID, ref string, bundle []byte) error {
+	return n.call(ctx, "syncManagedMeta", syncManagedMetaParams{ProjectID: projectID, Ref: ref, Bundle: bundle}, nil)
+}
 func (n *RemoteNode) PrepareWorkspace(ctx context.Context, taskID string, p domain.Project, env map[string]string) (domain.Workspace, error) {
 	var out domain.Workspace
 	e := n.call(ctx, "prepareWorkspace", workspaceParams{TaskID: taskID, Project: p, Env: env}, &out)

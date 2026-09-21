@@ -13,8 +13,9 @@ import {
 } from "react";
 import { api, APIError, getLog } from "./api";
 import type { Task, TaskEvent, Project, Execution } from "./types";
-import { ProjectEditor, newProject } from "./ProjectEditor";
+import { ProjectEditor } from "./ProjectEditor";
 const RuntimeSettings = lazy(() => import("./RuntimeSettings"));
+const ProjectWizard = lazy(() => import("./ProjectWizard"));
 export const stages: Record<string, string> = {
   queued: "排队中",
   waiting_dependencies: "等待依赖",
@@ -24,6 +25,7 @@ export const stages: Record<string, string> = {
   publishing: "发布 MR",
   reviewing: "审查中",
   waiting_approval: "等待批准",
+  waiting_manual_merge: "等待人工合并",
   acquiring_merge: "等待合并锁",
   merging: "合并中",
   partial_merge: "部分已合并",
@@ -1050,10 +1052,13 @@ function Projects({ id }: { id?: string }) {
   }, [refresh]);
   if (id === "new")
     return (
-      <ProjectEditor
-        initial={newProject()}
-        onSaved={(p) => go(`/projects/${encodeURIComponent(p.id)}`)}
-      />
+      <Suspense fallback={<div className="loading">正在加载配置向导…</div>}>
+        <ProjectWizard
+          onOpenProject={(project) =>
+            go(`/projects/${encodeURIComponent(project)}`)
+          }
+        />
+      </Suspense>
     );
   if (id) {
     const p = projects.find((p) => p.id === decodeURIComponent(id));

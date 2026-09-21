@@ -7,12 +7,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/gitlab"
+	"swarmjet/internal/managedmeta"
 )
 
 type checkResult struct {
@@ -34,7 +37,7 @@ func (a *server) check(w http.ResponseWriter, r *http.Request, p domain.Project)
 	} else {
 		appendCheck("configuration", nil, "configuration valid")
 	}
-	token, err := a.credential(p.CredentialRef)
+	token, err := a.projectCredential(p)
 	if err != nil {
 		appendCheck("credential", errors.New("GitLab credential unavailable"), "")
 	} else {
@@ -47,7 +50,11 @@ func (a *server) check(w http.ResponseWriter, r *http.Request, p domain.Project)
 				appendCheck("target:"+repo.ID, nil, "target branch readable")
 			}
 		}
-		appendCheck("meta", checkMeta(r.Context(), p, token), "Meta manifest and compose file match registered configuration")
+		if p.ManagedMeta() {
+			appendCheck("meta", a.checkManagedMeta(p), "Managed Meta-Repo manifest and compose file match registered configuration")
+		} else {
+			appendCheck("meta", checkMeta(r.Context(), p, token), "Meta manifest and compose file match registered configuration")
+		}
 	}
 	all := true
 	for _, v := range checks {
@@ -55,6 +62,65 @@ func (a *server) check(w http.ResponseWriter, r *http.Request, p domain.Project)
 	}
 	respond(w, 200, map[string]any{"ok": all, "checks": checks})
 }
+// checkManagedMeta validates a system-managed Meta-Repo from the shared data
+// directory. It never needs a remote Meta URL or an internal server path from
+// the caller.
+func (a *server) checkManagedMeta(p domain.Project) error {
+	root, err := managedmeta.New(a.cfg.DataDir).Root(p.ID)
+	if err != nil {
+		return err
+	}
+	manifest, err := os.ReadFile(filepath.Join(root, ".meta.yaml"))
+	if err != nil {
+		return errors.New("managed Meta-Repo is not initialized")
+	}
+	var parsed struct {
+		Projects map[string]any `yaml:"projects"`
+	}
+	if yaml.Unmarshal(manifest, &parsed) != nil || len(parsed.Projects) == 0 {
+		return errors.New("invalid managed Meta manifest")
+	}
+	entries := map[string]string{}
+	for alias, value := range parsed.Projects {
+		dest, url := alias, ""
+		if v, ok := value.(map[string]any); ok {
+			if x, ok := v["path"].(string); ok && x != "" {
+				dest = x
+			}
+			if x, ok := v["repo"].(string); ok {
+				url = x
+			}
+		} else if s, ok := value.(string); ok {
+			url = s
+		}
+		entries[dest] = url
+	}
+	for _, repo := range p.Repositories {
+		if repo.Path == "." || repo.Path == "" {
+			continue
+		}
+		if entries[repo.Path] != repo.URL {
+			return fmt.Errorf("managed Meta manifest mismatch for repository %s", repo.ID)
+		}
+	}
+	compose, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p.Integration.ComposeFile)))
+	if err != nil {
+		return errors.New("integration compose file unavailable in managed Meta-Repo")
+	}
+	var composeDoc struct {
+		Services map[string]any `yaml:"services"`
+	}
+	if yaml.Unmarshal(compose, &composeDoc) != nil || len(composeDoc.Services) == 0 {
+		return errors.New("invalid integration compose file")
+	}
+	for _, check := range p.Integration.Checks {
+		if _, ok := composeDoc.Services[check.Service]; !ok {
+			return fmt.Errorf("compose service missing for check %s", check.Name)
+		}
+	}
+	return nil
+}
+
 func metaProjectPath(p domain.Project) (string, error) {
 	base, err := url.Parse(p.GitLabURL)
 	if err != nil {

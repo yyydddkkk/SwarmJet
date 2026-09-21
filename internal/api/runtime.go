@@ -12,11 +12,11 @@ import (
 // Runtime control stays in the Worker. The console never receives Docker access.
 func (a *server) runtime(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/runtime")
-	if r.Method != "GET" {
+	if r.Method != "GET" && !(r.Method == "POST" && path == "/verify") {
 		problem(w, 405, "method not allowed")
 		return
 	}
-	if path != "/status" && path != "/models" && path != "/terminal" {
+	if path != "/status" && path != "/models" && path != "/terminal" && path != "/verify" {
 		problem(w, 404, "runtime route not found")
 		return
 	}

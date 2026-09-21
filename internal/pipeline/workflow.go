@@ -28,6 +28,10 @@ type StepResult struct {
 
 func WorkTask(ctx workflow.Context, t domain.Task) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 2 * time.Hour, HeartbeatTimeout: time.Minute, WaitForCancellation: true, RetryPolicy: &temporal.RetryPolicy{InitialInterval: 2 * time.Second, BackoffCoefficient: 2, MaximumInterval: time.Minute, MaximumAttempts: 3}})
+	// Version gate for the project-level auto-merge switch. Executions saved
+	// before this change replay with the previous decision order; new executions
+	// honor the switch. DefaultVersion is the pre-switch behavior.
+	autoMergeVersion := workflow.GetVersion(ctx, "auto-merge-switch", workflow.DefaultVersion, 1)
 	commands := workflow.GetSignalChannel(ctx, SignalName)
 	seen := map[string]bool{}
 	cancelled := false
@@ -323,7 +327,17 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 			for _, label := range t.Issue.Labels {
 				special = special || label == "no-auto-close"
 			}
-			if special && t.ApprovalDigest != t.ReviewDigest {
+			if autoMergeVersion >= 1 && !t.Project.AutoMergeEnabled() {
+				// Auto-merge off is distinct from a pending sensitive-change
+				// approval: the system never initiates the merge, so approval
+				// cannot override the closed switch. Wait for a human merge.
+				if !changed {
+					t.Stage = "finalizing"
+				} else {
+					t.Message = "自动合并已关闭，等待人工合并全部 MR"
+					t.Stage = "waiting_manual_merge"
+				}
+			} else if special && t.ApprovalDigest != t.ReviewDigest {
 				t.Stage = "waiting_approval"
 			} else if !changed {
 				t.Stage = "finalizing"
@@ -348,6 +362,15 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 					}
 				}
 				waitTick(10 * time.Second)
+			}
+		case "waiting_manual_merge":
+			if t.Stage == "waiting_approval" {
+				continue
+			}
+			if result.Ready {
+				t.Stage = "finalizing"
+			} else {
+				waitTick(30 * time.Second)
 			}
 		case "merging", "partial_merge":
 			if t.Stage == "waiting_approval" {

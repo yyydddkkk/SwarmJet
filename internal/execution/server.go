@@ -211,6 +211,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) dispatch(ctx context.Context, req rpcRequest) (any, error) {
 	switch req.Method {
+	case "syncManagedMeta":
+		var p syncManagedMetaParams
+		if e := decodeParams(req.Params, &p); e != nil {
+			return nil, e
+		}
+		return nil, h.Node.SyncManagedMeta(ctx, p.ProjectID, p.Ref, p.Bundle)
 	case "prepareWorkspace":
 		var p workspaceParams
 		if e := decodeParams(req.Params, &p); e != nil {

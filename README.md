@@ -38,11 +38,13 @@ Temporal 是运行流程的事实源；业务 PostgreSQL 保存配置、查询�
 
 ## 项目接入
 
-先填写 Meta-Repo 地址并读取仓库清单，GitLab 项目 ID、路径和依赖自动导入，通常只需确认目标分支。模型和验收尚未配置时可以保存草稿；草稿不接单，完整配置后再保存并启用。
+普通用户不需要理解 Meta-Repo。新建项目时填写 GitLab 地址和 Access Token，验证后搜索并选择子仓库、确认目标分支，随后在页面内嵌终端完成 `opencode auth login` 并选择模型做一次实际调用验证。系统据此创建受管的内部 Meta-Repo，运行初始化 Agent 分析项目，并在独立副本中执行验证。GitLab 连接加密保存（`SWARMJET_MASTER_KEY`）并可跨项目复用；Token 不回显，也不写入日志、URL、任务快照或 Temporal 历史。模型和验收未就绪时项目保持草稿，不接单；初始化未通过验证时也不会自动启用。
 
 控制台的“执行器环境”提供持久化配置终端，可执行 `opencode auth login`，也可使用 `codex login --device-auth` 预先配置 Codex。当前任务执行仅支持 OpenCode；Codex 登录入口不代表已经接入 Codex 任务适配器。终端登录配置保存在独立 profile 中，任务使用私有副本，开发与审查不共享会话。
 
-控制台配置 Meta-Repo URL/ref、GitLab 实例、启用仓库及 Project ID、目标分支、执行器/模型、联调定义。仓库列表与 Meta-Repo 的 `.meta.yaml`、`.meta.yml` 或 `.meta` 校验一致：
+自动合并是项目级开关，新项目默认关闭：关闭时系统仍会开发、验证、创建 MR 和审查，但只在全部 MR 被人工合并后才收尾关单。
+
+“导入已有 Meta-Repo”仍是高级入口。此时填写 Meta-Repo URL/ref 并读取清单，仓库列表与 Meta-Repo 的 `.meta.yaml`、`.meta.yml` 或 `.meta` 校验一致：
 
 ```yaml
 projects:
@@ -55,7 +57,7 @@ projects:
 
 各仓库独立配置 `targetBranch`。不存在时须提供 `createFrom`，从明确起点初始化一次。配置修改默认仅影响新任务。Meta-Repo 自身需要改码时，将它登记为 `path: "."` 的仓库，目标分支与 `metaRef` 对齐。
 
-第一版适配器为 `opencode`，开发和审查分别选择模型。模型填写实际可用的 `provider/model`，其他尚未实现的执行器会被明确拒绝。GitLab、模型凭证从部署环境注入，项目只保存环境变量名称。
+第一版适配器为 `opencode`，开发和审查分别选择模型。模型填写实际可用的 `provider/model`，其他尚未实现的执行器会被明确拒绝。GitLab 凭证可以来自页面保存的连接，也可以来自部署环境变量；项目与任务快照只保存引用。
 
 联调至少包含一条 required 检查。Compose 使用任务私有网络和卷，不使用固定容器名、共享外部卷、Docker socket、宿主机网络或固定宿主机端口。Worker 凭证不会整体传入联调服务。
 

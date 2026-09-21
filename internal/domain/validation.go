@@ -23,8 +23,23 @@ func ValidateProjectForSave(p Project) error {
 	if p.Version < 0 {
 		return fmt.Errorf("project version must not be negative")
 	}
-	if !safeRepositoryURL(p.MetaURL) {
+	if p.MetaMode != "" && p.MetaMode != MetaModeManaged && p.MetaMode != MetaModeImported {
+		return fmt.Errorf("unknown metaMode")
+	}
+	if p.ManagedMeta() {
+		// Managed Meta-Repos are created and owned by the system from the
+		// selected repositories; accepting a caller URL here would bypass the
+		// existing file:// and host validation.
+		if p.MetaURL != "" {
+			return fmt.Errorf("managed projects must not set metaUrl")
+		}
+	} else if !safeRepositoryURL(p.MetaURL) {
 		return fmt.Errorf("metaUrl must be a valid remote repository URL without credentials, query or fragment")
+	} else if p.GitLabURL != "" && !sameGitLabAuthority(p.GitLabURL, p.MetaURL) {
+		return fmt.Errorf("metaUrl must use the configured GitLab host")
+	}
+	if p.ConnectionID != "" && !IDPattern.MatchString(p.ConnectionID) {
+		return fmt.Errorf("invalid connection reference")
 	}
 	if p.GitLabURL != "" {
 		u, err := url.Parse(p.GitLabURL)
@@ -57,8 +72,13 @@ func ValidateProjectForSave(p Project) error {
 		if repo.ProjectID > 0 {
 			seenProjects[repo.ProjectID] = true
 		}
-		if repo.URL != "" && !safeRepositoryURL(repo.URL) {
-			return fmt.Errorf("invalid repository URL")
+		if repo.URL != "" {
+			if !safeRepositoryURL(repo.URL) {
+				return fmt.Errorf("invalid repository URL")
+			}
+			if p.GitLabURL != "" && !sameGitLabAuthority(p.GitLabURL, repo.URL) {
+				return fmt.Errorf("repository URL must use the configured GitLab host")
+			}
 		}
 		if repo.Path != "" {
 			if !safeRelativePath(repo.Path) || seenPaths[repo.Path] {
@@ -134,6 +154,26 @@ func ValidateProjectForSave(p Project) error {
 	return nil
 }
 
+// sameGitLabAuthority reports whether a repository or Meta URL belongs to the
+// configured GitLab authority. Only the host is compared, so HTTP/HTTPS and the
+// SSH forms of the same instance are accepted; embedded credentials, ports on a
+// different host, queries and fragments are rejected.
+func sameGitLabAuthority(gitlabURL, candidate string) bool {
+	base, err := url.Parse(strings.TrimRight(strings.TrimSpace(gitlabURL), "/"))
+	if err != nil || base.Hostname() == "" {
+		return false
+	}
+	if strings.HasPrefix(candidate, "git@") && !strings.Contains(candidate, "://") {
+		host, _, ok := strings.Cut(strings.TrimPrefix(candidate, "git@"), ":")
+		return ok && host != "" && strings.EqualFold(host, base.Hostname())
+	}
+	u, err := url.Parse(candidate)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), base.Hostname())
+}
+
 func safeRelativePath(path string) bool {
 	if path == "" || filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsAny(path, "\\\x00\r\n") {
 		return false
@@ -179,10 +219,30 @@ func ValidateProject(p Project) error {
 	if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 		return fmt.Errorf("invalid GitLab URL")
 	}
-	if p.MetaURL == "" || p.MetaRef == "" || len(p.Repositories) == 0 {
+	if p.MetaMode != "" && p.MetaMode != MetaModeManaged && p.MetaMode != MetaModeImported {
+		return fmt.Errorf("unknown metaMode")
+	}
+	if p.ManagedMeta() {
+		if p.MetaURL != "" {
+			return fmt.Errorf("managed projects must not set metaUrl")
+		}
+	} else if p.MetaURL == "" {
 		return fmt.Errorf("metaUrl, metaRef and repositories are required")
 	}
-	if !IDPattern.MatchString(p.CredentialRef) || !IDPattern.MatchString(p.MergeCredentialRef) {
+	if p.MetaRef == "" || len(p.Repositories) == 0 {
+		return fmt.Errorf("metaUrl, metaRef and repositories are required")
+	}
+	if p.MetaURL != "" && !sameGitLabAuthority(p.GitLabURL, p.MetaURL) {
+		return fmt.Errorf("metaUrl must use the configured GitLab host")
+	}
+	if p.ConnectionID != "" {
+		if !IDPattern.MatchString(p.ConnectionID) {
+			return fmt.Errorf("invalid connection reference")
+		}
+	} else if !IDPattern.MatchString(p.CredentialRef) {
+		return fmt.Errorf("credential references must name deployment environment variables")
+	}
+	if p.MergeCredentialRef != "" && !IDPattern.MatchString(p.MergeCredentialRef) {
 		return fmt.Errorf("credential references must name deployment environment variables")
 	}
 	seen := map[string]bool{}
@@ -196,6 +256,9 @@ func ValidateProject(p Project) error {
 		ids[r.ProjectID] = true
 		if r.URL == "" || !ValidBranch(r.TargetBranch) {
 			return fmt.Errorf("repository %s needs URL and valid targetBranch", r.ID)
+		}
+		if !sameGitLabAuthority(p.GitLabURL, r.URL) {
+			return fmt.Errorf("repository %s URL must use the configured GitLab host", r.ID)
 		}
 		if r.CreateFrom != "" && !ValidBranch(r.CreateFrom) {
 			return fmt.Errorf("invalid createFrom")
@@ -285,6 +348,36 @@ func MergeOrder(repos []Repository) []string {
 	return out
 }
 func Terminal(stage string) bool { return stage == "completed" || stage == "cancelled" }
+
+// NormalizeGitLabURL validates and canonicalises an http(s) GitLab base URL.
+// The path keeps an optional relative URL root but drops a trailing /api/v4.
+func NormalizeGitLabURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("gitlabUrl is required")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
+		return "", fmt.Errorf("gitlabUrl must be an http(s) URL without credentials, query or fragment")
+	}
+	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/api/v4")
+	return u.String(), nil
+}
+
+// ValidateConnection checks the non-secret metadata of a saved connection. The
+// token is validated separately by performing a real GitLab request.
+func ValidateConnection(c Connection) error {
+	if !IDPattern.MatchString(c.ID) || strings.TrimSpace(c.Name) == "" {
+		return fmt.Errorf("connection id and name are required")
+	}
+	if _, err := NormalizeGitLabURL(c.GitLabURL); err != nil {
+		return err
+	}
+	if c.Version < 0 {
+		return fmt.Errorf("connection version must not be negative")
+	}
+	return nil
+}
 
 func GitLabIdentity(raw string) string {
 	u, e := url.Parse(strings.TrimRight(raw, "/"))
