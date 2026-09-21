@@ -525,12 +525,19 @@ func (m *Manager) dockerRun(ctx context.Context, projectID string, index int, di
 	stale, cancelStale := context.WithTimeout(context.Background(), 30*time.Second)
 	_, _ = m.runDocker(stale, "rm", "-f", name)
 	cancelStale()
-	m.recordVerifyContainer(projectID, name)
+	if err := m.recordVerifyContainer(projectID, name); err != nil {
+		// Without a durable record the container could never be cleaned up, so
+		// refuse to start it rather than leak it.
+		return -1, "", fmt.Errorf("无法登记验证容器，已阻止启动：%w", err)
+	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_, _ = m.runDocker(cleanup, "rm", "-f", name)
-		m.forgetVerifyContainer(projectID, name)
+		// Drop the record only after removal is confirmed. A temporary Docker
+		// failure keeps it so a later cleanup or restart can retry.
+		if m.removeVerifyContainer(cleanup, name) {
+			m.forgetVerifyContainer(projectID, name)
+		}
 	}()
 	args := []string{
 		"run", "--name", name,
@@ -592,15 +599,15 @@ func verifyContainerName(projectID string, index int) string {
 	return "sj-init-verify-" + safe + "-" + strconv.Itoa(index)
 }
 
-func (m *Manager) recordVerifyContainer(projectID, name string) {
+func (m *Manager) recordVerifyContainer(projectID, name string) error {
 	path := m.verifyRegistryPath(projectID)
 	names := readVerifyRegistry(path)
 	for _, existing := range names {
 		if existing == name {
-			return
+			return nil
 		}
 	}
-	writeVerifyRegistry(path, append(names, name))
+	return writeVerifyRegistry(path, append(names, name))
 }
 
 func (m *Manager) forgetVerifyContainer(projectID, name string) {
@@ -616,23 +623,51 @@ func (m *Manager) forgetVerifyContainer(projectID, name string) {
 		_ = os.Remove(path)
 		return
 	}
-	writeVerifyRegistry(path, kept)
+	_ = writeVerifyRegistry(path, kept)
 }
 
 // cleanupVerifyContainers stops and removes every recorded verification
-// container. It uses a fresh context so it still runs after cancellation.
+// container. It uses a fresh context so it still runs after cancellation, and
+// retains any record whose removal is not confirmed so it can be retried.
 func (m *Manager) cleanupVerifyContainers(projectID string) {
 	path := m.verifyRegistryPath(projectID)
 	names := readVerifyRegistry(path)
-	_ = os.Remove(path)
+	remaining := names[:0]
 	for _, name := range names {
 		if !strings.HasPrefix(name, "sj-init-verify-") {
 			continue
 		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		_, _ = m.runDocker(cleanup, "rm", "-f", name)
+		gone := m.removeVerifyContainer(cleanup, name)
 		cancel()
+		if !gone {
+			remaining = append(remaining, name)
+		}
 	}
+	if len(remaining) == 0 {
+		_ = os.Remove(path)
+		return
+	}
+	_ = writeVerifyRegistry(path, remaining)
+}
+
+// removeVerifyContainer reports whether the named container is gone. Only a
+// successful removal or an explicit "no such container" counts; a transient
+// Docker failure must keep the record so cleanup can be retried.
+func (m *Manager) removeVerifyContainer(ctx context.Context, name string) bool {
+	output, err := m.runDocker(ctx, "rm", "-f", name)
+	if err == nil {
+		return true
+	}
+	return containerMissing(output, err)
+}
+
+func containerMissing(output []byte, err error) bool {
+	text := strings.ToLower(string(output))
+	if err != nil {
+		text += " " + strings.ToLower(err.Error())
+	}
+	return strings.Contains(text, "no such container") || strings.Contains(text, "no such object")
 }
 
 func readVerifyRegistry(path string) []string {
@@ -647,17 +682,17 @@ func readVerifyRegistry(path string) []string {
 	return registry.Containers
 }
 
-func writeVerifyRegistry(path string, names []string) {
+func writeVerifyRegistry(path string, names []string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return
+		return err
 	}
 	body, err := json.Marshal(verifyRegistry{Containers: names})
 	if err != nil {
-		return
+		return err
 	}
 	temp, err := os.CreateTemp(filepath.Dir(path), ".verify-registry-*")
 	if err != nil {
-		return
+		return err
 	}
 	name := temp.Name()
 	if err = temp.Chmod(0600); err == nil {
@@ -666,9 +701,9 @@ func writeVerifyRegistry(path string, names []string) {
 	_ = temp.Close()
 	if err != nil {
 		_ = os.Remove(name)
-		return
+		return err
 	}
-	_ = os.Rename(name, path)
+	return os.Rename(name, path)
 }
 
 type cappedBuffer struct{ bytes.Buffer }

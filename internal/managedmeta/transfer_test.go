@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 
 	"swarmjet/internal/domain"
@@ -59,5 +60,48 @@ func TestBundleInstallRoundTrip(t *testing.T) {
 	}
 	if err = node.Install(ctx, "p1", "main", nil); err == nil {
 		t.Fatal("empty bundle accepted")
+	}
+}
+
+// Concurrent installs for the same project on one node must serialize instead
+// of racing over the shared directory.
+func TestConcurrentInstallIsSerialized(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	ctx := context.Background()
+	source := New(t.TempDir())
+	node := New(t.TempDir())
+	repos := []domain.Repository{{ID: "svc", URL: "https://gitlab.test/team/svc.git", Path: "svc", TargetBranch: "dev"}}
+	files, err := Files("Demo", repos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = source.Ensure(ctx, "p1", "main", files); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := source.Bundle(ctx, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workers = 6
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- node.Install(ctx, "p1", "main", bundle)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent install failed: %v", err)
+		}
+	}
+	if _, err = node.ReadFile(ctx, "p1", "main", ".meta.yaml"); err != nil {
+		t.Fatalf("repository unusable after concurrent install: %v", err)
 	}
 }

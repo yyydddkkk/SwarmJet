@@ -412,6 +412,16 @@ func (m *Manager) Prepare(ctx context.Context, taskID string, p domain.Project) 
 		return empty, e
 	}
 	defer unlock()
+	if p.ManagedMeta() {
+		// Coordinate with managed Meta-Repo installation on this execution host:
+		// installing publishes the repository, and a reader must not observe the
+		// swap. The lock covers the whole preparation for this project.
+		unlockManaged, lockErr := managedmeta.New(m.DataDir).Lock(ctx, p.ID)
+		if lockErr != nil {
+			return empty, lockErr
+		}
+		defer unlockManaged()
+	}
 	s, e := m.load(taskID)
 	fresh := errors.Is(e, os.ErrNotExist)
 	if e != nil && !fresh {
