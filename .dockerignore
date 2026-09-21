@@ -1,7 +1,6 @@
 .git
-.env
-.env.*
-!.env.example
+**/.env
+**/.env.*
 **/node_modules
 web/dist
 web/test-results

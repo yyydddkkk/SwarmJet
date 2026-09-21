@@ -63,11 +63,11 @@ projects:
 
 ## 本地开发（推荐）
 
-前端、API 和 Worker 直接在宿主机运行，修改页面由 Vite 热更新；Go 代码修改后重启本地进程即可，不构建应用镜像。Dockerfile 和 Compose 保留用于部署；现阶段 Agent、联调验收仍通过容器隔离执行。
+前端、API 和 Worker 直接在宿主机运行，修改页面由 Vite 热更新；Go 代码修改后重启本地进程即可，不构建应用镜像。`deploy/` 中的 Dockerfile 和 Compose 用于部署；现阶段 Agent、联调验收仍通过容器隔离执行。
 
-Linux 开发环境需要 Python 3、Node.js、Go 1.25+、Git、`meta` 和可访问的 Docker daemon。先执行 `npm ci --prefix web`。从 `.env.example` 创建本项目独立的 `.env`，设置数据库凭据、`DATA_DIR`、执行器配置和 Temporal namespace；可复制 `.env.development.example` 为 `.env.development` 覆盖本机工具路径和端口。dotenv 内容作为数据解析，不作为 shell 脚本执行，文件不可提交。
+Linux 开发环境需要 Python 3、Node.js、Go 1.25+、Git、`meta` 和可访问的 Docker daemon。先执行 `npm ci --prefix web`。从 `deploy/.env.example` 创建本项目独立的 `deploy/.env`，设置数据库凭据、`DATA_DIR`、执行器配置和 Temporal namespace；可复制 `deploy/.env.development.example` 为 `deploy/.env.development` 覆盖本机工具路径和端口。dotenv 内容作为数据解析，不作为 shell 脚本执行，文件不可提交。
 
-PostgreSQL、Temporal 使用 SwarmJet 自己的 Compose 容器。启动脚本会动态查询 Compose 网络中的地址，不重建依赖、不清空数据；若使用其他数据库或 Temporal，在 `.env.development` 显式填写地址。首次准备依赖可执行 `docker compose up -d postgres temporal-namespace temporal-ui`，不必启动容器版 API、Worker。全新数据库需先完成部署文档中的迁移；开发启动不会隐式迁移数据库。
+PostgreSQL、Temporal 使用 SwarmJet 自己的 Compose 容器。启动脚本会动态查询 Compose 网络中的地址，不重建依赖、不清空数据；若使用其他数据库或 Temporal，在 `deploy/.env.development` 显式填写地址。首次准备依赖可执行 `(cd deploy && docker compose up -d postgres temporal-namespace temporal-ui)`，不必启动容器版 API、Worker。全新数据库需先在仓库根目录执行 `(cd deploy && docker compose -f compose.yaml -f compose.build.yaml run --build --rm migrate)`；开发启动不会隐式迁移数据库。Agent 镜像的构建见部署文档。
 
 ```bash
 ./scripts/dev.py start    # 编译 Go，检查依赖，停止旧容器版 API/Worker，启动本地三进程

@@ -14,6 +14,7 @@ import urllib.request
 from urllib.parse import urlsplit, urlunsplit
 
 ROOT = Path(__file__).resolve().parent.parent
+DEPLOY = ROOT / "deploy"
 STATE = ROOT / ".cache/dev"
 PID = STATE / "supervisor.pid"
 READY = STATE / "ready.json"
@@ -30,7 +31,7 @@ def environment():
     result = run(
         ["node", "--input-type=module", "-e",
          'import {loadEnv} from "./web/node_modules/vite/dist/node/index.js";'
-         'process.stdout.write(JSON.stringify(loadEnv("development",process.cwd(),"")))'],
+         'process.stdout.write(JSON.stringify(loadEnv("development",process.cwd()+"/deploy","")))'],
         capture_output=True, text=True,
     )
     env = os.environ | json.loads(result.stdout)
@@ -53,7 +54,7 @@ def environment():
 
 
 def compose(env, *args, capture=False):
-    return run(["docker", "compose", "-f", str(ROOT / "compose.yaml"), *args],
+    return run(["docker", "compose", "-f", str(DEPLOY / "compose.yaml"), *args],
                env=env, capture_output=capture, text=True)
 
 
@@ -67,7 +68,7 @@ def service_ip(env, service):
     name = env.get("COMPOSE_PROJECT_NAME", "swarmjet") + "_default"
     network = networks.get(name)
     if not network or not network.get("IPAddress"):
-        raise RuntimeError(f"Cannot resolve {service}; set its host address in .env.development")
+        raise RuntimeError(f"Cannot resolve {service}; set its host address in deploy/.env.development")
     return network["IPAddress"]
 
 
@@ -137,7 +138,7 @@ def supervise():
             resolve_dependencies(env)
             go = env.get("GO_BINARY") or shutil.which("go", path=env.get("PATH"))
             if not go:
-                raise RuntimeError("Install Go or set GO_BINARY in .env.development")
+                raise RuntimeError("Install Go or set GO_BINARY in deploy/.env.development")
             env["PATH"] = str(Path(go).resolve().parent) + os.pathsep + env["PATH"]
             for tool in (env.get("META_COMMAND", "meta"), "git", "docker", "node"):
                 if not shutil.which(tool, path=env["PATH"]):

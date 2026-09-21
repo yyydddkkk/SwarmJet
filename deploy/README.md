@@ -2,29 +2,32 @@
 
 部署包含控制台 API、Temporal Worker、PostgreSQL 18、Temporal Server 1.32.0 和 Temporal UI 2.54.1。业务执行器是独立的 OpenCode 镜像，默认不会作为常驻服务启动。这里使用持久化生产 Server，不使用 `temporal server start-dev`。
 
+所有部署文件集中在 `deploy/`：`compose.yaml` 是唯一的服务定义，`compose.build.yaml` 只补充源码构建配置，两个 Dockerfile 分别构建应用与执行器镜像。构建上下文仍是仓库根目录。
+
 ## 本地构建
 
-在仓库根目录执行：
+从仓库根目录进入 `deploy/` 后执行：
 
 ```sh
+cd deploy
 cp .env.example .env
 chmod 600 .env
 # 编辑 .env：独立随机 PostgreSQL / 管理员密码、实际凭证、DATA_DIR。
 mkdir -p /srv/swarmjet/data
 chmod 700 /srv/swarmjet/data
-docker compose --profile tools build
-docker compose up -d
+docker compose -f compose.yaml -f compose.build.yaml --profile tools build
+docker compose up -d --wait
 ```
 
-Dockerfile 默认使用 Docker Hub 官方基础镜像，并固定版本。可通过 build args 覆盖镜像来源：
+`deploy/Dockerfile` 默认使用 Docker Hub 官方基础镜像，并固定版本。可在仓库根目录通过 build args 覆盖镜像来源：
 
 ```sh
-docker build -t swarmjet:local \
+docker build -f deploy/Dockerfile -t swarmjet:local \
   --build-arg GO_IMAGE=golang:1.27.1-bookworm \
   --build-arg NODE_IMAGE=node:24.21.0-bookworm-slim \
   --build-arg RUNTIME_IMAGE=ubuntu:24.04 \
   --build-arg DOCKER_IMAGE=docker:29.8.1-cli .
-docker build -f Dockerfile.agent -t swarmjet-agent:local \
+docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
   --build-arg AGENT_BASE_IMAGE=node:22.23.1-bookworm-slim .
 ```
 
@@ -38,7 +41,7 @@ docker build -f Dockerfile.agent -t swarmjet-agent:local \
 
 发布流水线将主镜像推送为 `$CI_REGISTRY_IMAGE:<tag>`，执行器镜像为 `$CI_REGISTRY_IMAGE/agent:<tag>`；main 分支使用 `main` 标签，版本标签使用对应 Git tag。私有仓库需先执行 `docker login`。
 
-将 `deploy/` 目录复制到服务器，复制 `.env.example` 为该目录的 `.env`，填写发布流水线产生的完整 `IMAGE` 和 `AGENT_IMAGE` 地址。创建绝对 `DATA_DIR` 后执行：
+将 `deploy/` 目录复制到服务器，进入该目录，复制其中的 `.env.example` 为 `.env`，填写发布流水线产生的完整 `IMAGE` 和 `AGENT_IMAGE` 地址。创建绝对 `DATA_DIR` 后执行：
 
 ```sh
 chmod 600 .env
@@ -87,6 +90,8 @@ Worker 执行保留期清理：`FAILED_KEEP_DAYS=7` 用于已取消任务的现�
 
 ## 检查与备份
 
+以下命令均在 `deploy/` 目录执行。
+
 ```sh
 docker compose ps
 docker compose logs --tail=100 api worker temporal-schema temporal
@@ -97,6 +102,12 @@ docker compose exec -T postgres pg_dumpall -U swarmjet > backup.sql
 
 备份 PostgreSQL 与 `DATA_DIR`；后者包含任务工作区、Git 对象、执行日志和 OpenCode 会话。备份中可能有私有源代码和认证会话，按凭证数据管理。恢复时保留 `DATA_DIR` 的绝对路径，并恢复相同 Temporal namespace。旧版本 `state.json` 只能通过 `swarmjet legacy-inventory <file>` 生成人工接管清单；不要直接启用旧 Issue 的 `autonomous` 标签造成重复任务。
 
-在仓库根目录执行 `VALIDATE_DEPLOY=1 scripts/test.sh`：Go race tests、React build、两份 Compose 配置验证。有 `TEST_DATABASE_URL` 时运行独立临时 schema 的 PostgreSQL 集成测试；`RUN_BROWSER_TESTS=1` 额外运行浏览器测试。测试脚本要求本地安装 Go 和 Node.js。可用 `SWARMJET_TEMPORAL_ADDRESS` 与 `SWARMJET_TEMPORAL_NAMESPACE` 指向独立测试 Temporal，运行持久化/Worker 重启测试；该测试使用专属 task queue，不需要模型 key。原生工具链下还可用 `SWARMJET_DOCKER_SMOKE=1` 和 `SWARMJET_META_BIN` 启用实际 Docker / Meta 检查。
+在仓库根目录执行 `VALIDATE_DEPLOY=1 scripts/test.sh`：Go race tests、React build、发布镜像与源码构建两种 Compose 配置验证。有 `TEST_DATABASE_URL` 时运行独立临时 schema 的 PostgreSQL 集成测试；`RUN_BROWSER_TESTS=1` 额外运行浏览器测试。测试脚本要求本地安装 Go 和 Node.js。可用 `SWARMJET_TEMPORAL_ADDRESS` 与 `SWARMJET_TEMPORAL_NAMESPACE` 指向独立测试 Temporal，运行持久化/Worker 重启测试；该测试使用专属 task queue，不需要模型 key。原生工具链下还可用 `SWARMJET_DOCKER_SMOKE=1` 和 `SWARMJET_META_BIN` 启用实际 Docker / Meta 检查。
 
 版本依据：[Temporal Server release](https://github.com/temporalio/temporal/releases/tag/v1.32.0)、[生产 PostgreSQL 示例](https://github.com/temporalio/samples-server/blob/main/compose/docker-compose-postgres.yml)、[UI Server release](https://github.com/temporalio/ui-server/releases/tag/v2.54.1)、[Meta release](https://github.com/gitkb/meta/releases/tag/v0.2.22)。
+
+## 从原目录布局切换
+
+以前在仓库根目录保存配置的环境，将 `.env` 和可选的 `.env.development` 移入 `deploy/`；若目标文件已存在，先核对内容，不要直接覆盖。自定义 `compose.override.yaml` 也移入 `deploy/`，其中相对挂载路径需要按新目录调整。保留原 `COMPOSE_PROJECT_NAME`、`DATA_DIR` 和数据库配置，默认项目名仍为 `swarmjet`，无需删除或重建数据卷。
+
+日常 Compose 命令改为在 `deploy/` 执行。本地源码构建显式使用两个 `-f` 时，如有自定义覆盖文件，还需追加 `-f compose.override.yaml`。原生开发命令仍在仓库根目录执行 `./scripts/dev.py start`，环境配置统一从 `deploy/` 读取。

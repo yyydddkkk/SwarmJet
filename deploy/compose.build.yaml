@@ -1,0 +1,15 @@
+# Layer over compose.yaml when building from the repository checkout.
+x-build: &app-build
+  context: ..
+  dockerfile: deploy/Dockerfile
+services:
+  api:
+    build: *app-build
+  worker:
+    build: *app-build
+  migrate:
+    build: *app-build
+  agent-image:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.agent

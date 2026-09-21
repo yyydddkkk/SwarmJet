@@ -115,7 +115,7 @@ services:
         target: ${DATA_DIR:?Set absolute DATA_DIR}
         read_only: true
     healthcheck:
-      test: [CMD, curl, --fail, --silent, http://localhost:8180/healthz]
+      test: [CMD, curl, --fail, --silent, http://localhost:8080/healthz]
       interval: 10s
       timeout: 3s
       retries: 12

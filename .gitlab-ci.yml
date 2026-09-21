@@ -38,8 +38,8 @@ Compose validation:
     ADMIN_PASSWORD: validation-only-password
     DATA_DIR: /tmp/swarmjet-validation
   script:
-    - docker compose config --quiet
     - docker compose -f deploy/compose.yaml config --quiet
+    - docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml --profile tools config --quiet
     - docker compose -f examples/http-check/compose.yaml config --quiet
     - sh -n scripts/askpass.sh deploy/temporal/schema.sh deploy/temporal/namespace.sh
 
@@ -61,7 +61,7 @@ Publish images:
   script:
     - printf '%s' "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
     - IMAGE_TAG="${CI_COMMIT_TAG:-main}"
-    - docker build --platform linux/amd64 -t "$CI_REGISTRY_IMAGE:$IMAGE_TAG" .
-    - docker build --platform linux/amd64 -f Dockerfile.agent -t "$CI_REGISTRY_IMAGE/agent:$IMAGE_TAG" .
+    - docker build --platform linux/amd64 -f deploy/Dockerfile -t "$CI_REGISTRY_IMAGE:$IMAGE_TAG" .
+    - docker build --platform linux/amd64 -f deploy/Dockerfile.agent -t "$CI_REGISTRY_IMAGE/agent:$IMAGE_TAG" .
     - docker push "$CI_REGISTRY_IMAGE:$IMAGE_TAG"
     - docker push "$CI_REGISTRY_IMAGE/agent:$IMAGE_TAG"

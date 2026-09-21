@@ -15,10 +15,12 @@ if [[ ${RUN_BROWSER_TESTS:-0} == 1 ]]; then
   (cd web && npx playwright install chromium && npm test)
 fi
 if [[ ${VALIDATE_DEPLOY:-0} == 1 ]]; then
-  for manifest in compose.yaml deploy/compose.yaml; do
+  for mode in image build; do
+    manifests=(-f deploy/compose.yaml)
+    if [[ $mode == build ]]; then manifests+=(-f deploy/compose.build.yaml); fi
     env DATABASE_URL='postgres://swarmjet:validation-only@postgres:5432/swarmjet?sslmode=disable' \
       POSTGRES_PASSWORD=validation-only ADMIN_PASSWORD=validation-only-password \
       DATA_DIR=/tmp/swarmjet-compose-validation \
-      docker compose -f "$manifest" config --quiet
+      docker compose "${manifests[@]}" --profile tools config --quiet
   done
 fi
