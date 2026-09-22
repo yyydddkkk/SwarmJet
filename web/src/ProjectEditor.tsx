@@ -347,6 +347,10 @@ export function ProjectEditor({
       <a className="back" href="#/projects">
         ← 返回项目配置
       </a>
+      {managed && existing && <div className="notice">
+        <span>初始化进度、验证结果和待补充的信息会持续保存。</span>{" "}
+        <a className="button" href={`#/projects/${encodeURIComponent(p.id)}/initialization`}>查看初始化进度</a>
+      </div>}
       <header className="page-head setup-heading">
         <div>
           <div className="eyebrow">WORKSPACE SETUP</div>

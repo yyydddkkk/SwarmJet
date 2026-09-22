@@ -104,6 +104,7 @@ type InitVerification struct {
 // It separates "repositories connected", "analysis complete" and "ready for
 // development tasks" so the console never claims readiness it has not verified.
 type Initialization struct {
+	Publication           *MetaPublication   `json:"publication,omitempty"`
 	ID                    string             `json:"id"`
 	ProjectID             string             `json:"projectId"`
 	Status                string             `json:"status"`
@@ -128,4 +129,21 @@ type Initialization struct {
 	Version      int       `json:"version"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+// MetaPublication tracks optional publication independently of initialization.
+type MetaPublication struct {
+	Status        string `json:"status"`
+	Mode          string `json:"mode"`
+	NamespaceID   int64  `json:"namespaceId,omitempty"`
+	Path          string `json:"path"`
+	RemoteID      int64  `json:"remoteId,omitempty"`
+	URL           string `json:"url,omitempty"`
+	CloneURL      string `json:"cloneUrl,omitempty"`
+	Ref           string `json:"ref"`
+	SHA           string `json:"sha"`
+	GitLabURL     string `json:"gitlabUrl"`
+	CredentialRef string `json:"credentialRef"`
+	RequestID     string `json:"requestId"`
+	Error         string `json:"error,omitempty"`
 }

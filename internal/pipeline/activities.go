@@ -227,6 +227,26 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		if e != nil {
 			return out, e
 		}
+		if t.Project.ManagedMeta() {
+			init, readErr := a.Store.Initialization(ctx, "init-"+t.Project.ID)
+			if readErr != nil {
+				return out, readErr
+			}
+			if pub := init.Publication; pub != nil && pub.Status == "published" {
+				if pub.GitLabURL != t.Project.GitLabURL || pub.CredentialRef != t.Project.CredentialReference() || pub.Ref != t.Project.MetaRef {
+					return out, temporal.NewNonRetryableApplicationError("published Meta connection differs from task snapshot", "managed_meta", nil)
+				}
+				// The control-plane host fetches the remote source of truth;
+				// never use an execution node's askpass path on this host.
+				fetchEnv := map[string]string{"GITLAB_TOKEN": env["GITLAB_TOKEN"], "GIT_ASKPASS": "/usr/local/bin/swarmjet-askpass"}
+				if a.Workspace != nil && a.Workspace.Env["GIT_ASKPASS"] != "" {
+					fetchEnv["GIT_ASKPASS"] = a.Workspace.Env["GIT_ASKPASS"]
+				}
+				if e := managedmeta.New(a.DataDir).SyncRemote(ctx, t.Project.ID, pub.Ref, pub.CloneURL, fetchEnv); e != nil {
+					return out, e
+				}
+			}
+		}
 		// A managed Meta-Repo is owned by the control plane. Push it to the
 		// assigned execution node before its workspace is prepared.
 		if t.Project.ManagedMeta() && t.NodeID != "" {

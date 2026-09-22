@@ -364,7 +364,7 @@ func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Pr
 	// analysis; this gate is enforced server-side, not only in the console.
 	if p.Enabled && p.ManagedMeta() {
 		if a.cfg.Initializer == nil || !a.cfg.Initializer.ReadyForTasks(r.Context(), p.ID) {
-			problem(w, 409, "初始化尚未完成验证，不能启用项目。请先完成初始化或重试验证。")
+			problem(w, 409, "Meta 仓库尚未初始化完成，不能启用项目。请先完成初始化。")
 			return
 		}
 	}
@@ -508,7 +508,7 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if p.ManagedMeta() && (a.cfg.Initializer == nil || !a.cfg.Initializer.ReadyForTasks(r.Context(), p.ID)) {
-			problem(w, 409, "项目初始化尚未完成验证，暂不能接单。")
+			problem(w, 409, "Meta 仓库尚未初始化完成，暂不能接单。")
 			return
 		}
 		client, err := a.client(p)

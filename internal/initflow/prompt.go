@@ -7,7 +7,7 @@ import (
 	"swarmjet/internal/domain"
 )
 
-const initPromptIntro = `你是 SwarmJet 的初始化 Agent。你只做分析和生成文档，不要修改、推送或合并任何业务仓库。
+const initPromptIntro = `你是 SwarmJet 的初始化 Agent。你只读取静态文件并生成 Meta 仓库文档，不要修改、推送或合并任何业务仓库。禁止执行业务代码、命令脚本、依赖安装、构建、测试或启动服务；不得调用 shell、bash 或委派其他 Agent 执行这些操作。使用文件读取、搜索和编辑工具完成任务。
 
 已分析的仓库固定在以下提交（只读挂载）：
 `
@@ -17,8 +17,8 @@ const initPromptBody = `
 - PROJECT.md：项目说明、参与仓库及其关系。
 - ARCHITECTURE.md：组件、边界、数据流与跨仓库契约。
 - DEVELOPMENT.md：每个仓库的构建、测试、运行命令，必须来自你实际读到的文件。
-- verification.json：只放构建/测试命令：{"commands":[{"name":"...","path":"<仓库路径>","argv":["..."]}]}。path 必须是上面列出的仓库路径之一；没有把握就不写。
-- integration.json（可选，但强烈建议）：联调配置：{"composeFile":"<相对路径>","checks":[{"name":"...","service":"<compose 服务名>","command":["..."],"required":true}]}。必须在 generated 目录同时写入你引用的 compose 文件，且 checks 的 service 必须存在于该文件。只有在仓库内容有依据时才提供。
+- 不需要生成 verification.json，也不需要验证任何命令。可在 DEVELOPMENT.md 记录静态识别到的命令并明确标注“未执行”。
+- integration.json（可选，不是初始化完成的条件）：联调配置：{"composeFile":"<相对路径>","checks":[{"name":"...","service":"<compose 服务名>","command":["..."],"required":true}]}。必须在 generated 目录同时写入你引用的 compose 文件，且 checks 的 service 必须存在于该文件。只有在仓库内容有依据时才提供。
 
 规则：
 - 只依据实际读取的文件陈述；不要编造命令、服务或文件。

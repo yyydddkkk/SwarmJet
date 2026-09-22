@@ -182,6 +182,8 @@ func (m *Manager) sweep(ctx context.Context) {
 	}
 	for _, init := range list {
 		switch {
+		case init.Status == domain.InitReady && init.Publication != nil && init.Publication.Status == "pending":
+			m.advanceWithLease(ctx, init)
 		case init.Status == domain.InitCancelled:
 			m.stopCancelled(ctx, init)
 		case init.Status == domain.InitNeedsInput || init.Status == domain.InitBlocked:
@@ -355,9 +357,9 @@ func (m *Manager) Retry(ctx context.Context, projectID string) error {
 		// Resume there instead of starting an analysis that must fail again.
 		init.Stage = "connect"
 		init.Message = "准备重新连接仓库"
-	case executableVerification(init.Verification):
+	case init.AnalysisComplete && init.MetaSHA != "":
 		init.Stage = "verify"
-		init.Message = "准备重试验证"
+		init.Message = "准备完成 Meta 仓库初始化（仅静态分析）"
 	default:
 		init.Stage = "analyze"
 		init.Message = "准备重新分析"
@@ -376,7 +378,7 @@ func executableVerification(verification []domain.InitVerification) bool {
 	return false
 }
 
-// ReadyForTasks reports the persisted verification readiness used to gate
+// ReadyForTasks reports the persisted Meta initialization readiness used to gate
 // enabling a managed project and accepting new tasks for it.
 func (m *Manager) ReadyForTasks(ctx context.Context, projectID string) bool {
 	init, err := m.Store.Initialization(ctx, InitID(projectID))
@@ -423,6 +425,9 @@ func (m *Manager) Answer(ctx context.Context, projectID string, answers map[stri
 // Advance runs one step of the state machine. It is safe to call repeatedly and
 // after a process restart because every side effect is keyed by stable IDs.
 func (m *Manager) Advance(ctx context.Context, init domain.Initialization) (domain.Initialization, error) {
+	if init.Status == domain.InitReady && init.Publication != nil && init.Publication.Status == "pending" {
+		return m.publishMeta(ctx, init)
+	}
 	if domain.InitTerminal(init.Status) {
 		return init, nil
 	}

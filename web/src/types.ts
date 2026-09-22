@@ -68,6 +68,7 @@ export interface InitVerification {
   dryRun?: boolean;
 }
 export interface Initialization {
+  publication?: { status: string; mode: string; path: string; url?: string; ref: string; sha: string; error?: string };
   id: string;
   projectId: string;
   status: string;

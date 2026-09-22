@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"swarmjet/internal/initflow"
 
 	"swarmjet/internal/domain"
 	"swarmjet/internal/store"
@@ -36,6 +38,10 @@ func initializationFailure(w http.ResponseWriter, err error) {
 func (a *server) initialization(w http.ResponseWriter, r *http.Request, id string, tail []string) {
 	if a.cfg.Initializer == nil {
 		problem(w, http.StatusServiceUnavailable, "初始化服务未启用。")
+		return
+	}
+	if len(tail) > 0 && tail[0] == "publication" {
+		a.metaPublication(w, r, id, tail[1:])
 		return
 	}
 	if len(tail) == 0 {
@@ -99,5 +105,73 @@ func (a *server) initialization(w http.ResponseWriter, r *http.Request, id strin
 		respond(w, http.StatusAccepted, init)
 	default:
 		problem(w, http.StatusNotFound, "API route not found")
+	}
+}
+
+func (a *server) metaPublication(w http.ResponseWriter, r *http.Request, id string, tail []string) {
+	if len(tail) == 0 && r.Method == http.MethodPost {
+		publisher, ok := a.cfg.Initializer.(interface {
+			QueuePublication(context.Context, string, initflow.PublishRequest) (domain.Initialization, error)
+		})
+		if !ok {
+			problem(w, 503, "发布服务未启用")
+			return
+		}
+		var req initflow.PublishRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		init, err := publisher.QueuePublication(r.Context(), id, req)
+		if err != nil {
+			initializationFailure(w, err)
+			return
+		}
+		respond(w, http.StatusAccepted, init)
+		return
+	}
+	if len(tail) != 1 || r.Method != http.MethodGet {
+		problem(w, 404, "API route not found")
+		return
+	}
+	p, err := a.s.Project(r.Context(), id)
+	if err != nil {
+		failure(w, err)
+		return
+	}
+	if !p.ManagedMeta() {
+		problem(w, 400, "只有受管 Meta 仓库可发布")
+		return
+	}
+	c, err := a.client(p)
+	if err != nil {
+		problem(w, 400, "GitLab 连接不可用")
+		return
+	}
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	search := r.URL.Query().Get("search")
+	if len(search) > 200 {
+		problem(w, 400, "搜索内容过长")
+		return
+	}
+	switch tail[0] {
+	case "namespaces":
+		rows, next, err := c.Namespaces(r.Context(), search, page)
+		if err != nil {
+			gitlabProblem(w, err)
+			return
+		}
+		respond(w, 200, map[string]any{"items": rows, "page": page, "hasNext": next})
+	case "repositories":
+		rows, err := c.ListProjects(r.Context(), search, page, 50)
+		if err != nil {
+			gitlabProblem(w, err)
+			return
+		}
+		respond(w, 200, rows)
+	default:
+		problem(w, 404, "API route not found")
 	}
 }

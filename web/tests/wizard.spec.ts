@@ -8,12 +8,12 @@ function initRecord(id: string, status: string) {
     id: "init-" + id,
     projectId: id,
     status,
-    stage: ready ? "verify" : "analyze",
+    stage: ready ? "complete" : "analyze",
     progress: ready ? 100 : needsInput ? 35 : 20,
     message: needsInput
       ? "分析需要补充信息后继续"
       : ready
-        ? "初始化完成：说明与验证均已通过，请确认后启用项目。"
+        ? "Meta 仓库初始化完成：项目说明已保存。"
         : "初始化 Agent 正在分析仓库",
     repositoriesConnected: true,
     analysisComplete: ready,
@@ -50,7 +50,7 @@ async function setupWizard(page: Page, options?: { verifyFails?: boolean }) {
   const verifyFails = options?.verifyFails ?? false;
   const saves: Project[] = [];
   let initId = "";
-  let initGets = 0;
+  let answered = false;
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -97,20 +97,20 @@ async function setupWizard(page: Page, options?: { verifyFails?: boolean }) {
               {
                 id: 101,
                 name: "Core",
-                pathWithNamespace: "team/core",
-                defaultBranch: "dev",
-                httpUrlToRepo: "https://gitlab.example/team/core.git",
-                webUrl: "",
+                path_with_namespace: "team/core",
+                default_branch: "dev",
+                http_url_to_repo: "https://gitlab.example/team/core.git",
+                web_url: "",
                 archived: false,
                 description: "core library",
               },
               {
                 id: 102,
                 name: "API",
-                pathWithNamespace: "team/api",
-                defaultBranch: "main",
-                httpUrlToRepo: "https://gitlab.example/team/api.git",
-                webUrl: "",
+                path_with_namespace: "team/api",
+                default_branch: "main",
+                http_url_to_repo: "https://gitlab.example/team/api.git",
+                web_url: "",
                 archived: false,
                 description: "",
               },
@@ -119,10 +119,10 @@ async function setupWizard(page: Page, options?: { verifyFails?: boolean }) {
               {
                 id: 103,
                 name: "Web",
-                pathWithNamespace: "team/web",
-                defaultBranch: "main",
-                httpUrlToRepo: "https://gitlab.example/team/web.git",
-                webUrl: "",
+                path_with_namespace: "team/web",
+                default_branch: "main",
+                http_url_to_repo: "https://gitlab.example/team/web.git",
+                web_url: "",
                 archived: false,
                 description: "",
               },
@@ -176,7 +176,7 @@ async function setupWizard(page: Page, options?: { verifyFails?: boolean }) {
       });
     }
     if (pathname === "/api/projects" && method === "GET")
-      return route.fulfill({ json: [] });
+      return route.fulfill({ json: saves.map((project) => ({ ...project, version: 1 })) });
     if (pathname === "/api/projects" && method === "POST") {
       const payload = request.postDataJSON() as Project;
       saves.push(payload);
@@ -186,13 +186,14 @@ async function setupWizard(page: Page, options?: { verifyFails?: boolean }) {
     if (initId && pathname === "/api/projects/" + initId + "/initialization") {
       if (method === "POST")
         return route.fulfill({ status: 202, json: initRecord(initId, "running") });
-      initGets++;
       return route.fulfill({
-        json: initRecord(initId, initGets === 1 ? "needs_input" : "ready"),
+        json: initRecord(initId, answered ? "ready" : "needs_input"),
       });
     }
-    if (initId && pathname === "/api/projects/" + initId + "/initialization/answers")
+    if (initId && pathname === "/api/projects/" + initId + "/initialization/answers") {
+      answered = true;
       return route.fulfill({ status: 202, json: initRecord(initId, "running") });
+    }
     if (initId && pathname === "/api/projects/" + initId)
       return route.fulfill({
         json: { ...saves[saves.length - 1], id: initId, version: 1 },
@@ -225,12 +226,19 @@ test("wizard connects, paginates repos, verifies a model and completes initializ
   await page.getByLabel("Access Token").fill("glpat-secret-value");
   await page.getByRole("button", { name: "验证并继续" }).click();
   await expect(page.getByText("team/core", { exact: false })).toBeVisible();
+  await page.getByText("Core", { exact: true }).click();
+  await expect(page.getByLabel("选择仓库 team/core", { exact: true })).toBeChecked();
+  await page.getByLabel("Core 的目标分支").fill("feature/test");
   await page.getByRole("button", { name: "下一页" }).click();
   await expect(page.getByText("team/web", { exact: false })).toBeVisible();
+  await page.getByLabel("选择仓库 team/web", { exact: true }).check();
+  await expect(page.getByLabel("Core 的目标分支")).toHaveValue("feature/test");
+  await page.getByLabel("选择仓库 team/web", { exact: true }).uncheck();
   await page.getByRole("button", { name: "上一页" }).click();
   await expect(page.getByText("team/core", { exact: false })).toBeVisible();
   await page.getByRole("checkbox").first().check();
-  await expect(page.getByLabel("Core 的目标分支")).toHaveValue("dev");
+  await expect(page.getByLabel("Core 的目标分支")).toHaveValue("feature/test");
+  await page.getByLabel("Core 的目标分支").fill("dev");
   await page.getByRole("button", { name: "下一步" }).click();
   await expect(page.getByRole("checkbox", { name: /自动合并/ })).not.toBeChecked();
   await expect(page.getByText("目标 dev")).toBeVisible();
@@ -247,7 +255,21 @@ test("wizard connects, paginates repos, verifies a model and completes initializ
   await page.getByLabel("请提供本地联调方式。").fill("docker compose");
   await page.getByRole("button", { name: "提交并继续" }).click();
   await expect(page.getByText("初始化完成")).toBeVisible();
-  await expect(page.getByRole("button", { name: "启用项目" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "发布到 GitLab", exact: true })).toBeEnabled();
+  await expect(page).toHaveURL(/projects\/[^/]+\/initialization/);
+  await page.reload();
+  await expect(page.getByText("初始化完成", { exact: false })).toBeVisible();
+  await page.getByRole("link", { name: "返回项目配置" }).click();
+  await page.getByRole("link", { name: "查看初始化进度" }).click();
+  await expect(page.getByText("初始化完成", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "返回项目设置" }).click();
+  const mergeToggle = page.getByRole("checkbox", { name: /自动合并/ });
+  await expect(mergeToggle).toBeVisible();
+  expect((await mergeToggle.boundingBox())?.width).toBeLessThanOrEqual(24);
+  await mergeToggle.check();
+  await expect(mergeToggle).toBeChecked();
+  await page.getByRole("link", { name: "查看初始化进度" }).click();
+  await expect(page.getByText("初始化完成", { exact: false })).toBeVisible();
   expect(state.saves).toHaveLength(1);
   expect(state.saves[0]).toMatchObject({
     metaMode: "managed",
@@ -260,6 +282,7 @@ test("wizard connects, paginates repos, verifies a model and completes initializ
   });
   expect(state.saves[0].repositories?.[0]).toMatchObject({
     projectId: 101,
+    url: "https://gitlab.example/team/core.git",
     path: "core",
     targetBranch: "dev",
   });
@@ -284,6 +307,13 @@ test("wizard stays within a small viewport", async ({ page }) => {
   await page.getByLabel("Access Token").fill("glpat-secret-value");
   await page.getByRole("button", { name: "验证并继续" }).click();
   await expect(page.getByText("team/core", { exact: false })).toBeVisible();
+  const checkbox = page.getByLabel("选择仓库 team/core", { exact: true });
+  const box = await checkbox.boundingBox();
+  expect(box?.width).toBeLessThanOrEqual(24);
+  await checkbox.focus();
+  await page.keyboard.press("Space");
+  await expect(checkbox).toBeChecked();
+  await expect(page.getByLabel("Core 的目标分支")).toHaveValue("dev");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

@@ -29,3 +29,12 @@ Task stages: queued, waiting_dependencies, preparing, developing, verifying, pub
 Project defaults for form: metaRef `main`, development/review adapter `opencode`, image `swarmjet-agent:local`, timeoutSeconds 5400, maxReworks 3, requireCI true, integration startupTimeoutSeconds 180. Model required provider/model (no made-up default). GitLabURL explicit. CredentialRef `GITLAB_TOKEN`, MergeCredentialRef `GITLAB_MERGE_TOKEN`. Repositories require id, projectId, URL,path,targetBranch; createFrom optional only needed to initialize missing target. Integration composeFile is relative to Meta-Repo, checks list has name, service, argv string array, required. At least one required check.
 
 Control plane is one administrator. UI pages: login; task list with stage filtering and new task dialog; task detail with repositories/MRs, timeline, agent runs/logs, assumptions, verification, manual approval and task actions; project list/editor with repository targets, agent/model configs, integration checks. No placeholder/mock data on failures: show actionable error and retry.
+
+### 可选 Meta 仓库发布
+
+- `GET /api/projects/{id}/initialization/publication/namespaces?search=&page=1`：分页列出连接可见的群组 / 个人空间（不保证创建权限）。
+- `GET /api/projects/{id}/initialization/publication/repositories?search=&page=1`：分页列出已有仓库，提交时校验必须为空。
+- `POST /api/projects/{id}/initialization/publication`：首次请求为 `{ "mode": "create", "namespaceId": 42, "path": "project-meta" }` 或 `{ "mode": "existing", "existingProjectId": 42 }`。失败重试可发送 `{}`，继续使用持久化目标。
+- 返回 202 和 Initialization；`publication.status` 为 `pending / failed / published`，失败独立于初始化状态。通过原初始化 GET 轮询；成功包含 `url`、`path`、`ref` 和 `sha`。
+
+新建远程固定为 private。Git 操作只推送固定初始化提交到尚不存在的目标分支，拒绝覆盖已有内容，禁用 HTTP 重定向，凭证不进入状态记录。

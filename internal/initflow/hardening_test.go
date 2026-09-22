@@ -2,7 +2,6 @@ package initflow
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"testing"
 
@@ -74,14 +73,14 @@ func TestStaleStepCannotOverwriteCancellation(t *testing.T) {
 }
 
 // Verification must not execute when no isolated runtime is configured.
-func TestVerificationIsBlockedWithoutIsolatedRuntime(t *testing.T) {
+func TestStaticInitializationNeedsNoVerificationRuntime(t *testing.T) {
 	f := newFixture(t)
 	f.agents.onStart = readyAgent(true)
 	f.m.Runner = nil
 	f.m.VerifyImage = ""
 	init := f.drive(t, 12)
-	if init.Status != domain.InitBlocked || init.ReadyForTasks || !strings.Contains(init.Error, "INIT_VERIFY_IMAGE") {
-		t.Fatalf("verification ran without isolation: %+v", init)
+	if init.Status != domain.InitReady || !init.AnalysisComplete || init.Error != "" {
+		t.Fatalf("static initialization required verification runtime: %+v", init)
 	}
 }
 
@@ -89,10 +88,19 @@ func TestVerificationIsBlockedWithoutIsolatedRuntime(t *testing.T) {
 func TestRetryAfterFailedVerification(t *testing.T) {
 	f := newFixture(t)
 	f.agents.onStart = readyAgent(true)
-	f.m.Runner = func(context.Context, string, []string) (int, string, error) { return 1, "boom", nil }
 	init := f.drive(t, 12)
-	if init.Status != domain.InitBlocked || init.ReadyForTasks {
-		t.Fatalf("failed verification not blocked: %+v", init)
+	// Persist an old verification-stage failure, as produced before the static flow.
+	init.Status = domain.InitBlocked
+	init.Stage = "verify"
+	init.ReadyForTasks = false
+	init.Error = "old verification failure"
+	init.Version++
+	if err := f.repo.SaveInitialization(context.Background(), init); err != nil {
+		t.Fatal(err)
+	}
+	f.m.Runner = func(context.Context, string, []string) (int, string, error) {
+		t.Fatal("legacy retry executed business commands")
+		return 1, "", nil
 	}
 	if err := f.m.Retry(context.Background(), f.project.ID); err != nil {
 		t.Fatal(err)
@@ -101,7 +109,6 @@ func TestRetryAfterFailedVerification(t *testing.T) {
 	if retried.Status != domain.InitPending || retried.Stage != "verify" {
 		t.Fatalf("retry did not resume verification: %+v", retried)
 	}
-	f.m.Runner = func(context.Context, string, []string) (int, string, error) { return 0, "ok", nil }
 	done := f.drive(t, 12)
 	if done.Status != domain.InitReady || !done.ReadyForTasks {
 		t.Fatalf("retry did not complete: %+v", done)

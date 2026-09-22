@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, APIError } from "./api";
 import { ErrorBox, Field } from "./App";
+import { MetaPublication } from "./MetaPublication";
 import { TerminalPanel } from "./TerminalPanel";
 import type {
   Connection,
@@ -18,6 +19,17 @@ const stepList = [
   { key: "opencode", label: "配置 OpenCode" },
   { key: "initialize", label: "自动初始化" },
 ];
+
+type RepositoryResponse = {
+  id: number;
+  name: string;
+  path_with_namespace: string;
+  default_branch: string | null;
+  http_url_to_repo: string;
+  web_url: string;
+  archived: boolean;
+  description: string | null;
+};
 
 type VerifyResult = {
   username: string;
@@ -79,11 +91,13 @@ function agent(model: string, image: string) {
 export default function ProjectWizard({
   onSaved,
   onOpenProject,
+  initialProject,
 }: {
+  initialProject?: Project;
   onSaved?: (p: Project) => void;
   onOpenProject: (id: string) => void;
 }) {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(initialProject ? 4 : 0);
   const [error, setError] = useState("");
   const [defaultImage, setDefaultImage] = useState("swarmjet-agent:local");
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -100,11 +114,13 @@ export default function ProjectWizard({
   const [repoHasNext, setRepoHasNext] = useState(false);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [selected, setSelected] = useState<number[]>([]);
+  const [repositoryCache, setRepositoryCache] = useState<Record<number, ConnectionRepository>>({});
+  const repositoryRequest = useRef(0);
   const [targets, setTargets] = useState<Record<number, string>>({});
   const [name, setName] = useState("");
   const [metaRef, setMetaRef] = useState("main");
   const [autoMerge, setAutoMerge] = useState(false);
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(initialProject?.id || "");
   const [runtime, setRuntime] = useState<{
     available: boolean;
     opencode: { installed: boolean; configured: boolean; providers: string[] | null };
@@ -122,7 +138,6 @@ export default function ProjectWizard({
   const initRef = useRef<Initialization | null>(null);
   initRef.current = init;
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [enabling, setEnabling] = useState(false);
   const tokenRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -137,18 +152,19 @@ export default function ProjectWizard({
   }, []);
 
   const selectedRepos = useMemo(
-    () => repos.filter((r) => selected.includes(r.id)),
-    [repos, selected],
+    () => selected.map((id) => repositoryCache[id]).filter(Boolean),
+    [repositoryCache, selected],
   );
   const layout = useMemo(() => selectionLayout(selectedRepos), [selectedRepos]);
 
   const loadRepos = useCallback(
     async (id: string, query: string, page: number) => {
+      const request = ++repositoryRequest.current;
       setLoadingRepos(true);
       setError("");
       try {
         const result = await api<{
-          projects: ConnectionRepository[] | null;
+          projects: RepositoryResponse[] | null;
           page: number;
           hasNext: boolean;
         }>(
@@ -160,13 +176,25 @@ export default function ProjectWizard({
             page +
             "&perPage=50",
         );
-        setRepos(result.projects || []);
+        if (request !== repositoryRequest.current) return;
+        const repositories = (result.projects || []).map((repo): ConnectionRepository => ({
+          id: repo.id,
+          name: repo.name,
+          pathWithNamespace: repo.path_with_namespace,
+          defaultBranch: repo.default_branch || "",
+          httpUrlToRepo: repo.http_url_to_repo,
+          webUrl: repo.web_url,
+          archived: repo.archived,
+          description: repo.description || "",
+        }));
+        setRepos(repositories);
+        setRepositoryCache((old) => ({ ...old, ...Object.fromEntries(repositories.map((repo) => [repo.id, repo])) }));
         setRepoHasNext(!!result.hasNext);
         setRepoPage(result.page || page);
       } catch (e) {
-        setError((e as Error).message);
+        if (request === repositoryRequest.current) setError((e as Error).message);
       } finally {
-        setLoadingRepos(false);
+        if (request === repositoryRequest.current) setLoadingRepos(false);
       }
     },
     [],
@@ -381,6 +409,7 @@ export default function ProjectWizard({
       );
       setInit(started);
       setStep(4);
+      window.location.hash = `/projects/${encodeURIComponent(saved.id)}/initialization`;
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -406,6 +435,7 @@ export default function ProjectWizard({
       // Poll only while the job can still progress. A pending question or a
       // terminal state must not be overwritten by another poll.
       const status = initRef.current?.status;
+      if (initRef.current?.publication?.status === "pending") { void tick(); return; }
       if (
         status === "ready" ||
         status === "cancelled" ||
@@ -457,28 +487,6 @@ export default function ProjectWizard({
     }
   }
 
-  async function enableProject() {
-    if (!projectId) return;
-    setEnabling(true);
-    setError("");
-    try {
-      const current = await api<Project>(
-        "/projects/" + encodeURIComponent(projectId),
-      );
-      const updated = await api<Project>(
-        "/projects/" + encodeURIComponent(projectId),
-        "PUT",
-        { ...current, enabled: true },
-      );
-      onSaved?.(updated);
-      onOpenProject(updated.id);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setEnabling(false);
-    }
-  }
-
   const canLeaveConnection = !!connectionId;
   const canLeaveRepos = selected.length > 0;
   const canLeaveConfirm =
@@ -491,16 +499,15 @@ export default function ProjectWizard({
       </a>
       <header className="page-head setup-heading">
         <div>
-          <div className="eyebrow">NEW PROJECT</div>
-          <h1>连接仓库，配置 OpenCode，自动初始化</h1>
+          <div className="eyebrow">{initialProject ? "PROJECT INITIALIZATION" : "NEW PROJECT"}</div>
+          <h1>{initialProject ? initialProject.name + " · 初始化" : "连接仓库，配置 OpenCode，自动初始化"}</h1>
           <p>
-            只需填写 GitLab 地址与 Access Token；系统会读取真实仓库信息并托管
-            Meta-Repo。
+            {initialProject ? "离开页面不会中断初始化；可随时从项目列表或编辑页返回，查看进度并继续处理。" : "只需填写 GitLab 地址与 Access Token；系统会读取真实仓库信息并托管 Meta-Repo。"}
           </p>
         </div>
-        <span className="status paused">未保存</span>
+        <span className="status paused">{initialProject ? "进度已保存" : "未保存"}</span>
       </header>
-      <nav className="setup-steps" aria-label="配置步骤">
+      {!initialProject && <nav className="setup-steps" aria-label="配置步骤">
         {stepList.map((item, index) => (
           <button
             type="button"
@@ -513,7 +520,7 @@ export default function ProjectWizard({
             {item.label}
           </button>
         ))}
-      </nav>
+      </nav>}
       <ErrorBox error={error} />
 
       {step === 0 && (
@@ -621,7 +628,7 @@ export default function ProjectWizard({
             </span>
           </div>
           <div className="panel-padding">
-            <div className="wizard-search">
+            <form className="wizard-search" onSubmit={(event) => { event.preventDefault(); void loadRepos(connectionId, repoQuery, 1); }}>
               <input
                 value={repoQuery}
                 onChange={(e) => setRepoQuery(e.target.value)}
@@ -629,13 +636,13 @@ export default function ProjectWizard({
                 aria-label="搜索仓库"
               />
               <button
-                type="button"
-                onClick={() => void loadRepos(connectionId, repoQuery, 1)}
+                type="submit"
                 disabled={loadingRepos}
               >
                 {loadingRepos ? "搜索中…" : "搜索"}
               </button>
-            </div>
+            </form>
+            <p className="wizard-selection-hint" role="status">已选 {selected.length} 个仓库 · 点击整行勾选，翻页和搜索会保留选择</p>
             {repos.length === 0 && !loadingRepos && (
               <div className="repository-empty">
                 <strong>没有匹配的仓库</strong>
@@ -653,13 +660,15 @@ export default function ProjectWizard({
                     <label>
                       <input
                         type="checkbox"
+                        aria-label={"选择仓库 " + repo.pathWithNamespace}
                         checked={checked}
                         onChange={() => toggleRepo(repo)}
                       />
-                      <span>
+                      <span className="wizard-repo-info">
                         <strong>{repo.name}</strong>
+                        <small>{repo.pathWithNamespace}</small>
                         <small>
-                          {repo.pathWithNamespace} · 默认分支{" "}
+                          默认分支{" "}
                           {repo.defaultBranch || "未设置"}
                           {repo.archived ? " · 已归档" : ""}
                         </small>
@@ -929,8 +938,7 @@ export default function ProjectWizard({
             <div>
               <h2>自动初始化</h2>
               <p>
-                系统创建受管 Meta-Repo，并在只读分析副本上运行初始化 Agent；
-                验证命令在独立的可写副本中执行。
+                系统只读取仓库静态内容，创建 Meta-Repo 并生成项目说明；不执行业务代码、不安装依赖、不构建或测试。
               </p>
             </div>
             <span
@@ -963,7 +971,7 @@ export default function ProjectWizard({
                     分析完成
                   </li>
                   <li className={init.readyForTasks ? "done" : ""}>
-                    可以接收开发任务
+                    Meta 仓库已初始化
                   </li>
                 </ol>
                 {init.error && (
@@ -986,7 +994,7 @@ export default function ProjectWizard({
                 )}
                 {init.verification && init.verification.length > 0 && (
                   <div className="wizard-verification">
-                    <h3>验证结果</h3>
+                    <h3>历史验证记录（静态初始化不再执行）</h3>
                     {init.verification.map((item, index) => (
                       <div
                         key={item.name + index}
@@ -1030,6 +1038,7 @@ export default function ProjectWizard({
                     </button>
                   </div>
                 )}
+                {init.status === "ready" && <MetaPublication projectId={projectId} init={init} onChange={setInit} />}
                 <div className="actions wizard-actions">
                   {(init.status === "running" ||
                     init.status === "pending") && (
@@ -1046,22 +1055,20 @@ export default function ProjectWizard({
                       重试初始化
                     </button>
                   )}
-                  {init.status === "ready" && (
-                    <button
-                      type="button"
-                      className="primary"
-                      disabled={enabling}
-                      onClick={() => void enableProject()}
-                    >
-                      {enabling ? "正在启用…" : "启用项目"}
-                    </button>
+                  {(init.status === "cancelled" || init.status === "none") && (
+                    <button type="button" onClick={async () => {
+                      try {
+                        setError("");
+                        setInit(await api<Initialization>(`/projects/${encodeURIComponent(projectId)}/initialization`, "POST"));
+                      } catch (e) { setError((e as Error).message); }
+                    }}>重新开始初始化</button>
                   )}
                   {projectId && (
                     <button
                       type="button"
                       onClick={() => onOpenProject(projectId)}
                     >
-                      查看/编辑项目说明
+                      返回项目设置
                     </button>
                   )}
                 </div>

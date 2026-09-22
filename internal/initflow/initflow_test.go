@@ -235,8 +235,8 @@ func TestFullManagedFlow(t *testing.T) {
 	if len(f.clones) == 0 || f.clones[0] != "svc:sha-dev" {
 		t.Fatalf("clone did not use the pinned revision: %v", f.clones)
 	}
-	if len(f.runs) != 1 || f.runs[0] != "go test ./..." {
-		t.Fatalf("verification not executed in the copy: %v", f.runs)
+	if len(f.runs) != 0 {
+		t.Fatalf("static initialization executed commands: %v", f.runs)
 	}
 	body, err := f.m.Managed.ReadFile(context.Background(), "p1", "main", "PROJECT.md")
 	if err != nil || !strings.Contains(string(body), "Demo") {
@@ -257,11 +257,11 @@ func TestFullManagedFlow(t *testing.T) {
 		}
 	}
 	copied := filepath.Join(f.m.DataDir, "initializations", "p1", "verify", "services", "svc", "README.md")
-	if _, err := os.Stat(copied); err != nil {
-		t.Fatalf("writable verification copy missing: %v", err)
+	if _, err := os.Stat(copied); !os.IsNotExist(err) {
+		t.Fatalf("static initialization created a verification workspace: %v", err)
 	}
-	if saved := f.repo.projects["p1"]; saved.Integration.ComposeFile != "integration/compose.yaml" || len(saved.Integration.Checks) != 1 {
-		t.Fatalf("integration.json was not applied: %+v", saved.Integration)
+	if saved := f.repo.projects["p1"]; saved.Integration.ComposeFile != "" {
+		t.Fatalf("static initialization changed task acceptance settings: %+v", saved.Integration)
 	}
 }
 
@@ -321,22 +321,25 @@ func TestBlockedCancelAndRetry(t *testing.T) {
 	}
 }
 
-func TestUnverifiedResultsAreMarkedIncomplete(t *testing.T) {
+func TestStaticInitializationDoesNotRequireVerification(t *testing.T) {
 	t.Run("failing command", func(t *testing.T) {
 		f := newFixture(t)
 		f.agents.onStart = readyAgent(true)
-		f.m.Runner = func(context.Context, string, []string) (int, string, error) { return 1, "boom", nil }
+		f.m.Runner = func(context.Context, string, []string) (int, string, error) {
+			t.Fatal("business command executed during static initialization")
+			return 1, "boom", nil
+		}
 		init := f.drive(t, 12)
-		if init.Status != domain.InitBlocked || init.ReadyForTasks || len(init.Verification) != 1 || init.Verification[0].Passed {
-			t.Fatalf("failing verification was not blocked: %+v", init)
+		if init.Status != domain.InitReady || !init.AnalysisComplete || len(init.Verification) != 0 {
+			t.Fatalf("static analysis did not complete without running commands: %+v", init)
 		}
 	})
 	t.Run("no command identified", func(t *testing.T) {
 		f := newFixture(t)
 		f.agents.onStart = readyAgent(false)
 		init := f.drive(t, 12)
-		if init.Status != domain.InitBlocked || init.ReadyForTasks || len(init.Verification) != 1 || !init.Verification[0].DryRun {
-			t.Fatalf("missing verification was not blocked as incomplete: %+v", init)
+		if init.Status != domain.InitReady || !init.AnalysisComplete || len(init.Verification) != 0 {
+			t.Fatalf("missing verification incorrectly blocked static initialization: %+v", init)
 		}
 	})
 }

@@ -257,7 +257,7 @@ export default function App() {
               <RuntimeSettings />
             </Suspense>
           ) : projectPage ? (
-            <Projects key={route} id={parts[2]} />
+            <Projects key={route} id={parts[2]} initialization={parts[3] === "initialization"} />
           ) : parts[1] === "tasks" && parts[2] ? (
             <TaskDetail key={route} id={decodeURIComponent(parts[2])} />
           ) : (
@@ -1029,7 +1029,7 @@ function TaskDetail({ id }: { id: string }) {
     </>
   );
 }
-function Projects({ id }: { id?: string }) {
+function Projects({ id, initialization }: { id?: string; initialization?: boolean }) {
   const [projects, setProjects] = useState<Project[]>([]),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
@@ -1062,6 +1062,11 @@ function Projects({ id }: { id?: string }) {
     );
   if (id) {
     const p = projects.find((p) => p.id === decodeURIComponent(id));
+    if (p && initialization && p.metaMode === "managed") return (
+      <Suspense fallback={<div className="loading">正在加载初始化进度…</div>}>
+        <ProjectWizard initialProject={p} onOpenProject={(project) => go(`/projects/${encodeURIComponent(project)}`)} />
+      </Suspense>
+    );
     return p ? (
       <ProjectEditor
         key={p.id}
@@ -1121,6 +1126,7 @@ function Projects({ id }: { id?: string }) {
                 <span>{p.integration?.checks?.length || 0} 项检查</span>
               </div>
               <div className="form-actions">
+                {p.metaMode === "managed" && <a className="button" href={`#/projects/${encodeURIComponent(p.id)}/initialization`}>查看初始化进度</a>}
                 <button
                   disabled={checking === p.id}
                   onClick={async () => {

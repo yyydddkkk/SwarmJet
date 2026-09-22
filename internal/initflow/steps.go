@@ -180,12 +180,7 @@ func (m *Manager) analyze(ctx context.Context, init domain.Initialization, proje
 	init.Reports = reports
 	init.MetaSHA = sha
 	init.AnalysisComplete = true
-	init.Progress = 65
-	init.Stage = "verify"
-	init.Status = domain.InitRunning
-	init.Error = ""
-	init.Message = "分析完成，开始验证构建与测试"
-	return m.save(ctx, init, project)
+	return m.completeStatic(ctx, init, project)
 }
 
 // prepareAnalysis clones every registered repository at its pinned commit into
@@ -235,7 +230,11 @@ func (m *Manager) gitEnv(project domain.Project) []string {
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(m.DataDir, "git-home"), "LANG=C", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:http:ssh:file"}
 	if project.ID != "" {
 		if token, err := m.projectCredential(project); err == nil && token != "" {
-			env = append(env, "GITLAB_TOKEN="+token, "GIT_ASKPASS=/usr/local/bin/swarmjet-askpass")
+			askpass := os.Getenv("SWARMJET_GIT_ASKPASS")
+			if askpass == "" {
+				askpass = "/usr/local/bin/swarmjet-askpass"
+			}
+			env = append(env, "GITLAB_TOKEN="+token, "GIT_ASKPASS="+askpass)
 		}
 	}
 	return env
@@ -379,127 +378,23 @@ func readVerificationSpec(generated string) (verificationSpec, bool, error) {
 	return spec, present, nil
 }
 
-// verify runs the analyzed build/test commands in a separate writable copy of
-// the pinned revisions. Missing commands and a missing isolated runtime block
-// the verification instead of silently passing; a failed run stays retryable.
+// verify handles persisted jobs from the old initialization flow without
+// executing their generated commands.
 func (m *Manager) verify(ctx context.Context, init domain.Initialization, project domain.Project) (domain.Initialization, error) {
-	generated := filepath.Join(m.initDir(project.ID), "generated")
-	spec, present, err := readVerificationSpec(generated)
-	if err != nil {
-		init.Status = domain.InitBlocked
-		init.Error = err.Error()
-		return m.save(ctx, init, project)
-	}
-	// Publish any analyzed integration configuration even when verification is
-	// blocked so an operator can review and complete it. Readiness is taken from
-	// the persisted project so a manually configured integration also counts.
-	m.applyIntegration(ctx, project, spec)
-	// Readiness requires the referenced compose file to exist at the pinned Meta
-	// commit with valid services for every check, not just non-empty fields.
-	integrationReady := false
-	if current, err := m.Store.Project(ctx, project.ID); err == nil {
-		integrationReady = m.integrationIsUsable(current)
-	}
-	if !present || len(spec.Commands) == 0 {
-		init.AnalysisComplete = true
-		init.ReadyForTasks = false
-		init.Progress = 100
-		init.Status = domain.InitBlocked
-		init.Error = "分析未提供可执行的构建/测试命令"
-		init.Message = "项目说明已保存，但没有识别到可执行的构建/测试命令；请补充验收检查或调整后重试。"
-		init.Verification = []domain.InitVerification{{Name: "verification", Passed: false, DryRun: true, Report: init.Error}}
-		return m.save(ctx, init, project)
-	}
-	if m.Runner == nil && m.VerifyImage == "" {
-		init.AnalysisComplete = true
-		init.ReadyForTasks = false
-		init.Progress = 100
-		init.Status = domain.InitBlocked
-		init.Error = errVerificationUnavailable.Error()
-		init.Message = "已阻断验证：未配置隔离验证环境（INIT_VERIFY_IMAGE）。项目说明已保存，请在部署中配置隔离镜像后重试。"
-		init.Verification = []domain.InitVerification{{Name: "verification", Passed: false, DryRun: true, Report: init.Error}}
-		return m.save(ctx, init, project)
-	}
-	// Remove any verification container left behind by a crash or timeout.
-	m.cleanupVerifyContainers(project.ID)
-	verifyRoot := filepath.Join(m.initDir(project.ID), "verify")
-	if err = os.RemoveAll(verifyRoot); err != nil {
-		init.Status = domain.InitBlocked
-		init.Error = err.Error()
-		return m.save(ctx, init, project)
-	}
-	for _, repo := range project.Repositories {
-		if repo.Path == "." || repo.Path == "" {
-			continue
-		}
-		src := filepath.Join(m.initDir(project.ID), "analysis", filepath.FromSlash(repo.Path))
-		if err = copyTree(ctx, src, filepath.Join(verifyRoot, filepath.FromSlash(repo.Path))); err != nil {
-			init.Status = domain.InitBlocked
-			init.Error = "准备验证副本失败：" + err.Error()
-			return m.save(ctx, init, project)
-		}
-	}
-	results := []domain.InitVerification{}
-	allPassed := true
-	for index, command := range spec.Commands {
-		name := strings.TrimSpace(command.Name)
-		if name == "" {
-			name = strings.Join(command.Argv, " ")
-		}
-		if len(command.Argv) == 0 || strings.TrimSpace(command.Argv[0]) == "" {
-			results = append(results, domain.InitVerification{Name: name, Command: command.Argv, Passed: false, ExitCode: -1, Report: "验证命令为空"})
-			allPassed = false
-			continue
-		}
-		dir := verifyRoot
-		if p := strings.TrimSpace(command.Path); p != "" {
-			if !safeRelative(p) {
-				results = append(results, domain.InitVerification{Name: name, Command: command.Argv, Passed: false, ExitCode: -1, Report: "验证路径不安全：" + p})
-				allPassed = false
-				continue
-			}
-			dir = filepath.Join(verifyRoot, filepath.FromSlash(p))
-		}
-		if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
-			results = append(results, domain.InitVerification{Name: name, Command: command.Argv, Passed: false, ExitCode: -1, Report: "验证目录不存在：" + command.Path})
-			allPassed = false
-			continue
-		}
-		timeout := m.VerifyTimeout
-		if timeout <= 0 {
-			timeout = 10 * time.Minute
-		}
-		runCtx, cancel := context.WithTimeout(ctx, timeout)
-		code, output, runErr := m.runCommand(runCtx, project.ID, index, dir, command.Argv)
-		cancel()
-		passed := runErr == nil && code == 0
-		allPassed = allPassed && passed
-		report := output
-		if runErr != nil {
-			report = runErr.Error()
-		}
-		results = append(results, domain.InitVerification{Name: name, Command: command.Argv, Passed: passed, ExitCode: code, Report: truncate(report, 4000)})
-	}
-	init.Verification = results
-	init.AnalysisComplete = true
+	return m.completeStatic(ctx, init, project)
+}
+
+func (m *Manager) completeStatic(ctx context.Context, init domain.Initialization, project domain.Project) (domain.Initialization, error) {
+	init.Status = domain.InitReady
+	init.Stage = "complete"
 	init.Progress = 100
+	init.AnalysisComplete = true
+	// Initialization readiness means that the Meta repository exists. Actual
+	// task execution still requires the project's separate execution contract.
+	init.ReadyForTasks = true
 	init.Error = ""
-	switch {
-	case !allPassed:
-		init.Status = domain.InitBlocked
-		init.ReadyForTasks = false
-		init.Error = "验证命令未全部通过"
-		init.Message = "项目说明已保存，但验证命令未全部通过；请查看结果并修正后重试。"
-	case !integrationReady:
-		init.Status = domain.InitBlocked
-		init.ReadyForTasks = false
-		init.Error = "缺少有依据的联调配置"
-		init.Message = "验证已通过，但缺少联调 compose 与必需检查；请补充后重试或手动配置。"
-	default:
-		init.Status = domain.InitReady
-		init.ReadyForTasks = true
-		init.Message = "初始化完成：说明与验证均已通过，请确认后启用项目。"
-	}
+	init.Verification = nil
+	init.Message = "Meta 仓库初始化完成：项目说明已保存。初始化仅做静态分析，不再执行业务代码、安装依赖或运行测试。"
 	return m.save(ctx, init, project)
 }
 
@@ -550,9 +445,11 @@ func (m *Manager) dockerRun(ctx context.Context, projectID string, index int, di
 		"--mount", "type=bind,src=" + dir + ",dst=" + dir,
 		"--workdir", dir,
 		"--env", "HOME=/tmp",
+		// Verification runs its own executable, not the image's agent entrypoint.
+		"--entrypoint", argv[0],
 		m.VerifyImage,
 	}
-	args = append(args, argv...)
+	args = append(args, argv[1:]...)
 	output, runErr := m.runDocker(ctx, args...)
 	if runErr != nil {
 		if ctx.Err() != nil {

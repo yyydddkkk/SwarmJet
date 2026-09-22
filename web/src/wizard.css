@@ -199,3 +199,35 @@
     align-items: flex-start;
   }
 }
+
+/* Keep checkbox dimensions independent of the shared text-input styles. */
+.project-setup input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  flex: 0 0 18px;
+  padding: 0;
+  margin: 2px 0;
+  accent-color: var(--accent, #3b6ea5);
+  cursor: pointer;
+}
+.wizard-repo label {
+  min-height: 76px;
+  justify-content: flex-start;
+  padding: 14px 16px;
+}
+.wizard-repo:hover { background: rgba(59, 110, 165, 0.06); }
+.wizard-repo.selected { background: rgba(59, 110, 165, 0.12); }
+.wizard-repo:focus-within { outline: 2px solid var(--accent, #3b6ea5); outline-offset: -2px; }
+.wizard-repo-info { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.wizard-repo-info strong { display: block; }
+.wizard-repo-info small { margin-top: 3px; }
+.wizard-search input { min-width: 0; }
+.wizard-search button { flex-shrink: 0; }
+.wizard-selection-hint { color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+.wizard-toggle label > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+.meta-publication { margin-top: 24px; padding-top: 20px; border-top: 1px solid #d5dce5; }
+.meta-publication .field { display: grid; gap: 8px; margin: 14px 0; }
+.meta-publication p, .meta-publication a { overflow-wrap: anywhere; }

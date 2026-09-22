@@ -44,22 +44,22 @@ func writingAgent(writeIntegration bool, composeServices []string) func(domain.A
 	}
 }
 
-// Readiness must inspect the committed compose file, not just non-empty fields.
-func TestIntegrationReadinessRequiresCommittedComposeFile(t *testing.T) {
+// Static initialization is independent of the task execution environment.
+func TestStaticInitializationDoesNotRequireCompose(t *testing.T) {
 	t.Run("file missing", func(t *testing.T) {
 		f := newFixture(t)
 		f.agents.onStart = writingAgent(true, nil)
 		init := f.drive(t, 12)
-		if init.Status != domain.InitBlocked || init.ReadyForTasks {
-			t.Fatalf("missing compose file accepted: %+v", init)
+		if init.Status != domain.InitReady || !init.AnalysisComplete || len(f.runs) != 0 {
+			t.Fatalf("missing compose file blocked static initialization: %+v", init)
 		}
 	})
 	t.Run("service missing", func(t *testing.T) {
 		f := newFixture(t)
 		f.agents.onStart = writingAgent(true, []string{"other"})
 		init := f.drive(t, 12)
-		if init.Status != domain.InitBlocked || init.ReadyForTasks {
-			t.Fatalf("missing compose service accepted: %+v", init)
+		if init.Status != domain.InitReady || !init.AnalysisComplete || len(f.runs) != 0 {
+			t.Fatalf("missing compose service blocked static initialization: %+v", init)
 		}
 	})
 	t.Run("complete", func(t *testing.T) {

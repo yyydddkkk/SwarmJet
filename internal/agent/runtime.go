@@ -358,6 +358,11 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 	// OpenCode creates startup files (including .gitignore) in XDG_CONFIG_HOME.
 	// This is a private task/role copy; the shared profile remains unmounted.
 	args = append(args, "--mount", bindMount(home, false), "--env", "HOME="+home, "--env", "XDG_DATA_HOME="+home, "--mount", bindMount(config, false), "--env", "XDG_CONFIG_HOME="+config)
+	if req.Role == "init" {
+		// Static initialization may read sources and write generated documents,
+		// but cannot run repository commands or delegate execution.
+		args = append(args, "--env", `OPENCODE_CONFIG_CONTENT={"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow","list":"allow","edit":"allow","write":"allow","external_directory":"allow","bash":"deny","task":"deny","skill":"deny"}}`)
+	}
 	// --file is variadic: place the message first so it cannot become a second filename.
 	args = append(args, "--entrypoint", "opencode", req.Config.Image, "run", "Execute the instructions in the attached task file. Write the required result artifact.", "--format", "json", "--auto", "--dir", workspace, "-m", req.Config.Model, "--file", promptPath)
 	if req.SessionID != "" {
