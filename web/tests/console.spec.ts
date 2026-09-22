@@ -115,7 +115,7 @@ const task: Task = {
   createdAt: "2026-09-21T01:00:00Z",
   updatedAt: "2026-09-21T02:00:00Z",
 };
-async function mock(page: Page, loggedIn = true) {
+async function mock(page: Page, loggedIn = true, taskList: Task[] = [task]) {
   let saved = structuredClone(project);
   let signedIn = loggedIn;
   const commands: unknown[] = [];
@@ -143,7 +143,14 @@ async function mock(page: Page, loggedIn = true) {
       saved = { ...request.postDataJSON(), version: 2 };
       return json(saved);
     }
-    if (path === "/api/projects") return json([saved]);
+    if (path === "/api/projects")
+      return json(
+        Array.from(
+          new Map(
+            [saved, ...taskList.map((t) => t.project)].map((p) => [p.id, p]),
+          ).values(),
+        ),
+      );
     if (path.endsWith("/commands")) {
       commands.push(request.postDataJSON());
       return json({ error: "审查版本已变化，请重新确认" }, 409);
@@ -163,10 +170,13 @@ async function mock(page: Page, loggedIn = true) {
         body: "agent: verification complete",
         contentType: "text/plain",
       });
-    if (path === "/api/tasks/task-001") return json(task);
+    const requestedTask = taskList.find(
+      (t) => path === `/api/tasks/${encodeURIComponent(t.id)}`,
+    );
+    if (requestedTask) return json(requestedTask);
     if (path === "/api/tasks")
       return json(
-        method === "POST" ? task : [task],
+        method === "POST" ? task : taskList,
         method === "POST" ? 202 : 200,
       );
     return json({ error: "not found" }, 404);
@@ -194,6 +204,7 @@ test("login, task filtering, exact-digest approval errors, logs and logout", asy
   expect(state.commands).toEqual([
     expect.objectContaining({ kind: "approve", digest: "digest-1" }),
   ]);
+  await page.getByRole("button", { name: "执行记录", exact: true }).click();
   await page.getByRole("button", { name: "查看日志" }).click();
   await expect(page.getByRole("dialog")).toContainText(
     "agent: verification complete",
@@ -257,3 +268,174 @@ test("create task dialog supports keyboard, narrow screens have no page overflow
   ).toBe(true);
   await expect(page.getByRole("button", { name: "退出登录" })).toBeVisible();
 });
+
+test("workbench separates intervention states and combines project, stage and text filters", async ({
+  page,
+}) => {
+  const states = [
+    "developing",
+    "waiting_approval",
+    "waiting_manual_merge",
+    "partial_merge",
+    "blocked",
+    "developing",
+    "completed",
+    "cancelled",
+  ];
+  const list = states.map((stage, i): Task => ({
+    ...structuredClone(task),
+    id: `task-${i}`,
+    stage,
+    paused: i === 5 || i === 7,
+    issue: { ...task.issue, iid: 100 + i, title: `工作台任务 ${i}` },
+    project:
+      i === 0 ? { ...project, id: "payments", name: "交易服务" } : project,
+  }));
+  await mock(page, true, list);
+  await page.goto("/");
+  await expect(page.locator(".task-list tbody tr")).toHaveCount(8);
+  await expect(page.locator(".attention-card")).toHaveCount(4);
+  await expect(
+    page.getByRole("button", { name: "需要处理 5", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "进行中 1", exact: true }).click();
+  await expect(page.locator(".task-list tbody tr")).toHaveCount(1);
+  await expect(page.locator(".task-list")).toContainText("工作台任务 0");
+  await page.getByRole("button", { name: "已结束 2", exact: true }).click();
+  await expect(page.locator(".task-list tbody tr")).toHaveCount(2);
+  await expect(page.locator(".task-list .status.cancelled")).toHaveText(
+    "已取消",
+  );
+  await page
+    .getByRole("button", { name: "查看全部 5 项", exact: true })
+    .click();
+  await expect(page.locator(".task-list tbody tr")).toHaveCount(5);
+  await page.getByRole("button", { name: "全部任务 8", exact: true }).click();
+  await page.getByLabel("筛选任务阶段").selectOption("waiting_manual_merge");
+  await expect(page.locator(".task-list tbody tr")).toHaveCount(1);
+  await page.getByLabel("搜索任务").fill("102");
+  await expect(page.locator(".task-list tbody tr")).toHaveCount(1);
+  await page.getByLabel("搜索任务").fill("不存在");
+  await expect(page.getByText("没有符合筛选条件的任务。")).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "按项目查看任务" })
+    .getByRole("link", { name: "交易服务" })
+    .click();
+  await expect(page.getByLabel("筛选项目")).toHaveValue("payments");
+  await expect(page.locator(".task-list tbody tr")).toHaveCount(1);
+  await expect(page.locator(".attention-card")).toHaveCount(0);
+});
+
+for (const stage of [
+  "blocked",
+  "waiting_manual_merge",
+  "partial_merge",
+  "cancelled",
+]) {
+  test(`task detail preserves ${stage} state and available actions`, async ({
+    page,
+  }) => {
+    await mock(page, true, [{ ...task, stage }]);
+    await page.goto("/#/tasks/task-001");
+    await expect(
+      page.getByRole("heading", { name: task.issue.title, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "批准此版本", exact: true }),
+    ).toHaveCount(0);
+    if (stage === "cancelled") {
+      await expect(
+        page.getByRole("button", { name: "暂停任务", exact: true }),
+      ).toHaveCount(0);
+    } else {
+      await expect(
+        page.getByRole("button", { name: "暂停任务", exact: true }),
+      ).toBeVisible();
+      await expect(page.locator(".task-guidance")).toBeVisible();
+    }
+    if (stage === "blocked")
+      await expect(
+        page.getByRole("button", { name: "重试任务", exact: true }),
+      ).toBeVisible();
+    if (stage === "blocked" || stage === "cancelled")
+      await expect(
+        page.locator('.stage-track [aria-current="step"]'),
+      ).toHaveCount(0);
+    await page.getByRole("button", { name: "执行记录", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "查看日志", exact: true }),
+    ).toBeVisible();
+  });
+}
+
+test("commands use the real API without optimistic completion and note draft survives view changes", async ({
+  page,
+}) => {
+  await mock(page);
+  const received: Record<string, unknown>[] = [];
+  await page.route("**/api/tasks/task-001/commands", (route) => {
+    received.push(route.request().postDataJSON());
+    return route.fulfill({ status: 202, json: { accepted: true } });
+  });
+  await page.goto("/#/tasks/task-001");
+  await page.getByRole("button", { name: "批准此版本", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("指令已提交");
+  expect(received[0]).toMatchObject({ kind: "approve", digest: "digest-1" });
+  await expect(
+    page.getByRole("button", { name: "批准此版本", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "需求与说明", exact: true }).click();
+  await page.getByLabel("补充说明", { exact: true }).fill("保留现有接口兼容性");
+  await page.getByRole("button", { name: "交付结果", exact: true }).click();
+  await page.getByRole("button", { name: "需求与说明", exact: true }).click();
+  await expect(page.getByLabel("补充说明", { exact: true })).toHaveValue(
+    "保留现有接口兼容性",
+  );
+  await page.getByRole("button", { name: "提交说明", exact: true }).click();
+  await expect.poll(() => received.length).toBe(2);
+  expect(received[1]).toMatchObject({
+    kind: "note",
+    text: "保留现有接口兼容性",
+  });
+});
+
+for (const width of [390, 1440]) {
+  test(`workbench layout at ${width}`, async ({ page }, testInfo) => {
+    await mock(page, true, [
+      task,
+      {
+        ...task,
+        id: "task-002",
+        stage: "developing",
+        issue: { ...task.issue, title: "支持按项目筛选执行记录" },
+      },
+    ]);
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/");
+    await expect(page.locator(".task-list tbody tr")).toHaveCount(2);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath("tasks.png"),
+      fullPage: true,
+    });
+    await page
+      .getByRole("link", { name: task.issue.title, exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "批准此版本", exact: true }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath("detail.png"),
+      fullPage: true,
+    });
+  });
+}

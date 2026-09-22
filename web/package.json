@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "design": "vite --host 127.0.0.1 --port 5275 --strictPort --open '/?prototype=workbench#/tasks'",
     "dev": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
