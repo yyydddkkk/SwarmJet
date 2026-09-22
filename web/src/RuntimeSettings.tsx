@@ -1,3 +1,4 @@
+import { TerminalWindow } from "./TerminalWindow";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -155,6 +156,7 @@ export default function RuntimeSettings() {
     if (!host.current || session.current || !status?.available) return;
     setTerminalError("");
     setTerminalNotice("");
+    setCopyNotice("");
     setConnection("connecting");
     let pendingTerminal: Terminal | null = null;
     let pendingSocket: WebSocket | null = null;
@@ -399,6 +401,8 @@ export default function RuntimeSettings() {
         })}
       </div>
 
+      <TerminalWindow title="配置终端" available={!!status?.available && !loading}
+        onOpen={connect} onClose={() => disconnect()}>
       <section
         className="panel runtime-terminal-panel"
         aria-labelledby="runtime-terminal-title"
@@ -424,7 +428,7 @@ export default function RuntimeSettings() {
                 disabled={!status?.available || loading}
                 onClick={connect}
               >
-                打开配置终端
+                重新连接
               </button>
             ) : (
               <button onClick={() => disconnect()}>断开连接</button>
@@ -467,7 +471,7 @@ export default function RuntimeSettings() {
               <strong>
                 {connection === "connecting"
                   ? "正在连接执行器…"
-                  : "准备好后，打开配置终端"}
+                  : "准备好后，重新连接"}
               </strong>
               <p>
                 {!status?.available && status
@@ -479,7 +483,7 @@ export default function RuntimeSettings() {
         </div>
         <div className="runtime-terminal-footer">
           <span role="status">
-            {terminalNotice ||
+            {copyNotice || terminalNotice ||
               "选中终端文字可复制登录链接。终端内容仅保留在当前页面内存中。"}
           </span>
           <button
@@ -493,6 +497,7 @@ export default function RuntimeSettings() {
           </button>
         </div>
       </section>
+      </TerminalWindow>
 
       <section
         className="panel runtime-models-panel"

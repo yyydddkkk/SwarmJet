@@ -16,6 +16,27 @@ import type { Task, TaskEvent, Project, Execution } from "./types";
 import { ProjectEditor } from "./ProjectEditor";
 const RuntimeSettings = lazy(() => import("./RuntimeSettings"));
 const ProjectWizard = lazy(() => import("./ProjectWizard"));
+function Icon({ name }: {
+  name: "tasks" | "projects" | "runtime" | "logout" | "plus" | "search" | "arrow";
+}) {
+  const paths = {
+    tasks: "M8 5h12M8 12h12M8 19h12M3 5h.01M3 12h.01M3 19h.01",
+    projects: "M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z",
+    runtime: "m5 7 5 5-5 5M13 17h6",
+    logout: "M9 4H5v16h4M9 12h12m-5-5 5 5-5 5",
+    plus: "M12 5v14M5 12h14",
+    search: "m16 16 5 5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
+    arrow: "M5 12h14m-6-6 6 6-6 6",
+  };
+  return (
+    <svg className="ui-icon" width="18" height="18" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="1.6"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={paths[name]} />
+    </svg>
+  );
+}
+
 export const stages: Record<string, string> = {
   queued: "排队中",
   waiting_dependencies: "等待依赖",
@@ -204,18 +225,19 @@ export default function App() {
           </span>
         </a>
         <div className="nav-label">工作空间</div>
-        <nav>
+        <nav aria-label="主导航">
           <a
+            aria-current={!projectPage && !runtimePage ? "page" : undefined}
             className={!projectPage && !runtimePage ? "active" : ""}
             href="#/tasks"
           >
-            <span aria-hidden="true">▤</span>任务中心
+            <Icon name="tasks" />任务中心
           </a>
-          <a className={projectPage ? "active" : ""} href="#/projects">
-            <span aria-hidden="true">▦</span>项目配置
+          <a aria-current={projectPage ? "page" : undefined} className={projectPage ? "active" : ""} href="#/projects">
+            <Icon name="projects" />项目配置
           </a>
-          <a className={runtimePage ? "active" : ""} href="#/runtime">
-            <span aria-hidden="true">⌘</span>执行器环境
+          <a aria-current={runtimePage ? "page" : undefined} className={runtimePage ? "active" : ""} href="#/runtime">
+            <Icon name="runtime" />执行器环境
           </a>
         </nav>
         <div className="sidebar-foot">
@@ -236,7 +258,7 @@ export default function App() {
               }
             }}
           >
-            ↪
+            <Icon name="logout" />
           </button>
         </div>
       </aside>
@@ -246,7 +268,7 @@ export default function App() {
             工作空间 <span className="slash">/</span>{" "}
             {runtimePage ? "执行器环境" : projectPage ? "项目配置" : "任务中心"}
           </span>
-          <span className="top-note">AUTONOMOUS WORKSPACE</span>
+          <span className="top-note">SwarmJet / 工作空间</span>
         </header>
         <main id="main" tabIndex={-1}>
           <ErrorBox error={error} />
@@ -390,18 +412,17 @@ function Tasks() {
         .includes(search.toLowerCase()),
   );
   return (
-    <>
+    <div className="tasks-page">
       <div className="page-head">
         <div>
-          <div className="eyebrow">OVERVIEW</div>
           <h1>任务中心</h1>
           <p>追踪自主开发任务，从 Issue 到合并交付。</p>
         </div>
         <button className="primary" onClick={() => setCreate(true)}>
-          ＋ 创建任务
+          <Icon name="plus" /> 创建任务
         </button>
       </div>
-      <div className="metrics">
+      <div className="metrics" aria-label="任务概况">
         {[
           ["全部任务", tasks.length, "工作空间中的所有任务"],
           [
@@ -430,24 +451,28 @@ function Tasks() {
         ].map(([label, value, sub]) => (
           <div className="metric" key={label}>
             <span>{label}</span>
-            <strong>{value}</strong>
+            <strong>{loading ? "—" : value}</strong>
             <small>{sub}</small>
           </div>
         ))}
       </div>
       <ErrorBox error={error} retry={refresh} />
-      <section className="panel">
+      <section className="task-list" aria-label="任务列表">
         <div className="toolbar">
           <h2>
             任务列表 <span className="count">{rows.length}</span>
           </h2>
           <div className="filters">
-            <input
-              aria-label="搜索任务"
-              placeholder="搜索任务或项目…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+            <div className="task-search">
+              <Icon name="search" />
+              <input
+                type="search"
+                aria-label="搜索任务"
+                placeholder="搜索任务或项目…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
             <select
               aria-label="筛选任务阶段"
               value={filter}
@@ -469,7 +494,7 @@ function Tasks() {
             <table>
               <thead>
                 <tr>
-                  <th>任务 / ISSUE</th>
+                  <th>任务</th>
                   <th>项目</th>
                   <th>阶段</th>
                   <th>更新时间</th>
@@ -494,13 +519,13 @@ function Tasks() {
                     <td>
                       <Status task={t} />
                     </td>
-                    <td className="muted">{date(t.updatedAt)}</td>
+                    <td className="muted task-updated">{date(t.updatedAt)}</td>
                     <td>
                       <a
                         aria-label={`查看任务 ${t.issue.title}`}
                         href={`#/tasks/${encodeURIComponent(t.id)}`}
                       >
-                        ↗
+                        <Icon name="arrow" />
                       </a>
                     </td>
                   </tr>
@@ -522,7 +547,7 @@ function Tasks() {
       {create && (
         <CreateTask projects={projects} close={() => setCreate(false)} />
       )}
-    </>
+    </div>
   );
 }
 function CreateTask({

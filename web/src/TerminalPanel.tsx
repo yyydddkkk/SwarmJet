@@ -1,3 +1,4 @@
+import { TerminalWindow } from "./TerminalWindow";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -58,7 +59,10 @@ export function TerminalPanel({
     host.current?.replaceChildren();
   }, []);
 
-  useEffect(() => () => dispose(), [dispose]);
+  useEffect(() => () => {
+    clearTimeout(noticeTimer.current);
+    dispose();
+  }, [dispose]);
 
   const disconnect = useCallback(
     (message = "连接已断开，当前终端内容已清空。") => {
@@ -211,6 +215,8 @@ export function TerminalPanel({
   }
 
   return (
+    <TerminalWindow title="OpenCode 配置终端" available={available}
+      onOpen={connect} onClose={() => disconnect()}>
     <div className="runtime-terminal-panel wizard-terminal">
       <div className="panel-head">
         <div>
@@ -236,7 +242,7 @@ export function TerminalPanel({
               onClick={connect}
               type="button"
             >
-              打开配置终端
+              重新连接
             </button>
           ) : (
             <button onClick={() => disconnect()} type="button">
@@ -286,7 +292,7 @@ export function TerminalPanel({
             <strong>
               {connection === "connecting"
                 ? "正在连接执行器…"
-                : "准备好后，打开配置终端"}
+                : "准备好后，重新连接"}
             </strong>
             <p>打开终端并执行 opencode auth login，完成后再点击“检查并继续”。</p>
           </div>
@@ -311,5 +317,6 @@ export function TerminalPanel({
         {copyNotice}
       </div>
     </div>
+    </TerminalWindow>
   );
 }

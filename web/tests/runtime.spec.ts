@@ -93,7 +93,7 @@ test("terminal sends input without automatic Enter, fits narrow screens and clea
     socket.send(Buffer.from("runtime-ready\r\n$ "));
   });
   await page.goto("/#/runtime");
-  await page.getByRole("button", { name: "打开配置终端" }).click();
+  await page.getByRole("button", { name: "打开终端", exact: true }).click();
   await expect(page.getByRole("button", { name: "断开连接" })).toBeVisible();
   await expect
     .poll(() =>
@@ -152,7 +152,7 @@ test("terminal sends input without automatic Enter, fits narrow screens and clea
   await page.getByRole("button", { name: "断开连接" }).click();
   await expect(page.locator(".xterm")).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "打开配置终端" }),
+    page.getByRole("button", { name: "重新连接", exact: true }),
   ).toBeEnabled();
   expect(sockets).toHaveLength(1);
   expect(
@@ -179,11 +179,11 @@ test("terminal backend errors are visible and reconnect requires another click",
     );
   });
   await page.goto("/#/runtime");
-  await page.getByRole("button", { name: "打开配置终端" }).click();
+  await page.getByRole("button", { name: "打开终端", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("执行器镜像不可用");
   await expect(page.locator(".xterm")).toHaveCount(0);
   expect(connections).toBe(1);
-  await page.getByRole("button", { name: "打开配置终端" }).click();
+  await page.getByRole("button", { name: "重新连接", exact: true }).click();
   await expect.poll(() => connections).toBe(2);
 });
 
@@ -201,16 +201,62 @@ test("leaving runtime closes its socket and returning does not reconnect", async
     socket.send(Buffer.from("temporary-output\r\n"));
   });
   await page.goto("/#/runtime");
-  await page.getByRole("button", { name: "打开配置终端" }).click();
+  await page.getByRole("button", { name: "打开终端", exact: true }).click();
   await expect(page.locator(".xterm-accessibility-tree")).toContainText(
     "temporary-output",
   );
-  await page.getByRole("link", { name: "任务中心", exact: true }).click();
+  await page.evaluate(() => { location.hash = "/tasks"; });
   await expect.poll(() => closed).toBe(1);
   await page.getByRole("link", { name: "执行器环境", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "打开配置终端" }),
+    page.getByRole("button", { name: "打开终端", exact: true }),
   ).toBeEnabled();
   await expect(page.locator(".xterm")).toHaveCount(0);
   expect(connections).toBe(1);
+});
+
+
+test("floating terminal opens on demand, maximizes, preserves Escape and closes cleanly", async ({ page }) => {
+  await runtimeAPI(page);
+  let connections = 0;
+  let closed = 0;
+  const input: string[] = [];
+  const sizes: number[] = [];
+  await page.routeWebSocket("**/api/runtime/terminal", socket => {
+    connections++;
+    socket.onClose(() => closed++);
+    socket.onMessage(raw => {
+      const message = JSON.parse(String(raw));
+      if (message.type === "input") input.push(message.data);
+      if (message.type === "resize") sizes.push(message.rows);
+    });
+    socket.send(Buffer.from("floating-ready\r\n"));
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/#/runtime");
+  await expect(page.getByTestId("runtime-terminal")).not.toBeVisible();
+  expect(connections).toBe(0);
+  const launch = page.getByRole("button", { name: "打开终端", exact: true });
+  await launch.click();
+  const dialog = page.getByRole("dialog", { name: "配置终端", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(page.locator(".xterm-accessibility-tree")).toContainText("floating-ready");
+  const host = await page.getByTestId("runtime-terminal").boundingBox();
+  expect(host!.height).toBeGreaterThan(500);
+  await page.getByLabel("执行器配置终端输入").press("Escape");
+  await expect.poll(() => input.includes("\u001b")).toBe(true);
+  await expect(dialog).toBeVisible();
+  const initialRows = sizes.at(-1)!;
+  await page.getByRole("button", { name: "最大化", exact: true }).click();
+  await expect.poll(() => sizes.at(-1)!).toBeGreaterThan(initialRows);
+  expect(connections).toBe(1);
+  await page.getByRole("button", { name: "还原窗口" }).click();
+  await expect.poll(() => sizes.at(-1)!).toBe(initialRows);
+  await page.getByRole("button", { name: "关闭终端" }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect.poll(() => closed).toBe(1);
+  await expect(launch).toBeFocused();
+  await expect(page.locator(".xterm")).toHaveCount(0);
+  await launch.click();
+  await expect.poll(() => connections).toBe(2);
 });

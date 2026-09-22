@@ -320,3 +320,26 @@ test("wizard stays within a small viewport", async ({ page }) => {
     ),
   ).toBe(true);
 });
+
+
+test("wizard terminal opens in a floating window and releases the session on close", async ({ page }) => {
+  await setupWizard(page);
+  let closed = 0;
+  let connections = 0;
+  await page.routeWebSocket("**/api/runtime/terminal", socket => {
+    connections++;
+    socket.onClose(() => closed++);
+    socket.send(Buffer.from("wizard-ready\r\n"));
+  });
+  await page.goto("/#/projects/new");
+  await advanceToOpenCode(page);
+  await expect(page.getByTestId("wizard-terminal")).not.toBeVisible();
+  expect(connections).toBe(0);
+  await page.getByRole("button", { name: "打开终端", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "OpenCode 配置终端", exact: true })).toBeVisible();
+  await expect(page.locator(".xterm-accessibility-tree")).toContainText("wizard-ready");
+  await page.getByRole("button", { name: "关闭终端" }).click();
+  await expect.poll(() => closed).toBe(1);
+  await expect(page.getByRole("button", { name: "检查并继续" })).toBeVisible();
+  await expect(page.locator(".xterm")).toHaveCount(0);
+});

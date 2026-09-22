@@ -370,3 +370,89 @@
     margin: 14px 17px 0;
   }
 }
+
+.terminal-launcher {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px;
+  margin-bottom: 24px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+.terminal-launcher p { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.terminal-window {
+  --runtime-surface: var(--surface);
+  --runtime-soft: var(--sidebar);
+  --runtime-terminal: #172331;
+  --runtime-terminal-text: #e2e9f3;
+  --runtime-terminal-muted: #a7b6c9;
+  --runtime-terminal-line: #314458;
+  width: min(1440px, calc(100vw - 64px));
+  height: calc(100dvh - 64px);
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 24px 80px #0003;
+  overflow: hidden;
+}
+.terminal-window[open] { display: flex; flex-direction: column; }
+.terminal-window::backdrop { background: #18181855; }
+.terminal-window.is-maximized { width: 100%; height: 100dvh; border-radius: 0; border: 0; }
+.terminal-window-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.terminal-window-bar strong { font-size: 14px; font-weight: 600; }
+.terminal-window-content { flex: 1; min-height: 0; display: flex; }
+.terminal-window .runtime-terminal-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: auto;
+}
+.terminal-window .panel-head { padding: 10px 20px; flex: 0 0 auto; }
+.terminal-window .panel-head h2 { display: none; }
+.terminal-window .panel-head p { margin: 0; }
+.terminal-window .runtime-commands { padding: 10px 20px; flex: 0 0 auto; }
+.terminal-window .runtime-commands > span { display: none; }
+.terminal-window .runtime-commands > div { margin: 0 0 4px; }
+.terminal-window .runtime-terminal-stage { flex: 1; min-height: 180px; padding: 16px; display: flex; }
+.terminal-window .runtime-terminal-host { height: auto; min-height: 0; flex: 1; }
+.terminal-window .runtime-terminal-footer { flex: 0 0 auto; padding: 10px 20px; }
+.terminal-window .runtime-copy-notice:empty { display: none; }
+@media (max-width: 640px) {
+  .terminal-launcher { flex-direction: column; align-items: flex-start; padding: 20px; }
+  .terminal-window { width: 100%; height: 100dvh; border: 0; border-radius: 0; }
+  .terminal-window-bar { padding: 10px 12px; gap: 8px; }
+  .terminal-window-bar .actions { gap: 6px; }
+  .terminal-window-bar button { padding: 8px; min-height: 40px; font-size: 12px; }
+  .terminal-window .panel-head { padding: 8px 12px; }
+  .terminal-window .panel-head > div:first-child { display: none; }
+  .terminal-window .runtime-commands { padding: 8px 12px; }
+  .terminal-window .runtime-commands > div { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .terminal-window .runtime-commands button { flex: 0 0 auto; min-height: 40px; }
+  .terminal-window .runtime-commands > small { display: none; }
+  .terminal-window .runtime-terminal-stage { padding: 10px; }
+  .terminal-window .runtime-terminal-footer { padding: 8px 12px; flex-direction: row; }
+  .terminal-window .runtime-terminal-footer button { min-height: 40px; }
+}
+.terminal-window .panel-head { margin-bottom: 0; }
+.terminal-window .panel-head button { font-size: 12px; border: 1px solid var(--line); }
+.terminal-window .runtime-commands button code { white-space: nowrap; }
