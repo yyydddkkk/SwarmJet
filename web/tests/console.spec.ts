@@ -404,6 +404,74 @@ test("commands use the real API without optimistic completion and note draft sur
   });
 });
 
+test("task terminal follows live Agent output, switches runs, and stops polling on close", async ({ page }) => {
+  const liveTask: Task = {
+    ...task,
+    stage: "developing",
+    executions: {
+      dev: { ...task.executions!.development!, id: "exec-live", status: "running", exitCode: -1 },
+      review: { ...task.executions!.development!, id: "exec-review", status: "succeeded" },
+    },
+  };
+  await mock(page, true, [liveTask]);
+  let liveOutput = '{"type":"text","part":{"text":"开始分析"}}\n';
+  let requests = 0;
+  await page.route("**/api/tasks/task-001/artifacts?**", route => {
+    requests++;
+    const relative = new URL(route.request().url()).searchParams.get("path");
+    return route.fulfill({ status: 200, contentType: "text/plain", body: relative?.includes("exec-review") ? "审查完成\n" : liveOutput });
+  });
+  await page.setViewportSize({ width: 390, height: 740 });
+  await page.goto("/#/tasks/task-001");
+  await page.getByRole("button", { name: "打开终端", exact: true }).click();
+  const terminal = page.getByRole("dialog", { name: "任务终端 · 只读" });
+  await expect(terminal).toBeVisible();
+  await expect(terminal.getByTestId("task-terminal-output")).toContainText("开始分析");
+  await expect(terminal.getByRole("textbox")).toHaveCount(0);
+  await terminal.getByRole("button", { name: "原始日志" }).click();
+  await expect(terminal.getByTestId("task-terminal-output")).toContainText('"part":{"text":"开始分析"}');
+  await terminal.getByRole("button", { name: "易读视图" }).click();
+  const box = await terminal.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  liveOutput += '{"type":"text","part":{"text":"修改完成"}}\n';
+  await expect(terminal.getByTestId("task-terminal-output")).toContainText("修改完成", { timeout: 8000 });
+  await terminal.getByLabel("Agent 执行").selectOption("review");
+  await expect(terminal.getByTestId("task-terminal-output")).toContainText("审查完成");
+  await terminal.getByRole("button", { name: "关闭终端" }).click();
+  await expect(terminal).not.toBeVisible();
+  const countAtClose = requests;
+  await page.waitForTimeout(3300);
+  expect(requests).toBe(countAtClose);
+});
+
+test("task terminal explains missing runs and waits for the first live output", async ({ page }) => {
+  const queued: Task = { ...task, stage: "queued", executions: {} };
+  await mock(page, true, [queued]);
+  await page.goto("/#/tasks/task-001");
+  await page.getByRole("button", { name: "打开终端", exact: true }).click();
+  await expect(page.getByTestId("task-terminal-output")).toContainText("Agent 尚未启动");
+
+  const running: Task = { ...task, stage: "developing", executions: {
+    dev: { ...task.executions!.development!, id: "exec-live", status: "running" },
+  } };
+  await page.route("**/api/tasks/task-001", route => route.fulfill({ json: running }));
+  let logStatus = 404;
+  await page.route("**/api/tasks/task-001/artifacts?**", route => logStatus === 200
+    ? route.fulfill({ status: 200, contentType: "text/plain", body: "Agent 输出已恢复\n" })
+    : route.fulfill({ status: logStatus, json: { error: logStatus === 404 ? "artifact not found" : "node unavailable" } }));
+  await expect(page.getByTestId("task-terminal-output")).toContainText("等待首批运行输出", { timeout: 8000 });
+  await expect(page.getByRole("dialog").getByRole("alert")).toHaveCount(0);
+  logStatus = 502;
+  await page.getByRole("dialog").getByRole("button", { name: "刷新" }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("node unavailable");
+  logStatus = 200;
+  await page.getByRole("dialog").getByRole("button", { name: "刷新" }).click();
+  await expect(page.getByTestId("task-terminal-output")).toContainText("Agent 输出已恢复");
+  await expect(page.getByRole("dialog").getByRole("alert")).toHaveCount(0);
+});
+
 for (const width of [390, 1440]) {
   test(`workbench layout at ${width}`, async ({ page }, testInfo) => {
     await mock(page, true, [

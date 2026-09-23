@@ -34,10 +34,10 @@ export async function api<T>(
   if (response.status === 204) return undefined as T;
   return response.json();
 }
-export async function getLog(taskID: string, executionID: string) {
+export async function getLog(taskID: string, executionID: string, signal?: AbortSignal) {
   const response = await fetch(
     `/api/tasks/${encodeURIComponent(taskID)}/artifacts?path=${encodeURIComponent(`executions/${executionID}/output.jsonl`)}`,
-    { credentials: "same-origin" },
+    { credentials: "same-origin", signal },
   );
   if (!response.ok) {
     let message = `日志读取失败 (${response.status})`;
@@ -46,7 +46,7 @@ export async function getLog(taskID: string, executionID: string) {
     } catch {}
     if (response.status === 401)
       window.dispatchEvent(new Event("session-expired"));
-    throw new Error(message);
+    throw new APIError(message, response.status);
   }
   return response.text();
 }
