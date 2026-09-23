@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"swarmjet/internal/credentials"
 	"swarmjet/internal/domain"
 )
 
@@ -123,6 +124,29 @@ func TestDiscoverSimpleDefaultsAndMissingTarget(t *testing.T) {
 	}
 	if !strings.Contains(f.lookups[0], "team%2Fmeta") {
 		t.Fatalf("namespace not encoded: %v", f.lookups)
+	}
+}
+
+func TestDiscoverUsesSavedConnectionBoundToMetaHost(t *testing.T) {
+	f := newDiscoveryFixture(t, "")
+	f.manifest = "projects:\n  api: " + f.repo("api") + "\n"
+	box := newConnectionBox(t)
+	sealed, err := box.Seal(mustJSON(t, credentials.Payload{Token: "test-private-token"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conns := newFakeConnections()
+	conns.items["c1"] = domain.Connection{ID: "c1", GitLabURL: f.server.URL, Version: 1}
+	conns.secrets["c1"] = sealed
+	a := &server{cfg: Config{Box: box}, conns: conns}
+	input := discoverRequest{MetaURL: f.repo("meta"), ConnectionID: "c1"}
+	if result, err := a.discoverMeta(context.Background(), input); err != nil || len(result.Repositories) != 1 {
+		t.Fatalf("saved connection discovery failed: %+v %v", result, err)
+	}
+	before := f.requests
+	conns.items["c1"] = domain.Connection{ID: "c1", GitLabURL: "https://other.example", Version: 1}
+	if _, err := a.discoverMeta(context.Background(), input); err == nil || f.requests != before {
+		t.Fatalf("mismatched connection reached Meta-Repo: %v", err)
 	}
 }
 

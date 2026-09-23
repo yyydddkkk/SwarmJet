@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -400,6 +401,31 @@ func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Pr
 		if a.cfg.Initializer == nil || !a.cfg.Initializer.ReadyForTasks(r.Context(), p.ID) {
 			problem(w, 409, "Meta 仓库尚未初始化完成，不能启用项目。请先完成初始化。")
 			return
+		}
+	}
+	if p.Enabled && !p.ManagedMeta() {
+		checkRemote := p.Version == 0
+		if p.Version > 0 {
+			previous, err := a.s.Project(r.Context(), p.ID)
+			if err != nil {
+				failure(w, err)
+				return
+			}
+			checkRemote = !previous.Enabled || previous.MetaURL != p.MetaURL || previous.MetaRef != p.MetaRef ||
+				previous.GitLabURL != p.GitLabURL || previous.ConnectionID != p.ConnectionID ||
+				previous.CredentialRef != p.CredentialRef || previous.AcceptanceStrategy != p.AcceptanceStrategy ||
+				!reflect.DeepEqual(previous.Repositories, p.Repositories) || !reflect.DeepEqual(previous.Integration, p.Integration)
+		}
+		if checkRemote {
+			token, err := a.projectCredential(p)
+			if err != nil {
+				problem(w, 409, "无法使用项目的 GitLab 凭据读取 Meta-Repo："+err.Error())
+				return
+			}
+			if err = checkMeta(r.Context(), p, token); err != nil {
+				problem(w, 409, "Meta-Repo 校验未通过："+err.Error())
+				return
+			}
 		}
 	}
 

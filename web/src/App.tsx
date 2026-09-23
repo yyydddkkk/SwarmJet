@@ -19,7 +19,7 @@ import {
   taskPhase,
   type TaskView,
 } from "./task-presentation";
-import { ProjectEditor } from "./ProjectEditor";
+import { ProjectEditor, newProject } from "./ProjectEditor";
 import { TaskTerminal } from "./TaskTerminal";
 const RuntimeSettings = lazy(() => import("./RuntimeSettings"));
 const NodeSettings = lazy(() => import("./NodeSettings"));
@@ -353,6 +353,7 @@ export default function App() {
               key={route}
               id={parts[2]}
               initialization={parts[3] === "initialization"}
+              importing={parts[3] === "import"}
             />
           ) : parts[1] === "tasks" && parts[2] ? (
             <TaskDetail key={route} id={decodeURIComponent(parts[2])} />
@@ -1373,9 +1374,11 @@ function TaskDetail({ id }: { id: string }) {
 function Projects({
   id,
   initialization,
+  importing,
 }: {
   id?: string;
   initialization?: boolean;
+  importing?: boolean;
 }) {
   const [projects, setProjects] = useState<Project[]>([]),
     [error, setError] = useState(""),
@@ -1397,6 +1400,13 @@ function Projects({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  if (id === "new" && importing)
+    return (
+      <ProjectEditor
+        initial={newProject()}
+        onSaved={(project) => go(`/projects/${encodeURIComponent(project.id)}`)}
+      />
+    );
   if (id === "new")
     return (
       <Suspense fallback={<div className="loading">正在加载配置向导…</div>}>
