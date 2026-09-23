@@ -24,6 +24,7 @@ type discoverRequest struct {
 	MetaURL             string `json:"metaUrl"`
 	MetaRef             string `json:"metaRef"`
 	GitLabURL           string `json:"gitlabUrl"`
+	ConnectionID        string `json:"connectionId"`
 	CredentialRef       string `json:"credentialRef"`
 	DefaultTargetBranch string `json:"defaultTargetBranch"`
 }
@@ -118,15 +119,26 @@ func (a *server) discoverMeta(ctx context.Context, input discoverRequest) (disco
 	if err != nil {
 		return output, fmt.Errorf("Meta-Repo 地址无效：%w", err)
 	}
-	if input.CredentialRef == "" {
-		input.CredentialRef = "GITLAB_TOKEN"
-	}
-	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(input.CredentialRef) {
-		return output, errors.New("凭据引用必须是环境变量名称")
-	}
-	token, err := a.credential(input.CredentialRef)
-	if err != nil || token == "" {
-		return output, fmt.Errorf("凭据环境变量 %s 不可用，请先在服务端配置", input.CredentialRef)
+	var token string
+	if input.ConnectionID != "" {
+		if !domain.IDPattern.MatchString(input.ConnectionID) {
+			return output, errors.New("连接 ID 无效")
+		}
+		token, err = a.projectCredential(domain.Project{ConnectionID: input.ConnectionID, GitLabURL: base.String()})
+		if err != nil || token == "" {
+			return output, errors.New("已保存的 GitLab 连接不可用或与 Meta-Repo 地址不一致")
+		}
+	} else {
+		if input.CredentialRef == "" {
+			input.CredentialRef = "GITLAB_TOKEN"
+		}
+		if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(input.CredentialRef) {
+			return output, errors.New("凭据引用必须是环境变量名称")
+		}
+		token, err = a.credential(input.CredentialRef)
+		if err != nil || token == "" {
+			return output, fmt.Errorf("凭据环境变量 %s 不可用，请先在服务端配置", input.CredentialRef)
+		}
 	}
 	if input.DefaultTargetBranch == "" {
 		input.DefaultTargetBranch = "dev"

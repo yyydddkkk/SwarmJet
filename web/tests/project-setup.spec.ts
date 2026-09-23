@@ -122,6 +122,7 @@ const blankImported = (): Project => ({
 });
 async function setupAPI(page: Page, initial?: Project) {
   let project = initial ? structuredClone(initial) : undefined;
+  const connections = [{ id: "c1", name: "team GitLab", gitlabUrl: discovery.gitlabUrl, username: "admin", version: 1, hasMergeToken: false, fingerprint: "fp", createdAt: "", updatedAt: "" }];
   let failImport = false;
   const saves: Project[] = [];
   const imports: Record<string, unknown>[] = [];
@@ -136,6 +137,16 @@ async function setupAPI(page: Page, initial?: Project) {
       return route.fulfill({
         json: { agentImage: "swarmjet-agent:configured" },
       });
+    if (pathname === "/api/connections" && request.method() === "GET")
+      return route.fulfill({ json: connections });
+    if (pathname === "/api/connections/verify" && request.method() === "POST")
+      return route.fulfill({ json: { username: "admin" } });
+    if (pathname === "/api/connections" && request.method() === "POST") {
+      const input = request.postDataJSON();
+      const connection = { ...connections[0], id: "c2", name: input.name, gitlabUrl: input.gitlabUrl };
+      connections.push(connection);
+      return route.fulfill({ json: connection });
+    }
     if (pathname === "/api/runtime/agents") return route.fulfill({json:{agents:[{id:"opencode",name:"OpenCode"},{id:"codex",name:"Codex"},{id:"claude",name:"Claude Code"}],enabled:["opencode","codex"]}});
     if (pathname === "/api/runtime/models")
       return route.fulfill({
@@ -175,6 +186,36 @@ async function setupAPI(page: Page, initial?: Project) {
     },
   };
 }
+
+test("new project can import an existing Meta-Repo with a saved GitLab connection", async ({ page }) => {
+  const state = await setupAPI(page);
+  await page.goto("/#/projects/new");
+  await page.getByRole("link", { name: "导入已有 Meta-Repo" }).click();
+  await expect(page).toHaveURL(/#\/projects\/new\/import$/);
+  await page.getByLabel("GitLab 连接", { exact: true }).selectOption("c1");
+  await page.getByLabel("Meta-Repo 地址", { exact: true }).fill(discovery.metaUrl);
+  await page.getByRole("button", { name: "读取仓库清单" }).click();
+  await expect(page.getByLabel("项目名称", { exact: true })).toHaveValue(discovery.name);
+  await page.getByRole("button", { name: "保存草稿" }).click();
+  await expect.poll(() => state.saves.length).toBe(1);
+  expect(state.imports[0]).toMatchObject({ connectionId: "c1", metaUrl: discovery.metaUrl });
+  expect(state.saves[0]).toMatchObject({ metaMode: "imported", connectionId: "c1", mergeCredentialRef: "", enabled: false, metaRef: "trunk" });
+  await expect(page).toHaveURL(/#\/projects\/workspace$/);
+});
+
+test("new import can verify and save a GitLab connection before reading the manifest", async ({ page }) => {
+  const state = await setupAPI(page);
+  await page.goto("/#/projects/new/import");
+  await page.getByLabel("Meta-Repo 地址", { exact: true }).fill(discovery.metaUrl);
+  await page.getByRole("button", { name: "新增 GitLab 连接" }).click();
+  await expect(page.getByLabel("新连接的 GitLab 地址")).toHaveValue(discovery.gitlabUrl);
+  await page.getByLabel("Access Token", { exact: true }).fill("test-token");
+  await page.getByRole("button", { name: "验证并保存连接" }).click();
+  await expect(page.getByLabel("GitLab 连接", { exact: true })).toHaveValue("c2");
+  await page.getByRole("button", { name: "读取仓库清单" }).click();
+  await expect.poll(() => state.imports.length).toBe(1);
+  expect(state.imports[0]).toMatchObject({ connectionId: "c2", metaUrl: discovery.metaUrl });
+});
 async function completeExecutionAndChecks(page: Page) {
   await page.getByLabel("项目默认 Agent",{exact:true}).selectOption("opencode");
   await page

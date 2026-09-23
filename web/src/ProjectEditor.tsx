@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentConfig, Check, Project, Repository } from "./types";
+import type { AgentConfig, Check, Connection, Project, Repository } from "./types";
 import type {NodeView} from "./NodeSettings";
 import { api } from "./api";
 import { useAgentCatalog } from "./agents";
@@ -20,6 +20,7 @@ export const newProject = (): Project => ({
   acceptanceStrategy: "repository",
   metaUrl: "",
   metaRef: "",
+  metaMode: "imported",
   version: 0,
   enabled: false,
   gitlabUrl: "",
@@ -80,6 +81,11 @@ export function ProjectEditor({
   const [defaultBranch, setDefaultBranch] = useState("dev");
   const [sourceChanged, setSourceChanged] = useState(false);
   const [manual, setManual] = useState(false);
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [addingConnection, setAddingConnection] = useState(false);
+  const [connectionToken, setConnectionToken] = useState("");
+  const [connectionMergeToken, setConnectionMergeToken] = useState("");
+  const [savingConnection, setSavingConnection] = useState(false);
   const [shareReview, setShareReview] = useState(() =>
     sameAgent(initial.development, initial.review),
   );
@@ -90,6 +96,12 @@ export function ProjectEditor({
   );
   const existing = p.version > 0;
   const managed = p.metaMode === "managed";
+  useEffect(() => {
+    if (managed) return;
+    api<Connection[] | null>("/connections")
+      .then((list) => setConnections(list || []))
+      .catch(() => setConnections([]));
+  }, [managed]);
   useEffect(() => {
     if (initial.version > 0) return;
     let live = true;
@@ -166,6 +178,7 @@ export function ProjectEditor({
       ...old,
       [key]: value,
       ...(key === "metaUrl" &&
+      !old.connectionId &&
       (!old.gitlabUrl || old.gitlabUrl === inferOrigin(old.metaUrl))
         ? { gitlabUrl: inferOrigin(value) }
         : {}),
@@ -173,6 +186,56 @@ export function ProjectEditor({
     setSaved("");
     setWarnings([]);
     if ((p.repositories || []).length) setSourceChanged(true);
+  }
+  function selectConnection(id: string) {
+    const connection = connections.find((item) => item.id === id);
+    setP((old) => ({
+      ...old,
+      connectionId: id,
+      gitlabUrl: connection?.gitlabUrl || old.gitlabUrl,
+      mergeCredentialRef: id ? "" : old.mergeCredentialRef || "GITLAB_MERGE_TOKEN",
+    }));
+    if (p.repositories?.length) setSourceChanged(true);
+    setWarnings([]);
+    setSaved("");
+  }
+  async function createConnection() {
+    setError("");
+    setSavingConnection(true);
+    try {
+      const gitlabUrl = p.gitlabUrl.trim();
+      const verified = await api<{ username: string }>(
+        "/connections/verify",
+        "POST",
+        {
+          gitlabUrl,
+          token: connectionToken,
+          mergeToken: connectionMergeToken,
+        },
+      );
+      const saved = await api<Connection>("/connections", "POST", {
+        name: `${verified.username}@${gitlabUrl}`,
+        gitlabUrl,
+        token: connectionToken,
+        mergeToken: connectionMergeToken,
+      });
+      setConnections((old) => [...old.filter((item) => item.id !== saved.id), saved]);
+      setConnectionToken("");
+      setConnectionMergeToken("");
+      setAddingConnection(false);
+      setP((old) => ({
+        ...old,
+        connectionId: saved.id,
+        gitlabUrl: saved.gitlabUrl,
+        mergeCredentialRef: "",
+      }));
+      if (p.repositories?.length) setSourceChanged(true);
+      setSaved("GitLab 连接已保存，请读取 Meta-Repo 清单。");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSavingConnection(false);
+    }
   }
   async function discover() {
     setDiscovering(true);
@@ -184,6 +247,7 @@ export function ProjectEditor({
         metaUrl: p.metaUrl.trim(),
         metaRef: p.metaRef.trim(),
         gitlabUrl: p.gitlabUrl.trim(),
+        connectionId: p.connectionId || "",
         credentialRef: p.credentialRef,
         defaultTargetBranch: defaultBranch.trim() || "dev",
       });
@@ -438,29 +502,90 @@ export function ProjectEditor({
                   </div>
                 )}
                 {!managed && (
-                <div className="meta-import-row">
-                  <Field label="Meta-Repo 地址">
-                    <input
-                      value={p.metaUrl}
-                      disabled={discovering}
-                      onChange={(e) => changeSource("metaUrl", e.target.value)}
-                      placeholder="https://gitlab.example.com/team/project-meta.git"
-                      autoComplete="off"
-                    />
-                  </Field>
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={saving || !p.metaUrl.trim()}
-                    onClick={discover}
-                  >
-                    {discovering
-                      ? "正在读取…"
-                      : repositories.length
-                        ? "重新读取清单"
-                        : "读取仓库清单"}
-                  </button>
-                </div>
+                  <>
+                    <div className="form-grid">
+                      <Field
+                        label="GitLab 连接"
+                        hint="可选已保存的连接；旧项目也可继续使用部署环境变量。"
+                      >
+                        <select
+                          value={p.connectionId || ""}
+                          onChange={(e) => selectConnection(e.target.value)}
+                        >
+                          <option value="">部署环境变量</option>
+                          {connections.map((connection) => (
+                            <option key={connection.id} value={connection.id}>
+                              {connection.name} · {connection.gitlabUrl}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <button
+                        type="button"
+                        onClick={() => setAddingConnection((old) => !old)}
+                      >
+                        {addingConnection ? "取消新增连接" : "新增 GitLab 连接"}
+                      </button>
+                    </div>
+                    {addingConnection && (
+                      <div className="form-grid">
+                        <Field label="新连接的 GitLab 地址">
+                          <input
+                            value={p.gitlabUrl}
+                            onChange={(e) => changeSource("gitlabUrl", e.target.value)}
+                            placeholder="https://gitlab.example.com"
+                          />
+                        </Field>
+                        <Field label="Access Token">
+                          <input
+                            type="password"
+                            value={connectionToken}
+                            onChange={(e) => setConnectionToken(e.target.value)}
+                            autoComplete="off"
+                          />
+                        </Field>
+                        <Field label="合并 Token（可选）">
+                          <input
+                            type="password"
+                            value={connectionMergeToken}
+                            onChange={(e) => setConnectionMergeToken(e.target.value)}
+                            autoComplete="off"
+                          />
+                        </Field>
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={savingConnection || !p.gitlabUrl.trim() || !connectionToken.trim()}
+                          onClick={createConnection}
+                        >
+                          {savingConnection ? "正在验证…" : "验证并保存连接"}
+                        </button>
+                      </div>
+                    )}
+                    <div className="meta-import-row">
+                      <Field label="Meta-Repo 地址">
+                        <input
+                          value={p.metaUrl}
+                          disabled={discovering}
+                          onChange={(e) => changeSource("metaUrl", e.target.value)}
+                          placeholder="https://gitlab.example.com/team/project-meta.git"
+                          autoComplete="off"
+                        />
+                      </Field>
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={saving || !p.metaUrl.trim()}
+                        onClick={discover}
+                      >
+                        {discovering
+                          ? "正在读取…"
+                          : repositories.length
+                            ? "重新读取清单"
+                            : "读取仓库清单"}
+                      </button>
+                    </div>
+                  </>
                 )}
                 <div className="form-grid">
                   <Field
@@ -502,7 +627,7 @@ export function ProjectEditor({
                     <Field label="项目标识" hint="系统自动生成，用于内部关联。">
                       <input value={p.id} readOnly disabled={existing} />
                     </Field>
-                    <Field
+                    {!p.connectionId && <Field
                       label="开发凭据引用"
                       hint="服务器环境变量名称，不是 Token。"
                     >
@@ -510,15 +635,15 @@ export function ProjectEditor({
                         value={p.credentialRef}
                         onChange={(e) => set("credentialRef", e.target.value)}
                       />
-                    </Field>
-                    <Field label="合并凭据引用">
+                    </Field>}
+                    {!p.connectionId && <Field label="合并凭据引用">
                       <input
                         value={p.mergeCredentialRef}
                         onChange={(e) =>
                           set("mergeCredentialRef", e.target.value)
                         }
                       />
-                    </Field>
+                    </Field>}
                   </div>
                 </details>
               </div>

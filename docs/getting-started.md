@@ -56,7 +56,7 @@ opencode auth login
 
 ## 高级入口：导入已有 Meta-Repo
 
-已有 Meta-Repo 的团队仍可在项目编辑器中填写 Meta-Repo 地址并读取清单，行为与之前一致；仓库清单必须与 `.meta.yaml`、`.meta.yml` 或 `.meta` 一致。
+已有 Meta-Repo 的团队可在“新建项目”页点击“导入已有 Meta-Repo”。选择已保存的 GitLab 连接，或验证并保存一个新连接，然后填写 Meta-Repo 地址、读取清单并确认各仓库目标分支。导入项目保存为草稿，不运行受管 Meta-Repo 的自动初始化；配置完整且远程清单校验通过后可以启用。旧项目仍可使用部署环境变量凭据。仓库清单必须与 `.meta.yaml`、`.meta.yml` 或 `.meta` 一致。
 
 ## 部署要点
 

@@ -561,6 +561,11 @@ export default function ProjectWizard({
         </div>
         <span className="status paused">{initialProject ? "进度已保存" : "未保存"}</span>
       </header>
+      {!initialProject && (
+        <div className="notice" role="note">
+          团队已有 Meta-Repo？ <a href="#/projects/new/import">导入已有 Meta-Repo</a>
+        </div>
+      )}
       {!initialProject && <nav className="setup-steps" aria-label="配置步骤">
         {stepList.map((item, index) => (
           <button

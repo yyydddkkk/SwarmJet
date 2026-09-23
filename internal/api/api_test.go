@@ -154,6 +154,11 @@ func TestMetaCheckReadOnly(t *testing.T) {
 	if err := checkMeta(context.Background(), p, "token"); err != nil {
 		t.Fatal(err)
 	}
+	bad := p
+	bad.Repositories = []domain.Repository{{ID: "service", Path: "service", URL: "https://git/other.git"}}
+	if err := checkMeta(context.Background(), bad, "token"); err == nil {
+		t.Fatal("mismatched Meta manifest accepted")
+	}
 	for _, method := range methods {
 		if method != "GET" {
 			t.Fatal("mutation")
@@ -220,7 +225,9 @@ func TestLoginPostgres(t *testing.T) {
 	}
 	// Exercise real authenticated persistence using only a local GitLab fixture.
 	t.Setenv("GITLAB_TOKEN", "fixture-token")
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	manifestMismatch := false
+	var remote *httptest.Server
+	remote = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
 			t.Error("unexpected remote mutation")
 			w.WriteHeader(405)
@@ -235,6 +242,14 @@ func TestLoginPostgres(t *testing.T) {
 		}
 		if r.URL.Path == "/api/v4/projects/1/issues/2" {
 			respond(w, 200, map[string]any{"project_id": 1, "iid": 2, "title": "Manual issue", "state": "opened", "labels": []string{}})
+			return
+		}
+		if strings.Contains(r.URL.Path, "/repository/files/.meta.yaml/raw") {
+			if manifestMismatch {
+				_, _ = w.Write([]byte("projects:\n  service: https://wrong.example/service.git\n"))
+				return
+			}
+			_, _ = w.Write([]byte("projects:\n  service: " + remote.URL + "/group/service.git\n"))
 			return
 		}
 		w.WriteHeader(404)
@@ -300,6 +315,11 @@ func TestLoginPostgres(t *testing.T) {
 	activeDraft.MetaURL = draft.MetaURL
 	activeDraft.Repositories = append([]domain.Repository(nil), project.Repositories...)
 	activeDraft.Repositories[0].ProjectID = 22
+	manifestMismatch = true
+	if rejected := call("PUT", "/api/projects/draft", activeDraft); rejected.Code != 409 || !strings.Contains(rejected.Body.String(), "Meta-Repo") {
+		t.Fatal("mismatched Meta manifest enabled", rejected.Code, rejected.Body)
+	}
+	manifestMismatch = false
 	activatedResponse := call("PUT", "/api/projects/draft", activeDraft)
 	if activatedResponse.Code != 200 {
 		t.Fatal("complete draft activation failed", activatedResponse.Code, activatedResponse.Body)
