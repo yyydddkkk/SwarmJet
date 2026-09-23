@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,9 +25,45 @@ type Store struct{ Pool *pgxpool.Pool }
 
 func (s *Store) HasSource(ctx context.Context, base string, issue domain.Issue) (bool, error) {
 	var exists bool
-	source := fmt.Sprintf("%s/%d/%d", domain.GitLabIdentity(base), issue.ProjectID, issue.IID)
-	e := s.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM tasks WHERE source=$1)", source).Scan(&exists)
+	e := s.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM tasks WHERE source=$1)", issueSource(base, issue)).Scan(&exists)
 	return exists, e
+}
+
+func issueSource(base string, issue domain.Issue) string {
+	return fmt.Sprintf("%s/%d/%d", domain.GitLabIdentity(base), issue.ProjectID, issue.IID)
+}
+
+func (s *Store) FirstTaskCreatedAt(ctx context.Context, base string, issue domain.Issue) (time.Time, error) {
+	var at time.Time
+	e := s.Pool.QueryRow(ctx, `SELECT COALESCE((body->>'createdAt')::timestamptz,updated_at) FROM tasks WHERE source=$1 ORDER BY COALESCE((body->>'createdAt')::timestamptz,updated_at),id LIMIT 1`, issueSource(base, issue)).Scan(&at)
+	return at, mapErr(e)
+}
+
+func (s *Store) IssueRoundEnabledAt(ctx context.Context) (time.Time, error) {
+	var at time.Time
+	e := s.Pool.QueryRow(ctx, `SELECT enabled_at FROM feature_epochs WHERE name='issue_round_comments'`).Scan(&at)
+	return at, e
+}
+
+func (s *Store) RecordIssueRunCommand(ctx context.Context, base string, issue domain.Issue, noteID int64, body string, created time.Time) error {
+	_, e := s.Pool.Exec(ctx, `INSERT INTO issue_run_commands(source,note_id,body,created_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, issueSource(base, issue), noteID, body, created)
+	return e
+}
+
+func (s *Store) PendingIssueRunCommands(ctx context.Context, base string, issue domain.Issue) (bool, error) {
+	var pending bool
+	e := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM issue_run_commands WHERE source=$1 AND claimed_task_id IS NULL)`, issueSource(base, issue)).Scan(&pending)
+	return pending, e
+}
+
+func (s *Store) LatestTaskForIssue(ctx context.Context, base string, issue domain.Issue) (domain.Task, error) {
+	var b []byte
+	e := s.Pool.QueryRow(ctx, `SELECT body FROM tasks WHERE source=$1 ORDER BY COALESCE((body->>'createdAt')::timestamptz,updated_at) DESC,id DESC LIMIT 1`, issueSource(base, issue)).Scan(&b)
+	var t domain.Task
+	if e == nil {
+		e = json.Unmarshal(b, &t)
+	}
+	return t, mapErr(e)
 }
 
 func Open(ctx context.Context, dsn string) (*Store, error) {
@@ -136,6 +173,10 @@ func (s *Store) SaveProject(ctx context.Context, p domain.Project) (domain.Proje
 	if p.Version != version {
 		return p, ErrConflict
 	}
+	if version == 0 && p.AutoMerge == nil {
+		enabled := true
+		p.AutoMerge = &enabled
+	}
 	p.Version = version + 1
 	b, _ := json.Marshal(p)
 	if version == 0 {
@@ -169,6 +210,41 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84261302)"); e != nil {
 		return t, e
 	}
+	source := issueSource(t.Project.GitLabURL, t.Issue)
+	var previous string
+	var rounds int64
+	if e = tx.QueryRow(ctx, `SELECT count(*),COALESCE((SELECT id FROM tasks WHERE source=$1 ORDER BY COALESCE((body->>'createdAt')::timestamptz,updated_at) DESC,id DESC LIMIT 1),'') FROM tasks WHERE source=$1`, source).Scan(&rounds, &previous); e != nil {
+		return t, e
+	}
+	t.Round = int(rounds) + 1
+	t.PreviousTaskID = previous
+	if t.TriggerNoteIDs != nil {
+		rows, err := tx.Query(ctx, `SELECT note_id,body FROM issue_run_commands WHERE source=$1 AND claimed_task_id IS NULL ORDER BY created_at,note_id FOR UPDATE`, source)
+		if err != nil {
+			return t, err
+		}
+		t.TriggerNoteIDs = nil
+		parts := []string{}
+		for rows.Next() {
+			var id int64
+			var body string
+			if err = rows.Scan(&id, &body); err != nil {
+				rows.Close()
+				return t, err
+			}
+			t.TriggerNoteIDs = append(t.TriggerNoteIDs, id)
+			parts = append(parts, body)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return t, err
+		}
+		if len(t.TriggerNoteIDs) == 0 {
+			return t, ErrNotFound
+		}
+		t.TriggerText = strings.Join(parts, "\n\n")
+	}
 	node, found, e := pickTaskNode(ctx, tx, &t)
 	if e != nil {
 		return t, e
@@ -185,7 +261,6 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 		}
 	}
 	b, _ := json.Marshal(t)
-	source := fmt.Sprintf("%s/%d/%d", domain.GitLabIdentity(t.Project.GitLabURL), t.Issue.ProjectID, t.Issue.IID)
 	var nodeID any
 	if t.NodeID != "" {
 		nodeID = t.NodeID
@@ -193,6 +268,11 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 	_, e = tx.Exec(ctx, "INSERT INTO tasks(id,project_id,source,stage,node_id,body) VALUES($1,$2,$3,$4,$5,$6)", t.ID, t.Project.ID, source, t.Stage, nodeID, b)
 	if e != nil {
 		return t, mapErr(e)
+	}
+	if len(t.TriggerNoteIDs) > 0 {
+		if _, e = tx.Exec(ctx, `UPDATE issue_run_commands SET claimed_task_id=$2 WHERE source=$1 AND note_id=ANY($3) AND claimed_task_id IS NULL`, source, t.ID, t.TriggerNoteIDs); e != nil {
+			return t, e
+		}
 	}
 	c := domain.Command{ID: "start-" + t.ID, Kind: "start"}
 	cb, _ := json.Marshal(c)
@@ -231,6 +311,42 @@ func (s *Store) Tasks(ctx context.Context) ([]domain.Task, error) {
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+type GitLabSyncTask struct {
+	Task      domain.Task
+	UpdatedAt time.Time
+}
+
+func (s *Store) PendingGitLabSync(ctx context.Context) ([]GitLabSyncTask, error) {
+	rows, e := s.Pool.Query(ctx, `SELECT body,updated_at FROM tasks WHERE (gitlab_synced_at IS NULL OR updated_at>gitlab_synced_at) AND (gitlab_sync_retry_at IS NULL OR gitlab_sync_retry_at<=now()) ORDER BY updated_at,id LIMIT 100`)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []GitLabSyncTask{}
+	for rows.Next() {
+		var item GitLabSyncTask
+		var body []byte
+		if e = rows.Scan(&body, &item.UpdatedAt); e != nil {
+			return nil, e
+		}
+		if e = json.Unmarshal(body, &item.Task); e != nil {
+			return nil, e
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CompleteGitLabSync(ctx context.Context, id string, updatedAt time.Time) error {
+	_, e := s.Pool.Exec(ctx, `UPDATE tasks SET gitlab_synced_at=$2,gitlab_sync_retry_at=NULL WHERE id=$1 AND updated_at=$2`, id, updatedAt)
+	return e
+}
+
+func (s *Store) DelayGitLabSync(ctx context.Context, id string) error {
+	_, e := s.Pool.Exec(ctx, `UPDATE tasks SET gitlab_sync_retry_at=now()+interval '1 minute' WHERE id=$1`, id)
+	return e
 }
 func (s *Store) SaveTask(ctx context.Context, t domain.Task) error {
 	t.UpdatedAt = time.Now().UTC()

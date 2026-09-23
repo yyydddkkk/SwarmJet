@@ -181,6 +181,88 @@ func cleanManual(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(s), "<!--", "&lt;!--"), "\n", " ")
 }
 
+func issueReviewGuide(t domain.Task) (string, error) {
+	plan := t.HumanAcceptance
+	if plan == nil || len(plan.Prerequisites) == 0 || len(plan.Steps) == 0 || len(plan.Steps) > 30 {
+		return "", errors.New("缺少人工复核指引：请提供前置条件、操作步骤和预期结果")
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "## 人工复核指引 · SwarmJet 第 %d 轮\n\n任务：`%s`。本轮由系统执行验收与独立审查；合并状态以关联 MR 为准。以下步骤供合并后复核，不代表人工已验收。\n\n", t.Round, t.ID)
+	fmt.Fprintf(&b, "审查提交集合：`%s`\n\n### 本轮 MR\n", domain.Digest(t.Workspace.Revisions))
+	for _, r := range t.Workspace.Revisions {
+		if r.Changed {
+			fmt.Fprintf(&b, "- %s：%s · `%s` → `%s`\n", cleanManual(r.RepositoryID), r.MRURL, r.HeadSHA, cleanManual(r.TargetBranch))
+		}
+	}
+	b.WriteString("\n### 前置条件与环境\n")
+	for _, item := range plan.Prerequisites {
+		fmt.Fprintf(&b, "- %s\n", cleanManual(item))
+	}
+	b.WriteString("\n### 操作步骤与预期结果\n")
+	for i, step := range plan.Steps {
+		if strings.TrimSpace(step.Action) == "" || strings.TrimSpace(step.Expected) == "" {
+			return "", errors.New("复核步骤需要操作和预期结果")
+		}
+		fmt.Fprintf(&b, "%d. %s\n   - 预期：%s\n", i+1, cleanManual(step.Action), cleanManual(step.Expected))
+	}
+	if len(plan.Notes) > 0 {
+		b.WriteString("\n### 风险、未覆盖项与清理\n")
+		for _, item := range plan.Notes {
+			fmt.Fprintf(&b, "- %s\n", cleanManual(item))
+		}
+	}
+	b.WriteString("\n如需新一轮开发，请在此 Issue 发布以 `/swarmjet run` 开头的评论。")
+	if b.Len() > 60000 {
+		return "", errors.New("人工复核指引过长")
+	}
+	return b.String(), nil
+}
+
+func publishIssueReviewGuide(ctx context.Context, c *gitlab.Client, t domain.Task) error {
+	changed := false
+	for _, r := range t.Workspace.Revisions {
+		changed = changed || r.Changed
+	}
+	if !changed {
+		return nil
+	}
+	body, err := issueReviewGuide(t)
+	if err != nil {
+		return err
+	}
+	link, err := c.UpsertIssueReview(ctx, t.Issue, t.ID, domain.Digest(t.Workspace.Revisions), body)
+	if err != nil {
+		return err
+	}
+	const start = "<!-- swarmjet:issue-review -->"
+	const end = "<!-- /swarmjet:issue-review -->"
+	for _, r := range t.Workspace.Revisions {
+		if !r.Changed || r.MRIID == 0 {
+			continue
+		}
+		mr, err := c.GetMR(ctx, r.ProjectID, r.MRIID)
+		if err != nil {
+			return err
+		}
+		if !sameMR(mr, r) {
+			return errors.New("MR changed before review guide publication")
+		}
+		description := mr.Description
+		if pos := strings.Index(description, start); pos >= 0 {
+			if tail := strings.Index(description[pos:], end); tail >= 0 {
+				description = description[:pos] + description[pos+tail+len(end):]
+			}
+		}
+		next := strings.TrimSpace(description) + "\n\n" + start + "\n人工复核指引与后续讨论：[来源 Issue](" + link + ")\n" + end
+		if next != mr.Description {
+			if err := c.UpdateMRDescription(ctx, r.ProjectID, r.MRIID, next); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func taskIntegration(t domain.Task) domain.IntegrationConfig {
 	if t.Project.AcceptanceStrategy == "repository" || t.Project.AcceptanceStrategy == "gitlab_ci" {
 		return domain.IntegrationConfig{Mode: "commands"}
@@ -192,9 +274,13 @@ func refreshMRVerification(ctx context.Context, c *gitlab.Client, t domain.Task)
 	const start = "<!-- swarmjet:verification -->"
 	const end = "<!-- /swarmjet:verification -->"
 	var b strings.Builder
-	b.WriteString(start + "\n## 自动验收结果（不代替真人验收）\n\n")
+	if t.Round > 0 {
+		b.WriteString(start + "\n## 自动验收结果\n\n")
+	} else {
+		b.WriteString(start + "\n## 自动验收结果（不代替真人验收）\n\n")
+	}
 	if t.AcceptanceIncomplete {
-		b.WriteString("> **验收不完整，禁止自动合并。请真人确认后决定是否合并。**\n\n")
+		b.WriteString("> **验收不完整，禁止自动合并。**\n\n")
 	}
 	for _, v := range t.Verification {
 		state := "未通过"

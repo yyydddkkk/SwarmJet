@@ -165,6 +165,11 @@ type AgentRequest struct {
 	Env          map[string]string `json:"-"`
 }
 type Task struct {
+	Round                int                  `json:"round,omitempty"`
+	PreviousTaskID       string               `json:"previousTaskId,omitempty"`
+	TriggerNoteIDs       []int64              `json:"triggerNoteIds,omitempty"`
+	TriggerText          string               `json:"triggerText,omitempty"`
+	DependencyTasks      map[string]string    `json:"dependencyTasks,omitempty"`
 	Network              NetworkVersion       `json:"network,omitempty"`
 	NodeConfigVersion    int                  `json:"nodeConfigVersion,omitempty"`
 	AcceptanceCommands   []AcceptanceCommand  `json:"acceptanceCommands,omitempty"`

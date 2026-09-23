@@ -7,10 +7,10 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.temporal.io/api/enums/v1"
@@ -179,6 +179,9 @@ func (s *Service) Scan(ctx context.Context) error {
 					return e
 				}
 				if seen {
+					if err := s.scanFollowup(ctx, g, p, issue, enabled); err != nil {
+						slog.Warn("issue follow-up scan", "project", p.ID, "issue", issue.IID, "error", err)
+					}
 					continue
 				}
 				legacy := false
@@ -221,29 +224,88 @@ func (s *Service) Scan(ctx context.Context) error {
 	}
 	return nil
 }
+
+func runComment(body string) (string, bool) {
+	body = strings.TrimSpace(body)
+	rest, ok := strings.CutPrefix(body, "/swarmjet run")
+	if !ok || rest != "" && rest[0] != ' ' && rest[0] != '\n' && rest[0] != '\t' && rest[0] != '\r' {
+		return "", false
+	}
+	return strings.TrimSpace(rest), true
+}
+
+func (s *Service) scanFollowup(ctx context.Context, g *gitlab.Client, p domain.Project, issue domain.Issue, enabled []string) error {
+	first, err := s.Store.FirstTaskCreatedAt(ctx, p.GitLabURL, issue)
+	if err != nil {
+		return err
+	}
+	enabledAt, err := s.Store.IssueRoundEnabledAt(ctx)
+	if err != nil {
+		return err
+	}
+	notes, err := g.ListIssueNotes(ctx, issue)
+	if err != nil {
+		return err
+	}
+	for _, note := range notes {
+		if note.ID < 1 || note.System || note.Internal || note.CreatedAt.Before(first) || note.CreatedAt.Before(enabledAt) || !note.UpdatedAt.IsZero() && !note.UpdatedAt.Equal(note.CreatedAt) {
+			continue
+		}
+		body, ok := runComment(note.Body)
+		if !ok {
+			continue
+		}
+		if err := s.Store.RecordIssueRunCommand(ctx, p.GitLabURL, issue, note.ID, body, note.CreatedAt); err != nil {
+			return err
+		}
+	}
+	pending, err := s.Store.PendingIssueRunCommands(ctx, p.GitLabURL, issue)
+	if err != nil || !pending {
+		return err
+	}
+	previous, err := s.Store.LatestTaskForIssue(ctx, p.GitLabURL, issue)
+	if err != nil || !domain.Terminal(previous.Stage) {
+		return err
+	}
+	taskProject, err := domain.ResolveIssueAgent(p, issue, enabled)
+	if err != nil {
+		return err
+	}
+	if !s.RequireNode && taskProject.Nodes.Mode == "" {
+		taskProject, err = imagebuild.ApplyToProject(s.DataDir, taskProject)
+		if err != nil {
+			return err
+		}
+	}
+	now := time.Now().UTC()
+	t := domain.Task{ID: ID(), Project: taskProject, Issue: issue, Stage: "queued", Executions: map[string]domain.Execution{}, TriggerNoteIDs: []int64{}, CreatedAt: now, UpdatedAt: now}
+	_, err = s.Store.CreateTaskScheduled(ctx, t, s.RequireNode)
+	if errors.Is(err, store.ErrNoNode) || errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	return err
+}
 func (s *Service) Sync(ctx context.Context, a *pipeline.Activities) {
 	tick := time.NewTicker(15 * time.Second)
 	defer tick.Stop()
-	last := map[string]string{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			tasks, e := s.Store.Tasks(ctx)
+			tasks, e := s.Store.PendingGitLabSync(ctx)
 			if e != nil {
 				continue
 			}
-			for _, t := range tasks {
-				stamp := fmt.Sprint(t.UpdatedAt)
-				if last[t.ID] == stamp {
+			for _, item := range tasks {
+				if e = a.Sync(ctx, item.Task); e != nil {
+					slog.Warn("GitLab progress pending retry", "task", item.Task.ID, "error", e)
+					_ = s.Store.DelayGitLabSync(ctx, item.Task.ID)
 					continue
 				}
-				if e = a.Sync(ctx, t); e != nil {
-					slog.Warn("GitLab progress pending retry", "task", t.ID, "error", e)
-					continue
+				if e = s.Store.CompleteGitLabSync(ctx, item.Task.ID, item.UpdatedAt); e != nil {
+					slog.Warn("GitLab progress sync checkpoint failed", "task", item.Task.ID, "error", e)
 				}
-				last[t.ID] = stamp
 			}
 		}
 	}

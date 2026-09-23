@@ -682,8 +682,8 @@ export function ProjectEditor({
                                 </Field>
                               )}
                               <Field
-                                label="额外人工审核路径"
-                                hint="迁移、CI 和部署配置默认需要人工审核；在此补充项目特有路径，每行一项。"
+                                label="额外敏感路径"
+                                hint="标记项目特有的高风险路径，供 Agent 审查与报告使用；每行一项。"
                               >
                                 <textarea
                                   rows={2}
@@ -905,7 +905,7 @@ export function ProjectEditor({
               <div className="setup-section-head">
                 <div>
                   <h2>开发任务验收策略</h2>
-                  <p>用于开发完成后的检查，与 Meta 仓库静态初始化无关。MR 顶部会单独列出真人验收清单。</p>
+                  <p>用于开发完成后的检查，与 Meta 仓库静态初始化无关。人工复核指引会发布到来源 Issue。</p>
                 </div>
                 <span className="setup-label">可稍后补充</span>
               </div>
@@ -1076,7 +1076,7 @@ export function ProjectEditor({
                     />
                     要求 GitLab 当前提交的 CI 通过
                   </label>
-                  <p className="muted">迁移、CI 和部署配置变更仍需人工审核。</p>
+                  <p className="muted">迁移、CI 和部署配置变更仍需通过当前提交的验收、审查和 GitLab 合并检查。</p>
                 </details>
               </div>
             </section>
@@ -1141,14 +1141,14 @@ export function ProjectEditor({
                   <strong>自动合并</strong>
                   <small>
                     关闭后系统仍会开发、验证、创建 MR 和审查，但不会发起合并；需要在
-                    GitLab 人工合并全部 MR 后才会收尾并关闭来源 Issue。
+                    GitLab 人工合并全部 MR 后该轮任务完成，来源 Issue 保持打开。
                   </small>
                 </span>
               </label>
               <p className="wizard-hint">
                 {(p.autoMerge ?? true)
-                  ? "沿用现有自动合并门禁：有效审查、当前提交验证、CI、目标分支检查，以及敏感变更的人工作业批准。"
-                  : "当前为人工合并；关闭开关与“等待敏感变更批准”是不同概念，批准不能越过关闭的开关。"}
+                  ? "必需验收、独立审查、当前提交 CI 和目标分支检查通过后自动合并；冲突会交给开发 Agent 返工。"
+                  : "当前为人工合并；所有 MR 合并后该轮任务完成，来源 Issue 保持打开。"}
               </p>
             </div>
           </div>

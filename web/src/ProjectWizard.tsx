@@ -120,7 +120,7 @@ export default function ProjectWizard({
   const [targets, setTargets] = useState<Record<number, string>>({});
   const [name, setName] = useState("");
   const [metaRef, setMetaRef] = useState("main");
-  const [autoMerge, setAutoMerge] = useState(false);
+  const [autoMerge, setAutoMerge] = useState(true);
   const [projectId, setProjectId] = useState(initialProject?.id || "");
   const [runtime, setRuntime] = useState<{
     available: boolean;
@@ -786,15 +786,15 @@ export default function ProjectWizard({
                 <span>
                   <strong>自动合并</strong>
                   <small>
-                    默认关闭。关闭时系统仍会开发、验证、创建 MR 和审查，但不会发起
-                    合并，需要人工在 GitLab 完成合并后才会收尾关单。
+                    默认开启。关闭时系统仍会开发、验证、创建 MR 和审查，待你在
+                    GitLab 合并所有 MR 后完成该轮任务。来源 Issue 保持打开。
                   </small>
                 </span>
               </label>
               <p className="wizard-hint">
                 {autoMerge
-                  ? "开启后沿用现有自动合并门禁：有效审查、当前提交验证、CI、目标分支检查，以及敏感变更的人工作业批准。"
-                  : "当前为人工合并：请在所有 MR 合并完成后等待系统检测并关闭来源 Issue。"}
+                  ? "必需验收、独立审查、当前提交 CI 和目标分支检查通过后自动合并；冲突会交给开发 Agent 返工。"
+                  : "当前为人工合并；所有 MR 合并后该轮任务完成，来源 Issue 保持打开。"}
               </p>
             </div>
             <div className="wizard-summary">

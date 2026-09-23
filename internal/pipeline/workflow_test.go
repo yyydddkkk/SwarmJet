@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -110,6 +111,35 @@ func TestWorkflowHappyChanged(t *testing.T) {
 	}
 	if final.ReviewDigest != domain.Digest(final.Workspace.Revisions) {
 		t.Fatal("review digest missing")
+	}
+}
+func TestEvergreenRoundAutoMergesSensitiveChangeWithoutApproval(t *testing.T) {
+	h := newWorkflowHarness(t)
+	task := workflowTask()
+	task.Round = 1
+	task.Workspace.Revisions[0].Sensitive = true
+	task.Issue.Labels = append(task.Issue.Labels, "no-auto-close")
+	final := h.run(t, task)
+	if final.Stage != "completed" || h.counts["waiting_approval"] != 0 || h.counts["merging"] != 1 || !strings.Contains(final.Message, "Issue 保持打开") {
+		t.Fatalf("unexpected evergreen flow: %+v phases=%v", final, h.phases)
+	}
+}
+func TestEvergreenRoundReworksMergeConflictBeforeMerging(t *testing.T) {
+	h := newWorkflowHarness(t)
+	h.step = func(_ context.Context, input StepInput, count int) (StepResult, error) {
+		out := successfulStep(input)
+		if input.Phase == "acquiring_merge" && count == 1 {
+			out.Ready = false
+			out.Rework = true
+			out.Task.Message = "STALE: merge conflict"
+		}
+		return out, nil
+	}
+	task := workflowTask()
+	task.Round = 1
+	final := h.run(t, task)
+	if final.Stage != "completed" || final.Reworks != 1 || h.counts["developing"] != 2 || h.counts["verifying"] != 2 || h.counts["reviewing"] != 2 || h.counts["merging"] != 1 {
+		t.Fatalf("conflict did not get reworked and rechecked: %+v %v", final, h.counts)
 	}
 }
 func TestWorkflowClarificationAssumptionsContinue(t *testing.T) {

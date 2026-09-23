@@ -451,6 +451,19 @@
 .app .task-list .table-foot {
   padding: 13px 18px;
   font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.app .task-list .task-page-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.app .task-list .task-page-actions button {
+  min-height: 30px;
+  padding: 4px 9px;
 }
 .app .task-list .status {
   padding: 3px 7px;

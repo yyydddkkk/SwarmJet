@@ -37,4 +37,6 @@ GitLab 连接以 `Connection` 保存：地址、验证过的用户名、Token �
 
 初始化是持久化、可恢复的任务，由 worker 侧的 `internal/initflow` 协调，状态写入 `initializations` 表，并用按项目的数据库租约保证单一执行者。阶段为 connect → analyze → verify，状态区分“仓库已连接”“分析完成”“可以接收开发任务”。稳定执行 ID、幂等的受管 Meta 提交和按需重新克隆，保证重试与服务重启不会重复创建 Meta-Repo，也不会覆盖人工修订。分析副本固定在各仓库提交上且只读，生成目录是唯一可写目录，由容器挂载强制执行，而不是只靠提示词；初始化角色 `init` 不注入 GitLab Token。验证命令只在 `INIT_VERIFY_IMAGE` 指定的隔离容器中执行（无网络、只读根、丢弃 capability），容器以确定性名称创建并在取消、超时或重启后清理；未配置镜像时验证被阻断。受管项目只有在持久化的 `readyForTasks` 为真时才能启用、接单；启用、建单和 Issue 扫描三条路径都做服务端校验。
 
-自动合并是项目级开关。`autoMerge` 为 null 表示旧项目的既有行为（开启），新项目显式默认关闭。关闭时 workflow 在审查通过后进入 `waiting_manual_merge`，只创建/审查 MR，并在观察到全部 MR 被人工合并后才收尾关单。“等待敏感变更批准”是独立门禁，批准不能越过关闭的开关。该决策通过 `workflow.GetVersion("auto-merge-switch", DefaultVersion, 1)` 版本化，已保存的旧历史按原决策顺序重放。
+自动合并是项目级开关。`autoMerge` 为 null 表示旧项目的既有行为（开启），新项目显式默认开启。关闭时 workflow 在审查通过后进入 `waiting_manual_merge`，只创建/审查 MR，并在观察到全部 MR 被合并后完成该轮任务。新任务用 `Round > 0` 标识常开 Issue 语义：合并后不关单，敏感路径不设人工批准门禁，必需验收与 GitLab 合并检查仍必须通过；旧任务保留原关单与批准行为。该决策使用 Temporal 版本化记录，避免已保存历史重放改变。
+
+同一 Issue 可有多轮 Task；`/swarmjet run` Issue 评论的 ID 持久化去重，当前轮非终态时新评论排队并合并到下一轮。来源 Issue 描述、触发评论和上一轮 Task 引用固定在新任务快照中。人工复核指引按 Task 和审查提交摘要发布在 Issue 独立评论中，MR 描述只保留链接。平台管理的 Issue 依赖绑定首轮等待时选定的上游 Task，以上游 Task 完成而非 Issue 关闭为满足条件；外部 Issue 仍依 GitLab 关闭状态判断。

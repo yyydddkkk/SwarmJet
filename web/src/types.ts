@@ -178,6 +178,11 @@ export interface Execution {
   result?: AgentResult | null;
 }
 export interface Task {
+  round?: number;
+  previousTaskId?: string;
+  triggerNoteIds?: number[];
+  triggerText?: string;
+  dependencyTasks?: Record<string, string>;
   id: string;
   project: Project;
   issue: Issue;
@@ -200,6 +205,12 @@ export interface Task {
   paused: boolean;
   createdAt: string;
   updatedAt: string;
+}
+export interface TaskPage {
+  items: Task[];
+  nextCursor?: string;
+  total: number;
+  counts: { all: number; active: number; attention: number; ended: number; completed: number };
 }
 export interface TaskEvent {
   id: number;

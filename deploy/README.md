@@ -149,7 +149,7 @@ services:
 
 随后在 `.env` 的 `AGENT_ENV_ALLOWLIST` 中追加 `CUSTOM_MODEL_KEY`，将 `INTEGRATION_ENV_ALLOWLIST` 设为 `INTEGRATION_TEST_TOKEN`。GitLab 项目使用额外 credential reference 时，需要在 API 和 Worker 两个服务都显式传入该变量；不要将数据库或管理员密码加入 agent / integration allowlist。
 
-Worker 执行保留期清理：`FAILED_KEEP_DAYS=7` 用于已取消任务的现场，`REPORT_KEEP_DAYS=30` 用于已完成任务。运行中、暂停中和 blocked 任务不会因这些配置自动清除，任务记录与审计信息仍在 PostgreSQL。设置 `GITLAB_WEBHOOK_SECRET` 后可接收 `/api/webhooks/gitlab`；GitLab webhook 配置使用相同的 secret token。
+Worker 执行保留期清理：`FAILED_KEEP_DAYS=7` 用于已取消任务的现场，`REPORT_KEEP_DAYS=30` 用于已完成任务。运行中、暂停中和 blocked 任务不会因这些配置自动清除，任务记录与审计信息仍在 PostgreSQL。设置 `GITLAB_WEBHOOK_SECRET` 后可接收 `/api/webhooks/gitlab`；GitLab webhook 配置使用相同的 secret token，并开启 Issue 与 Note 事件。Webhook 只唤醒扫描，120 秒轮询会补漏。后续轮次只接受 Issue 中以 `/swarmjet run` 开头的新公开评论。
 
 ## 分布式执行节点
 

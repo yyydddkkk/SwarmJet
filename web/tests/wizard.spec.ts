@@ -211,7 +211,7 @@ async function advanceToOpenCode(page: Page) {
   await expect(page.getByText("team/core", { exact: false })).toBeVisible();
   await page.getByRole("checkbox").first().check();
   await page.getByRole("button", { name: "下一步" }).click();
-  await expect(page.getByRole("checkbox", { name: /自动合并/ })).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /自动合并/ })).toBeChecked();
   await page.getByRole("button", { name: "下一步：配置 OpenCode" }).click();
   await expect(page.getByText("检测到已有的 OpenCode 登录配置")).toBeVisible();
   await page.getByRole("button", { name: "检查并继续" }).click();
@@ -242,7 +242,7 @@ test("wizard connects, paginates repos, verifies a model and completes initializ
   await expect(page.getByLabel("Core 的目标分支")).toHaveValue("feature/test");
   await page.getByLabel("Core 的目标分支").fill("dev");
   await page.getByRole("button", { name: "下一步" }).click();
-  await expect(page.getByRole("checkbox", { name: /自动合并/ })).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /自动合并/ })).toBeChecked();
   await expect(page.getByText("目标 dev")).toBeVisible();
   await page.getByRole("button", { name: "下一步：配置 OpenCode" }).click();
   await expect(page.getByText("检测到已有的 OpenCode 登录配置")).toBeVisible();
@@ -277,7 +277,7 @@ test("wizard connects, paginates repos, verifies a model and completes initializ
   expect(state.saves[0]).toMatchObject({
     metaMode: "managed",
     connectionId: "c1",
-    autoMerge: false,
+    autoMerge: true,
     metaUrl: "",
     enabled: false,
     credentialRef: "",

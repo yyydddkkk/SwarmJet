@@ -33,6 +33,8 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 	// before this change replay with the previous decision order; new executions
 	// honor the switch. DefaultVersion is the pre-switch behavior.
 	autoMergeVersion := workflow.GetVersion(ctx, "auto-merge-switch", workflow.DefaultVersion, 1)
+	evergreenVersion := workflow.GetVersion(ctx, "evergreen-issue", workflow.DefaultVersion, 1)
+	evergreen := evergreenVersion >= 1 && t.Round > 0
 	acceptanceVersion := workflow.GetVersion(ctx, "acceptance-strategy", workflow.DefaultVersion, 1)
 	earlyPublish := acceptanceVersion >= 1 && t.Project.AcceptanceStrategy != ""
 	commands := workflow.GetSignalChannel(ctx, SignalName)
@@ -368,7 +370,7 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 					}
 					t.Stage = "waiting_manual_merge"
 				}
-			} else if special && t.ApprovalDigest != t.ReviewDigest {
+			} else if !evergreen && special && t.ApprovalDigest != t.ReviewDigest {
 				t.Stage = "waiting_approval"
 			} else if !changed {
 				t.Stage = "finalizing"
@@ -422,7 +424,11 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 				continue
 			}
 			t.Stage = "completed"
-			t.Message = "所有仓库处理完成，来源 Issue 已关闭"
+			if evergreen {
+				t.Message = "所有仓库已合并，来源 Issue 保持打开以供复核和后续迭代"
+			} else {
+				t.Message = "所有仓库处理完成，来源 Issue 已关闭"
+			}
 		default:
 			return fmt.Errorf("unknown phase %q", previousPhase)
 		}

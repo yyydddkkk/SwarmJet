@@ -344,8 +344,13 @@ func TestLoginPostgres(t *testing.T) {
 	if err = json.Unmarshal(taskResponse.Body.Bytes(), &task); err != nil {
 		t.Fatal(err)
 	}
-	if task.Stage != "queued" || task.Project.Version != 2 {
+	if task.Stage != "queued" || task.Project.Version != 2 || task.Round != 1 {
 		t.Fatalf("task not frozen %+v", task)
+	}
+	pageResponse := call("GET", "/api/tasks?limit=1", nil)
+	var page store.TaskPage
+	if pageResponse.Code != 200 || json.Unmarshal(pageResponse.Body.Bytes(), &page) != nil || page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != task.ID {
+		t.Fatalf("task page status=%d body=%s", pageResponse.Code, pageResponse.Body.String())
 	}
 	if duplicate := call("POST", "/api/tasks", map[string]any{"projectId": "p", "issueProjectId": 1, "issueIid": 1}); duplicate.Code != 409 {
 		t.Fatal("duplicate issue task accepted", duplicate.Code)
