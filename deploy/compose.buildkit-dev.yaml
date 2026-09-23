@@ -10,11 +10,12 @@ services:
     environment:
       HTTP_PROXY: http://127.0.0.1:${DEV_BUILDER_PROXY_PORT:-8194}
       HTTPS_PROXY: http://127.0.0.1:${DEV_BUILDER_PROXY_PORT:-8194}
-      NO_PROXY: localhost,127.0.0.1
+      NO_PROXY: localhost,127.0.0.1,${REGISTRY_BIND_HOST}
     volumes:
       - ${DEV_BUILDKIT_DIR:?Set DEV_BUILDKIT_DIR}:/run/buildkit
       - buildkit-cache:/var/lib/buildkit
-      - ./buildkitd.toml:/etc/buildkit/buildkitd.toml:ro
+      - ${REGISTRY_BUILDKIT_CONFIG}:/etc/buildkit/buildkitd.toml:ro
+      - ${REGISTRY_CA_FILE}:/etc/buildkit/certs/registry.crt:ro
     cpus: 2
     mem_limit: 2g
 volumes:

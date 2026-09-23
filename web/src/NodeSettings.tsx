@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import { ErrorBox, Field } from "./App";
-import { NetworkSelect, type NetworkChoice } from "./NetworkSettings";
+import { ErrorBox, Field } from "./ui";
+import { NetworkSelect, type NetworkChoice } from "./NetworkSelect";
 import "./image-settings.css";
 type Config = {
   images?: string[];
@@ -16,6 +16,7 @@ type Config = {
   network: NetworkChoice;
   image: string;
 };
+type RegistryImage = { digest: string; reference: string; tags: string[] };
 export type NodeView = {
   node: {
     id: string;
@@ -54,6 +55,10 @@ export default function NodeSettings() {
     { scope: string; status?: number; error?: string }[]
   >([]);
   const [nodes, setNodes] = useState<NodeView[]>([]),
+    [registryImages, setRegistryImages] = useState<RegistryImage[]>([]),
+    [registryError, setRegistryError] = useState(""),
+    [loadingImages, setLoadingImages] = useState(false),
+    [manualImage, setManualImage] = useState(false),
     [draft, setDraft] = useState<Config | null>(null),
     [id, setID] = useState(""),
     [newID, setNewID] = useState(""),
@@ -63,8 +68,21 @@ export default function NodeSettings() {
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
   const load = () => api<NodeView[]>("/nodes").then(setNodes);
+  async function loadRegistryImages() {
+    setLoadingImages(true);
+    setRegistryError("");
+    try {
+      const result = await api<{ images: RegistryImage[] }>("/registry/images");
+      setRegistryImages(result.images);
+    } catch (e) {
+      setRegistryError((e as Error).message);
+    } finally {
+      setLoadingImages(false);
+    }
+  }
   useEffect(() => {
     load().catch((e) => setError(e.message));
+    void loadRegistryImages();
     const t = setInterval(() => load().catch((e) => setError(e.message)), 5000);
     return () => clearInterval(t);
   }, []);
@@ -73,6 +91,10 @@ export default function NodeSettings() {
     if (draft && !dialog?.open) dialog?.showModal();
     if (!draft && dialog?.open) dialog.close();
   }, [draft]);
+  const selectedNode = nodes.find((n) => n.node.id === id);
+  useEffect(() => {
+    setChecks([]);
+  }, [id, selectedNode?.config?.version, selectedNode?.node.readiness?.status, selectedNode?.node.readiness?.configVersion]);
   function closeDetail() {
     detailGeneration.current += 1;
     setDraft(null);
@@ -80,6 +102,7 @@ export default function NodeSettings() {
     setChecks([]);
     setDetailError("");
     setNotice("");
+    setManualImage(false);
   }
   function edit(n: NodeView) {
     detailGeneration.current += 1;
@@ -98,6 +121,7 @@ export default function NodeSettings() {
     setChecks([]);
     setDetailError("");
     setNotice("");
+    setManualImage(false);
   }
   async function save() {
     const generation = detailGeneration.current;
@@ -110,7 +134,10 @@ export default function NodeSettings() {
         "PUT",
         draft,
       );
-      if (detailGeneration.current === generation) setDraft(c);
+      if (detailGeneration.current === generation) {
+        setDraft(c);
+        setChecks([]);
+      }
       await load();
       if (detailGeneration.current === generation)
         setNotice("配置已保存，等待节点同步。");
@@ -125,8 +152,8 @@ export default function NodeSettings() {
     <div className="image-settings">
       <div className="page-head">
         <div>
-          <h1>执行节点</h1>
-          <p>节点提供执行环境，项目可以使用多个符合条件的节点。</p>
+          <h1>Node 管理</h1>
+          <p>Node 承载任务工作区与 Runner，项目可以使用多个符合条件的 Node。</p>
         </div>
       </div>
       <ErrorBox error={error} />
@@ -260,7 +287,7 @@ export default function NodeSettings() {
                     onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                   />
                 </Field>
-                <Field label="并发任务容量">
+                <Field label="并发任务容量" hint="同时分配给此节点的未结束任务和初始化数量；等待人工处理的任务也会占用名额。">
                   <input
                     type="number"
                     min={1}
@@ -271,24 +298,26 @@ export default function NodeSettings() {
                     }
                   />
                 </Field>
-                <Field label="每个 Agent 内存上限（MiB，0 使用 2048）">
+                <Field label="每个 Runner 内存上限（MiB）" hint="留空使用默认值 2048 MiB；限制运行 Agent CLI 的任务容器。">
                   <input
                     type="number"
                     min={0}
-                    value={draft.memoryMB || 0}
+                    placeholder="默认 2048"
+                    value={draft.memoryMB || ""}
                     onChange={(e) =>
-                      setDraft({ ...draft, memoryMB: Number(e.target.value) })
+                      setDraft({ ...draft, memoryMB: e.target.value === "" ? 0 : Number(e.target.value) })
                     }
                   />
                 </Field>
-                <Field label="每个 Agent CPU 上限（0 使用 2）">
+                <Field label="每个 Runner CPU 上限" hint="留空使用默认值 2 CPU；限制运行 Agent CLI 的任务容器。">
                   <input
                     type="number"
                     min={0}
                     step={0.5}
-                    value={draft.cpus || 0}
+                    placeholder="默认 2"
+                    value={draft.cpus || ""}
                     onChange={(e) =>
-                      setDraft({ ...draft, cpus: Number(e.target.value) })
+                      setDraft({ ...draft, cpus: e.target.value === "" ? 0 : Number(e.target.value) })
                     }
                   />
                 </Field>
@@ -310,15 +339,40 @@ export default function NodeSettings() {
                     }
                   />
                 </Field>
-                <Field label="默认镜像（仓库摘要）">
-                  <input
-                    placeholder="registry.example.com/swarmjet/agent@sha256:…"
-                    value={draft.image}
-                    onChange={(e) =>
-                      setDraft({ ...draft, image: e.target.value })
-                    }
-                  />
-                </Field>
+                <div className="node-image-picker">
+                  <Field label="默认镜像（已发布版本）">
+                    <select
+                      value={manualImage ? "__manual__" : draft.image}
+                      onChange={(e) => {
+                        if (e.target.value === "__manual__") setManualImage(true);
+                        else { setManualImage(false); setDraft({ ...draft, image: e.target.value }); }
+                      }}
+                    >
+                      <option value="">暂不指定镜像</option>
+                      {draft.image && !registryImages.some((image) => image.reference === draft.image) && (
+                        <option value={draft.image}>当前配置：{draft.image}</option>
+                      )}
+                      {registryImages.map((image) => (
+                        <option key={image.digest} value={image.reference}>
+                          {image.tags.join("、") || "未命名版本"} · {image.digest.slice(0, 19)}…
+                        </option>
+                      ))}
+                      <option value="__manual__">手动填写镜像摘要…</option>
+                    </select>
+                  </Field>
+                  {registryImages.length === 0 && !registryError && <small>仓库中暂无已发布镜像，可先到镜像管理页构建。</small>}
+                  {registryError && <small role="alert">镜像列表读取失败：{registryError}</small>}
+                  <button type="button" disabled={loadingImages} onClick={() => void loadRegistryImages()}>
+                    {loadingImages ? "读取中…" : "刷新镜像列表"}
+                  </button>
+                  {manualImage && <Field label="手动填写镜像摘要">
+                    <input
+                      placeholder="registry.example.com/swarmjet/agent@sha256:…"
+                      value={draft.image}
+                      onChange={(e) => setDraft({ ...draft, image: e.target.value })}
+                    />
+                  </Field>}
+                </div>
               </div>
               <label className="environment-check">
                 <input
@@ -353,7 +407,7 @@ export default function NodeSettings() {
                   className="button"
                   href={`#/runtime?node=${encodeURIComponent(id)}`}
                 >
-                  节点配置终端
+                  配置此 Node 的 Runner
                 </a>
               </div>
               <Field label="连通性测试地址">
@@ -387,11 +441,11 @@ export default function NodeSettings() {
                   }
                 }}
               >
-                从节点和 Agent 容器测试
+                测试节点进程与临时容器
               </button>
               {checks.map((c) => (
                 <p key={c.scope}>
-                  {c.scope === "node" ? "节点进程" : "Agent 容器"}：
+                  {c.scope === "node" ? "节点进程" : "临时测试容器"}：
                   {c.error || `已连接，HTTP ${c.status}`}
                 </p>
               ))}

@@ -184,7 +184,7 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		a.mihomo(w, r)
 		return
 	}
-	if r.URL.Path == "/api/registry" {
+	if r.URL.Path == "/api/registry" || r.URL.Path == "/api/registry/reveal" {
 		a.registry(w, r)
 		return
 	}

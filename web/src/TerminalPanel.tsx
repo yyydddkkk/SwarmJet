@@ -215,8 +215,8 @@ export function TerminalPanel({
   }
 
   return (
-    <TerminalWindow title="OpenCode 配置终端" available={available}
-      onOpen={connect} onClose={() => disconnect()}>
+    <TerminalWindow title="OpenCode 配置终端" available={available} connection={connection}
+      onOpen={connect} onClose={() => disconnect()} onRestore={() => requestAnimationFrame(() => session.current?.fit.fit())}>
     <div className="runtime-terminal-panel wizard-terminal">
       <div className="panel-head">
         <div>
@@ -253,7 +253,7 @@ export function TerminalPanel({
       </div>
       {!available && (
         <div className="setup-warning" role="status">
-          执行器配置终端当前不可用。请确认服务端已启用执行器环境管理。
+          Runner 配置终端当前不可用。请确认所选 Node 已连接且镜像就绪。
         </div>
       )}
       {terminalError && (

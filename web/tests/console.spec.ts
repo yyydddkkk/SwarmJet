@@ -434,6 +434,20 @@ test("commands use the real API without optimistic completion and note draft sur
   });
 });
 
+test("cancel task shows a reversible confirmation before sending the command", async ({ page }) => {
+  const state = await mock(page);
+  await page.goto("/#/tasks/task-001");
+  await page.getByRole("button", { name: "取消任务" }).click();
+  const confirmation = page.getByRole("dialog", { name: "取消任务" });
+  await expect(confirmation).toContainText("已经合并的变更不会撤回");
+  await confirmation.getByRole("button", { name: "取消", exact: true }).click();
+  expect(state.commands).toHaveLength(0);
+  await page.getByRole("button", { name: "取消任务" }).click();
+  await confirmation.getByRole("button", { name: "取消任务" }).click();
+  await expect.poll(() => state.commands.length).toBe(1);
+  expect(state.commands[0]).toMatchObject({ kind: "cancel" });
+});
+
 test("task terminal follows live Agent output, switches runs, and stops polling on close", async ({ page }) => {
   const liveTask: Task = {
     ...task,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
-import { ErrorBox, Field } from "./App";
+import { ErrorBox, Field } from "./ui";
 import "./mihomo-settings.css";
 
 type Revision = {

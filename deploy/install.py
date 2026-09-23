@@ -2,12 +2,34 @@
 """Bootstrap a single-host source deployment using the existing Compose files."""
 import argparse
 import json
+import importlib.util
 import os
 from pathlib import Path
 import secrets
 import shutil
 import subprocess
 import sys
+
+
+def lan_host():
+    route = subprocess.run(["ip", "-4", "route", "show", "table", "main", "default"],
+                           check=True, text=True, capture_output=True).stdout.split()
+    if "dev" not in route:
+        raise RuntimeError("无法确定局域网网卡；请传入 --registry-host")
+    device = route[route.index("dev") + 1]
+    addresses = subprocess.run(["ip", "-o", "-4", "addr", "show", "dev", device],
+                               check=True, text=True, capture_output=True).stdout.split()
+    if "inet" not in addresses:
+        raise RuntimeError("无法确定局域网 IPv4；请传入 --registry-host")
+    return addresses[addresses.index("inet") + 1].split("/")[0]
+
+
+def setup_registry(root, host, env_file):
+    source = Path(__file__).resolve().parent / "registry_setup.py"
+    spec = importlib.util.spec_from_file_location("registry_setup", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.setup(root, host, 5443, env_file)
 
 
 def initialize(path, example, data_dir, agent_clis):
@@ -46,6 +68,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", default="/srv/swarmjet/data", help="首次生成配置时的数据目录")
     parser.add_argument("--agent-clis", default="opencode", help="首次安装的 CLI，如 opencode,codex,claude")
+    parser.add_argument("--registry-host", help="仓库对局域网节点公开的固定 IPv4 地址")
     args = parser.parse_args()
     if not Path(args.data_dir).is_absolute() or any(c in args.data_dir for c in "\r\n$#'\"\\ \t"):
         parser.error("--data-dir 必须是无空白或 dotenv 特殊字符的绝对路径")
@@ -68,8 +91,16 @@ def main():
     if endpoint != "unix:///var/run/docker.sock":
         raise RuntimeError("此部署需要本机 /var/run/docker.sock，请使用本机 Docker context。")
     initialize(directory / ".env", directory / ".env.example", args.data_dir, args.agent_clis)
+    values = dict(line.split("=", 1) for line in (directory / ".env").read_text().splitlines()
+                  if line and not line.startswith("#") and "=" in line)
+    registry_env = directory / ".env.registry"
+    existing = dict(line.split("=", 1) for line in registry_env.read_text().splitlines()
+                    if "=" in line) if registry_env.exists() else {}
+    host = args.registry_host or existing.get("REGISTRY_BIND_HOST") or lan_host()
+    setup_registry(Path(values["DATA_DIR"]) / "registry-config", host, registry_env)
     compose = ["docker", "compose", "--env-file", str(directory / ".env"),
-               "-f", "compose.yaml", "-f", "compose.build.yaml", "-f", "compose.builder.yaml"]
+               "--env-file", str(registry_env), "-f", "compose.yaml", "-f", "compose.build.yaml",
+               "-f", "compose.builder.yaml", "-f", "compose.registry.yaml"]
     override = directory / "compose.override.yaml"
     if override.exists():
         compose += ["-f", str(override)]

@@ -12,15 +12,17 @@
 sudo python3 deploy/install.py
 # 需要多个执行器时，在首次部署指定（初始化始终需要 opencode）：
 # sudo python3 deploy/install.py --agent-clis opencode,codex,claude
+# 局域网有多个地址时，明确指定仓库地址：
+# sudo python3 deploy/install.py --registry-host 10.0.0.20
 ```
 
-脚本自动生成权限为 `0600` 的 `deploy/.env`、独立的数据库和管理员密码、运行终端密钥及连接加密主密钥，创建 `/srv/swarmjet/data`，构建镜像并通过 Compose 完成迁移、启动和健康检查。宿主机不需要安装 Go、Node.js 或 Agent CLI。可用 `--data-dir /绝对路径` 修改首次部署的数据目录。脚本要求本机 Docker socket，支持 `deploy/compose.override.yaml`。
+脚本自动生成权限为 `0600` 的 `deploy/.env`、独立的数据库和管理员密码、运行终端密钥及连接加密主密钥，还会生成 `deploy/.env.registry`、局域网 TLS 证书和独立随机的仓库推送/拉取密码，创建 `/srv/swarmjet/data`，构建镜像并通过 Compose 完成迁移、启动和健康检查。仓库证书会加入本机 Docker 信任目录，远程节点仍需安装生成的 CA。宿主机需要 Docker、Python 3、OpenSSL 和 `ip` 命令，不需要 Go、Node.js 或 Agent CLI。可用 `--data-dir /绝对路径` 修改首次部署的数据目录。脚本要求本机 Docker socket，支持 `deploy/compose.override.yaml`。
 
-默认只监听服务器本机。在自己的电脑执行 `ssh -N -L 8180:127.0.0.1:8180 用户名@服务器`，然后打开 `http://localhost:8180`。账号为 `admin`，密码在服务器 `deploy/.env` 的 `ADMIN_PASSWORD` 中。登录后在“执行器环境”启用已安装的 Agent、配置模型认证，再添加 GitLab 项目。
+控制台默认只监听服务器本机；镜像仓库网关监听安装时选定的局域网 IP。在自己的电脑执行 `ssh -N -L 8180:127.0.0.1:8180 用户名@服务器`，然后打开 `http://localhost:8180`。账号为 `admin`，密码在服务器 `deploy/.env` 的 `ADMIN_PASSWORD` 中。登录后在“Runner 环境”选择 Node、启用已安装的 Agent 并配置模型认证，再添加 GitLab 项目。仓库所用 IP 应通过 DHCP 保留或静态配置保持稳定。
 
 初始化验证默认使用 `swarmjet-agent:local`。如果业务项目需要额外工具链或离线依赖，应准备相应镜像并修改 `INIT_VERIFY_IMAGE`；服务启动成功不代表项目验收已通过。
 
-失败后可以重新运行脚本；已有 `.env` 不会被覆盖或补写，密码和主密钥不会轮换。`--data-dir` 和 `--agent-clis` 仅用于首次生成配置，之后直接编辑 `.env`。脚本会重新构建并更新服务，不删除数据；升级前仍应备份 PostgreSQL、数据目录和主密钥。已发布镜像的更新使用下文的 `update.sh`。
+失败后可以重新运行脚本；已有 `.env` 不会被覆盖或补写，仓库密码和 CA 也不会轮换。`--data-dir` 和 `--agent-clis` 仅用于首次生成配置，之后直接编辑 `.env`。脚本会重新构建并更新服务，不删除数据；升级前仍应备份 PostgreSQL、数据目录、`.env.registry` 和主密钥。已发布镜像的更新使用下文的 `update.sh`。
 
 ## 手动本地构建
 
@@ -33,8 +35,9 @@ chmod 600 .env
 # 编辑 .env：独立随机 PostgreSQL / 管理员密码、实际凭证、DATA_DIR。
 mkdir -p /srv/swarmjet/data
 chmod 700 /srv/swarmjet/data
-docker compose -f compose.yaml -f compose.build.yaml --profile tools build
-docker compose up -d --wait
+python3 registry_setup.py --root /srv/swarmjet/data/registry-config --host 10.0.0.20 --env-file .env.registry
+docker compose --env-file .env --env-file .env.registry -f compose.yaml -f compose.build.yaml -f compose.builder.yaml -f compose.registry.yaml --profile tools build
+docker compose --env-file .env --env-file .env.registry -f compose.yaml -f compose.builder.yaml -f compose.registry.yaml up -d --wait
 ```
 
 `deploy/Dockerfile` 默认使用 Docker Hub 官方基础镜像，并固定版本。可在仓库根目录通过 build args 覆盖镜像来源：
@@ -59,7 +62,9 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
 
 侧边栏“镜像管理”管理 Agent 执行镜像。独立 builder 调用 Compose 管理的持久化 BuildKit，发布到自建 Distribution。平台程序镜像和业务应用镜像仍使用各自发布流程。
 
-源码安装脚本会组合 `compose.yaml`、`compose.build.yaml`、`compose.builder.yaml`。手动部署也应包含 builder 配置。先按 [Distribution 部署说明](../docs/registry.md) 准备仓库，再在页面保存仓库账号和构建参数。构建成功不会自动应用或启用 Agent；选择节点分发后，节点按摘要预拉取并检查 CLI，准备完成才可接单。
+源码安装脚本会组合 `compose.yaml`、`compose.build.yaml`、`compose.builder.yaml` 和 `compose.registry.yaml`。手动部署也应包含 builder 与 registry 配置；镜像管理页默认使用局域网 TLS 仓库，可按需查看自动生成的账号密码或切换自定义仓库。其他节点需信任仓库 CA 后才能拉取镜像。构建成功不会自动应用或启用 Agent；选择节点分发后，节点按摘要预拉取并检查 CLI，准备完成才可接单。
+
+本机原生开发的 `scripts/dev start` 也会自动使用同一份 `compose.registry.yaml`，私有配置保存在 `DATA_DIR/registry-config`。
 
 节点支持默认镜像及多个额外预加载镜像，项目显式角色镜像优先于节点默认值。已有任务保留原摘要。未启用独立构建服务的旧单机部署仍保留原本地镜像管理路径；本地 image ID 不能直接用于跨机器分发。
 
@@ -77,7 +82,7 @@ chmod 600 .env
 ./update.sh registry.example/swarmjet:v1 registry.example/swarmjet-agent:v1
 ```
 
-脚本拉取镜像，先执行 Temporal schema 更新和 namespace 初始化、再执行应用 migration，最后更新 API / Worker / UI。它不会执行 `compose down` 或删除数据卷。已有执行容器和 Temporal 历史不会因为替换 Worker 而删除。
+脚本拉取镜像，先执行 Temporal schema 更新和 namespace 初始化、再执行应用 migration，最后更新 API、Worker、builder、BuildKit、本地节点和内置仓库。它不会执行 `compose down` 或删除数据卷。已有执行容器和 Temporal 历史不会因为替换 Worker 而删除。
 
 首次初始化由 PostgreSQL 建立 `swarmjet`、`temporal`、`temporal_visibility` 三个数据库，随后对应工具建立 schema。升级已有数据库前先备份；不要给新版 Temporal 强行降级数据库 schema。更换主版本应遵循官方升级路径，不能仅修改镜像 tag 跳过中间升级要求。`TEMPORAL_NAMESPACE` 默认 `swarmjet`，历史保留 7 天。
 

@@ -38,6 +38,7 @@ type Manager struct {
 	root    string
 	nodeID  string
 	active  *Desired
+	desired *Desired
 }
 
 func New(root string, id string) *Manager {
@@ -62,9 +63,24 @@ func (m *Manager) Active() *Desired {
 	_ = json.Unmarshal(b, &d)
 	return &d
 }
+func (m *Manager) Desired() *Desired {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.desired == nil {
+		return nil
+	}
+	b, _ := json.Marshal(m.desired)
+	var d Desired
+	_ = json.Unmarshal(b, &d)
+	return &d
+}
 func (m *Manager) Apply(ctx context.Context, d Desired) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	b, _ := json.Marshal(d)
+	var copy Desired
+	_ = json.Unmarshal(b, &copy)
+	m.desired = &copy
 	if m.running {
 		if m.cancel != nil && (m.state.ConfigVersion != d.Config.Version || m.state.Network != d.Network) {
 			m.cancel()

@@ -120,6 +120,44 @@ test("registry passwords can be revealed independently without changing their va
   await expect(pull).toHaveValue("pull-secret");
 });
 
+test("builtin registry is the default and a custom address can be saved", async ({ page }) => {
+  await imagesAPI(page);
+  let config = { mode: "builtin", builtinAvailable: true, builtinAddress: "10.0.0.20:5443", address: "10.0.0.20:5443", repository: "swarmjet/agent", pushUser: "", pullUser: "", hasPushPassword: false, hasPullPassword: false };
+  await page.route("**/api/registry", (route) => {
+    if (route.request().method() === "PUT") config = { ...config, ...route.request().postDataJSON() };
+    return route.fulfill({ json: config });
+  });
+  await page.goto("/#/images");
+  await page.getByRole("tab", { name: "仓库设置" }).click();
+  await page.getByText("Distribution 镜像仓库").click();
+  await expect(page.getByLabel("仓库来源")).toHaveValue("builtin");
+  await expect(page.getByText("10.0.0.20:5443")).toBeVisible();
+  await page.getByLabel("仓库来源").selectOption("custom");
+  await page.getByLabel("仓库地址（host:port）").fill("registry.example:5443");
+  await page.getByRole("button", { name: "保存仓库选择" }).click();
+  await expect(page.getByRole("status")).toContainText("仓库配置已保存");
+  expect(config.mode).toBe("custom");
+  expect(config.address).toBe("registry.example:5443");
+});
+
+test("admin can reveal generated registry credentials on demand", async ({ page }) => {
+  await imagesAPI(page);
+  await page.route("**/api/registry", (route) => route.fulfill({ json: {
+    mode: "builtin", builtinAvailable: true, address: "10.0.0.20:5443", repository: "swarmjet/agent",
+    pushUser: "builder", pullUser: "reader", hasPushPassword: true, hasPullPassword: true,
+  } }));
+  await page.route("**/api/registry/reveal", (route) => route.fulfill({ json: { pushPassword: "generated-push", pullPassword: "generated-pull" } }));
+  await page.goto("/#/images");
+  await page.getByRole("tab", { name: "仓库设置" }).click();
+  await page.getByText("Distribution 镜像仓库").click();
+  await expect(page.getByText("generated-push")).toHaveCount(0);
+  await page.getByRole("button", { name: "查看已保存密码" }).click();
+  await expect(page.getByLabel("推送密码", { exact: true })).toHaveValue("generated-push");
+  await expect(page.getByLabel("推送密码", { exact: true })).toHaveAttribute("type", "text");
+  await page.getByRole("button", { name: "隐藏推送密码" }).click();
+  await expect(page.getByLabel("推送密码", { exact: true })).toHaveAttribute("type", "password");
+});
+
 for (const width of [1440, 390]) test(`image settings fit ${width}px and expose advanced options on demand`, async ({ page }) => {
   await imagesAPI(page);
   await page.setViewportSize({ width, height: 1000 });

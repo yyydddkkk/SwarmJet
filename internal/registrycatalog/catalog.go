@@ -2,12 +2,15 @@ package registrycatalog
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -35,8 +38,17 @@ type StatusError struct{ Code int }
 func (e StatusError) Error() string { return fmt.Sprintf("仓库请求失败（HTTP %d）", e.Code) }
 
 func New(config registryconfig.Config, access registryconfig.Access) Client {
+	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if config.Mode == "builtin" && os.Getenv("REGISTRY_CA_FILE") != "" {
+		roots, err := x509.SystemCertPool()
+		if err == nil {
+			if ca, readErr := os.ReadFile(os.Getenv("REGISTRY_CA_FILE")); readErr == nil && roots.AppendCertsFromPEM(ca) {
+				client.Transport = &http.Transport{Proxy: http.ProxyFromEnvironment, TLSClientConfig: &tls.Config{RootCAs: roots}}
+			}
+		}
+	}
 	return Client{
-		HTTP:    &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		HTTP:    client,
 		BaseURL: "https://" + config.Address, Repository: config.Repository, Access: access,
 	}
 }

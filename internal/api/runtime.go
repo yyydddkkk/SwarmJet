@@ -11,7 +11,8 @@ import (
 	"time"
 )
 
-// Runtime control stays in the Worker. The console never receives Docker access.
+// Runtime control is proxied to the selected Node (or legacy Worker).
+// The console never receives Docker access.
 func (a *server) runtime(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/runtime")
 	if path == "/agents" {
@@ -23,11 +24,11 @@ func (a *server) runtime(w http.ResponseWriter, r *http.Request) {
 		problem(w, 503, "镜像管理目前仅支持单机执行环境，多执行节点请通过部署分发镜像。")
 		return
 	}
-	if !imageRoute && r.Method != "GET" && !(r.Method == "POST" && (path == "/verify" || path == "/network-test")) {
+	if !imageRoute && r.Method != "GET" && !(r.Method == "POST" && (path == "/verify" || path == "/network-test" || path == "/runner-test")) {
 		problem(w, 405, "method not allowed")
 		return
 	}
-	if !imageRoute && path != "/status" && path != "/models" && path != "/terminal" && path != "/verify" && path != "/network-test" {
+	if !imageRoute && path != "/status" && path != "/models" && path != "/terminal" && path != "/verify" && path != "/network-test" && path != "/runner-test" {
 		problem(w, 404, "runtime route not found")
 		return
 	}
@@ -56,7 +57,7 @@ func (a *server) runtime(w http.ResponseWriter, r *http.Request) {
 		runtimeURL = a.cfg.BuilderURL
 	}
 	if runtimeSecret == "" || runtimeURL == "" {
-		problem(w, 503, "执行器环境管理尚未启用，请配置服务端管理连接。")
+		problem(w, 503, "Runner 环境管理尚未启用，请检查管理连接。")
 		return
 	}
 	target, e := url.Parse(runtimeURL)
@@ -125,7 +126,7 @@ func (a *server) runtime(w http.ResponseWriter, r *http.Request) {
 		req.Header.Set("X-SwarmJet-Runtime-Secret", runtimeSecret)
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		problem(w, 502, "暂时无法连接执行器环境，请检查 Worker 状态后重试。")
+		problem(w, 502, "暂时无法连接 Runner 环境，请检查运行服务状态后重试。")
 	}
 	proxy.ServeHTTP(w, request)
 }

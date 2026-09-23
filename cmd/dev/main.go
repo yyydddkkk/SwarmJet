@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -298,6 +300,56 @@ func persistentSecret(path string) (string, error) {
 	return secret, nil
 }
 
+func prepareRegistry(env map[string]string) error {
+	host := env["REGISTRY_BIND_HOST"]
+	if host == "" {
+		out, err := run(env, "ip", "-4", "route", "show", "table", "main", "default")
+		if err != nil {
+			return err
+		}
+		fields := strings.Fields(string(out))
+		for i := 0; i+1 < len(fields); i++ {
+			if fields[i] == "dev" {
+				iface, err := net.InterfaceByName(fields[i+1])
+				if err != nil {
+					return err
+				}
+				addrs, err := iface.Addrs()
+				if err != nil {
+					return err
+				}
+				for _, addr := range addrs {
+					if ip, _, err := net.ParseCIDR(addr.String()); err == nil && ip.To4() != nil && ip.IsPrivate() {
+						host = ip.String()
+						break
+					}
+				}
+				break
+			}
+		}
+	}
+	if host == "" {
+		return errors.New("无法确定局域网 IPv4 地址；请在 deploy/.env.development 设置 REGISTRY_BIND_HOST")
+	}
+	port := value(env, "REGISTRY_PORT", "5443")
+	configRoot := filepath.Join(env["DATA_DIR"], "registry-config")
+	envFile := file(".env.registry")
+	if _, err := run(env, "python3", filepath.Join(root, "deploy/registry_setup.py"), "--root", configRoot, "--host", host, "--port", port, "--env-file", envFile); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if key, val, ok := strings.Cut(line, "="); ok {
+			env[key] = val
+		}
+	}
+	env["SWARMJET_BUILTIN_REGISTRY_ADDRESS"] = net.JoinHostPort(host, port)
+	return nil
+}
+
 func compose(env map[string]string, args ...string) ([]byte, error) {
 	return run(env, "docker", append([]string{"compose", "-f", filepath.Join(root, "deploy", "compose.yaml")}, args...)...)
 }
@@ -453,6 +505,32 @@ func reachable(address string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+func registryReachable(env map[string]string) bool {
+	ca, err := os.ReadFile(env["REGISTRY_CA_FILE"])
+	if err != nil {
+		return false
+	}
+	roots, err := x509.SystemCertPool()
+	if err != nil {
+		return false
+	}
+	if !roots.AppendCertsFromPEM(ca) {
+		return false
+	}
+	client := http.Client{Timeout: time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots}}}
+	req, err := http.NewRequest("GET", "https://"+env["SWARMJET_BUILTIN_REGISTRY_ADDRESS"]+"/v2/", nil)
+	if err != nil {
+		return false
+	}
+	req.SetBasicAuth(env["REGISTRY_PULL_USER"], env["REGISTRY_PULL_PASSWORD"])
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 func build(env map[string]string, candidate string) error {
 	if _, err := run(env, value(env, "GO_BINARY", "go"), "build", "-o", candidate, "./cmd/swarmjet"); err != nil {
 		return err
@@ -524,6 +602,9 @@ func supervise() error {
 	if err != nil {
 		return err
 	}
+	if err := prepareRegistry(env); err != nil {
+		return err
+	}
 	if err := os.Setenv("PATH", env["PATH"]); err != nil {
 		return err
 	}
@@ -563,6 +644,9 @@ func supervise() error {
 	if _, err := compose(env, "stop", "api", "worker"); err != nil {
 		return err
 	}
+	if _, err := run(env, "docker", "compose", "-p", "swarmjet-registry", "-f", filepath.Join(root, "deploy/compose.registry.yaml"), "up", "-d", "--wait"); err != nil {
+		return err
+	}
 	if _, err := run(env, "docker", "compose", "-f", filepath.Join(root, "deploy/compose.buildkit-dev.yaml"), "up", "-d"); err != nil {
 		return err
 	}
@@ -594,7 +678,7 @@ func supervise() error {
 		}
 	}
 	deadline := time.Now().Add(45 * time.Second)
-	for !(reachable(env["DEV_API_URL"]+"/healthz") && reachable(env["PUBLIC_ORIGIN"])) {
+	for !(reachable(env["DEV_API_URL"]+"/healthz") && reachable(env["PUBLIC_ORIGIN"]) && registryReachable(env)) {
 		if time.Now().After(deadline) {
 			return errors.New("startup health check timed out; inspect .cache/dev logs")
 		}

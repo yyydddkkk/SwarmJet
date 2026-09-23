@@ -13,6 +13,9 @@
   --status-success: oklch(45% 0.08 160);
   --status-warning: oklch(46% 0.09 75);
   --status-danger: oklch(48% 0.13 25);
+  --control-line: #cbd5e3;
+  --control-hover: #aabbd1;
+  --control-disabled: #f0f3f7;
   --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -77,6 +80,16 @@ button:disabled {
   color: var(--surface);
   border-color: #284bbd;
 }
+.danger {
+  background: #b63d42;
+  border-color: #b63d42;
+  color: #fff;
+}
+.danger:hover {
+  background: #972e33;
+  border-color: #972e33;
+  color: #fff;
+}
 a {
   color: inherit;
   text-decoration: none;
@@ -118,16 +131,93 @@ input,
 select,
 textarea {
   width: 100%;
-  border: 1px solid #d5dce5;
-  border-radius: 6px;
-  background: #fff;
-  color: #263344;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
   padding: 10px 12px;
   min-height: 42px;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
 }
-input:disabled {
-  background: #f4f5f7;
-  color: #687484;
+input:not(:disabled):hover,
+select:not(:disabled):hover,
+textarea:not(:disabled):hover {
+  border-color: var(--control-hover);
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px #345bd61c;
+}
+select {
+  appearance: none;
+  cursor: pointer;
+  padding-right: 38px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='m4 6 4 4 4-4' stroke='%23536680' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+}
+select:hover:not(:disabled) {
+  background-color: #f9fbfe;
+}
+select:disabled,
+input:disabled,
+textarea:disabled {
+  background-color: var(--control-disabled);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+select:disabled {
+  opacity: 1;
+}
+select option {
+  background: var(--surface);
+  color: var(--ink);
+}
+@supports (appearance: base-select) {
+  select:not([multiple]) {
+    appearance: base-select;
+  }
+  select::picker-icon {
+    display: none;
+  }
+  select::picker(select) {
+    appearance: base-select;
+    inset: auto;
+    top: anchor(bottom);
+    left: anchor(left);
+    position-try-fallbacks: flip-block;
+    border: 1px solid var(--control-line);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 6px;
+    margin-top: 5px;
+    max-height: min(320px, 50dvh);
+    overflow-y: auto;
+    box-shadow: 0 18px 50px #18283f26;
+  }
+  select option {
+    min-height: 34px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  select option:hover,
+  select option:focus-visible {
+    background: var(--hover);
+  }
+  select option:checked {
+    color: var(--accent);
+    background: var(--selected);
+    font-weight: 600;
+  }
+  select option:disabled {
+    color: var(--muted);
+  }
 }
 textarea {
   resize: vertical;
@@ -391,6 +481,7 @@ footer span {
   min-height: 36px;
   padding: 7px 10px;
 }
+.filters select { padding-right: 34px; }
 .table-wrap {
   overflow-x: auto;
 }
@@ -572,6 +663,7 @@ dialog {
   width: min(600px, calc(100vw - 32px));
   max-height: 90vh;
   color: var(--ink);
+  background: var(--surface);
   box-shadow: 0 30px 100px #10213935;
 }
 dialog::backdrop {
@@ -585,6 +677,48 @@ dialog .panel-head {
 dialog .panel-head button {
   font-size: 23px;
   border: 0;
+}
+.confirm-dialog {
+  width: min(480px, calc(100vw - 32px));
+  padding: 0;
+  overflow: hidden;
+}
+.confirm-dialog .panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 16px;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+.confirm-dialog .panel-head h2 { font-size: 17px; }
+.confirm-dialog .panel-head button {
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  color: var(--muted);
+}
+.confirm-dialog-content {
+  padding: 20px 24px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.confirm-dialog-content p { margin: 0; overflow-wrap: anywhere; }
+.confirm-dialog-content p + p { margin-top: 12px; }
+.confirm-dialog-warning {
+  color: var(--status-danger);
+  background: #fff5f4;
+  border: 1px solid #f0d3d5;
+  border-radius: 7px;
+  padding: 10px 12px;
+}
+.confirm-dialog .error { margin: 0 24px 8px; }
+.confirm-dialog-actions {
+  margin: 0;
+  padding: 16px 24px;
+  border-top: 1px solid var(--line);
+  background: #fafbfd;
 }
 .back {
   display: inline-block;
@@ -1048,7 +1182,7 @@ button:active:not(:disabled), .button:active { transform: translateY(1px); }
 .task-search { position: relative; display: flex; align-items: center; min-width: 0; }
 .task-search > .ui-icon { position: absolute; left: 10px; color: var(--muted); pointer-events: none; width: 15px; }
 .task-search input { padding-left: 32px; }
-.task-list input, .task-list select { background: var(--surface); border-color: var(--line); color: var(--ink); border-radius: 7px; }
+.task-list input, .task-list select { background-color: var(--surface); border-color: var(--line); color: var(--ink); border-radius: 7px; }
 .task-list input::placeholder { color: var(--muted); }
 .task-list th { background: transparent; color: var(--muted); font-size: 12px; font-weight: 400; letter-spacing: 0; padding: 12px 16px; }
 .task-list td { padding: 24px 16px; font-size: 13px; vertical-align: middle; border-bottom: 1px solid var(--line); }

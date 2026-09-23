@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 const ref = "registry.test/swarmjet/agent@sha256:" + "a".repeat(64);
+const publishedRef = "registry.test/swarmjet/agent@sha256:" + "b".repeat(64);
 async function mock(page: Page) {
   const profiles: any[] = [];
   let defaultId = "";
@@ -47,6 +48,7 @@ async function mock(page: Page) {
           revisions: [{ id: "revision-a", name: "内网出口", createdAt: "2026-09-23T00:00:00Z", warnings: [] }],
         },
       });
+    if (path === "/api/registry/images") return route.fulfill({ json: { repository: "registry.test/swarmjet/agent", images: [{ digest: "sha256:" + "b".repeat(64), reference: publishedRef, tags: ["v2", "stable"] }] } });
     if (path === "/api/networks/default" && r.method() === "PUT") {
       defaultId = r.postDataJSON().id;
       return route.fulfill({ json: { id: defaultId } });
@@ -121,8 +123,12 @@ test("network editor creates versioned profile without placing password in the l
   await page.getByRole("button", { name: /构建出口/ }).click();
   await savedEditor.getByLabel("名称", { exact: true }).fill("构建出口 2");
   await page.keyboard.press("Escape");
-  await expect(savedEditor.getByText("有未保存的修改，确定放弃吗？")).toBeVisible();
-  await savedEditor.getByRole("button", { name: "放弃修改" }).click();
+  const discard = page.getByRole("dialog", { name: "放弃未保存的修改" });
+  await expect(discard).toContainText("无法恢复");
+  await discard.getByRole("button", { name: "继续编辑" }).click();
+  await expect(savedEditor.getByLabel("名称", { exact: true })).toHaveValue("构建出口 2");
+  await savedEditor.getByRole("button", { name: "关闭网络配置" }).click();
+  await discard.getByRole("button", { name: "放弃修改" }).click();
   await expect(savedEditor).not.toBeVisible();
 });
 test("Mihomo management opens above the overview with versions shown first", async ({ page }) => {
@@ -149,10 +155,18 @@ test("saved network profile can be deleted and default returns to direct", async
   await page.getByLabel("名称", { exact: true }).fill("临时出口");
   await page.getByRole("button", { name: "保存配置", exact: true }).click();
   await page.getByRole("button", { name: "关闭网络配置" }).click();
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.getByLabel("默认网络").click();
+  await page.screenshot({ path: "test-results/network-select-open-390.png" });
+  await page.keyboard.press("Escape");
   await page.getByLabel("默认网络").selectOption({ label: "临时出口" });
   await page.getByRole("button", { name: /临时出口/ }).click();
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("dialog", { name: "编辑网络配置" }).getByRole("button", { name: "删除配置" }).click();
+  const confirmation = page.getByRole("dialog", { name: "删除网络配置" });
+  await expect(confirmation).toContainText("临时出口");
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.screenshot({ path: "test-results/network-delete-confirm-390.png" });
+  await confirmation.getByRole("button", { name: "删除配置" }).click();
   await expect(page.getByRole("status")).toContainText("网络配置已删除");
   await expect(page.getByText("临时出口", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("默认网络")).toHaveValue("");
@@ -170,12 +184,12 @@ test("node drain preserves image and scopes network tests to selected node", asy
   await expect(page.getByRole("status")).toContainText("等待节点同步");
   expect(state.saved().image).toBe(ref);
   expect(state.saved().enabled).toBe(false);
-  await page.getByRole("button", { name: "从节点和 Agent 容器测试" }).click();
+  await page.getByRole("button", { name: "测试节点进程与临时容器" }).click();
   await expect(
     page.getByText("节点进程：已连接，HTTP 401", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Agent 容器：已连接，HTTP 200", { exact: true }),
+    page.getByText("临时测试容器：已连接，HTTP 200", { exact: true }),
   ).toBeVisible();
   await detail.getByRole("button", { name: "关闭节点详情" }).click();
   await expect(detail).not.toBeVisible();
@@ -183,6 +197,14 @@ test("node drain preserves image and scopes network tests to selected node", asy
   await expect(detail).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(detail).not.toBeVisible();
+});
+test("node default image can be selected from published registry versions", async ({ page }) => {
+  const state = await mock(page);
+  await page.goto("/#/nodes");
+  await page.getByRole("button", { name: /内网执行节点/ }).click();
+  await page.getByLabel("默认镜像（已发布版本）").selectOption(publishedRef);
+  await page.getByRole("button", { name: "保存节点配置" }).click();
+  expect(state.saved().image).toBe(publishedRef);
 });
 for (const width of [1440, 390])
   test(`node and network settings fit ${width}px`, async ({ page }) => {
@@ -202,7 +224,7 @@ for (const width of [1440, 390])
     if (width === 390) {
       const detail = page.getByRole("dialog", { name: "内网执行节点" });
       await detail
-        .getByRole("button", { name: "从节点和 Agent 容器测试" })
+        .getByRole("button", { name: "测试节点进程与临时容器" })
         .scrollIntoViewIfNeeded();
       await expect
         .poll(() => detail.evaluate((element) => element.scrollTop))

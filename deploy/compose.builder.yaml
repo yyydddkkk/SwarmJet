@@ -4,6 +4,14 @@ services:
     environment:
       BUILDER_ADMIN_URL: http://builder:8093
       NODE_SECRET: ${NODE_SECRET:-${RUNTIME_ADMIN_SECRET}}
+      SWARMJET_BUILTIN_REGISTRY_ADDRESS: ${REGISTRY_BIND_HOST}:${REGISTRY_PORT:-5443}
+      REGISTRY_CA_FILE: /etc/swarmjet/registry-ca.crt
+      REGISTRY_PUSH_USER: ${REGISTRY_PUSH_USER}
+      REGISTRY_PUSH_PASSWORD: ${REGISTRY_PUSH_PASSWORD}
+      REGISTRY_PULL_USER: ${REGISTRY_PULL_USER}
+      REGISTRY_PULL_PASSWORD: ${REGISTRY_PULL_PASSWORD}
+    volumes:
+      - ${REGISTRY_CA_FILE}:/etc/swarmjet/registry-ca.crt:ro
   worker:
     environment:
       BUILDER_ADMIN_URL: http://builder:8093
@@ -22,9 +30,18 @@ services:
       RUNTIME_ADMIN_SECRET: ${RUNTIME_ADMIN_SECRET:?Set RUNTIME_ADMIN_SECRET}
       DATA_DIR: /var/lib/swarmjet-builds
       BUILDKIT_HOST: unix:///run/buildkit/buildkitd.sock
+      SWARMJET_BUILTIN_REGISTRY_ADDRESS: ${REGISTRY_BIND_HOST}:${REGISTRY_PORT:-5443}
+      REGISTRY_CA_FILE: /etc/swarmjet/registry-ca.crt
+      REGISTRY_PUSH_USER: ${REGISTRY_PUSH_USER}
+      REGISTRY_PUSH_PASSWORD: ${REGISTRY_PUSH_PASSWORD}
+      REGISTRY_PULL_USER: ${REGISTRY_PULL_USER}
+      REGISTRY_PULL_PASSWORD: ${REGISTRY_PULL_PASSWORD}
+    ports:
+      - '127.0.0.1:8094:8094'
     volumes:
       - builder-data:/var/lib/swarmjet-builds
       - buildkit-socket:/run/buildkit
+      - ${REGISTRY_CA_FILE}:/etc/swarmjet/registry-ca.crt:ro
     depends_on:
       migrate: {condition: service_completed_successfully}
       buildkit: {condition: service_started}
@@ -32,15 +49,17 @@ services:
     image: moby/buildkit:v0.23.2
     restart: unless-stopped
     privileged: true
+    network_mode: host
     command: [--addr, unix:///run/buildkit/buildkitd.sock, --config, /etc/buildkit/buildkitd.toml]
     environment:
-      HTTP_PROXY: http://builder:8094
-      HTTPS_PROXY: http://builder:8094
-      NO_PROXY: localhost,127.0.0.1
+      HTTP_PROXY: http://127.0.0.1:8094
+      HTTPS_PROXY: http://127.0.0.1:8094
+      NO_PROXY: localhost,127.0.0.1,${REGISTRY_BIND_HOST}
     volumes:
       - buildkit-data:/var/lib/buildkit
       - buildkit-socket:/run/buildkit
-      - ./buildkitd.toml:/etc/buildkit/buildkitd.toml:ro
+      - ${REGISTRY_BUILDKIT_CONFIG}:/etc/buildkit/buildkitd.toml:ro
+      - ${REGISTRY_CA_FILE}:/etc/buildkit/certs/registry.crt:ro
     mem_limit: 2g
     cpus: 2
   local-node:

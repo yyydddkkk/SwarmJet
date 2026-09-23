@@ -80,8 +80,6 @@
   border-top: 1px solid var(--line);
   background: var(--surface);
 }
-.network-discard { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; width: 100%; font-size: 13px; }
-.network-discard span { margin-right: auto; }
 .network-settings .network-delete { color: var(--status-danger); margin-right: auto; }
 .network-settings .network-delete:hover { border-color: var(--status-danger); background: #fff5f4; }
 .network-mihomo-dialog .mihomo-panel { border: 0; box-shadow: none; margin: 0; }

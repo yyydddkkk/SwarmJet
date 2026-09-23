@@ -104,12 +104,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.images(w, r)
 		return
 	}
-	if r.Method != http.MethodGet && !(r.Method == http.MethodPost && (r.URL.Path == "/verify" || r.URL.Path == "/network-test")) {
+	if r.Method != http.MethodGet && !(r.Method == http.MethodPost && (r.URL.Path == "/verify" || r.URL.Path == "/network-test" || r.URL.Path == "/runner-test")) {
 		w.Header().Set("Allow", "GET, POST")
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "不支持此请求方法"})
 		return
 	}
-	if s.initErr != nil {
+	if s.initErr != nil && r.URL.Path != "/network-test" {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "运行环境尚未正确配置"})
 		return
 	}
@@ -124,6 +124,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveTerminal(w, r)
 	case "/verify":
 		s.verify(w, r)
+	case "/runner-test":
+		s.testRunner(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "接口不存在"})
 	}

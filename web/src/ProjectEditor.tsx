@@ -3,7 +3,7 @@ import type { AgentConfig, Check, Connection, Project, Repository } from "./type
 import type {NodeView} from "./NodeSettings";
 import { api } from "./api";
 import { useAgentCatalog } from "./agents";
-import { ErrorBox, Field } from "./App";
+import { ErrorBox, Field } from "./ui";
 import { formatCommand, parseCommand } from "./commands";
 import "./wizard.css";
 
@@ -945,7 +945,7 @@ export function ProjectEditor({
             <section className="panel setup-section" id="execution">
               <div className="setup-section-head">
                 <div>
-                  <h2>执行器</h2>
+                  <h2>Runner 与 Agent</h2>
                   <p>开发与审查使用相同 Agent 的独立会话。</p>
                   <label className="checkbox"><input type="checkbox" checked={!p.development.image&&!p.review.image} onChange={e=>setP({...p,nodes:p.nodes||{mode:'auto'},development:{...p.development,image:e.target.checked?'':'swarmjet-agent:local'},review:{...p.review,image:e.target.checked?'':'swarmjet-agent:local'}})}/>使用节点默认镜像</label>
                   <Field label="执行节点范围"><select value={p.nodes?.mode||'auto'} onChange={e=>setP({...p,nodes:{mode:e.target.value,ids:[]}})}><option value="auto">所有符合条件的节点</option><option value="selected">指定节点</option></select></Field>
@@ -954,7 +954,7 @@ export function ProjectEditor({
                 <span className="setup-label">可稍后补充</span>
               </div>
               <div className="panel-padding">
-                <p>Issue 使用 <code>agent:opencode</code>、<code>agent:codex</code> 等标签覆盖默认执行器，统一作用于开发、审查和合并。模型使用 CLI 保存的默认配置。</p>
+                <p>Issue 使用 <code>agent:opencode</code>、<code>agent:codex</code> 等标签覆盖默认 Agent，统一作用于开发、审查和合并。模型使用 CLI 保存的默认配置。</p>
                 <a className="button" href="#/runtime">启用 Agent 与终端配置 →</a>
                 {agentCatalogError && <p role="alert">{agentCatalogError}</p>}
                 <Field label="项目默认 Agent">

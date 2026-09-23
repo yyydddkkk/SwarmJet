@@ -91,7 +91,7 @@
 .image-distribute { margin-top:16px; padding:14px; background:var(--bg); border-radius:8px; }
 .image-distribute .environment-check { margin:10px 0; }
 .image-distribute small { color:var(--muted); }
-.image-delete-confirm { position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:20px; background:rgba(15,24,36,.55); }
-.image-delete-confirm .panel { width:min(600px,100%); max-height:90vh; overflow:auto; padding:24px; background:#fff; }
-.image-delete-confirm code { overflow-wrap:anywhere; }
-.image-delete-confirm .image-actions { justify-content:flex-end; margin-top:20px; }
+.node-image-picker { min-width:0; }
+.node-image-picker .field { margin-bottom:8px; }
+.node-image-picker small { display:block; color:var(--muted); overflow-wrap:anywhere; margin-bottom:8px; }
+.node-image-picker > button { margin-bottom:12px; }

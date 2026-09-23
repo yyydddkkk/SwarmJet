@@ -19,12 +19,12 @@ flowchart TB
             routing["执行路由：按 Task.NodeID 选择本机或远程 Node"]
             maintenance["任务现场与报告保留期清理"]
             initflow["项目初始化：connect → analyze → verify"]
-            runtimeAdmin["执行器配置终端 / 模型验证"]
+            runtimeAdmin["Runner 配置终端 / 模型验证"]
         end
 
         subgraph localExecution["控制面本机执行环境：宿主 Docker + DATA_DIR"]
             localNode["LocalNode：进程内执行后端"]
-            localAgents["任务 Agent 容器：开发、审查、合并角色"]
+            localAgents["Runner：开发、审查、合并角色"]
             localTests["任务验收容器 / Compose 联调"]
             localData[("任务私有工作区、角色会话、配置快照、报告")]
             setupContainers["初始化、初始化验证、配置终端容器"]
@@ -34,7 +34,7 @@ flowchart TB
 
     subgraph remoteExecution["可选执行节点 × N：各自独立主机，使用 compose.node.yaml"]
         remoteNode["swarmjet node：签名 HTTP 执行接口"]
-        remoteAgents["本机 Docker：任务 Agent 容器"]
+        remoteAgents["本机 Docker：Runner"]
         remoteTests["本机 Docker：验收容器 / Compose 联调"]
         remoteData[("节点独立 DATA_DIR：工作区、会话、配置、报告")]
     end

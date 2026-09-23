@@ -1,62 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import MihomoSettings from "./MihomoSettings";
 import { api } from "./api";
-import { ErrorBox, Field } from "./App";
+import { ConfirmDialog, ErrorBox, Field } from "./ui";
+import type { NetworkProfile } from "./NetworkSelect";
 import "./image-settings.css";
 import "./network-settings.css";
-export type NetworkChoice = { mode: string; id?: string };
-export type NetworkProfile = {
-  id: string;
-  name: string;
-  version: number;
-  httpProxy: string;
-  httpsProxy: string;
-  noProxy: string;
-  username: string;
-  hasPassword: boolean;
-  revoked: boolean;
-};
-export function NetworkSelect({
-  value,
-  onChange,
-}: {
-  value: NetworkChoice;
-  onChange: (v: NetworkChoice) => void;
-}) {
-  const [profiles, setProfiles] = useState<NetworkProfile[]>([]);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    api<{ profiles: NetworkProfile[] }>("/networks")
-      .then((v) => setProfiles(v.profiles))
-      .catch((e) => setError(e.message));
-  }, []);
-  return (
-    <>
-      <select
-        aria-label="网络配置"
-        value={value.mode === "profile" ? value.id : value.mode || "default"}
-        onChange={(e) =>
-          onChange(
-            ["default", "direct"].includes(e.target.value)
-              ? { mode: e.target.value }
-              : { mode: "profile", id: e.target.value },
-          )
-        }
-      >
-        <option value="default">使用平台默认</option>
-        <option value="direct">直连</option>
-        {profiles
-          .filter((p) => !p.revoked)
-          .map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-      </select>
-      {error && <small role="alert">{error}</small>}
-    </>
-  );
-}
 const blank = (): NetworkProfile => ({
   id: `network-${crypto.randomUUID().slice(0, 8)}`,
   name: "",
@@ -82,6 +30,7 @@ export default function NetworkSettings() {
     [pageNotice, setPageNotice] = useState(""),
     [profileNotice, setProfileNotice] = useState(""),
     [confirmDiscard, setConfirmDiscard] = useState(false),
+    [confirmDelete, setConfirmDelete] = useState(false),
     [showMihomo, setShowMihomo] = useState(false),
     [mihomoOpened, setMihomoOpened] = useState(false),
     [mihomoStatus, setMihomoStatus] = useState<{
@@ -128,6 +77,7 @@ export default function NetworkSettings() {
     setProfileError("");
     setProfileNotice("");
     setConfirmDiscard(false);
+    setConfirmDelete(false);
   }
   function closeProfile() {
     if (dirty) {
@@ -144,6 +94,7 @@ export default function NetworkSettings() {
     setProfileError("");
     setProfileNotice("");
     setConfirmDiscard(false);
+    setConfirmDelete(false);
   }
   async function save() {
     if (!draft) return;
@@ -173,7 +124,7 @@ export default function NetworkSettings() {
     }
   }
   async function remove() {
-    if (!draft?.version || !window.confirm(`确定删除“${draft.name}”吗？该配置的所有版本都会删除，引用它的节点、构建或任务可能无法继续使用代理。`)) return;
+    if (!draft?.version) return;
     const generation = editorGeneration.current;
     setBusy(true);
     setProfileError("");
@@ -181,6 +132,7 @@ export default function NetworkSettings() {
       await api<void>(`/networks?id=${encodeURIComponent(draft.id)}&version=${draft.version}`, "DELETE");
       await load();
       if (editorGeneration.current === generation) {
+        setConfirmDelete(false);
         profileRef.current?.close();
         setPageNotice("网络配置已删除。");
       }
@@ -326,23 +278,38 @@ export default function NetworkSettings() {
               )}
             </div>
             <div className="network-dialog-footer">
-              {confirmDiscard ? (
-                <div className="network-discard" role="alert">
-                  <span>有未保存的修改，确定放弃吗？</span>
-                  <button onClick={() => setConfirmDiscard(false)}>继续编辑</button>
-                  <button onClick={() => profileRef.current?.close()}>放弃修改</button>
-                </div>
-              ) : (
-                <>
-                  {draft.version > 0 && <button className="network-delete" disabled={busy} onClick={remove}>删除配置</button>}
-                  <button onClick={closeProfile}>取消</button>
-                  <button className="primary" disabled={busy} onClick={save}>保存配置</button>
-                </>
-              )}
+              {draft.version > 0 && <button className="network-delete" disabled={busy} onClick={() => setConfirmDelete(true)}>删除配置</button>}
+              <button onClick={closeProfile}>取消</button>
+              <button className="primary" disabled={busy} onClick={save}>保存配置</button>
             </div>
           </>
         )}
       </dialog>
+      {confirmDiscard && (
+        <ConfirmDialog
+          title="放弃未保存的修改"
+          confirmLabel="放弃修改"
+          cancelLabel="继续编辑"
+          danger
+          onCancel={() => setConfirmDiscard(false)}
+          onConfirm={() => { setConfirmDiscard(false); profileRef.current?.close(); }}
+        >
+          <p>当前网络配置有未保存的修改。放弃后，这些修改无法恢复。</p>
+        </ConfirmDialog>
+      )}
+      {confirmDelete && draft && (
+        <ConfirmDialog
+          title="删除网络配置"
+          confirmLabel="删除配置"
+          danger
+          busy={busy}
+          error={profileError}
+          onCancel={() => { setConfirmDelete(false); setProfileError(""); }}
+          onConfirm={() => void remove()}
+        >
+          <p>将删除“{draft.name}”及其所有版本。引用该配置的 Node、构建或任务可能无法继续使用代理。</p>
+        </ConfirmDialog>
+      )}
       <dialog
         ref={mihomoRef}
         className="network-mihomo-dialog"

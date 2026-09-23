@@ -70,3 +70,14 @@ func TestMissingRepositoryHasNoImages(t *testing.T) {
 		t.Fatalf("images=%v err=%v", images, err)
 	}
 }
+
+func TestRegistryModesUseHTTPS(t *testing.T) {
+	builtin := New(registryconfig.Config{Mode: "builtin", Address: "10.0.0.20:5443"}, registryconfig.Access{})
+	if builtin.BaseURL != "https://10.0.0.20:5443" {
+		t.Fatal(builtin.BaseURL)
+	}
+	custom := New(registryconfig.Config{Mode: "custom", Address: "registry.example:5443"}, registryconfig.Access{})
+	if custom.BaseURL != "https://registry.example:5443" {
+		t.Fatal(custom.BaseURL)
+	}
+}

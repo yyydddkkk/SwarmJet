@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import type { AgentSpec } from "./agents";
 import RegistrySettings from "./RegistrySettings";
-import { NetworkSelect, type NetworkChoice } from "./NetworkSettings";
+import { NetworkSelect, type NetworkChoice } from "./NetworkSelect";
 import type { NodeView } from "./NodeSettings";
-import { Field } from "./App";
+import { ConfirmDialog, Field } from "./ui";
 import "./image-settings.css";
 
 type ImageConfig = {
@@ -155,10 +155,10 @@ export default function ImageSettings() {
       <div className="page-head">
         <div>
           <h1>镜像管理</h1>
-          <p>查看仓库版本、分发到执行节点，并构建 Agent 镜像。</p>
+          <p>查看仓库版本、分发到 Node，并构建包含 Agent CLI 的 Runner 镜像。</p>
         </div>
         <a className="button" href="#/runtime">
-          执行器环境
+          Runner 环境
         </a>
       </div>
       <div className="image-tabs" role="tablist" aria-label="镜像管理视图">
@@ -251,7 +251,7 @@ export default function ImageSettings() {
               </fieldset>
               <p className="image-help">
                 构建不会启用
-                Agent。应用镜像后，请在执行器环境中完成启用和登录。受管项目的静态初始化需要
+                Agent。应用镜像后，请在 Runner 环境中选择 Node 完成启用和登录。受管项目的静态初始化需要
                 OpenCode。
               </p>
               <Field label="构建步骤网络配置">
@@ -687,21 +687,22 @@ function RegistryInventory({ builds, nodes, reloadNodes, onBuild }: {
         </div>
       </article>;
     })}
-    {deleteTarget && <div className="image-delete-confirm" role="dialog" aria-modal="true" aria-label="确认删除镜像版本" onKeyDown={(event) => { if (event.key === "Escape") setDeleteTarget(null); }}>
-      <div className="panel">
-        <h2>删除镜像版本</h2>
+    {deleteTarget && <ConfirmDialog
+      title="确认删除镜像版本"
+      confirmLabel="确认删除"
+      danger
+      busy={!!busy}
+      disabled={usage.length > 0}
+      error={error}
+      onCancel={() => setDeleteTarget(null)}
+      onConfirm={() => void run("delete", async () => {
+        await api(`/registry/images/${encodeURIComponent(deleteTarget.digest)}`, "DELETE", { expectedTags: deleteTarget.tags });
+        setDeleteTarget(null); setSelected(""); await refresh();
+        setNotice("镜像版本已从仓库删除；磁盘空间将在维护时回收。");
+      })}
+    >
         <p>将从仓库删除摘要 <code>{deleteTarget.digest}</code> 及其所有标签：{deleteTarget.tags.join("、")}。删除后无法从仓库拉取；磁盘空间需在维护时单独回收。</p>
-        {usage.length > 0 && <p className="image-build-error">平台仍在使用：{usage.join("、")}。请先移除这些引用。</p>}
-        {error && <p className="error" role="alert">{error}</p>}
-        <div className="image-actions">
-          <button autoFocus onClick={() => setDeleteTarget(null)}>取消</button>
-          <button className="primary" disabled={!!busy || usage.length > 0} onClick={() => void run("delete", async () => {
-            await api(`/registry/images/${encodeURIComponent(deleteTarget.digest)}`, "DELETE", { expectedTags: deleteTarget.tags });
-            setDeleteTarget(null); setSelected(""); await refresh();
-            setNotice("镜像版本已从仓库删除；磁盘空间将在维护时回收。");
-          })}>确认删除</button>
-        </div>
-      </div>
-    </div>}
+        {usage.length > 0 && <p className="confirm-dialog-warning">平台仍在使用：{usage.join("、")}。请先移除这些引用。</p>}
+    </ConfirmDialog>}
   </section>;
 }

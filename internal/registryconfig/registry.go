@@ -15,13 +15,25 @@ import (
 )
 
 type Config struct {
-	Address         string `json:"address"`
-	Repository      string `json:"repository"`
-	PushUser        string `json:"pushUser"`
-	PullUser        string `json:"pullUser"`
-	HasPushPassword bool   `json:"hasPushPassword"`
-	HasPullPassword bool   `json:"hasPullPassword"`
+	Mode             string `json:"mode,omitempty"`
+	BuiltinAvailable bool   `json:"builtinAvailable,omitempty"`
+	BuiltinAddress   string `json:"builtinAddress,omitempty"`
+	Address          string `json:"address"`
+	Repository       string `json:"repository"`
+	PushUser         string `json:"pushUser"`
+	PullUser         string `json:"pullUser"`
+	HasPushPassword  bool   `json:"hasPushPassword"`
+	HasPullPassword  bool   `json:"hasPullPassword"`
 }
+
+func Builtin() (Config, bool) {
+	address := os.Getenv("SWARMJET_BUILTIN_REGISTRY_ADDRESS")
+	if address == "" {
+		return Config{}, false
+	}
+	return Config{Mode: "builtin", BuiltinAvailable: true, BuiltinAddress: address, Address: address, Repository: "swarmjet/agent", PushUser: os.Getenv("REGISTRY_PUSH_USER"), PullUser: os.Getenv("REGISTRY_PULL_USER"), HasPushPassword: os.Getenv("REGISTRY_PUSH_PASSWORD") != "", HasPullPassword: os.Getenv("REGISTRY_PULL_PASSWORD") != ""}, true
+}
+
 type Secrets struct {
 	Push string `json:"push"`
 	Pull string `json:"pull"`
@@ -37,6 +49,9 @@ type Access struct {
 }
 
 func (c Config) Validate() error {
+	if c.Mode != "" && c.Mode != "custom" && c.Mode != "builtin" {
+		return fmt.Errorf("无效镜像仓库模式")
+	}
 	u, e := url.Parse("https://" + c.Address)
 	if e != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(c.Address, " \r\n") {
 		return fmt.Errorf("仓库地址应为 host[:port]，不含协议和路径")
@@ -50,7 +65,26 @@ func Load(ctx context.Context, s *store.Store, box *secretbox.Box, push bool) (C
 	var v Saved
 	e := s.Setting(ctx, "registry", &v)
 	if e != nil {
+		if e == store.ErrNotFound {
+			if builtin, ok := Builtin(); ok {
+				return builtin, builtinAccess(builtin.Address, push), nil
+			}
+		}
 		return v.Config, Access{}, e
+	}
+	if v.Config.Mode == "builtin" {
+		builtin, ok := Builtin()
+		if !ok {
+			return Config{}, Access{}, fmt.Errorf("内置镜像仓库未启用")
+		}
+		return builtin, builtinAccess(builtin.Address, push), nil
+	}
+	v.Config.Mode = "custom"
+	v.Config.BuiltinAvailable = false
+	v.Config.BuiltinAddress = ""
+	if builtin, ok := Builtin(); ok {
+		v.Config.BuiltinAvailable = true
+		v.Config.BuiltinAddress = builtin.Address
 	}
 	a := Access{Address: v.Config.Address, Username: v.Config.PullUser}
 	var sec Secrets
@@ -72,6 +106,13 @@ func Load(ctx context.Context, s *store.Store, box *secretbox.Box, push bool) (C
 		a.Password = sec.Push
 	}
 	return v.Config, a, nil
+}
+
+func builtinAccess(address string, push bool) Access {
+	if push {
+		return Access{Address: address, Username: os.Getenv("REGISTRY_PUSH_USER"), Password: os.Getenv("REGISTRY_PUSH_PASSWORD")}
+	}
+	return Access{Address: address, Username: os.Getenv("REGISTRY_PULL_USER"), Password: os.Getenv("REGISTRY_PULL_PASSWORD")}
 }
 
 // DockerConfig creates a private short-lived CLI authentication directory.

@@ -14,9 +14,24 @@ HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("installer", HERE / "install.py")
 installer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(installer)
+REGISTRY_SPEC = importlib.util.spec_from_file_location("registry_setup", HERE / "registry_setup.py")
+registry_setup = importlib.util.module_from_spec(REGISTRY_SPEC)
+REGISTRY_SPEC.loader.exec_module(registry_setup)
 
 
 class InstallTests(unittest.TestCase):
+    def test_registry_bootstrap_is_stable_and_private(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "registry"
+            env_file = Path(directory) / ".env.registry"
+            first = registry_setup.setup(root, "10.0.0.20", 5443, env_file, False)
+            second = registry_setup.setup(root, "10.0.0.20", 5443, env_file, False)
+            self.assertEqual(first, second)
+            self.assertNotEqual(first["push_password"], first["pull_password"])
+            self.assertEqual((root / "secrets.json").stat().st_mode & 0o777, 0o600)
+            self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
+            self.assertIn("10.0.0.20:5443", (root / "buildkitd.toml").read_text())
+
     def test_generated_secrets_permissions_and_rerun(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / ".env"
@@ -54,9 +69,14 @@ class InstallTests(unittest.TestCase):
                     raise subprocess.CalledProcessError(1, argv)
                 return subprocess.CompletedProcess(argv, 0, output)
 
+            def registry_setup(registry_root, host, env_file):
+                env_file.write_text("REGISTRY_BIND_HOST=" + host + "\nREGISTRY_PORT=5443\n")
+
             with patch.object(installer, "__file__", str(root / "install.py")), \
                  patch.object(installer.shutil, "which", return_value="/usr/bin/docker"), \
                  patch.object(installer.subprocess, "run", side_effect=run), \
+                 patch.object(installer, "lan_host", return_value="10.0.0.20"), \
+                 patch.object(installer, "setup_registry", side_effect=registry_setup), \
                  patch.dict(installer.os.environ, {"DOCKER_HOST": "unix:///var/run/docker.sock"}), \
                  patch("sys.argv", ["install.py", "--data-dir", str(root / "data")]), \
                  contextlib.redirect_stdout(io.StringIO()):

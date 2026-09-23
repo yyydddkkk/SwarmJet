@@ -19,6 +19,7 @@
 .workbench-prototype svg{flex-shrink:0;vertical-align:middle}
 .workbench-prototype code,.workbench-prototype pre{font-family:"SFMono-Regular",Consolas,monospace;font-size:12px}
 .workbench-prototype input,.workbench-prototype select,.workbench-prototype textarea{font-family:inherit;font-size:14px;background:white;color:var(--wb-ink);border:1px solid #dce2eb;border-radius:6px;min-height:36px;padding:8px 10px}
+.workbench-prototype select{appearance:auto}
 .workbench-prototype input::placeholder,.workbench-prototype textarea::placeholder{color:#7a8799}
 .workbench-prototype .wb-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 .workbench-prototype .wb-skip{position:fixed;top:-80px;left:240px;background:#fff;padding:12px;z-index:100}

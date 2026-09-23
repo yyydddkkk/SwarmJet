@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, APIError } from "./api";
 import { useAgentCatalog } from "./agents";
-import { ErrorBox, Field } from "./App";
+import { ErrorBox, Field } from "./ui";
 import { MetaPublication } from "./MetaPublication";
 import { TerminalPanel } from "./TerminalPanel";
 import type {
@@ -944,7 +944,7 @@ export default function ProjectWizard({
                 {agentCatalog.agents.filter((a)=>agentCatalog.enabled.includes(a.id)).map((a)=><option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </Field>
-            <p>在<a href="#/runtime">执行器环境</a>统一勾选启用。Issue 标签可覆盖默认 Agent；任务模型由 CLI 的持久化配置决定。下方 OpenCode 模型仅用于 Meta 静态初始化。</p>
+            <p>在<a href="#/runtime">Runner 环境</a>统一勾选启用，并选择 Node 配置登录。Issue 标签可覆盖默认 Agent；任务模型由 CLI 的持久化配置决定。下方 OpenCode 模型仅用于 Meta 静态初始化。</p>
             {agentCatalogError && <p role="alert">{agentCatalogError}</p>}
             <div className="wizard-model">
               <button

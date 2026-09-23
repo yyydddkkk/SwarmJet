@@ -1,6 +1,5 @@
-# docker compose --env-file registry.env -f deploy/compose.registry.yaml up -d
+# Include this file with the app stack, or run it standalone with -p swarmjet-registry.
 # Generate TLS/htpasswd files first; see docs/registry.md.
-name: ${REGISTRY_PROJECT_NAME:-swarmjet-registry}
 services:
   registry:
     image: registry:3

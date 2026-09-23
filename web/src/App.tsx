@@ -1,10 +1,6 @@
 import {
   useCallback,
-  useId,
-  cloneElement,
-  isValidElement,
   useEffect,
-  useRef,
   useState,
   lazy,
   Suspense,
@@ -21,6 +17,7 @@ import {
 } from "./task-presentation";
 import { ProjectEditor, newProject } from "./ProjectEditor";
 import { TaskTerminal } from "./TaskTerminal";
+import { ConfirmDialog, ErrorBox, Field, Modal, Panel } from "./ui";
 const RuntimeSettings = lazy(() => import("./RuntimeSettings"));
 const NodeSettings = lazy(() => import("./NodeSettings"));
 const NetworkSettings = lazy(() => import("./NetworkSettings"));
@@ -109,62 +106,6 @@ const date = (value: string) =>
 const go = (path: string) => {
   location.hash = path;
 };
-export function ErrorBox({
-  error,
-  retry,
-}: {
-  error: string;
-  retry?: () => void;
-}) {
-  return error ? (
-    <div className="error" role="alert">
-      <span>{error}</span>
-      {retry && <button onClick={retry}>重试</button>}
-    </div>
-  ) : null;
-}
-export function Field({
-  label,
-  children,
-  hint,
-}: {
-  label: string;
-  children: ReactNode;
-  hint?: string;
-}) {
-  const id = useId();
-  return (
-    <label className="field">
-      <span id={`${id}-label`}>{label}</span>
-      {isValidElement<Record<string, unknown>>(children)
-        ? cloneElement(children, {
-            "aria-labelledby": `${id}-label`,
-            "aria-describedby": hint ? `${id}-hint` : undefined,
-          })
-        : children}
-      {hint && <small id={`${id}-hint`}>{hint}</small>}
-    </label>
-  );
-}
-export function Panel({
-  title,
-  children,
-  extra,
-}: {
-  title: string;
-  children: ReactNode;
-  extra?: ReactNode;
-}) {
-  return (
-    <section className="panel">
-      <div className="panel-head">
-        <h2>{title}</h2>
-        {extra}
-      </div>
-      {children}
-    </section>
-  );
-}
 function Status({ task }: { task: Task }) {
   const paused =
     task.paused && !["completed", "cancelled"].includes(task.stage);
@@ -176,33 +117,6 @@ function Status({ task }: { task: Task }) {
 }
 function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
-}
-function Modal({
-  title,
-  children,
-  close,
-}: {
-  title: string;
-  children: ReactNode;
-  close: () => void;
-}) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    ref.current?.showModal();
-    const dialog = ref.current;
-    return () => dialog?.close();
-  }, []);
-  return (
-    <dialog ref={ref} onCancel={close} aria-labelledby="dialog-title">
-      <div className="panel-head">
-        <h2 id="dialog-title">{title}</h2>
-        <button onClick={close} aria-label="关闭对话框">
-          ×
-        </button>
-      </div>
-      {children}
-    </dialog>
-  );
 }
 export default function App() {
   const [user, setUser] = useState<string | null>(null),
@@ -302,9 +216,9 @@ export default function App() {
             href="#/runtime"
           >
             <Icon name="runtime" />
-            执行器环境
+            Runner 环境
           </a>
-          <a href="#/nodes" className={nodesPage?"active":""} aria-current={nodesPage?"page":undefined}><Icon name="nodes"/>执行节点</a>
+          <a href="#/nodes" className={nodesPage?"active":""} aria-current={nodesPage?"page":undefined}><Icon name="nodes"/>Node 管理</a>
           <a href="#/networks" className={networksPage?"active":""} aria-current={networksPage?"page":undefined}><Icon name="branch"/>网络配置</a>
           <a aria-current={imagesPage ? "page" : undefined} className={imagesPage ? "active" : ""} href="#/images">
             <Icon name="images" />镜像管理
@@ -337,7 +251,7 @@ export default function App() {
         <header className="topbar">
           <span>
             工作空间 <span className="slash">/</span>{" "}
-            {nodesPage ? "执行节点" : networksPage ? "网络配置" : imagesPage ? "镜像管理" : runtimePage ? "执行器环境" : projectPage ? "项目配置" : "任务中心"}
+            {nodesPage ? "Node 管理" : networksPage ? "网络配置" : imagesPage ? "镜像管理" : runtimePage ? "Runner 环境" : projectPage ? "项目配置" : "任务中心"}
           </span>
           <span className="top-note">SwarmJet / 工作空间</span>
         </header>
@@ -347,7 +261,7 @@ export default function App() {
             <Suspense fallback={<div className="loading">正在加载镜像管理…</div>}><ImageSettings /></Suspense>
           ) : runtimePage ? (
             <Suspense
-              fallback={<div className="loading">正在加载执行器环境…</div>}
+              fallback={<div className="loading">正在加载 Runner 环境…</div>}
             >
               <RuntimeSettings key={route} />
             </Suspense>
@@ -881,6 +795,7 @@ function TaskDetail({ id }: { id: string }) {
     [text, setText] = useState(""),
     [feedback, setFeedback] = useState(""),
     [reject, setReject] = useState(false),
+    [confirmCancel, setConfirmCancel] = useState(false),
     [log, setLog] = useState<{ name: string; body: string } | null>(null),
     [logBusy, setLogBusy] = useState(""),
     [detailView, setDetailView] = useState("delivery");
@@ -1279,12 +1194,7 @@ function TaskDetail({ id }: { id: string }) {
                     <button
                       className="danger-text"
                       disabled={busy}
-                      onClick={() => {
-                        if (
-                          window.confirm("取消此任务？已经合并的变更不会撤回。")
-                        )
-                          void command("cancel");
-                      }}
+                      onClick={() => setConfirmCancel(true)}
                     >
                       取消任务
                     </button>
@@ -1374,6 +1284,20 @@ function TaskDetail({ id }: { id: string }) {
             </div>
           </form>
         </Modal>
+      )}
+      {confirmCancel && (
+        <ConfirmDialog
+          title="取消任务"
+          confirmLabel="取消任务"
+          danger
+          onCancel={() => setConfirmCancel(false)}
+          onConfirm={() => {
+            setConfirmCancel(false);
+            void command("cancel");
+          }}
+        >
+          <p>取消后任务将停止。已经合并的变更不会撤回。</p>
+        </ConfirmDialog>
       )}
       {log && (
         <Modal title={`${log.name} · 运行日志`} close={() => setLog(null)}>

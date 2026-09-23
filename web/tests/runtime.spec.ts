@@ -11,17 +11,28 @@ const status = {
 };
 async function runtimeAPI(page: Page) {
   let modelCalls = 0;
+  const calls: string[] = [];
   let enabled:string[] = [];
   const agents=[{id:"opencode",name:"OpenCode",executable:"opencode",setupCommand:"opencode auth login"},{id:"codex",name:"Codex",executable:"codex",setupCommand:"codex login --device-auth"},{id:"dst",name:"DeepSeek Harness TUI",executable:"dsh",setupCommand:"dst"},{id:"agy",name:"Antigravity",executable:"agy",setupCommand:"agy"},{id:"claude",name:"Claude Code",executable:"claude",setupCommand:"claude"}];
   await page.route("**/api/**", async (route) => {
-    const path = new URL(route.request().url()).pathname;
+    const url = new URL(route.request().url());
+    const path = url.pathname;
     if (path === "/api/runtime/agents") {
       if(route.request().method()==="PUT") enabled=route.request().postDataJSON().enabled;
       return route.fulfill({json:{agents,enabled}});
     }
     if (path === "/api/session")
       return route.fulfill({ json: { username: "admin" } });
+    if (path === "/api/nodes") return route.fulfill({json:[
+      {node:{id:"node-a",readiness:{status:"ready"}},online:true,config:{name:"节点 A",image:"registry.test/runner@sha256:aaa"}},
+      {node:{id:"node-b",readiness:{status:"ready"}},online:true,config:{name:"节点 B",image:"registry.test/runner@sha256:bbb"}},
+    ]});
+    if (path.startsWith("/api/runtime/") && path !== "/api/runtime/agents") {
+      calls.push(`${path}?node=${url.searchParams.get("node")}`);
+      expect(["node-a","node-b"]).toContain(url.searchParams.get("node"));
+    }
     if (path === "/api/runtime/status") return route.fulfill({ json: status });
+    if (path === "/api/runtime/runner-test") return route.fulfill({json:{ok:true,image:"registry.test/runner@sha256:aaa",agents:["opencode","dst"]}});
     if (path === "/api/runtime/models") {
       modelCalls++;
       return route.fulfill({
@@ -38,7 +49,7 @@ async function runtimeAPI(page: Page) {
       return route.fulfill({ json: [] });
     return route.fulfill({ status: 404, json: { error: "not found" } });
   });
-  return () => modelCalls;
+  return {modelCalls:() => modelCalls,calls};
 }
 
 test("runtime status and model catalog are explicit, searchable and copyable", async ({
@@ -46,14 +57,14 @@ test("runtime status and model catalog are explicit, searchable and copyable", a
   context,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  const modelCalls = await runtimeAPI(page);
+  const {modelCalls} = await runtimeAPI(page);
   let connections = 0;
-  await page.routeWebSocket("**/api/runtime/terminal", () => {
+  await page.routeWebSocket("**/api/runtime/terminal?node=*", () => {
     connections++;
   });
   await page.goto("/#/runtime");
   await expect(
-    page.getByRole("heading", { name: "执行器环境", exact: true }),
+    page.getByRole("heading", { name: "Runner 环境", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", {name:"展开 OpenCode 详情",exact:true}).click();
   await expect(
@@ -94,7 +105,7 @@ test("terminal sends input without automatic Enter, fits narrow screens and clea
     rows?: number;
   }> = [];
   const sockets: WebSocketRoute[] = [];
-  await page.routeWebSocket("**/api/runtime/terminal", (socket) => {
+  await page.routeWebSocket("**/api/runtime/terminal?node=*", (socket) => {
     sockets.push(socket);
     socket.onMessage((raw) => {
       const message = JSON.parse(String(raw));
@@ -137,7 +148,7 @@ test("terminal sends input without automatic Enter, fits narrow screens and clea
         .map((message) => message.data),
     )
     .toEqual(["opencode auth login"]);
-  await page.getByLabel("执行器配置终端输入").press("Enter");
+  await page.getByLabel("Runner 配置终端输入").press("Enter");
   await expect
     .poll(() =>
       messages.some(
@@ -180,7 +191,7 @@ test("terminal backend errors are visible and reconnect requires another click",
 }) => {
   await runtimeAPI(page);
   let connections = 0;
-  await page.routeWebSocket("**/api/runtime/terminal", (socket) => {
+  await page.routeWebSocket("**/api/runtime/terminal?node=*", (socket) => {
     connections++;
     socket.send(
       JSON.stringify({
@@ -204,7 +215,7 @@ test("leaving runtime closes its socket and returning does not reconnect", async
   await runtimeAPI(page);
   let connections = 0;
   let closed = 0;
-  await page.routeWebSocket("**/api/runtime/terminal", (socket) => {
+  await page.routeWebSocket("**/api/runtime/terminal?node=*", (socket) => {
     connections++;
     socket.onClose(() => {
       closed++;
@@ -218,7 +229,7 @@ test("leaving runtime closes its socket and returning does not reconnect", async
   );
   await page.evaluate(() => { location.hash = "/tasks"; });
   await expect.poll(() => closed).toBe(1);
-  await page.getByRole("link", { name: "执行器环境", exact: true }).click();
+  await page.getByRole("link", { name: "Runner 环境", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "打开终端", exact: true }),
   ).toBeEnabled();
@@ -233,7 +244,7 @@ test("floating terminal opens on demand, maximizes, preserves Escape and closes 
   let closed = 0;
   const input: string[] = [];
   const sizes: number[] = [];
-  await page.routeWebSocket("**/api/runtime/terminal", socket => {
+  await page.routeWebSocket("**/api/runtime/terminal?node=*", socket => {
     connections++;
     socket.onClose(() => closed++);
     socket.onMessage(raw => {
@@ -249,12 +260,12 @@ test("floating terminal opens on demand, maximizes, preserves Escape and closes 
   expect(connections).toBe(0);
   const launch = page.getByRole("button", { name: "打开终端", exact: true });
   await launch.click();
-  const dialog = page.getByRole("dialog", { name: "配置终端", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Runner 配置终端", exact: true });
   await expect(dialog).toBeVisible();
   await expect(page.locator(".xterm-accessibility-tree")).toContainText("floating-ready");
   const host = await page.getByTestId("runtime-terminal").boundingBox();
   expect(host!.height).toBeGreaterThan(500);
-  await page.getByLabel("执行器配置终端输入").press("Escape");
+  await page.getByLabel("Runner 配置终端输入").press("Escape");
   await expect.poll(() => input.includes("\u001b")).toBe(true);
   await expect(dialog).toBeVisible();
   const initialRows = sizes.at(-1)!;
@@ -289,4 +300,43 @@ test("agents start unchecked and only explicit saved selections persist", async 
   await page.reload();
   await expect(page.getByRole("checkbox",{name:"Codex",exact:true})).toBeChecked();
   await expect(page.getByRole("checkbox",{checked:true})).toHaveCount(1);
+});
+
+test("Runner test and status follow the selected Node", async ({page}) => {
+  const {calls} = await runtimeAPI(page);
+  await page.goto("/#/runtime");
+  await expect(page.getByLabel("选择 Node")).toHaveValue("node-a");
+  await page.getByRole("button",{name:"测试此 Node 的 Runner"}).click();
+  await expect(page.getByRole("status").filter({hasText:"Runner 镜像启动成功"})).toContainText("dst");
+  expect(calls).toContain("/api/runtime/runner-test?node=node-a");
+  await page.getByLabel("选择 Node").selectOption("node-b");
+  await expect(page.getByLabel("选择 Node")).toHaveValue("node-b");
+  await expect(page.getByText("registry.test/runner@sha256:bbb")).toBeVisible();
+  await expect.poll(() => calls.includes("/api/runtime/status?node=node-b")).toBe(true);
+  await page.getByRole("button",{name:"刷新模型列表"}).click();
+  expect(calls).toContain("/api/runtime/models?node=node-b");
+});
+
+test("minimizing terminal preserves connection and closing it disconnects", async ({page}) => {
+  await runtimeAPI(page);
+  let connections = 0, closed = 0;
+  await page.routeWebSocket("**/api/runtime/terminal?node=*", socket => {
+    connections++;
+    socket.onClose(() => closed++);
+    socket.send(Buffer.from("alive\r\n"));
+  });
+  await page.goto("/#/runtime");
+  await page.getByRole("button",{name:"打开终端",exact:true}).click();
+  await expect(page.locator(".xterm-accessibility-tree")).toContainText("alive");
+  await page.getByRole("button",{name:"最小化"}).click();
+  await expect(page.getByText("Runner 配置终端已最小化，连接保持中。")).toBeVisible();
+  expect(connections).toBe(1);
+  expect(closed).toBe(0);
+  await page.getByRole("button",{name:"恢复终端"}).last().click();
+  await expect(page.locator(".xterm-accessibility-tree")).toContainText("alive");
+  expect(connections).toBe(1);
+  await page.getByRole("button",{name:"最小化"}).click();
+  await page.getByRole("button",{name:"关闭终端"}).last().click();
+  await expect.poll(() => closed).toBe(1);
+  await expect(page.getByRole("button",{name:"打开终端",exact:true})).toBeVisible();
 });

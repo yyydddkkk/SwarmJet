@@ -113,11 +113,19 @@ func runNode(ctx context.Context) error {
 			return
 		}
 		active := environment.Active()
+		ready := active != nil
 		if active == nil {
-			http.Error(w, "节点镜像尚未就绪", 503)
-			return
+			if r.URL.Path != "/runtime/network-test" {
+				http.Error(w, "节点镜像尚未就绪", 503)
+				return
+			}
+			active = environment.Desired()
+			if active == nil {
+				http.Error(w, "节点配置尚未下发", 503)
+				return
+			}
 		}
-		key := fmt.Sprintf("%d/%s/%d", active.Config.Version, active.Network.ID, active.Network.Version)
+		key := fmt.Sprintf("%t/%d/%s/%d", ready, active.Config.Version, active.Network.ID, active.Network.Version)
 		adminMu.Lock()
 		busy := adminRequests > 0
 		if h, ok := admin.(interface{ TerminalActive() bool }); ok {

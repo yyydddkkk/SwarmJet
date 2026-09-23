@@ -9,6 +9,25 @@ import (
 )
 
 func (a *server) registry(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/registry/reveal" {
+		if r.Method != http.MethodPost {
+			problem(w, 405, "method not allowed")
+			return
+		}
+		_, push, err := registryconfig.Load(r.Context(), a.s, a.cfg.Box, true)
+		if err != nil {
+			failure(w, err)
+			return
+		}
+		_, pull, err := registryconfig.Load(r.Context(), a.s, a.cfg.Box, false)
+		if err != nil {
+			failure(w, err)
+			return
+		}
+		_ = a.s.Event(r.Context(), "", "registry_credentials_revealed", "管理员查看镜像仓库凭据")
+		respond(w, 200, map[string]string{"pushPassword": push.Password, "pullPassword": pull.Password})
+		return
+	}
 	var saved registryconfig.Saved
 	e := a.s.Setting(r.Context(), "registry", &saved)
 	if e != nil && !errors.Is(e, store.ErrNotFound) {
@@ -16,7 +35,14 @@ func (a *server) registry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == "GET" {
-		respond(w, 200, saved.Config)
+		config, _, err := registryconfig.Load(r.Context(), a.s, a.cfg.Box, false)
+		if errors.Is(err, store.ErrNotFound) {
+			config = registryconfig.Config{Mode: "custom", Repository: "swarmjet/agent"}
+		} else if err != nil {
+			failure(w, err)
+			return
+		}
+		respond(w, 200, config)
 		return
 	}
 	if r.Method != "PUT" {
@@ -30,6 +56,24 @@ func (a *server) registry(w http.ResponseWriter, r *http.Request) {
 	}
 	if !decode(w, r, &req) {
 		return
+	}
+	if req.Mode == "builtin" {
+		builtin, ok := registryconfig.Builtin()
+		if !ok {
+			problem(w, 400, "内置镜像仓库未启用")
+			return
+		}
+		if e = a.s.SetSetting(r.Context(), "registry", registryconfig.Saved{Config: builtin}); e != nil {
+			failure(w, e)
+			return
+		}
+		respond(w, 200, builtin)
+		return
+	}
+	req.Mode = "custom"
+	if builtin, ok := registryconfig.Builtin(); ok {
+		req.BuiltinAvailable = true
+		req.BuiltinAddress = builtin.Address
 	}
 	if e = req.Validate(); e != nil {
 		problem(w, 400, e.Error())

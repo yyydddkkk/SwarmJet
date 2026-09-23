@@ -4,6 +4,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { api } from "./api";
 import { useAgentCatalog, type AgentCatalog } from "./agents";
+import type { NodeView } from "./NodeSettings";
 import "@xterm/xterm/css/xterm.css";
 import "./runtime-settings.css";
 
@@ -59,16 +60,23 @@ function modelID(model: ModelEntry): string {
     : model.id;
 }
 
-const selectedNode=()=>new URLSearchParams(location.hash.split('?')[1]||'').get('node')||'';
-const nodePath=(path:string)=>path+(selectedNode()?`?node=${encodeURIComponent(selectedNode())}`:'');
+const requestedNode=()=>new URLSearchParams(location.hash.split('?')[1]||'').get('node')||'';
+const nodePath=(path:string,nodeID:string)=>`${path}?node=${encodeURIComponent(nodeID)}`;
 export default function RuntimeSettings() {
+  const [nodes,setNodes] = useState<NodeView[]>([]);
+  const [nodeID,setNodeID] = useState("");
+  const [nodesLoading,setNodesLoading] = useState(true);
+  const [nodesError,setNodesError] = useState("");
+  const [testingRunner,setTestingRunner] = useState(false);
+  const [runnerResult,setRunnerResult] = useState<{ok:boolean;image:string;agents:string[]}|null>(null);
+  const [runnerError,setRunnerError] = useState("");
   const {catalog,setCatalog,error:agentsError,setError:setAgentsError} = useAgentCatalog();
   const [savingAgents,setSavingAgents] = useState(false);
   const [expandedAgents, setExpandedAgents] = useState<string[]>([]);
   const [agentsNotice,setAgentsNotice] = useState("");
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [models, setModels] = useState<RuntimeModels | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [statusError, setStatusError] = useState("");
   const [modelsError, setModelsError] = useState("");
@@ -93,7 +101,7 @@ export default function RuntimeSettings() {
     setStatusError("");
     try {
       const result = await api<RuntimeStatus>(
-        nodePath("/runtime/status"),
+        nodePath("/runtime/status",nodeID),
         "GET",
         undefined,
         controller.signal,
@@ -105,7 +113,7 @@ export default function RuntimeSettings() {
       requests.current.delete(controller);
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, []);
+  }, [nodeID]);
   const refreshModels = useCallback(async () => {
     const controller = new AbortController();
     requests.current.add(controller);
@@ -113,7 +121,7 @@ export default function RuntimeSettings() {
     setModelsError("");
     try {
       const result = await api<RuntimeModels>(
-        nodePath("/runtime/models"),
+        nodePath("/runtime/models",nodeID),
         "GET",
         undefined,
         controller.signal,
@@ -125,6 +133,23 @@ export default function RuntimeSettings() {
       requests.current.delete(controller);
       if (!controller.signal.aborted) setModelsLoading(false);
     }
+  }, [nodeID]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api<NodeView[]>("/nodes", "GET", undefined, controller.signal)
+      .then((list) => {
+        setNodes(list);
+        const requested = requestedNode();
+        if (requested && !list.some((item) => item.node.id === requested)) {
+          setNodesError(`Node ${requested} 不存在，请重新选择。`);
+        } else {
+          setNodeID(requested || list.find((item) => item.online)?.node.id || list[0]?.node.id || "");
+        }
+      })
+      .catch((error) => { if (!controller.signal.aborted) setNodesError((error as Error).message); })
+      .finally(() => { if (!controller.signal.aborted) setNodesLoading(false); });
+    return () => controller.abort();
   }, []);
 
   const disposeSession = useCallback(() => {
@@ -146,7 +171,7 @@ export default function RuntimeSettings() {
 
   useEffect(() => {
     mounted.current = true;
-    void refreshStatus();
+    if (nodeID) void refreshStatus();
     return () => {
       mounted.current = false;
       requests.current.forEach((request) => request.abort());
@@ -154,7 +179,7 @@ export default function RuntimeSettings() {
       clearTimeout(noticeTimer.current);
       disposeSession();
     };
-  }, [disposeSession, refreshStatus]);
+  }, [disposeSession, refreshStatus, nodeID]);
 
   function disconnect(message = "连接已断开，当前终端内容已清空。") {
     disposeSession();
@@ -199,7 +224,7 @@ export default function RuntimeSettings() {
       const fit = new FitAddon();
       terminal.loadAddon(fit);
       terminal.open(host.current);
-      terminal.textarea?.setAttribute("aria-label", "执行器配置终端输入");
+      terminal.textarea?.setAttribute("aria-label", "Runner 配置终端输入");
       terminal.attachCustomKeyEventHandler((event) => {
         // Let the browser copy selected output without sending Ctrl-C to the shell.
         if (
@@ -210,7 +235,7 @@ export default function RuntimeSettings() {
           return false;
         return true;
       });
-      const url = new URL(nodePath("/api/runtime/terminal"), window.location.href);
+      const url = new URL(nodePath("/api/runtime/terminal",nodeID), window.location.href);
       url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const socket = new WebSocket(url);
       pendingSocket = socket;
@@ -267,7 +292,7 @@ export default function RuntimeSettings() {
           };
           if (message.type === "error") {
             setTerminalError(
-              message.message || "终端连接失败，请检查执行器服务。",
+              message.message || "终端连接失败，请检查所选 Node。",
             );
             disconnect("终端连接已结束。修复后可重新连接。");
             return;
@@ -285,7 +310,7 @@ export default function RuntimeSettings() {
       socket.onerror = () => {
         if (session.current?.socket !== socket) return;
         setTerminalError(
-          "无法连接配置终端。请确认登录会话和执行器服务可用，然后重新连接。",
+          "无法连接配置终端。请确认登录会话和所选 Node 可用，然后重新连接。",
         );
         disconnect("连接未建立。");
       };
@@ -293,7 +318,7 @@ export default function RuntimeSettings() {
         if (session.current?.socket !== socket) return;
         if (!event.wasClean)
           setTerminalError(
-            "终端连接意外断开，请检查网络或执行器状态后重新连接。",
+            "终端连接意外断开，请检查网络或所选 Node 状态后重新连接。",
           );
         disconnect("连接已结束，当前终端内容已清空。");
       };
@@ -335,19 +360,49 @@ export default function RuntimeSettings() {
     model.toLowerCase().includes(search.toLowerCase()),
   );
   const providers = models?.providers || status?.opencode?.providers || [];
+  const node = nodes.find((item) => item.node.id === nodeID);
 
   return (
     <div className="runtime-page">
       <div className="page-head">
         <div>
-          <div className="eyebrow">EXECUTOR ENVIRONMENT</div>
-          <h1>执行器环境</h1>
-          <p>配置工具登录与模型服务，供新任务复用。每个任务的会话独立保存。</p>
+          <div className="eyebrow">RUNNER ENVIRONMENT</div>
+          <h1>Runner 环境</h1>
+          <p>选择 Node，检查它用于启动 Runner 的镜像和 Agent CLI，并配置该节点的登录信息。</p>
         </div>
-        <button onClick={() => void refreshStatus()} disabled={loading}>
+        <button onClick={() => void refreshStatus()} disabled={!nodeID || loading}>
           {loading ? "正在检查…" : "刷新状态"}
         </button>
       </div>
+
+      <section className="panel panel-padding runtime-node-panel" aria-label="Node 选择与测试">
+        <label htmlFor="runtime-node">选择 Node</label>
+        <select id="runtime-node" value={nodeID} disabled={nodesLoading || !nodes.length}
+          onChange={(event) => { location.hash = `#/runtime?node=${encodeURIComponent(event.target.value)}`; }}>
+          {!nodeID && <option value="">{nodesLoading ? "正在读取 Node…" : "请选择 Node"}</option>}
+          {nodes.map((item) => <option key={item.node.id} value={item.node.id}>
+            {item.config?.name || item.node.id}（{item.node.id}）{item.online ? "" : "· 离线"}
+          </option>)}
+        </select>
+        {nodesError && <p role="alert">{nodesError}</p>}
+        {!nodesLoading && !nodes.length && !nodesError && <p>暂无 Node，请先到<a href="#/nodes">执行节点</a>配置。</p>}
+        {node && <p>Node：{node.online ? "在线" : "离线"} · 镜像：{node.node.readiness?.status === "ready" ? "就绪" : node.node.readiness?.status || "未就绪"} · Runner 镜像：<code>{node.config?.image || "未配置"}</code></p>}
+        <div className="runtime-runner-check">
+          <button type="button" disabled={!nodeID || !node?.online || testingRunner}
+            onClick={async () => {
+              setTestingRunner(true); setRunnerResult(null); setRunnerError("");
+              try {
+                const result = await api<{ok:boolean;image:string;agents:string[]}>(nodePath("/runtime/runner-test",nodeID),"POST");
+                setRunnerResult(result);
+                void refreshStatus();
+              } catch (error) { setRunnerError((error as Error).message); }
+              finally { setTestingRunner(false); }
+            }}>{testingRunner ? "正在测试 Runner…" : "测试此 Node 的 Runner"}</button>
+          <span>启动临时 Runner 容器并检查 Agent CLI；不发起模型调用。</span>
+        </div>
+        {runnerError && <p role="alert">Runner 测试失败：{runnerError}</p>}
+        {runnerResult && <p role="status">{runnerResult.ok ? "Runner 镜像启动成功" : "Runner 镜像已启动，但未检测到受支持的 Agent CLI"}：{runnerResult.agents.length ? runnerResult.agents.join("、") : "无"}。镜像：<code>{runnerResult.image}</code>。登录与模型可用性需在配置终端单独验证。</p>}
+      </section>
 
       {statusError && (
         <div className="error" role="alert">
@@ -360,7 +415,7 @@ export default function RuntimeSettings() {
       )}
       <section className="panel panel-padding" aria-label="启用 Agent">
         <h2>启用 Agent</h2>
-        <p>勾选需要启用的 Agent，再保存。未安装的工具可前往<a href="#/images">镜像管理</a>构建。</p>
+        <p>启用列表对所有 Node 生效；下方安装和配置状态来自当前选中的 Node。未安装的工具可前往<a href="#/images">镜像管理</a>构建。</p>
         {agentsError && <p role="alert">{agentsError}</p>}
         <div className="runtime-agent-list" aria-label="可用 Agent">
           {catalog.agents.map((agent) => {
@@ -401,8 +456,8 @@ export default function RuntimeSettings() {
                 </div>
                 <div id={`agent-details-${agent.id}`} className="runtime-agent-card-details" hidden={!expanded}>
                   <p><code>agent:{agent.id}</code></p>
-                  <div className="runtime-tool-state"><span>工具安装</span><strong>{!status?.toolsChecked ? "打开终端后检测" : info?.installed ? "已安装" : "未检测到工具"}</strong></div>
-                  <div className="runtime-tool-state"><span>配置文件</span><strong>{info?.configured ? "已检测到（不代表认证有效）" : "尚未检测到"}</strong></div>
+                  <div className="runtime-tool-state"><span>工具安装</span><strong>{status?.toolsChecked ? info?.installed ? "已安装" : "未检测到工具" : runnerResult ? runnerResult.agents.includes(agent.id) ? "已安装" : "未检测到工具" : "测试 Runner 或打开终端后检测"}</strong></div>
+                  <div className="runtime-tool-state"><span>配置文件</span><strong>{!status ? "尚未读取" : info?.configured ? "已检测到（不代表认证有效）" : "尚未检测到"}</strong></div>
                   <p>配置入口：<code>{agent.setupCommand}</code></p>
                   <p>勾选只控制启用范围，安装或扩展工具请前往<a href="#/images">镜像管理</a>。模型使用 CLI 保存的默认配置；终端 export 不会自动传给任务容器。</p>
                   {agent.id === "agy" && <p>任务使用 GEMINI_API_KEY 或 ADC 文件认证；系统钥匙串登录不会复制到任务容器。</p>}
@@ -413,15 +468,15 @@ export default function RuntimeSettings() {
         </div>
         <button type="button" disabled={savingAgents || !catalog.agents.length} onClick={async () => {
           setSavingAgents(true); setAgentsError(""); setAgentsNotice("");
-          try { setCatalog(await api<AgentCatalog>("/runtime/agents","PUT",{enabled:catalog.enabled})); setAgentsNotice("启用列表已保存，作用于新任务；已有任务继续使用原执行器。"); }
+          try { setCatalog(await api<AgentCatalog>("/runtime/agents","PUT",{enabled:catalog.enabled})); setAgentsNotice("启用列表已保存，作用于新任务；已有任务继续使用原 Agent。"); }
           catch(e) { setAgentsError((e as Error).message); }
           finally { setSavingAgents(false); }
         }}>{savingAgents ? "保存中…" : "保存启用列表"}</button>
         {agentsNotice && <p role="status">{agentsNotice}</p>}
       </section>
 
-      <TerminalWindow title="配置终端" available={!!status?.available && !loading}
-        onOpen={connect} onClose={() => disconnect()}>
+      <TerminalWindow title="Runner 配置终端" available={!!nodeID && !!status?.available && !loading} connection={connection}
+        onOpen={connect} onClose={() => disconnect()} onRestore={() => requestAnimationFrame(() => session.current?.fit.fit())}>
       <section
         className="panel runtime-terminal-panel"
         aria-labelledby="runtime-terminal-title"
@@ -489,12 +544,12 @@ export default function RuntimeSettings() {
               </div>
               <strong>
                 {connection === "connecting"
-                  ? "正在连接执行器…"
+                  ? "正在连接 Node…"
                   : "准备好后，重新连接"}
               </strong>
               <p>
                 {!status?.available && status
-                  ? "执行器当前不可用，请检查服务后刷新状态。"
+                  ? "当前 Node 的 Runner 环境不可用，请检查镜像和节点状态。"
                   : "通过工具的交互式登录流程配置服务。"}
               </p>
             </div>
@@ -605,13 +660,13 @@ export default function RuntimeSettings() {
         <dl>
           <dt>配置档案</dt>
           <dd>{status?.profile || "default"}</dd>
-          <dt>默认执行器镜像</dt>
+          <dt>Runner 镜像</dt>
           <dd>
             <code>{status?.image || "尚未读取"}</code>
           </dd>
         </dl>
         <p>
-          默认镜像由部署配置管理。新任务读取更新后的登录配置，已有任务继续使用自己的会话。
+          镜像由当前 Node 配置管理。新任务读取更新后的登录配置，已有任务继续使用自己的会话。
         </p>
       </details>
     </div>

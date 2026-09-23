@@ -18,15 +18,11 @@ import (
 func (a *server) registryImages(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/registry/images")
 	if path == "" && r.Method == http.MethodGet {
-		var saved registryconfig.Saved
-		if err := a.s.Setting(r.Context(), "registry", &saved); errors.Is(err, store.ErrNotFound) {
+		config, access, err := registryconfig.Load(r.Context(), a.s, a.cfg.Box, false)
+		if errors.Is(err, store.ErrNotFound) {
 			respond(w, 200, map[string]any{"repository": "", "images": []registrycatalog.Image{}})
 			return
-		} else if err != nil {
-			failure(w, err)
-			return
 		}
-		config, access, err := registryconfig.Load(r.Context(), a.s, a.cfg.Box, false)
 		if err != nil {
 			failure(w, err)
 			return

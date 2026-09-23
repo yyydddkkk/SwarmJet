@@ -406,8 +406,8 @@
   min-height: 32px;
   width: 165px;
   max-width: 100%;
-  padding: 4px 8px;
-  background: #fafbfd;
+  padding: 4px 34px 4px 10px;
+  background-color: #fafbfd;
 }
 .app .task-list th {
   background: #fafbfd;
