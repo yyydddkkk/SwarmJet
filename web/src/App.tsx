@@ -32,6 +32,7 @@ function Icon({
   name:
     | "tasks"
     | "projects"
+    | "nodes"
     | "runtime"
     | "images"
     | "logout"
@@ -51,6 +52,8 @@ function Icon({
     tasks: "M8 5h12M8 12h12M8 19h12M3 5h.01M3 12h.01M3 19h.01",
     projects:
       "M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z",
+    nodes:
+      "M4 3h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm0 10h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2ZM6 7h.01M6 17h.01",
     runtime: "m5 7 5 5-5 5M13 17h6",
     images: "m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5",
     logout: "M9 4H5v16h4M9 12h12m-5-5 5 5-5 5",
@@ -301,7 +304,7 @@ export default function App() {
             <Icon name="runtime" />
             执行器环境
           </a>
-          <a href="#/nodes" className={nodesPage?"active":""} aria-current={nodesPage?"page":undefined}><Icon name="projects"/>执行节点</a>
+          <a href="#/nodes" className={nodesPage?"active":""} aria-current={nodesPage?"page":undefined}><Icon name="nodes"/>执行节点</a>
           <a href="#/networks" className={networksPage?"active":""} aria-current={networksPage?"page":undefined}><Icon name="branch"/>网络配置</a>
           <a aria-current={imagesPage ? "page" : undefined} className={imagesPage ? "active" : ""} href="#/images">
             <Icon name="images" />镜像管理

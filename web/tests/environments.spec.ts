@@ -38,6 +38,15 @@ async function mock(page: Page) {
     if (path === "/api/session")
       return route.fulfill({ json: { username: "admin" } });
     if (path === "/api/projects") return route.fulfill({ json: [] });
+    if (path === "/api/mihomo/status")
+      return route.fulfill({
+        json: {
+          enabled: true,
+          running: false,
+          active: "revision-a",
+          revisions: [{ id: "revision-a", name: "内网出口", createdAt: "2026-09-23T00:00:00Z", warnings: [] }],
+        },
+      });
     if (path === "/api/networks/default" && r.method() === "PUT") {
       defaultId = r.postDataJSON().id;
       return route.fulfill({ json: { id: defaultId } });
@@ -89,6 +98,9 @@ test("network editor creates versioned profile without placing password in the l
 }) => {
   const state = await mock(page);
   await page.goto("/#/networks");
+  await page.getByRole("button", { name: "新增配置" }).click();
+  const editor = page.getByRole("dialog", { name: "新增网络配置" });
+  await expect(editor).toBeVisible();
   await page.getByLabel("名称", { exact: true }).fill("构建出口");
   await page
     .getByLabel("HTTP 代理", { exact: true })
@@ -103,15 +115,44 @@ test("network editor creates versioned profile without placing password in the l
     page.getByText("private-fixture-password", { exact: true }),
   ).toHaveCount(0);
   await expect(page.getByLabel("新密码（留空保留）")).toHaveValue("");
+  const savedEditor = page.getByRole("dialog", { name: "编辑网络配置" });
+  await savedEditor.getByRole("button", { name: "关闭网络配置" }).click();
+  await expect(savedEditor).not.toBeVisible();
+  await page.getByRole("button", { name: /构建出口/ }).click();
+  await savedEditor.getByLabel("名称", { exact: true }).fill("构建出口 2");
+  await page.keyboard.press("Escape");
+  await expect(savedEditor.getByText("有未保存的修改，确定放弃吗？")).toBeVisible();
+  await savedEditor.getByRole("button", { name: "放弃修改" }).click();
+  await expect(savedEditor).not.toBeVisible();
+});
+test("Mihomo management opens above the overview with versions shown first", async ({ page }) => {
+  await mock(page);
+  await page.goto("/#/networks");
+  await page.getByRole("button", { name: "管理服务" }).click();
+  const dialog = page.getByRole("dialog", { name: "Mihomo 代理服务" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "配置版本" })).toBeVisible();
+  await expect(dialog.getByLabel("导入方式")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "导入配置" }).click();
+  await expect(dialog.getByLabel("导入方式")).toBeVisible();
+  await dialog.getByLabel("配置名称").fill("待导入出口");
+  await dialog.getByRole("button", { name: "关闭 Mihomo 配置" }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.getByRole("button", { name: "管理服务" }).click();
+  await expect(dialog.getByLabel("导入方式")).toBeVisible();
+  await expect(dialog.getByLabel("配置名称")).toHaveValue("待导入出口");
 });
 test("saved network profile can be deleted and default returns to direct", async ({ page }) => {
   await mock(page);
   await page.goto("/#/networks");
+  await page.getByRole("button", { name: "新增配置" }).click();
   await page.getByLabel("名称", { exact: true }).fill("临时出口");
   await page.getByRole("button", { name: "保存配置", exact: true }).click();
+  await page.getByRole("button", { name: "关闭网络配置" }).click();
   await page.getByLabel("默认网络").selectOption({ label: "临时出口" });
+  await page.getByRole("button", { name: /临时出口/ }).click();
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "删除配置" }).click();
+  await page.getByRole("dialog", { name: "编辑网络配置" }).getByRole("button", { name: "删除配置" }).click();
   await expect(page.getByRole("status")).toContainText("网络配置已删除");
   await expect(page.getByText("临时出口", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("默认网络")).toHaveValue("");
@@ -122,6 +163,8 @@ test("node drain preserves image and scopes network tests to selected node", asy
   const state = await mock(page);
   await page.goto("/#/nodes");
   await page.getByRole("button", { name: /内网执行节点/ }).click();
+  const detail = page.getByRole("dialog", { name: "内网执行节点" });
+  await expect(detail).toBeVisible();
   await page.getByLabel("接收新任务", { exact: true }).uncheck();
   await page.getByRole("button", { name: "保存节点配置" }).click();
   await expect(page.getByRole("status")).toContainText("等待节点同步");
@@ -134,6 +177,12 @@ test("node drain preserves image and scopes network tests to selected node", asy
   await expect(
     page.getByText("Agent 容器：已连接，HTTP 200", { exact: true }),
   ).toBeVisible();
+  await detail.getByRole("button", { name: "关闭节点详情" }).click();
+  await expect(detail).not.toBeVisible();
+  await page.getByRole("button", { name: /内网执行节点/ }).click();
+  await expect(detail).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(detail).not.toBeVisible();
 });
 for (const width of [1440, 390])
   test(`node and network settings fit ${width}px`, async ({ page }) => {
@@ -150,6 +199,15 @@ for (const width of [1440, 390])
       path: `test-results/nodes-${width}.png`,
       fullPage: true,
     });
+    if (width === 390) {
+      const detail = page.getByRole("dialog", { name: "内网执行节点" });
+      await detail
+        .getByRole("button", { name: "从节点和 Agent 容器测试" })
+        .scrollIntoViewIfNeeded();
+      await expect
+        .poll(() => detail.evaluate((element) => element.scrollTop))
+        .toBeGreaterThan(0);
+    }
     await page.goto("/#/networks");
     await expect(
       page.getByRole("heading", { name: "网络配置", exact: true }),
@@ -163,4 +221,17 @@ for (const width of [1440, 390])
       path: `test-results/networks-${width}.png`,
       fullPage: true,
     });
+    await page.getByRole("button", { name: "新增配置" }).click();
+    await expect(page.getByRole("dialog", { name: "新增网络配置" })).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true);
+    await page.screenshot({ path: `test-results/network-editor-${width}.png` });
+    await page.getByRole("button", { name: "关闭网络配置" }).click();
+    await page.getByRole("button", { name: "管理服务" }).click();
+    await expect(page.getByRole("dialog", { name: "Mihomo 代理服务" })).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true);
+    await page.screenshot({ path: `test-results/mihomo-${width}.png` });
   });

@@ -1,6 +1,9 @@
 .mihomo-panel {padding:24px}
 .mihomo-head {display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:20px}
+.mihomo-head-actions {display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
 .mihomo-head p,.mihomo-help {font-size:12px;line-height:1.7;color:var(--muted);margin:8px 0 16px}
+.mihomo-import-panel {padding:16px;border:1px solid var(--line);border-radius:8px;background:var(--paper)}
+.mihomo-import-panel > .mihomo-help {margin-bottom:0}
 .mihomo-panel h3 {font-size:14px;margin:0 0 16px}
 .mihomo-import {display:grid;grid-template-columns:1fr 2fr;gap:20px}
 .mihomo-editor {font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;resize:vertical;white-space:pre}

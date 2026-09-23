@@ -35,8 +35,14 @@ type View = {
 };
 type Group = { name: string; type: string; now?: string; all?: string[] };
 export default function MihomoSettings({
+  active = true,
+  embedded = false,
+  onStatusChange,
   onNetworkCreated,
 }: {
+  active?: boolean;
+  embedded?: boolean;
+  onStatusChange?: (status: { enabled: boolean; running?: boolean; active?: string }) => void;
   onNetworkCreated: () => void;
 }) {
   const [noProxy, setNoProxy] = useState("localhost,127.0.0.1,::1");
@@ -52,15 +58,18 @@ export default function MihomoSettings({
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
+    [showImport, setShowImport] = useState(false),
     [choices, setChoices] = useState<Record<string, string>>({});
   const refresh = useCallback(async () => {
     const v = await api<View>("/mihomo/status");
     setView(v);
+    onStatusChange?.(v);
     setSelected((old) => old || v.active || v.revisions[0]?.id || "");
     setEndpoint((old) => old || v.proxyUrl || "");
     return v;
-  }, []);
+  }, [onStatusChange]);
   useEffect(() => {
+    if (!active) return;
     let live = true;
     const load = () =>
       refresh().catch((e) => {
@@ -72,9 +81,9 @@ export default function MihomoSettings({
       live = false;
       clearInterval(t);
     };
-  }, [refresh]);
+  }, [active, refresh]);
   useEffect(() => {
-    if (!view?.running) {
+    if (!active || !view?.running) {
       setGroups([]);
       return;
     }
@@ -85,7 +94,7 @@ export default function MihomoSettings({
         if (!ctl.signal.aborted) setError(e.message);
       });
     return () => ctl.abort();
-  }, [view?.running, view?.active]);
+  }, [active, view?.running, view?.active]);
   async function act(action: string, fn: () => Promise<void>) {
     setBusy(action);
     setError("");
@@ -116,18 +125,25 @@ export default function MihomoSettings({
     <section className="panel mihomo-panel" aria-label="Mihomo 代理服务">
       <div className="mihomo-head">
         <div>
-          <h2>Mihomo 代理服务</h2>
+          {!embedded && <h2>Mihomo 代理服务</h2>}
           <p>导入 HY2 链接或 Clash / Mihomo YAML，测试后应用到代理入口。</p>
         </div>
-        <span className={`status ${view?.running ? "completed" : "paused"}`}>
-          {!view?.enabled
-            ? "未启用"
-            : view.running
-              ? "运行中"
-              : view?.active
-                ? "内核未就绪"
-                : "尚未应用配置"}
-        </span>
+        <div className="mihomo-head-actions">
+          {view?.enabled && view.revisions.length > 0 && (
+            <button onClick={() => setShowImport(!showImport)}>
+              {showImport ? "返回版本管理" : "导入配置"}
+            </button>
+          )}
+          <span className={`status ${view?.running ? "completed" : "paused"}`}>
+            {!view?.enabled
+              ? "未启用"
+              : view.running
+                ? "运行中"
+                : view?.active
+                  ? "内核未就绪"
+                  : "尚未应用配置"}
+          </span>
+        </div>
       </div>
       <ErrorBox error={error} />
       {notice && (
@@ -143,92 +159,97 @@ export default function MihomoSettings({
         </p>
       ) : (
         <>
-          <div className="mihomo-import">
-            <Field label="导入方式">
-              <select
-                value={format}
-                onChange={(e) => setFormat(e.target.value)}
+          {(showImport || view.revisions.length === 0) && (
+            <div className="mihomo-import-panel">
+              <div className="mihomo-import">
+                <Field label="导入方式">
+                  <select
+                    value={format}
+                    onChange={(e) => setFormat(e.target.value)}
+                  >
+                    <option value="hy2">HY2 链接</option>
+                    <option value="yaml">YAML / 自定义配置</option>
+                  </select>
+                </Field>
+                <Field label="配置名称">
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="例如：服务器 HY2 出口"
+                    maxLength={200}
+                  />
+                </Field>
+              </div>
+              <Field
+                label={
+                  format === "hy2"
+                    ? "HY2 链接（含认证信息）"
+                    : "Mihomo YAML（含认证信息）"
+                }
               >
-                <option value="hy2">HY2 链接</option>
-                <option value="yaml">YAML / 自定义配置</option>
-              </select>
-            </Field>
-            <Field label="配置名称">
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="例如：服务器 HY2 出口"
-                maxLength={200}
-              />
-            </Field>
-          </div>
-          <Field
-            label={
-              format === "hy2"
-                ? "HY2 链接（含认证信息）"
-                : "Mihomo YAML（含认证信息）"
-            }
-          >
-            <textarea
-              spellCheck={false}
-              autoComplete="off"
-              className="mihomo-editor"
-              rows={format === "hy2" ? 3 : 13}
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder={
-                format === "hy2"
-                  ? "hy2://…"
-                  : "粘贴完整 YAML，或在这里编辑自定义配置"
-              }
-            />
-          </Field>
-          <div className="image-actions">
-            <button
-              className="primary"
-              disabled={!!busy || !name.trim() || !content.trim()}
-              onClick={() =>
-                void act("import", async () => {
-                  const r = await api<Revision>("/mihomo/import", "POST", {
-                    name,
-                    format,
-                    content,
-                  });
-                  setSelected(r.id);
-                  if (format === "hy2") setProxy("SWARMJET-PROXY");
-                  else setProxy("");
-                  setContent("");
-                  setNotice("已保存为新版本，尚未应用。请校验并运行探针。");
-                })
-              }
-            >
-              {busy === "import" ? "正在导入…" : "导入为新版本"}
-            </button>
-            <label className="button mihomo-upload">
-              上传 YAML
-              <input
-                aria-label="上传 YAML 文件"
-                type="file"
-                accept=".yaml,.yml,text/yaml,text/plain"
-                disabled={!!busy}
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  if (file.size > 1024 * 1024) {
-                    setError("配置文件不能超过 1 MiB");
-                    return;
+                <textarea
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="mihomo-editor"
+                  rows={format === "hy2" ? 3 : 13}
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder={
+                    format === "hy2"
+                      ? "hy2://…"
+                      : "粘贴完整 YAML，或在这里编辑自定义配置"
                   }
-                  setFormat("yaml");
-                  setContent(await file.text());
-                  if (!name) setName(file.name);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-          </div>
-          <p className="mihomo-help">
-            监听端口和控制接口由平台管理，不启用 TUN。草稿与活动配置分开保存。
-          </p>
+                />
+              </Field>
+              <div className="image-actions">
+                <button
+                  className="primary"
+                  disabled={!!busy || !name.trim() || !content.trim()}
+                  onClick={() =>
+                    void act("import", async () => {
+                      const r = await api<Revision>("/mihomo/import", "POST", {
+                        name,
+                        format,
+                        content,
+                      });
+                      setSelected(r.id);
+                      if (format === "hy2") setProxy("SWARMJET-PROXY");
+                      else setProxy("");
+                      setContent("");
+                      setShowImport(false);
+                      setNotice("已保存为新版本，尚未应用。请校验并运行探针。");
+                    })
+                  }
+                >
+                  {busy === "import" ? "正在导入…" : "导入为新版本"}
+                </button>
+                <label className="button mihomo-upload">
+                  上传 YAML
+                  <input
+                    aria-label="上传 YAML 文件"
+                    type="file"
+                    accept=".yaml,.yml,text/yaml,text/plain"
+                    disabled={!!busy}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (file.size > 1024 * 1024) {
+                        setError("配置文件不能超过 1 MiB");
+                        return;
+                      }
+                      setFormat("yaml");
+                      setContent(await file.text());
+                      if (!name) setName(file.name);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+              <p className="mihomo-help">
+                监听端口和控制接口由平台管理，不启用 TUN。草稿与活动配置分开保存。
+              </p>
+            </div>
+          )}
           <div className="mihomo-workspace">
             <div>
               <h3>配置版本</h3>
@@ -300,6 +321,7 @@ export default function MihomoSettings({
                           setFormat("yaml");
                           setContent(v.yaml);
                           setName(revision.name + "（修改）");
+                          setShowImport(true);
                           setNotice("配置已载入编辑器，保存会创建新版本。");
                         })
                       }
