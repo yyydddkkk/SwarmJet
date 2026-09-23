@@ -83,6 +83,20 @@ func (s *Store) SetSetting(ctx context.Context, name string, v any) error {
 	if e != nil {
 		return e
 	}
+	if name == "image_build_state" || name == "registry" {
+		tx, err := s.Pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		if _, err = tx.Exec(ctx, imageGuardLock); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO platform_settings(name,body) VALUES($1,$2) ON CONFLICT(name) DO UPDATE SET body=excluded.body`, name, b); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
 	_, e = s.Pool.Exec(ctx, `INSERT INTO platform_settings(name,body) VALUES($1,$2) ON CONFLICT(name) DO UPDATE SET body=excluded.body`, name, b)
 	return e
 }
@@ -126,6 +140,9 @@ func (s *Store) SaveNodeConfig(ctx context.Context, id string, c domain.NodeConf
 	}
 	defer tx.Rollback(ctx)
 	if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(84261302)`); e != nil {
+		return c, e
+	}
+	if _, e = tx.Exec(ctx, imageGuardLock); e != nil {
 		return c, e
 	}
 	var old int

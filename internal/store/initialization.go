@@ -22,7 +22,15 @@ func (s *Store) SaveInitialization(ctx context.Context, init domain.Initializati
 	if err != nil {
 		return err
 	}
-	tag, err := s.Pool.Exec(ctx, `INSERT INTO initializations(id,project_id,status,body,updated_at) VALUES($1,$2,$3,$4,now())
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, imageGuardLock); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO initializations(id,project_id,status,body,updated_at) VALUES($1,$2,$3,$4,now())
 		ON CONFLICT(id) DO UPDATE SET project_id=$2,status=$3,body=$4,updated_at=now()
 		WHERE (initializations.body->>'version')::int = $5`, init.ID, init.ProjectID, init.Status, body, previous)
 	if err != nil {
@@ -31,7 +39,7 @@ func (s *Store) SaveInitialization(ctx context.Context, init domain.Initializati
 	if tag.RowsAffected() == 0 {
 		return ErrConflict
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (s *Store) Initialization(ctx context.Context, id string) (domain.Initialization, error) {

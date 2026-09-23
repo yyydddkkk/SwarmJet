@@ -57,7 +57,7 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
 
 ## 页面管理 Agent 镜像与跨机分发
 
-侧边栏“镜像配置”管理 Agent 执行镜像。独立 builder 调用 Compose 管理的持久化 BuildKit，发布到自建 Distribution。平台程序镜像和业务应用镜像仍使用各自发布流程。
+侧边栏“镜像管理”管理 Agent 执行镜像。独立 builder 调用 Compose 管理的持久化 BuildKit，发布到自建 Distribution。平台程序镜像和业务应用镜像仍使用各自发布流程。
 
 源码安装脚本会组合 `compose.yaml`、`compose.build.yaml`、`compose.builder.yaml`。手动部署也应包含 builder 配置。先按 [Distribution 部署说明](../docs/registry.md) 准备仓库，再在页面保存仓库账号和构建参数。构建成功不会自动应用或启用 Agent；选择节点分发后，节点按摘要预拉取并检查 CLI，准备完成才可接单。
 
@@ -103,7 +103,7 @@ Git HTTPS 认证使用 `/usr/local/bin/swarmjet-askpass`，用户名为 `oauth2`
 docker compose --env-file deploy/.env -f deploy/compose.yaml -f deploy/compose.build.yaml --profile tools build agent-image
 ```
 
-重建完成后，按正常发布流程让配置终端和所有执行节点使用新的 `AGENT_IMAGE`。执行器环境页的勾选只控制平台准入，不会构建镜像，也不验证账号额度；镜像配置页的“保存并构建”才会提交构建。项目默认 Agent 和 Issue 的 `agent:*` 标签都必须位于已启用列表中。
+重建完成后，按正常发布流程让配置终端和所有执行节点使用新的 `AGENT_IMAGE`。执行器环境页的勾选只控制平台准入，不会构建镜像，也不验证账号额度；镜像管理页的“保存并构建”才会提交构建。项目默认 Agent 和 Issue 的 `agent:*` 标签都必须位于已启用列表中。
 
 | Agent ID | 终端入口 | 复制到任务的配置 |
 |---|---|---|

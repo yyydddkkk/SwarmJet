@@ -51,6 +51,10 @@ func (s *server) images(w http.ResponseWriter, r *http.Request) {
 		if !decodeImageRequest(w, r, &c) {
 			return
 		}
+		if s.cfg.ImagesOnly && c.Repository != "" {
+			writeJSON(w, 400, map[string]string{"error": "构建路径由镜像仓库设置统一管理"})
+			return
+		}
 		if err := s.imageManager.SaveConfig(c); err != nil {
 			fail(err)
 			return

@@ -40,7 +40,7 @@ Temporal 是运行流程的事实源；业务 PostgreSQL 保存配置、查询�
 
 普通用户不需要理解 Meta-Repo。新建项目时填写 GitLab 地址和 Access Token，验证后搜索并选择子仓库、确认目标分支，随后在页面内嵌终端完成 `opencode auth login` 并选择模型做一次实际调用验证。系统据此创建受管的内部 Meta-Repo，运行初始化 Agent 分析项目，并在独立副本中执行验证。GitLab 连接加密保存（`SWARMJET_MASTER_KEY`）并可跨项目复用；Token 不回显，也不写入日志、URL、任务快照或 Temporal 历史。模型和验收未就绪时项目保持草稿，不接单；初始化未通过验证时也不会自动启用。
 
-控制台的“执行器环境”提供五种 Agent 的适配列表，管理员统一勾选启用，默认全部未勾选；项目选择一个已启用的默认 Agent。CLI 必须安装在配置终端与任务所用的镜像中，勾选启用不会自动安装软件。可通过独立的“镜像配置”页面选择 Agent、设置构建参数，由持久化 BuildKit 构建并发布到 Distribution，再选择执行节点分发，也可继续通过 `AGENT_CLIS=opencode,codex` 等构建参数按需打包，详见 [部署说明](deploy/README.md)。终端配置保存在持久化 Home 中。
+控制台的“执行器环境”提供五种 Agent 的适配列表，管理员统一勾选启用，默认全部未勾选；项目选择一个已启用的默认 Agent。CLI 必须安装在配置终端与任务所用的镜像中，勾选启用不会自动安装软件。可通过独立的“镜像管理”页面查看仓库版本、分发或回退节点镜像，并选择 Agent、设置构建参数，由持久化 BuildKit 构建并发布到 Distribution；也可继续通过 `AGENT_CLIS=opencode,codex` 等构建参数按需打包，详见 [部署说明](deploy/README.md)。终端配置保存在持久化 Home 中。
 
 Issue 继续用 `autonomous` 接单，可添加一个 `agent:opencode`、`agent:codex`、`agent:dst`、`agent:agy` 或 `agent:claude` 标签，统一指定开发、审查、发布与合并执行器。不加标签沿用项目默认；多个标签、未知或未启用的 Agent 会明确拒绝接单，修正后轮询重试。任务接单后执行器固定，已有任务不会因标签或启用列表变化而切换。
 

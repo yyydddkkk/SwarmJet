@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"swarmjet/internal/buildproxy"
 	"swarmjet/internal/imagebuild"
 	"swarmjet/internal/networkconfig"
@@ -53,12 +52,11 @@ func runBuilder(ctx context.Context, s *store.Store, box *secretbox.Box) error {
 			if e != nil {
 				return imagebuild.Prepared{}, fmt.Errorf("请先配置镜像仓库")
 			}
-			if c.Repository == "" {
-				c.Repository = reg.Address + "/" + reg.Repository
+			repository := reg.Address + "/" + reg.Repository
+			if c.Repository != "" && c.Repository != repository {
+				return imagebuild.Prepared{}, fmt.Errorf("构建只能发布到当前配置的仓库路径")
 			}
-			if !strings.HasPrefix(c.Repository, reg.Address+"/") {
-				return imagebuild.Prepared{}, fmt.Errorf("构建仓库地址与已保存凭据不匹配")
-			}
+			c.Repository = repository
 			if c.Platform == "" {
 				c.Platform = "linux/" + runtime.GOARCH
 			}

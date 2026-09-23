@@ -7,6 +7,7 @@ services:
     restart: unless-stopped
     environment:
       REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
       REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET:?Set a stable random secret}
       REGISTRY_LOG_LEVEL: info
       OTEL_TRACES_EXPORTER: none

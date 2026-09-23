@@ -303,7 +303,7 @@ export default function App() {
           <a href="#/nodes" className={nodesPage?"active":""} aria-current={nodesPage?"page":undefined}><Icon name="projects"/>执行节点</a>
           <a href="#/networks" className={networksPage?"active":""} aria-current={networksPage?"page":undefined}><Icon name="branch"/>网络配置</a>
           <a aria-current={imagesPage ? "page" : undefined} className={imagesPage ? "active" : ""} href="#/images">
-            <Icon name="images" />镜像配置
+            <Icon name="images" />镜像管理
           </a>
         </nav>
         <SidebarProjects route={route} selectedProject={selectedProject} />
@@ -333,14 +333,14 @@ export default function App() {
         <header className="topbar">
           <span>
             工作空间 <span className="slash">/</span>{" "}
-            {nodesPage ? "执行节点" : networksPage ? "网络配置" : imagesPage ? "镜像配置" : runtimePage ? "执行器环境" : projectPage ? "项目配置" : "任务中心"}
+            {nodesPage ? "执行节点" : networksPage ? "网络配置" : imagesPage ? "镜像管理" : runtimePage ? "执行器环境" : projectPage ? "项目配置" : "任务中心"}
           </span>
           <span className="top-note">SwarmJet / 工作空间</span>
         </header>
         <main id="main" tabIndex={-1}>
           <ErrorBox error={error} />
           {nodesPage ? (<Suspense fallback={<p>正在加载节点…</p>}><NodeSettings/></Suspense>) : networksPage ? (<Suspense fallback={<p>正在加载网络配置…</p>}><NetworkSettings/></Suspense>) : imagesPage ? (
-            <Suspense fallback={<div className="loading">正在加载镜像配置…</div>}><ImageSettings /></Suspense>
+            <Suspense fallback={<div className="loading">正在加载镜像管理…</div>}><ImageSettings /></Suspense>
           ) : runtimePage ? (
             <Suspense
               fallback={<div className="loading">正在加载执行器环境…</div>}

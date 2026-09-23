@@ -43,7 +43,7 @@ async function imagesAPI(page: Page) {
 test("image recipe saves, builds without switching, then explicitly activates", async ({ page }) => {
   const backend = await imagesAPI(page);
   await page.goto("/#/images");
-  await expect(page.getByRole("heading", { name: "镜像配置", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "镜像管理", exact: true })).toBeVisible();
   await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "保存并构建" })).toBeDisabled();
   expect(backend.launches()).toBe(0);
@@ -109,4 +109,52 @@ for (const width of [1440, 390]) test(`image settings fit ${width}px and expose 
   await page.getByText("高级构建参数", { exact: true }).click();
   await expect(page.getByLabel("基础镜像", { exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("registry inventory includes external images, distributes by digest, and protects deletion", async ({ page }) => {
+  const reference = `registry.test/swarmjet/agent@${digest}`;
+  const image = { digest, reference, tags: ["external", "stable"] };
+  const node = { node: { id: "n1", readiness: { status: "unconfigured", images: [] } }, config: { version: 1, name: "节点一", enabled: false, archived: false, capacity: 1, network: { mode: "default" }, image: "", images: [] } };
+  let deleted = false;
+  let usage: string[] = [];
+  await page.route("**/api/**", async (route) => {
+    const req = route.request(), path = decodeURIComponent(new URL(req.url()).pathname);
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (path === "/api/projects") return route.fulfill({ json: [] });
+    if (path === "/api/nodes" && req.method() === "GET") return route.fulfill({ json: [node] });
+    if (path === "/api/nodes/n1/config" && req.method() === "PUT") {
+      node.config = req.postDataJSON();
+      usage = ["节点 n1"];
+      return route.fulfill({ json: node.config });
+    }
+    if (path === "/api/runtime/images") return route.fulfill({ json: {
+      scope: "registry", config: { agents: [], baseImage: "node:22", extraPackages: [], buildArgs: {} }, builds: [], active: null, defaultImage: "", agents, parameters: [],
+    } });
+    if (path === "/api/registry/images" && req.method() === "GET") return route.fulfill({ json: { repository: "registry.test/swarmjet/agent", images: deleted ? [] : [image] } });
+    if (path === `/api/registry/images/${digest}/usage`) return route.fulfill({ json: { references: usage } });
+    if (path === `/api/registry/images/${digest}` && req.method() === "DELETE") {
+      expect(req.postDataJSON()).toEqual({ expectedTags: ["external", "stable"] });
+      deleted = true;
+      return route.fulfill({ status: 204, body: "" });
+    }
+    return route.fulfill({ status: 404, json: { error: "not found" } });
+  });
+  await page.goto("/#/images");
+  await expect(page.getByRole("region", { name: "仓库镜像" })).toContainText("external");
+  await expect(page.getByText("外部推送")).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 900 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/registry-images-390.png", fullPage: true });
+  await page.getByRole("button", { name: "分发 / 回退" }).click();
+  await page.getByRole("checkbox", { name: /节点一/ }).check();
+  await page.getByRole("button", { name: "分发到所选节点" }).click();
+  await expect.poll(() => node.config.image).toBe(reference);
+  await page.getByRole("button", { name: "删除版本" }).click();
+  await expect(page.getByRole("dialog", { name: "确认删除镜像版本" })).toContainText("节点 n1");
+  await expect(page.getByRole("button", { name: "确认删除" })).toBeDisabled();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  usage = []; node.config.image = "";
+  await page.getByRole("button", { name: "删除版本" }).click();
+  await page.getByRole("button", { name: "确认删除" }).click();
+  await expect(page.getByText("仓库中还没有镜像版本。")).toBeVisible();
 });

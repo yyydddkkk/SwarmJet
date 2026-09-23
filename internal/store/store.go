@@ -94,6 +94,9 @@ func (s *Store) SaveProject(ctx context.Context, p domain.Project) (domain.Proje
 	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84261301)"); e != nil {
 		return p, e
 	}
+	if _, e = tx.Exec(ctx, imageGuardLock); e != nil {
+		return p, e
+	}
 	if p.Enabled {
 		rows, err := tx.Query(ctx, "SELECT body FROM projects WHERE id<>$1", p.ID)
 		if err != nil {
@@ -169,6 +172,9 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84261302)"); e != nil {
 		return t, e
 	}
+	if _, e = tx.Exec(ctx, imageGuardLock); e != nil {
+		return t, e
+	}
 	node, found, e := pickTaskNode(ctx, tx, &t)
 	if e != nil {
 		return t, e
@@ -235,11 +241,22 @@ func (s *Store) Tasks(ctx context.Context) ([]domain.Task, error) {
 func (s *Store) SaveTask(ctx context.Context, t domain.Task) error {
 	t.UpdatedAt = time.Now().UTC()
 	b, _ := json.Marshal(t)
-	tag, e := s.Pool.Exec(ctx, "UPDATE tasks SET stage=$2,terminal=$3,body=$4,updated_at=now() WHERE id=$1", t.ID, t.Stage, domain.Terminal(t.Stage), b)
+	tx, e := s.Pool.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	if _, e = tx.Exec(ctx, imageGuardLock); e != nil {
+		return e
+	}
+	tag, e := tx.Exec(ctx, "UPDATE tasks SET stage=$2,terminal=$3,body=$4,updated_at=now() WHERE id=$1", t.ID, t.Stage, domain.Terminal(t.Stage), b)
 	if e == nil && tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return e
+	if e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) Execution(ctx context.Context, taskID, role string, ex domain.Execution) error {

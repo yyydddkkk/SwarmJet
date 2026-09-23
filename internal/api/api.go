@@ -187,6 +187,10 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		a.registry(w, r)
 		return
 	}
+	if r.URL.Path == "/api/registry/images" || strings.HasPrefix(r.URL.Path, "/api/registry/images/") {
+		a.registryImages(w, r)
+		return
+	}
 	if r.URL.Path == "/api/networks" || r.URL.Path == "/api/networks/default" {
 		a.networks(w, r)
 		return

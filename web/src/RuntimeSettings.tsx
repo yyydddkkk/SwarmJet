@@ -360,7 +360,7 @@ export default function RuntimeSettings() {
       )}
       <section className="panel panel-padding" aria-label="启用 Agent">
         <h2>启用 Agent</h2>
-        <p>勾选需要启用的 Agent，再保存。未安装的工具可前往<a href="#/images">镜像配置</a>构建。</p>
+        <p>勾选需要启用的 Agent，再保存。未安装的工具可前往<a href="#/images">镜像管理</a>构建。</p>
         {agentsError && <p role="alert">{agentsError}</p>}
         <div className="runtime-agent-list" aria-label="可用 Agent">
           {catalog.agents.map((agent) => {
@@ -404,7 +404,7 @@ export default function RuntimeSettings() {
                   <div className="runtime-tool-state"><span>工具安装</span><strong>{!status?.toolsChecked ? "打开终端后检测" : info?.installed ? "已安装" : "未检测到工具"}</strong></div>
                   <div className="runtime-tool-state"><span>配置文件</span><strong>{info?.configured ? "已检测到（不代表认证有效）" : "尚未检测到"}</strong></div>
                   <p>配置入口：<code>{agent.setupCommand}</code></p>
-                  <p>勾选只控制启用范围，安装或扩展工具请前往<a href="#/images">镜像配置</a>。模型使用 CLI 保存的默认配置；终端 export 不会自动传给任务容器。</p>
+                  <p>勾选只控制启用范围，安装或扩展工具请前往<a href="#/images">镜像管理</a>。模型使用 CLI 保存的默认配置；终端 export 不会自动传给任务容器。</p>
                   {agent.id === "agy" && <p>任务使用 GEMINI_API_KEY 或 ADC 文件认证；系统钥匙串登录不会复制到任务容器。</p>}
                 </div>
               </section>

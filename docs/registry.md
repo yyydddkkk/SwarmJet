@@ -26,7 +26,11 @@ Distribution 保存镜像内容，通过 Registry API 提供上传和拉取。�
 
 运行 `docker compose --env-file /absolute/registry.env -f deploy/compose.registry.yaml up -d`。备份 registry-data 卷及私有配置。不要对业务 Docker 执行全局 prune。
 
-在平台镜像配置页填写 host:port、镜像路径、builder 推送账号和 reader 拉取账号。密码加密存储，不需要给 Node 推送权限。
+在平台“镜像管理 → 仓库设置”填写 host:port、镜像路径、builder 推送账号和 reader 拉取账号。密码加密存储，不需要给 Node 推送权限。仓库镜像清单读取此路径的实时 tag 与摘要，包含外部推送的镜像；新构建也只发布到此路径。
+
+页面删除以 manifest 摘要为单位，同摘要的所有 tag 一起失效。节点、项目、未结束任务或初始化仍引用该摘要时会拒绝删除；页面无法得知仓库外部客户端的引用。当前 Compose 示例已启用 manifest 删除，升级已有仓库容器后才会生效。删除不会立即回收磁盘，构建记录和已完成任务历史仍保留原摘要。
+
+需要回收空间时，安排仓库维护窗口：先停止推送或将仓库设为只读，备份仓库数据卷，用 `registry garbage-collect --dry-run /etc/distribution/config.yml` 检查待清理对象，再运行不带 `--dry-run` 的命令，最后恢复写入。具体配置路径以运行中的 Registry 容器为准；不要在可写运行状态下执行垃圾回收。
 
 ## 构建服务
 
@@ -49,6 +53,6 @@ Nginx worker 必须能读取两份 htpasswd 文件，例如文件权限 0644、T
 - [Distribution 部署说明](https://distribution.github.io/distribution/about/deploying/)
 - [Buildx remote driver](https://docs.docker.com/build/builders/drivers/remote/)
 
-原生开发通过 `scripts/dev.py restart` 启动独立 builder 进程和持久化 BuildKit 容器。构建服务日志为 `.cache/dev/builder.log`；停止开发进程不会删除 BuildKit 缓存。平台镜像构建页现在需要先保存仓库配置才能发布。
+原生开发通过 `scripts/dev.py restart` 启动独立 builder 进程和持久化 BuildKit 容器。构建服务日志为 `.cache/dev/builder.log`；停止开发进程不会删除 BuildKit 缓存。平台镜像构建前需要先保存仓库配置才能发布。
 
 单机部署及原生开发会注册一个默认暂停的 `local` 节点，使用独立的 local-node 数据目录。构建成功后可把镜像分发给它，完成节点专属 CLI 登录配置后再启用。原有 Worker 配置终端用于历史本机环境，登录状态不会自动复制到新节点。
