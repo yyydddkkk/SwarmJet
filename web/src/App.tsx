@@ -20,6 +20,7 @@ import {
   type TaskView,
 } from "./task-presentation";
 import { ProjectEditor } from "./ProjectEditor";
+import { TaskTerminal } from "./TaskTerminal";
 const RuntimeSettings = lazy(() => import("./RuntimeSettings"));
 const NodeSettings = lazy(() => import("./NodeSettings"));
 const NetworkSettings = lazy(() => import("./NetworkSettings"));
@@ -949,16 +950,14 @@ function TaskDetail({ id }: { id: string }) {
             <Status task={task} /> <span className="mono">{task.id}</span>
           </p>
         </div>
-        {task.issue.url && (
-          <a
-            className="button"
-            href={task.issue.url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            查看 Issue ↗
-          </a>
-        )}
+        <div className="task-detail-actions">
+          <TaskTerminal task={task} />
+          {task.issue.url && (
+            <a className="button" href={task.issue.url} target="_blank" rel="noreferrer">
+              查看 Issue ↗
+            </a>
+          )}
+        </div>
       </div>
       <ErrorBox
         error={error}
