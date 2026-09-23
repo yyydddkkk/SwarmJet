@@ -13,3 +13,5 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.agent
+      args:
+        AGENT_CLIS: ${AGENT_CLIS:-opencode}

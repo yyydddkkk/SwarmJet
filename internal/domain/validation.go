@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"swarmjet/internal/agentcli"
 )
 
 var IDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$`)
@@ -17,6 +18,13 @@ var IDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$`)
 // ValidateProjectForSave accepts incomplete disabled drafts while rejecting unsafe
 // supplied values. Enabling a project always requires the execution contract.
 func ValidateProjectForSave(p Project) error {
+	if err := p.Nodes.Validate(); err != nil {
+		return err
+	}
+	if err := validateAcceptance(p); err != nil {
+		return err
+	}
+
 	if !IDPattern.MatchString(p.ID) || strings.TrimSpace(p.Name) == "" {
 		return fmt.Errorf("project id and name are required; id must be a safe identifier")
 	}
@@ -105,10 +113,10 @@ func ValidateProjectForSave(p Project) error {
 		}
 	}
 	for _, agent := range []AgentConfig{p.Development, p.Review} {
-		if agent.Adapter != "" && agent.Adapter != "opencode" {
-			return fmt.Errorf("unsupported agent adapter; only opencode is available")
+		if _, ok := agentcli.Lookup(agent.Adapter); agent.Adapter != "" && !ok {
+			return fmt.Errorf("unsupported agent adapter")
 		}
-		if agent.Model != "" {
+		if agent.Model != "" && (agent.Adapter == "opencode" || agent.Adapter == "") {
 			provider, model, ok := strings.Cut(agent.Model, "/")
 			if !ok || provider == "" || model == "" || strings.ContainsAny(agent.Model, " \t\r\n\x00") {
 				return fmt.Errorf("agent model must use provider/model format")
@@ -276,12 +284,24 @@ func ValidateProject(p Project) error {
 		}
 	}
 	for _, a := range []AgentConfig{p.Development, p.Review} {
-		if a.Adapter != "opencode" || a.Model == "" || a.Image == "" || a.TimeoutSeconds < 1 || a.TimeoutSeconds > 86400 {
-			return fmt.Errorf("enabled adapter must be opencode with model, image and timeout 1..86400")
+		if _, ok := agentcli.Lookup(a.Adapter); !ok || (a.Image == "" && p.Nodes.Mode == "") || a.TimeoutSeconds < 1 || a.TimeoutSeconds > 86400 {
+			return fmt.Errorf("enabled agent must have a supported adapter, image and timeout 1..86400")
 		}
 	}
 	if p.MaxReworks < 0 || p.MaxReworks > 20 {
 		return fmt.Errorf("maxReworks must be 0..20")
+	}
+	if err := validateAcceptance(p); err != nil {
+		return err
+	}
+	if p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" {
+		return nil
+	}
+	if p.Integration.Mode == "commands" {
+		if p.Integration.Image == "" || len(p.Integration.Commands) == 0 {
+			return fmt.Errorf("自定义命令需要验收镜像和至少一条命令")
+		}
+		return nil
 	}
 	f := p.Integration.ComposeFile
 	if f == "" || filepath.IsAbs(f) || filepath.Clean(f) != f || f == ".." || strings.HasPrefix(f, "../") {
@@ -390,4 +410,29 @@ func GitLabIdentity(raw string) string {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return strings.TrimRight(u.String(), "/")
+}
+
+func validateAcceptance(p Project) error {
+	switch p.AcceptanceStrategy {
+	case "", "custom", "repository", "gitlab_ci":
+	default:
+		return fmt.Errorf("unknown acceptance strategy")
+	}
+	if p.Integration.Mode != "" && p.Integration.Mode != "compose" && p.Integration.Mode != "commands" {
+		return fmt.Errorf("unknown custom acceptance mode")
+	}
+	if len(p.Integration.Commands) > 20 {
+		return fmt.Errorf("最多配置 20 条验收命令")
+	}
+	for _, c := range p.Integration.Commands {
+		if c.Name == "" || len(c.Argv) == 0 || strings.TrimSpace(c.Argv[0]) == "" || (c.Path != "." && !safeRelativePath(c.Path)) {
+			return fmt.Errorf("验收命令需要名称、安全的相对目录和非空 argv")
+		}
+		for _, arg := range c.Argv {
+			if strings.ContainsRune(arg, 0) {
+				return fmt.Errorf("invalid acceptance argv")
+			}
+		}
+	}
+	return nil
 }

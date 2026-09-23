@@ -59,7 +59,14 @@ func (m *Manager) run(ctx context.Context, dir, exe string, args ...string) (str
 	c.Dir = dir
 	// Do not leak worker/API/merge secrets into subprocesses. Only explicitly
 	// injected read credentials and the process search path are inherited.
-	c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(m.DataDir, "git-home"), "LANG=C", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:http:ssh:file"}
+	proxy := ""
+	if strings.HasPrefix(exe, "git") {
+		proxy = m.Env["HTTPS_PROXY"]
+		if proxy == "" {
+			proxy = m.Env["HTTP_PROXY"]
+		}
+	}
+	c.Env = []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.proxy", "GIT_CONFIG_VALUE_0=" + proxy, "PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(m.DataDir, "git-home"), "LANG=C", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:http:ssh:file"}
 	for k, v := range m.Env {
 		c.Env = append(c.Env, k+"="+v)
 	}
@@ -67,7 +74,7 @@ func (m *Manager) run(ctx context.Context, dir, exe string, args ...string) (str
 	if e != nil {
 		text := strings.TrimSpace(string(b))
 		for k, v := range m.Env {
-			if v != "" && (strings.Contains(k, "TOKEN") || strings.Contains(k, "PASSWORD") || strings.Contains(k, "SECRET")) {
+			if v != "" && (strings.Contains(k, "TOKEN") || strings.Contains(k, "PASSWORD") || strings.Contains(k, "SECRET") || strings.Contains(strings.ToUpper(k), "PROXY")) {
 				text = strings.ReplaceAll(text, v, "[REDACTED]")
 			}
 		}
@@ -79,7 +86,7 @@ func (m *Manager) git(ctx context.Context, dir string, args ...string) (string, 
 	if err := m.checkPrivateMetadata(ctx, dir); err != nil {
 		return "", err
 	}
-	flags := []string{"-c", "core.askpass=", "-c", "http.sslVerify=true", "-c", "http.proxy=", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "credential.helper=", "-c", "core.sshCommand=ssh -F /dev/null", "-c", "core.gitProxy=", "-c", "diff.external=", "-c", "protocol.ext.allow=never", "-c", "fetch.recurseSubmodules=false", "-c", "submodule.recurse=false"}
+	flags := []string{"-c", "core.askpass=", "-c", "http.sslVerify=true", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "credential.helper=", "-c", "core.sshCommand=ssh -F /dev/null", "-c", "core.gitProxy=", "-c", "diff.external=", "-c", "protocol.ext.allow=never", "-c", "fetch.recurseSubmodules=false", "-c", "submodule.recurse=false"}
 	// No host operation may run repository-configured content filters. Git
 	// config itself only parses data; command-line overrides disable each filter.
 	if dir != "" {

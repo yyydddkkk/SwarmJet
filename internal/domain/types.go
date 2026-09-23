@@ -13,10 +13,15 @@ type Repository struct {
 	SensitivePaths []string `json:"sensitivePaths" yaml:"sensitivePaths"`
 }
 type AgentConfig struct {
-	Adapter        string `json:"adapter"`
-	Model          string `json:"model"`
-	Image          string `json:"image"`
-	TimeoutSeconds int    `json:"timeoutSeconds"`
+	DockerNetwork  string  `json:"dockerNetwork,omitempty"`
+	MemoryMB       int     `json:"memoryMB,omitempty"`
+	CPUs           float64 `json:"cpus,omitempty"`
+	PidsLimit      int     `json:"pidsLimit,omitempty"`
+	UseCLIDefaults bool    `json:"useCliDefaults,omitempty"`
+	Adapter        string  `json:"adapter"`
+	Model          string  `json:"model"`
+	Image          string  `json:"image"`
+	TimeoutSeconds int     `json:"timeoutSeconds"`
 }
 type Check struct {
 	Name     string   `json:"name" yaml:"name"`
@@ -24,21 +29,41 @@ type Check struct {
 	Command  []string `json:"command" yaml:"command"`
 	Required bool     `json:"required" yaml:"required"`
 }
+type AcceptanceCommand struct {
+	Name     string   `json:"name"`
+	Path     string   `json:"path"`
+	Argv     []string `json:"argv"`
+	Evidence string   `json:"evidence"`
+}
+type ManualStep struct {
+	Action   string `json:"action"`
+	Expected string `json:"expected"`
+}
+type ManualAcceptance struct {
+	Prerequisites []string     `json:"prerequisites"`
+	Steps         []ManualStep `json:"steps"`
+	Notes         []string     `json:"notes"`
+}
 type IntegrationConfig struct {
-	ComposeFile           string  `json:"composeFile"`
-	Checks                []Check `json:"checks"`
-	StartupTimeoutSeconds int     `json:"startupTimeoutSeconds"`
+	Mode                  string              `json:"mode,omitempty"`
+	Image                 string              `json:"image,omitempty"`
+	Commands              []AcceptanceCommand `json:"commands,omitempty"`
+	ComposeFile           string              `json:"composeFile"`
+	Checks                []Check             `json:"checks"`
+	StartupTimeoutSeconds int                 `json:"startupTimeoutSeconds"`
 }
 type Project struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name"`
-	MetaURL            string `json:"metaUrl"`
-	MetaRef            string `json:"metaRef"`
-	Version            int    `json:"version"`
-	Enabled            bool   `json:"enabled"`
-	GitLabURL          string `json:"gitlabUrl"`
-	CredentialRef      string `json:"credentialRef"`
-	MergeCredentialRef string `json:"mergeCredentialRef"`
+	Nodes              NodeSelection `json:"nodes,omitempty"`
+	AcceptanceStrategy string        `json:"acceptanceStrategy,omitempty"`
+	ID                 string        `json:"id"`
+	Name               string        `json:"name"`
+	MetaURL            string        `json:"metaUrl"`
+	MetaRef            string        `json:"metaRef"`
+	Version            int           `json:"version"`
+	Enabled            bool          `json:"enabled"`
+	GitLabURL          string        `json:"gitlabUrl"`
+	CredentialRef      string        `json:"credentialRef"`
+	MergeCredentialRef string        `json:"mergeCredentialRef"`
 	// ConnectionID references a saved GitLab connection. Its token is stored
 	// encrypted outside the project snapshot; only the reference is persisted.
 	ConnectionID string `json:"connectionId,omitempty"`
@@ -106,11 +131,13 @@ type Finding struct {
 	Message      string `json:"message"`
 }
 type AgentResult struct {
-	Outcome     string    `json:"outcome"`
-	Summary     string    `json:"summary"`
-	Assumptions []string  `json:"assumptions"`
-	Findings    []Finding `json:"findings"`
-	NeedsHelp   string    `json:"needsHelp"`
+	AcceptanceCommands []AcceptanceCommand `json:"acceptanceCommands,omitempty"`
+	HumanAcceptance    *ManualAcceptance   `json:"humanAcceptance,omitempty"`
+	Outcome            string              `json:"outcome"`
+	Summary            string              `json:"summary"`
+	Assumptions        []string            `json:"assumptions"`
+	Findings           []Finding           `json:"findings"`
+	NeedsHelp          string              `json:"needsHelp"`
 	// Questions carries concrete missing-information prompts for the init role.
 	Questions []string `json:"questions,omitempty"`
 }
@@ -138,25 +165,30 @@ type AgentRequest struct {
 	Env          map[string]string `json:"-"`
 }
 type Task struct {
-	Checkpoint     *WorkflowCheckpoint  `json:"checkpoint,omitempty"`
-	ID             string               `json:"id"`
-	NodeID         string               `json:"nodeId,omitempty"`
-	Project        Project              `json:"project"`
-	Issue          Issue                `json:"issue"`
-	Dependencies   []IssueRef           `json:"dependencies"`
-	Stage          string               `json:"stage"`
-	Message        string               `json:"message"`
-	Workspace      Workspace            `json:"workspace"`
-	Executions     map[string]Execution `json:"executions"`
-	Verification   []Verification       `json:"verification"`
-	Assumptions    []string             `json:"assumptions"`
-	Notes          []string             `json:"notes"`
-	Reworks        int                  `json:"reworks"`
-	ReviewDigest   string               `json:"reviewDigest"`
-	ApprovalDigest string               `json:"approvalDigest"`
-	Paused         bool                 `json:"paused"`
-	CreatedAt      time.Time            `json:"createdAt"`
-	UpdatedAt      time.Time            `json:"updatedAt"`
+	Network              NetworkVersion       `json:"network,omitempty"`
+	NodeConfigVersion    int                  `json:"nodeConfigVersion,omitempty"`
+	AcceptanceCommands   []AcceptanceCommand  `json:"acceptanceCommands,omitempty"`
+	HumanAcceptance      *ManualAcceptance    `json:"humanAcceptance,omitempty"`
+	AcceptanceIncomplete bool                 `json:"acceptanceIncomplete,omitempty"`
+	Checkpoint           *WorkflowCheckpoint  `json:"checkpoint,omitempty"`
+	ID                   string               `json:"id"`
+	NodeID               string               `json:"nodeId,omitempty"`
+	Project              Project              `json:"project"`
+	Issue                Issue                `json:"issue"`
+	Dependencies         []IssueRef           `json:"dependencies"`
+	Stage                string               `json:"stage"`
+	Message              string               `json:"message"`
+	Workspace            Workspace            `json:"workspace"`
+	Executions           map[string]Execution `json:"executions"`
+	Verification         []Verification       `json:"verification"`
+	Assumptions          []string             `json:"assumptions"`
+	Notes                []string             `json:"notes"`
+	Reworks              int                  `json:"reworks"`
+	ReviewDigest         string               `json:"reviewDigest"`
+	ApprovalDigest       string               `json:"approvalDigest"`
+	Paused               bool                 `json:"paused"`
+	CreatedAt            time.Time            `json:"createdAt"`
+	UpdatedAt            time.Time            `json:"updatedAt"`
 }
 type WorkflowCheckpoint struct {
 	Serial        int             `json:"serial"`
@@ -185,19 +217,21 @@ type Event struct {
 // Node is one registered execution host. Running work is derived from tasks
 // pinned to the node; LastSeen drives liveness.
 type Node struct {
-	ID       string    `json:"id"`
-	Address  string    `json:"address"`
-	Capacity int       `json:"capacity"`
-	Version  string    `json:"version"`
-	LastSeen time.Time `json:"lastSeen"`
+	Readiness NodeReadiness `json:"readiness"`
+	ID        string        `json:"id"`
+	Address   string        `json:"address"`
+	Capacity  int           `json:"capacity"`
+	Version   string        `json:"version"`
+	LastSeen  time.Time     `json:"lastSeen"`
 }
 
 // NodeStatus combines a node with its current load for the console and the
 // scheduler.
 type NodeStatus struct {
-	Node    Node `json:"node"`
-	Running int  `json:"running"`
-	Online  bool `json:"online"`
+	Config  *NodeConfig `json:"config,omitempty"`
+	Node    Node        `json:"node"`
+	Running int         `json:"running"`
+	Online  bool        `json:"online"`
 }
 
 // NodeOnlineAfter is how recently a node must have heartbeated to receive work.

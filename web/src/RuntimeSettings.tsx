@@ -3,10 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { api } from "./api";
+import { useAgentCatalog, type AgentCatalog } from "./agents";
 import "@xterm/xterm/css/xterm.css";
 import "./runtime-settings.css";
 
 type RuntimeStatus = {
+ agents?: {id:string;installed:boolean;configured:boolean;executionSupported:boolean}[];
   profile: string;
   image: string;
   available: boolean;
@@ -44,6 +46,9 @@ const commands = [
   { command: "opencode models", label: "查看模型" },
   { command: "codex login --device-auth", label: "登录 Codex" },
   { command: "codex login status", label: "查看 Codex 登录状态" },
+  {command:"dst",label:"配置 DeepSeek Harness TUI"},
+  {command:"agy",label:"配置 Antigravity"},
+  {command:"claude",label:"配置 Claude Code"},
 ];
 
 function modelID(model: ModelEntry): string {
@@ -54,7 +59,13 @@ function modelID(model: ModelEntry): string {
     : model.id;
 }
 
+const selectedNode=()=>new URLSearchParams(location.hash.split('?')[1]||'').get('node')||'';
+const nodePath=(path:string)=>path+(selectedNode()?`?node=${encodeURIComponent(selectedNode())}`:'');
 export default function RuntimeSettings() {
+  const {catalog,setCatalog,error:agentsError,setError:setAgentsError} = useAgentCatalog();
+  const [savingAgents,setSavingAgents] = useState(false);
+  const [expandedAgents, setExpandedAgents] = useState<string[]>([]);
+  const [agentsNotice,setAgentsNotice] = useState("");
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [models, setModels] = useState<RuntimeModels | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,7 +93,7 @@ export default function RuntimeSettings() {
     setStatusError("");
     try {
       const result = await api<RuntimeStatus>(
-        "/runtime/status",
+        nodePath("/runtime/status"),
         "GET",
         undefined,
         controller.signal,
@@ -102,7 +113,7 @@ export default function RuntimeSettings() {
     setModelsError("");
     try {
       const result = await api<RuntimeModels>(
-        "/runtime/models",
+        nodePath("/runtime/models"),
         "GET",
         undefined,
         controller.signal,
@@ -199,7 +210,7 @@ export default function RuntimeSettings() {
           return false;
         return true;
       });
-      const url = new URL("/api/runtime/terminal", window.location.href);
+      const url = new URL(nodePath("/api/runtime/terminal"), window.location.href);
       url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const socket = new WebSocket(url);
       pendingSocket = socket;
@@ -347,59 +358,67 @@ export default function RuntimeSettings() {
       {status?.message && (
         <div className="runtime-message">{status.message}</div>
       )}
-      <div className="runtime-tool-grid">
-        {(["opencode", "codex"] as const).map((tool) => {
-          const info = status?.[tool];
-          return (
-            <section
-              className="panel runtime-tool-card"
-              key={tool}
-              aria-label={
-                tool === "opencode" ? "OpenCode 环境状态" : "Codex 环境状态"
-              }
-            >
-              <div className="runtime-tool-top">
-                <div className="runtime-tool-mark" aria-hidden="true">
-                  {tool === "opencode" ? ">_" : "C/"}
+      <section className="panel panel-padding" aria-label="启用 Agent">
+        <h2>启用 Agent</h2>
+        <p>勾选需要启用的 Agent，再保存。未安装的工具可前往<a href="#/images">镜像配置</a>构建。</p>
+        {agentsError && <p role="alert">{agentsError}</p>}
+        <div className="runtime-agent-list" aria-label="可用 Agent">
+          {catalog.agents.map((agent) => {
+            const info = status?.agents?.find((item) => item.id === agent.id);
+            const expanded = expandedAgents.includes(agent.id);
+            return (
+              <section className="runtime-agent-card" key={agent.id} aria-label={`${agent.name} 环境状态`}>
+                <div className="runtime-agent-card-header">
+                  <label className="checkbox runtime-agent-option">
+                    <input
+                      type="checkbox"
+                      checked={catalog.enabled.includes(agent.id)}
+                      disabled={savingAgents}
+                      onChange={(e) => {
+                        setAgentsNotice("");
+                        setCatalog({
+                          ...catalog,
+                          enabled: e.target.checked
+                            ? [...catalog.enabled, agent.id]
+                            : catalog.enabled.filter((id) => id !== agent.id),
+                        });
+                      }}
+                    />
+                    <span>{agent.name}</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="runtime-agent-toggle"
+                    aria-label={`${expanded ? "收起" : "展开"} ${agent.name} 详情`}
+                    aria-expanded={expanded}
+                    aria-controls={`agent-details-${agent.id}`}
+                    onClick={() => setExpandedAgents((ids) => expanded
+                      ? ids.filter((id) => id !== agent.id)
+                      : [...ids, agent.id])}
+                  >
+                    <span aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
+                  </button>
                 </div>
-                <span
-                  className={`status ${tool === "opencode" ? "completed" : "paused"}`}
-                >
-                  {tool === "opencode" ? "当前任务执行器" : "可配置登录"}
-                </span>
-              </div>
-              <h2>{tool === "opencode" ? "OpenCode" : "Codex"}</h2>
-              <p>
-                {tool === "opencode"
-                  ? "任务开发、审查和合并使用此执行器。"
-                  : "可在环境中完成登录，任务适配器尚未实现。"}
-              </p>
-              <div className="runtime-tool-state">
-                <span>工具安装</span>
-                <strong>
-                  {!status
-                    ? "尚未检查"
-                    : status.toolsChecked === false
-                      ? "打开终端后检测"
-                      : info?.installed
-                        ? "已安装"
-                        : "未检测到工具"}
-                </strong>
-              </div>
-              <div className="runtime-tool-state">
-                <span>登录配置</span>
-                <strong>
-                  {!status
-                    ? "尚未检查"
-                    : info?.configured
-                      ? "检测到登录配置"
-                      : "未检测到登录配置"}
-                </strong>
-              </div>
-            </section>
-          );
-        })}
-      </div>
+                <div id={`agent-details-${agent.id}`} className="runtime-agent-card-details" hidden={!expanded}>
+                  <p><code>agent:{agent.id}</code></p>
+                  <div className="runtime-tool-state"><span>工具安装</span><strong>{!status?.toolsChecked ? "打开终端后检测" : info?.installed ? "已安装" : "未检测到工具"}</strong></div>
+                  <div className="runtime-tool-state"><span>配置文件</span><strong>{info?.configured ? "已检测到（不代表认证有效）" : "尚未检测到"}</strong></div>
+                  <p>配置入口：<code>{agent.setupCommand}</code></p>
+                  <p>勾选只控制启用范围，安装或扩展工具请前往<a href="#/images">镜像配置</a>。模型使用 CLI 保存的默认配置；终端 export 不会自动传给任务容器。</p>
+                  {agent.id === "agy" && <p>任务使用 GEMINI_API_KEY 或 ADC 文件认证；系统钥匙串登录不会复制到任务容器。</p>}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+        <button type="button" disabled={savingAgents || !catalog.agents.length} onClick={async () => {
+          setSavingAgents(true); setAgentsError(""); setAgentsNotice("");
+          try { setCatalog(await api<AgentCatalog>("/runtime/agents","PUT",{enabled:catalog.enabled})); setAgentsNotice("启用列表已保存，作用于新任务；已有任务继续使用原执行器。"); }
+          catch(e) { setAgentsError((e as Error).message); }
+          finally { setSavingAgents(false); }
+        }}>{savingAgents ? "保存中…" : "保存启用列表"}</button>
+        {agentsNotice && <p role="status">{agentsNotice}</p>}
+      </section>
 
       <TerminalWindow title="配置终端" available={!!status?.available && !loading}
         onOpen={connect} onClose={() => disconnect()}>

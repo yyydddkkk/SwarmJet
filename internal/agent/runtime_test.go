@@ -273,7 +273,7 @@ func TestRecoveryBeforeContainerCreate(t *testing.T) {
 }
 func TestContextAndAdapter(t *testing.T) {
 	r, _, req := setup(t)
-	req.Config.Adapter = "claude"
+	req.Config.Adapter = "unknown"
 	if _, err := r.Start(context.Background(), req); err == nil {
 		t.Fatal("unsupported adapter")
 	}

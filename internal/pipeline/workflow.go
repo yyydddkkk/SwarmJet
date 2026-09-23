@@ -21,9 +21,10 @@ type StepInput struct {
 	ExecutionID string
 }
 type StepResult struct {
-	Task   domain.Task
-	Ready  bool
-	Rework bool
+	Task    domain.Task
+	Ready   bool
+	Rework  bool
+	Waiting bool
 }
 
 func WorkTask(ctx workflow.Context, t domain.Task) error {
@@ -32,6 +33,8 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 	// before this change replay with the previous decision order; new executions
 	// honor the switch. DefaultVersion is the pre-switch behavior.
 	autoMergeVersion := workflow.GetVersion(ctx, "auto-merge-switch", workflow.DefaultVersion, 1)
+	acceptanceVersion := workflow.GetVersion(ctx, "acceptance-strategy", workflow.DefaultVersion, 1)
+	earlyPublish := acceptanceVersion >= 1 && t.Project.AcceptanceStrategy != ""
 	commands := workflow.GetSignalChannel(ctx, SignalName)
 	seen := map[string]bool{}
 	cancelled := false
@@ -274,10 +277,31 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 				continue
 			}
 			t.Assumptions = append(t.Assumptions, ex.Result.Assumptions...)
-			t.Stage = "verifying"
-		case "verifying":
-			if result.Ready {
+			if earlyPublish {
 				t.Stage = "publishing"
+			} else {
+				t.Stage = "verifying"
+			}
+		case "verifying":
+			if result.Waiting {
+				ciWaits++
+				if ciWaits <= 60 {
+					waitTick(30 * time.Second)
+					continue
+				}
+				t.AcceptanceIncomplete = true
+				t.Message = "等待 CI 超过 30 分钟，保留 MR 供人工验收，禁止自动合并"
+				result.Ready = true
+			} else {
+				ciWaits = 0
+			}
+
+			if result.Ready {
+				if earlyPublish {
+					t.Stage = "reviewing"
+				} else {
+					t.Stage = "publishing"
+				}
 			} else {
 				t.Reworks++
 				t.ApprovalDigest = ""
@@ -291,7 +315,11 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 				}
 			}
 		case "publishing":
-			t.Stage = "reviewing"
+			if earlyPublish {
+				t.Stage = "verifying"
+			} else {
+				t.Stage = "reviewing"
+			}
 		case "reviewing":
 			ex := t.Executions["review"]
 			if ex.Result == nil || ex.Result.Outcome == "blocked" {
@@ -327,14 +355,17 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 			for _, label := range t.Issue.Labels {
 				special = special || label == "no-auto-close"
 			}
-			if autoMergeVersion >= 1 && !t.Project.AutoMergeEnabled() {
+			if autoMergeVersion >= 1 && (!t.Project.AutoMergeEnabled() || t.AcceptanceIncomplete) {
 				// Auto-merge off is distinct from a pending sensitive-change
 				// approval: the system never initiates the merge, so approval
 				// cannot override the closed switch. Wait for a human merge.
 				if !changed {
 					t.Stage = "finalizing"
 				} else {
-					t.Message = "自动合并已关闭，等待人工合并全部 MR"
+					t.Message = "等待真人验收并人工合并全部 MR"
+					if t.AcceptanceIncomplete {
+						t.Message = "自动验收不完整，禁止自动合并；请按 MR 顶部清单人工验收"
+					}
 					t.Stage = "waiting_manual_merge"
 				}
 			} else if special && t.ApprovalDigest != t.ReviewDigest {

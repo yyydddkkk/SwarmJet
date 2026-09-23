@@ -26,7 +26,7 @@ const maxOutput = 2 << 20
 const maxInlineConfig = 64 << 10
 
 var providerID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
-var providerEnv = map[string]string{"OPENAI_API_KEY": "openai", "ANTHROPIC_API_KEY": "anthropic", "GOOGLE_GENERATIVE_AI_API_KEY": "google", "GEMINI_API_KEY": "google", "DEEPSEEK_API_KEY": "deepseek", "OPENROUTER_API_KEY": "openrouter", "GROQ_API_KEY": "groq", "XAI_API_KEY": "xai", "MISTRAL_API_KEY": "mistral", "AZURE_OPENAI_API_KEY": "azure"}
+var providerEnv = map[string]string{"OPENAI_API_KEY": "openai", "CODEX_API_KEY": "openai", "CLAUDE_CODE_OAUTH_TOKEN": "anthropic", "AGY_ADC_AUTH": "google", "GOOGLE_GEMINI_BASE_URL": "google", "ANTHROPIC_API_KEY": "anthropic", "GOOGLE_GENERATIVE_AI_API_KEY": "google", "GEMINI_API_KEY": "google", "DEEPSEEK_API_KEY": "deepseek", "OPENROUTER_API_KEY": "openrouter", "GROQ_API_KEY": "groq", "XAI_API_KEY": "xai", "MISTRAL_API_KEY": "mistral", "AZURE_OPENAI_API_KEY": "azure"}
 
 // openat with O_NOFOLLOW on every component prevents credential paths from
 // traversing symlinks created through the administrative terminal.

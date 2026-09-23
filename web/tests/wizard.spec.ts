@@ -137,6 +137,7 @@ async function setupWizard(page: Page, options?: { verifyFails?: boolean }) {
         },
       });
     }
+    if (pathname === "/api/runtime/agents") return route.fulfill({json:{agents:[{id:"opencode",name:"OpenCode"},{id:"codex",name:"Codex"}],enabled:["opencode","codex"]}});
     if (pathname === "/api/runtime/status")
       return route.fulfill({
         json: {
@@ -214,7 +215,8 @@ async function advanceToOpenCode(page: Page) {
   await page.getByRole("button", { name: "下一步：配置 OpenCode" }).click();
   await expect(page.getByText("检测到已有的 OpenCode 登录配置")).toBeVisible();
   await page.getByRole("button", { name: "检查并继续" }).click();
-  await expect(page.locator("select")).toHaveValue("example/development");
+  await page.getByLabel("项目默认 Agent",{exact:true}).selectOption("opencode");
+  await expect(page.locator("select").filter({has:page.locator('option[value="example/development"]')})).toHaveValue("example/development");
 }
 
 test("wizard connects, paginates repos, verifies a model and completes initialization", async ({
@@ -245,7 +247,8 @@ test("wizard connects, paginates repos, verifies a model and completes initializ
   await page.getByRole("button", { name: "下一步：配置 OpenCode" }).click();
   await expect(page.getByText("检测到已有的 OpenCode 登录配置")).toBeVisible();
   await page.getByRole("button", { name: "检查并继续" }).click();
-  await expect(page.locator("select")).toHaveValue("example/development");
+  await page.getByLabel("项目默认 Agent",{exact:true}).selectOption("opencode");
+  await expect(page.locator("select").filter({has:page.locator('option[value="example/development"]')})).toHaveValue("example/development");
   await page.getByRole("button", { name: "验证模型" }).click();
   await expect(page.getByText("模型验证通过")).toBeVisible();
   await page.getByRole("button", { name: "创建项目并开始初始化" }).click();

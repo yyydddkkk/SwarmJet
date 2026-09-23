@@ -25,13 +25,16 @@ import (
 	"swarmjet/internal/domain"
 	"swarmjet/internal/execution"
 	"swarmjet/internal/gitlab"
+	"swarmjet/internal/imagebuild"
 	"swarmjet/internal/secretbox"
 	"swarmjet/internal/store"
 )
 
 type Config struct {
+	MihomoURL, MihomoSecret                               string
 	Username, Password, AllowedOrigin, StaticDir, DataDir string
 	DefaultAgentImage                                     string
+	BuilderURL                                            string
 	RuntimeURL, RuntimeSecret                             string
 	NodeSecret                                            string
 	RequireNode                                           bool
@@ -176,6 +179,22 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		problem(w, 401, "authentication required")
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/mihomo/") {
+		a.mihomo(w, r)
+		return
+	}
+	if r.URL.Path == "/api/registry" {
+		a.registry(w, r)
+		return
+	}
+	if r.URL.Path == "/api/networks" || r.URL.Path == "/api/networks/default" {
+		a.networks(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/nodes/") {
+		a.manageNode(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/runtime/") {
 		a.runtime(w, r)
 		return
@@ -215,10 +234,21 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		image := a.cfg.DefaultAgentImage
+		if !a.cfg.RequireNode {
+			var err error
+			image, err = imagebuild.CurrentImage(a.cfg.DataDir, image)
+			if err != nil {
+				failure(w, err)
+				return
+			}
+		}
 		if image == "" {
 			image = "swarmjet-agent:local"
 		}
-		respond(w, 200, map[string]any{"agentImage": image, "adapter": "opencode", "timeoutSeconds": 5400, "maxReworks": 3})
+		if a.cfg.RequireNode || a.cfg.BuilderURL != "" {
+			image = ""
+		}
+		respond(w, 200, map[string]any{"distributed": a.cfg.RequireNode || a.cfg.BuilderURL != "", "agentImage": image, "adapter": "opencode", "timeoutSeconds": 5400, "maxReworks": 3})
 		return
 	case "/api/projects":
 		a.projects(w, r)
@@ -337,6 +367,10 @@ func (a *server) projects(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Project) {
+	if p.Version == 0 && p.AcceptanceStrategy == "" {
+		p.AcceptanceStrategy = "repository"
+	}
+
 	// A saved connection is bound to the GitLab address it was verified against.
 	if p.ConnectionID != "" {
 		if a.conns == nil {
@@ -529,6 +563,23 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 			problem(w, 400, "issue must be opened and labeled autonomous")
 			return
 		}
+		enabled, err := a.s.EnabledAgents(r.Context())
+		if err != nil {
+			failure(w, err)
+			return
+		}
+		p, err = domain.ResolveIssueAgent(p, issue, enabled)
+		if err != nil {
+			problem(w, 400, err.Error())
+			return
+		}
+		if !a.cfg.RequireNode && p.Nodes.Mode == "" {
+			p, err = imagebuild.ApplyToProject(a.cfg.DataDir, p)
+			if err != nil {
+				failure(w, err)
+				return
+			}
+		}
 		id, err := newID()
 		if err != nil {
 			failure(w, err)
@@ -538,7 +589,7 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 		t := domain.Task{ID: id, Project: p, Issue: issue, Dependencies: req.Dependencies, Stage: "queued", Executions: map[string]domain.Execution{}, Verification: []domain.Verification{}, Assumptions: []string{}, Notes: []string{}, CreatedAt: now, UpdatedAt: now}
 		scheduled, err := a.s.CreateTaskScheduled(r.Context(), t, a.cfg.RequireNode)
 		if errors.Is(err, store.ErrNoNode) {
-			problem(w, 503, "没有可用的执行节点，请先启动执行节点或稍后重试")
+			problem(w, 503, err.Error())
 			return
 		}
 		if err != nil {

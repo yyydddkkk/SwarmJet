@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, APIError } from "./api";
+import { useAgentCatalog } from "./agents";
 import { ErrorBox, Field } from "./App";
 import { MetaPublication } from "./MetaPublication";
 import { TerminalPanel } from "./TerminalPanel";
@@ -129,6 +130,8 @@ export default function ProjectWizard({
   const [runtimeError, setRuntimeError] = useState("");
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
+  const {catalog:agentCatalog,error:agentCatalogError} = useAgentCatalog();
+  const [defaultAgent,setDefaultAgent] = useState(initialProject?.development.adapter || "");
   const [loadingModels, setLoadingModels] = useState(false);
   const [verifyingModel, setVerifyingModel] = useState(false);
   const [modelResult, setModelResult] = useState("");
@@ -141,8 +144,8 @@ export default function ProjectWizard({
   const tokenRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api<{ agentImage: string }>("/project-defaults")
-      .then((d) => d.agentImage && setDefaultImage(d.agentImage))
+    api<{ agentImage: string;distributed?:boolean }>("/project-defaults")
+      .then((d) => setDefaultImage(d.agentImage))
       .catch(() => {
         /* Local default remains valid. */
       });
@@ -293,15 +296,17 @@ export default function ProjectWizard({
       metaMode: "managed",
       connectionId,
       autoMerge,
+      acceptanceStrategy: "repository",
       gitlabUrl: connection?.gitlabUrl || gitlabUrl,
       credentialRef: "",
       mergeCredentialRef: "",
       repositories: buildRepositories(),
-      development: agent(model, defaultImage),
-      review: agent(model, defaultImage),
+      nodes:{mode:"auto"},
+      development: {...agent(model, defaultImage),adapter:defaultAgent},
+      review: {...agent(model, defaultImage),adapter:defaultAgent},
       integration: { composeFile: "", checks: [], startupTimeoutSeconds: 180 },
       maxReworks: 3,
-      requireCI: true,
+      requireCI: false,
     };
   }
 
@@ -856,6 +861,14 @@ export default function ProjectWizard({
               available={!!runtime?.available}
               onConnected={() => void refreshRuntime()}
             />
+            <Field label="项目默认 Agent">
+              <select value={defaultAgent} onChange={(e)=>setDefaultAgent(e.target.value)}>
+                <option value="">请选择已启用的 Agent</option>
+                {agentCatalog.agents.filter((a)=>agentCatalog.enabled.includes(a.id)).map((a)=><option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </Field>
+            <p>在<a href="#/runtime">执行器环境</a>统一勾选启用。Issue 标签可覆盖默认 Agent；任务模型由 CLI 的持久化配置决定。下方 OpenCode 模型仅用于 Meta 静态初始化。</p>
+            {agentCatalogError && <p role="alert">{agentCatalogError}</p>}
             <div className="wizard-model">
               <button
                 type="button"
@@ -922,7 +935,7 @@ export default function ProjectWizard({
               <button
                 type="button"
                 className="primary"
-                disabled={saving || !modelVerified}
+                disabled={saving || !modelVerified || !agentCatalog.enabled.includes(defaultAgent)}
                 onClick={() => void startInitialization()}
               >
                 {saving ? "正在创建项目…" : "创建项目并开始初始化"}

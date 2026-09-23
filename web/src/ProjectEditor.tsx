@@ -1,19 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentConfig, Check, Project, Repository } from "./types";
+import type {NodeView} from "./NodeSettings";
 import { api } from "./api";
+import { useAgentCatalog } from "./agents";
 import { ErrorBox, Field } from "./App";
 import { formatCommand, parseCommand } from "./commands";
 import "./wizard.css";
 
 const agent = (): AgentConfig => ({
-  adapter: "opencode",
+  adapter: "",
   model: "",
   image: "swarmjet-agent:local",
   timeoutSeconds: 5400,
 });
 export const newProject = (): Project => ({
   id: `project-${crypto.randomUUID().slice(0, 8)}`,
+  nodes:{mode:"auto"},
   name: "",
+  acceptanceStrategy: "repository",
   metaUrl: "",
   metaRef: "",
   version: 0,
@@ -26,7 +30,7 @@ export const newProject = (): Project => ({
   review: agent(),
   integration: { composeFile: "", checks: [], startupTimeoutSeconds: 180 },
   maxReworks: 3,
-  requireCI: true,
+  requireCI: false,
 });
 interface Discovery {
   name: string;
@@ -62,11 +66,11 @@ export function ProjectEditor({
   onSaved: (p: Project) => void;
 }) {
   const [p, setP] = useState<Project>(() => structuredClone(initial));
+  const [nodes,setNodes]=useState<NodeView[]>([]);
+  useEffect(()=>{api<NodeView[]>("/nodes").then(setNodes).catch(()=>{});},[]);
   const latestProject = useRef(p);
   latestProject.current = p;
-  const [modelOptions, setModelOptions] = useState<string[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [modelMessage, setModelMessage] = useState("");
+  const {catalog:agentCatalog,error:agentCatalogError} = useAgentCatalog();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState("");
@@ -235,10 +239,9 @@ export function ProjectEditor({
   }
   const repositories = p.repositories || [];
   const checks = p.integration.checks || [];
-  const modelsReady = [p.development, p.review].every(
+  const agentsReady = [p.development, p.review].every(
     (a) =>
-      a.adapter === "opencode" &&
-      /^[^/\s]+\/.+/.test(a.model.trim()) &&
+      agentCatalog.enabled.includes(a.adapter) &&
       a.image.trim() &&
       a.timeoutSeconds > 0 &&
       a.timeoutSeconds <= 86400,
@@ -257,7 +260,10 @@ export function ProjectEditor({
           branches[r.id].includes(r.targetBranch) ||
           r.createFrom),
     );
-  const checksReady =
+  const strategy = p.acceptanceStrategy || "custom";
+  const [acceptanceArgv, setAcceptanceArgv] = useState(() => (initial.integration.commands || []).map((c) => formatCommand(c.argv)));
+  const customCommands = p.integration.mode === "commands";
+  const composeReady =
     !!p.integration.composeFile.trim() &&
     checks.some((c) => c.required) &&
     checks.every((c, i) => {
@@ -271,6 +277,10 @@ export function ProjectEditor({
         return false;
       }
     });
+  const commandsReady = !!p.integration.image?.trim() && !!p.integration.commands?.length && p.integration.commands.every((c, i) => {
+    try { return !!c.name.trim() && !!c.path.trim() && parseCommand(acceptanceArgv[i] || "").length > 0; } catch { return false; }
+  });
+  const checksReady = strategy !== "custom" || (customCommands ? commandsReady : composeReady);
   const connectionReady = !!(
     p.name.trim() &&
     p.metaRef.trim() &&
@@ -280,8 +290,8 @@ export function ProjectEditor({
   const readiness = [
     { id: "connection", label: "Meta-Repo 信息", ok: connectionReady },
     { id: "repositories", label: "仓库与目标分支", ok: repoReady },
-    { id: "execution", label: "开发与审查模型", ok: modelsReady },
-    { id: "verification", label: "至少一项必需验收", ok: checksReady },
+    { id: "execution", label: "执行器与运行环境", ok: agentsReady },
+    { id: "verification", label: "开发任务验收策略", ok: checksReady },
   ];
   const ready = readiness.every((r) => r.ok);
   const saving = busy || discovering;
@@ -315,10 +325,11 @@ export function ProjectEditor({
         enabled,
         integration: {
           ...p.integration,
-          checks: checks.map((c, i) => ({
+          commands: strategy === "custom" && customCommands ? (p.integration.commands || []).map((c,i) => ({...c, argv: parseCommand(acceptanceArgv[i] || "")})) : p.integration.commands,
+          checks: strategy === "custom" && !customCommands ? checks.map((c, i) => ({
             ...c,
             command: parseCommand(commands[i] || ""),
-          })),
+          })) : checks,
         },
         repositories: (sourceChanged ? [] : repositories).map((r) => ({
           ...r,
@@ -809,89 +820,29 @@ export function ProjectEditor({
             <section className="panel setup-section" id="execution">
               <div className="setup-section-head">
                 <div>
-                  <h2>执行模型</h2>
-                  <p>开发与审查使用独立会话，可以使用相同模型。</p>
+                  <h2>执行器</h2>
+                  <p>开发与审查使用相同 Agent 的独立会话。</p>
+                  <label className="checkbox"><input type="checkbox" checked={!p.development.image&&!p.review.image} onChange={e=>setP({...p,nodes:p.nodes||{mode:'auto'},development:{...p.development,image:e.target.checked?'':'swarmjet-agent:local'},review:{...p.review,image:e.target.checked?'':'swarmjet-agent:local'}})}/>使用节点默认镜像</label>
+                  <Field label="执行节点范围"><select value={p.nodes?.mode||'auto'} onChange={e=>setP({...p,nodes:{mode:e.target.value,ids:[]}})}><option value="auto">所有符合条件的节点</option><option value="selected">指定节点</option></select></Field>
+                  {p.nodes?.mode==='selected'&&nodes.map(n=><label className="checkbox" key={n.node.id}><input type="checkbox" checked={p.nodes?.ids?.includes(n.node.id)||false} onChange={e=>setP({...p,nodes:{mode:'selected',ids:e.target.checked?[...(p.nodes?.ids||[]),n.node.id]:(p.nodes?.ids||[]).filter(id=>id!==n.node.id)}})}/>{n.config?.name||n.node.id}</label>)}
                 </div>
                 <span className="setup-label">可稍后补充</span>
               </div>
               <div className="panel-padding">
-                <div className="agent-product">
-                  <span className="agent-product-icon" aria-hidden="true">
-                    ›_
-                  </span>
-                  <div>
-                    <strong>OpenCode</strong>
-                    <span>当前已接入的执行器</span>
-                  </div>
-                  <a className="button" href="#/runtime">
-                    登录与 provider 配置 →
-                  </a>
-                </div>
-                <div className="model-tools">
-                  <button
-                    type="button"
-                    disabled={loadingModels}
-                    onClick={async () => {
-                      setLoadingModels(true);
-                      setModelMessage("");
-                      try {
-                        const result = await api<{
-                          models: string[];
-                          warnings: string[];
-                        }>("/runtime/models");
-                        setModelOptions(result.models || []);
-                        setModelMessage(
-                          (result.warnings || []).join("；") ||
-                            ((result.models || []).length
-                              ? `已读取 ${result.models.length} 个模型；此列表不检查额度。`
-                              : "还没有模型，请先在执行器环境中配置 provider。"),
-                        );
-                      } catch (e) {
-                        setModelMessage((e as Error).message);
-                      } finally {
-                        setLoadingModels(false);
-                      }
-                    }}
-                  >
-                    {loadingModels ? "正在读取…" : "读取模型列表"}
-                  </button>
-                  <span>
-                    {modelMessage ||
-                      "登录后可从列表选择，也可直接填写模型名称。"}
-                  </span>
-                </div>
-                <datalist id="configured-models">
-                  {modelOptions.map((model) => (
-                    <option key={model} value={model} />
-                  ))}
-                </datalist>
-                <div className="form-grid">
-                  <Field
-                    label="开发模型"
-                    hint="填写 OpenCode 中已配置的 provider/model。"
-                  >
-                    <input
-                      value={p.development.model}
-                      list="configured-models"
-                      onChange={(e) =>
-                        updateAgent("development", { model: e.target.value })
-                      }
-                      placeholder="provider/model"
-                    />
-                  </Field>
-                  {!shareReview && (
-                    <Field label="审查模型">
-                      <input
-                        value={p.review.model}
-                        list="configured-models"
-                        onChange={(e) =>
-                          updateAgent("review", { model: e.target.value })
-                        }
-                        placeholder="provider/model"
-                      />
-                    </Field>
-                  )}
-                </div>
+                <p>Issue 使用 <code>agent:opencode</code>、<code>agent:codex</code> 等标签覆盖默认执行器，统一作用于开发、审查和合并。模型使用 CLI 保存的默认配置。</p>
+                <a className="button" href="#/runtime">启用 Agent 与终端配置 →</a>
+                {agentCatalogError && <p role="alert">{agentCatalogError}</p>}
+                <Field label="项目默认 Agent">
+                  <select value={p.development.adapter} onChange={(e)=>{
+                    const adapter=e.target.value;
+                    setP((old)=>({...old,development:{...old.development,adapter,model:""},review:{...old.review,adapter,model:""}}));
+                    setShareReview(true);
+                  }}>
+                    <option value="">请选择已启用的 Agent</option>
+                    {!agentCatalog.enabled.includes(p.development.adapter) && p.development.adapter && <option value={p.development.adapter} disabled>{p.development.adapter}（未启用）</option>}
+                    {agentCatalog.agents.filter((a)=>agentCatalog.enabled.includes(a.id)).map((a)=><option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </Field>
                 <label className="checkbox">
                   <input
                     type="checkbox"
@@ -901,7 +852,7 @@ export function ProjectEditor({
                       if (e.target.checked) set("review", { ...p.development });
                     }}
                   />
-                  审查沿用开发模型和执行环境
+                  审查沿用开发执行环境
                 </label>
                 <details className="setup-advanced">
                   <summary>
@@ -916,19 +867,6 @@ export function ProjectEditor({
                       const label = role === "development" ? "开发" : "审查";
                       return (
                         <div key={role}>
-                          <Field label={`${label}执行器`}>
-                            <select
-                              value={p[role].adapter}
-                              onChange={(e) =>
-                                updateAgent(role, { adapter: e.target.value })
-                              }
-                            >
-                              <option value="opencode">OpenCode</option>
-                              <option value="codex" disabled>
-                                Codex（尚未接入）
-                              </option>
-                            </select>
-                          </Field>
                           <Field
                             label={`${label}容器镜像`}
                             hint="决定工具链和运行环境，通常使用部署默认镜像。"
@@ -966,12 +904,34 @@ export function ProjectEditor({
             <section className="panel setup-section" id="verification">
               <div className="setup-section-head">
                 <div>
-                  <h2>验收配置</h2>
-                  <p>启用前至少设置一项必需检查。现在可以先保存草稿。</p>
+                  <h2>开发任务验收策略</h2>
+                  <p>用于开发完成后的检查，与 Meta 仓库静态初始化无关。MR 顶部会单独列出真人验收清单。</p>
                 </div>
                 <span className="setup-label">可稍后补充</span>
               </div>
               <div className="panel-padding">
+                <Field label="验收策略">
+                  <select value={strategy} onChange={(e) => { setP((old) => ({...old, acceptanceStrategy:e.target.value as Project["acceptanceStrategy"], requireCI:e.target.value === "gitlab_ci"})); }}>
+                    <option value="repository">根据仓库约定验收（推荐）</option>
+                    <option value="gitlab_ci">使用 GitLab CI</option>
+                    <option value="custom">自定义验收（高级）</option>
+                  </select>
+                </Field>
+                <p className="notice">{strategy === "repository" ? "Agent 从仓库说明、脚本和 CI 提出针对本次改动的检查，平台执行并记录结果，独立审查 Agent 判断是否充分。缺少工具或检查时保留 MR，交由人工处理，不自动合并。" : strategy === "gitlab_ci" ? "先创建 MR，再等待每个变更仓库当前提交的 CI。旧提交成功、跳过或不存在的流水线不算通过。" : "明确指定验收命令，或通过 Compose 启动多个服务后执行检查。"}</p>
+                {strategy === "repository" && <Field label="验收镜像（可选）" hint="默认使用开发 Agent 镜像；镜像需要包含项目工具链。"><input value={p.integration.image || ""} placeholder={p.development.image} onChange={(e) => set("integration", {...p.integration, image:e.target.value})} /></Field>}
+                {strategy === "custom" && <>
+                  <Field label="自定义验收方式"><select value={p.integration.mode || "compose"} onChange={(e) => set("integration", {...p.integration, mode:e.target.value as "compose" | "commands"})}><option value="commands">隔离容器命令</option><option value="compose">Compose 联调</option></select></Field>
+                  {customCommands ? <>
+                    <Field label="验收镜像" hint="准备包含构建和测试工具链的镜像，命令在独立容器运行。"><input value={p.integration.image || ""} onChange={(e) => set("integration", {...p.integration,image:e.target.value})} /></Field>
+                    {(p.integration.commands || []).map((command,index) => <fieldset className="setup-check" key={index}>
+                      <legend>验收命令 {index+1}</legend>
+                      <Field label="名称"><input value={command.name} onChange={(e) => set("integration",{...p.integration,commands:p.integration.commands!.map((c,i) => i===index?{...c,name:e.target.value}:c)})} /></Field>
+                      <Field label="工作目录" hint="相对 Meta 工作区，例如 issue-bot。"><input value={command.path} onChange={(e) => set("integration",{...p.integration,commands:p.integration.commands!.map((c,i) => i===index?{...c,path:e.target.value}:c)})} /></Field>
+                      <Field label="执行命令" hint="直接执行程序及参数；需要 shell 语法时显式使用 sh -c。"><input value={acceptanceArgv[index] || ""} onChange={(e) => setAcceptanceArgv((old) => old.map((c,i) => i===index?e.target.value:c))} /></Field>
+                      <button type="button" onClick={() => {set("integration",{...p.integration,commands:p.integration.commands!.filter((_,i) => i!==index)});setAcceptanceArgv((old) => old.filter((_,i) => i!==index));}}>删除命令</button>
+                    </fieldset>)}
+                    <button type="button" onClick={() => {set("integration",{...p.integration,commands:[...(p.integration.commands || []),{name:"",path:".",argv:[],evidence:"项目自定义验收"}]});setAcceptanceArgv((old)=>[...old,""]);}}>＋ 添加验收命令</button>
+                  </> : <>
                 <Field
                   label="联调配置文件"
                   hint="相对于 Meta-Repo，例如 integration/http-check/compose.yaml。"
@@ -1076,6 +1036,8 @@ export function ProjectEditor({
                 >
                   ＋ 添加验收检查
                 </button>
+                  </>}
+                </>}
                 <details className="setup-advanced">
                   <summary>
                     运行与合并策略<span>保留默认策略即可</span>

@@ -104,6 +104,11 @@ type InitVerification struct {
 // It separates "repositories connected", "analysis complete" and "ready for
 // development tasks" so the console never claims readiness it has not verified.
 type Initialization struct {
+	ExecutionConfig       AgentConfig        `json:"executionConfig,omitempty"`
+	NodeID                string             `json:"nodeId,omitempty"`
+	NodeConfigVersion     int                `json:"nodeConfigVersion,omitempty"`
+	Image                 string             `json:"image,omitempty"`
+	Network               NetworkVersion     `json:"network,omitempty"`
 	Publication           *MetaPublication   `json:"publication,omitempty"`
 	ID                    string             `json:"id"`
 	ProjectID             string             `json:"projectId"`

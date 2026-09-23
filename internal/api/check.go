@@ -62,6 +62,7 @@ func (a *server) check(w http.ResponseWriter, r *http.Request, p domain.Project)
 	}
 	respond(w, 200, map[string]any{"ok": all, "checks": checks})
 }
+
 // checkManagedMeta validates a system-managed Meta-Repo from the shared data
 // directory. It never needs a remote Meta URL or an internal server path from
 // the caller.
@@ -102,6 +103,9 @@ func (a *server) checkManagedMeta(p domain.Project) error {
 		if entries[repo.Path] != repo.URL {
 			return fmt.Errorf("managed Meta manifest mismatch for repository %s", repo.ID)
 		}
+	}
+	if p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" || p.Integration.Mode == "commands" {
+		return nil
 	}
 	compose, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p.Integration.ComposeFile)))
 	if err != nil {
@@ -220,6 +224,9 @@ func checkMeta(ctx context.Context, p domain.Project, token string) error {
 		} else if entries[repo.Path] != repo.URL {
 			return fmt.Errorf("Meta manifest mismatch for repository %s", repo.ID)
 		}
+	}
+	if p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" || p.Integration.Mode == "commands" {
+		return nil
 	}
 	compose, err := get(p.Integration.ComposeFile)
 	if err != nil {

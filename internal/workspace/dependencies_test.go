@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 	"swarmjet/internal/domain"
+	"testing"
 )
 
 func TestManifestDependencyAliasesPathsCapabilitiesAndCanonicalSets(t *testing.T) {

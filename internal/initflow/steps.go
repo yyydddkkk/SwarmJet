@@ -17,6 +17,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"swarmjet/internal/domain"
+	"swarmjet/internal/execution"
 	"swarmjet/internal/managedmeta"
 )
 
@@ -94,22 +95,9 @@ func (m *Manager) connect(ctx context.Context, init domain.Initialization, proje
 // analyze materializes a read-only analysis copy, runs the init agent with a
 // writable generated directory and publishes the validated documents.
 func (m *Manager) analyze(ctx context.Context, init domain.Initialization, project domain.Project) (domain.Initialization, error) {
-	if m.Agents == nil {
+	if m.Agents == nil && m.RemoteAnalysis == nil {
 		init.Status = domain.InitBlocked
 		init.Error = "Agent 执行后端未配置"
-		return m.save(ctx, init, project)
-	}
-	root, err := m.prepareAnalysis(ctx, init, project)
-	if err != nil {
-		init.Status = domain.InitBlocked
-		init.Error = "准备分析副本失败：" + err.Error()
-		init.Message = init.Error
-		return m.save(ctx, init, project)
-	}
-	generated := filepath.Join(m.initDir(project.ID), "generated")
-	if err = os.MkdirAll(generated, 0700); err != nil {
-		init.Status = domain.InitBlocked
-		init.Error = err.Error()
 		return m.save(ctx, init, project)
 	}
 	if init.Attempts < 1 {
@@ -118,8 +106,14 @@ func (m *Manager) analyze(ctx context.Context, init domain.Initialization, proje
 	if init.ExecutionID == "" {
 		init.ExecutionID = fmt.Sprintf("init-%s-analyze-%d", project.ID, init.Attempts)
 	}
-	req := domain.AgentRequest{ExecutionID: init.ExecutionID, TaskID: project.ID, Role: "init", Workspace: root, GeneratedDir: generated, Prompt: initialPrompt(project, init), SessionID: init.SessionID, Config: project.Development}
-	ex, err := m.Agents.Start(ctx, req)
+	var response execution.AnalysisResult
+	var err error
+	if m.RemoteAnalysis != nil {
+		response, err = m.RemoteAnalysis(ctx, &init, project)
+	} else {
+		response, err = AnalyzeAtNode(ctx, m.DataDir, m.Agents, execution.AnalysisParams{Initialization: init, Project: project}, m)
+	}
+	ex := response.Execution
 	if err != nil {
 		init.Status = domain.InitBlocked
 		init.Error = "无法启动分析 Agent：" + err.Error()
@@ -159,7 +153,8 @@ func (m *Manager) analyze(ctx context.Context, init domain.Initialization, proje
 		init.Message = "分析遇到障碍，请处理后重试"
 		return m.save(ctx, init, project)
 	}
-	reports, files, err := collectGenerated(generated)
+	reports, files := response.Reports, response.Files
+	err = validateGeneratedFiles(files)
 	if err != nil {
 		init.Status = domain.InitBlocked
 		init.Error = "读取分析结果失败：" + err.Error()
@@ -237,6 +232,9 @@ func (m *Manager) gitEnv(project domain.Project) []string {
 			env = append(env, "GITLAB_TOKEN="+token, "GIT_ASKPASS="+askpass)
 		}
 	}
+	for k, v := range m.AnalysisEnv {
+		env = append(env, k+"="+v)
+	}
 	return env
 }
 
@@ -247,6 +245,13 @@ func (m *Manager) runGit(ctx context.Context, dir string, env []string, args ...
 	command.Env = env
 	output, err := command.CombinedOutput()
 	text := strings.TrimSpace(string(output))
+	for _, entry := range env {
+		k, v, ok := strings.Cut(entry, "=")
+		if ok && v != "" && (strings.Contains(k, "TOKEN") || strings.Contains(strings.ToUpper(k), "PROXY")) {
+			text = strings.ReplaceAll(text, v, "[REDACTED]")
+		}
+	}
+
 	if err != nil {
 		return text, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, text)
 	}

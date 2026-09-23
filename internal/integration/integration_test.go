@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"swarmjet/internal/domain"
 	"testing"
 	"time"
-	"swarmjet/internal/domain"
 )
 
 func fixture(t *testing.T) (*Manager, domain.Workspace, domain.IntegrationConfig) {

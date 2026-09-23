@@ -139,6 +139,11 @@ async function mock(page: Page, loggedIn = true, taskList: Task[] = [task]) {
       signedIn = false;
       return route.fulfill({ status: 204 });
     }
+    if (path === "/api/runtime/agents")
+      return json({
+        agents: [{ id: "opencode", name: "OpenCode", executable: "opencode", setupCommand: "" }],
+        enabled: ["opencode"],
+      });
     if (path === "/api/projects/platform" && method === "PUT") {
       saved = { ...request.postDataJSON(), version: 2 };
       return json(saved);

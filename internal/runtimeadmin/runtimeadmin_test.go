@@ -140,7 +140,7 @@ func TestStatusIsReadonlyAndNeverReturnsCredentialValues(t *testing.T) {
 	if e := json.Unmarshal(w.Body.Bytes(), &status); e != nil {
 		t.Fatal(e)
 	}
-	if !status.Available || !status.OpenCode.Configured || !status.OpenCode.ConfigExists || !status.Codex.Configured || status.Codex.ExecutionSupported {
+	if !status.Available || !status.OpenCode.Configured || !status.OpenCode.ConfigExists || !status.Codex.Configured || !status.Codex.ExecutionSupported {
 		t.Fatalf("wrong status %+v", status)
 	}
 	if strings.Join(status.OpenCode.Providers, ",") != "anthropic,custom,openai" {

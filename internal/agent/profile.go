@@ -210,7 +210,7 @@ func authSecrets(data []byte) ([]string, error) {
 			for key, item := range v {
 				normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(key))
 				switch normalized {
-				case "key", "apikey", "access", "accesstoken", "refresh", "refreshtoken", "token", "secret", "clientsecret", "idtoken":
+				case "key", "apikey", "access", "accesstoken", "refresh", "refreshtoken", "token", "secret", "clientsecret", "idtoken", "openaiapikey":
 					if text, ok := item.(string); ok && text != "" {
 						found[text] = true
 					}
@@ -231,6 +231,9 @@ func authSecrets(data []byte) ([]string, error) {
 	return out, nil
 }
 func (r *Runtime) profileSecrets(rec record) ([]string, error) {
+	if rec.ProfileHome != "" {
+		return r.cliProfileSecrets(rec)
+	}
 	authPath := rec.AuthPath
 	if authPath == "" {
 		authPath = filepath.Join(r.DataDir, "opencode", rec.TaskID, roleScope(rec.Role), "opencode", "auth.json")

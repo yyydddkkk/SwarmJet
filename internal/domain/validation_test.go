@@ -71,7 +71,7 @@ func TestDraftRejectsUnsafeSuppliedValues(t *testing.T) {
 		"env reference":        func(p *Project) { p.CredentialRef = "token-value" },
 		"meta ref":             func(p *Project) { p.MetaRef = "-option" },
 		"model":                func(p *Project) { p.Development.Model = "model-without-provider" },
-		"unsupported adapter":  func(p *Project) { p.Review.Adapter = "codex" },
+		"unsupported adapter":  func(p *Project) { p.Review.Adapter = "unknown" },
 		"timeout":              func(p *Project) { p.Review.TimeoutSeconds = -1 },
 		"image":                func(p *Project) { p.Review.Image = "--privileged" },
 		"repo path":            func(p *Project) { p.Repositories = []Repository{{Path: "../escape"}} },

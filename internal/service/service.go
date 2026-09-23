@@ -18,6 +18,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/gitlab"
+	"swarmjet/internal/imagebuild"
 	"swarmjet/internal/pipeline"
 	"swarmjet/internal/store"
 )
@@ -30,6 +31,7 @@ type InitReadiness interface {
 }
 
 type Service struct {
+	DataDir           string
 	Store             *store.Store
 	Temporal          client.Client
 	ResolveCredential func(string) (string, error)
@@ -147,6 +149,10 @@ func (s *Service) Scan(ctx context.Context) error {
 	if e != nil {
 		return e
 	}
+	enabled, e := s.Store.EnabledAgents(ctx)
+	if e != nil {
+		return e
+	}
 	for _, p := range projects {
 		if !p.Enabled {
 			continue
@@ -184,8 +190,22 @@ func (s *Service) Scan(ctx context.Context) error {
 				if legacy {
 					continue
 				}
+				taskProject, resolveErr := domain.ResolveIssueAgent(p, issue, enabled)
+				if resolveErr != nil {
+					slog.Warn("issue agent rejected", "project", p.ID, "issue", issue.IID, "error", resolveErr)
+					if err := g.UpsertProgress(ctx, issue, "dispatch", "无法接单："+resolveErr.Error()+"。修正标签或启用配置后将自动重试。"); err != nil {
+						slog.Warn("dispatch feedback failed", "error", err)
+					}
+					continue
+				}
+				if !s.RequireNode && taskProject.Nodes.Mode == "" {
+					taskProject, e = imagebuild.ApplyToProject(s.DataDir, taskProject)
+					if e != nil {
+						return e
+					}
+				}
 				now := time.Now().UTC()
-				t := domain.Task{ID: ID(), Project: p, Issue: issue, Stage: "queued", Executions: map[string]domain.Execution{}, CreatedAt: now, UpdatedAt: now}
+				t := domain.Task{ID: ID(), Project: taskProject, Issue: issue, Stage: "queued", Executions: map[string]domain.Execution{}, CreatedAt: now, UpdatedAt: now}
 				if _, e = s.Store.CreateTaskScheduled(ctx, t, s.RequireNode); e != nil {
 					if errors.Is(e, store.ErrNoNode) {
 						// Distributed mode: leave the issue unclaimed until a node has capacity.

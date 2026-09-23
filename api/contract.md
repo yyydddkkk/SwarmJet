@@ -26,7 +26,7 @@ All paths under `/api`. JSON uses camelCase from `internal/domain/types.go`. API
 
 Task stages: queued, waiting_dependencies, preparing, developing, verifying, publishing, reviewing, waiting_approval, waiting_manual_merge, acquiring_merge, merging, partial_merge, finalizing, completed, blocked, cancelled; `paused` boolean overlays a stage. Terminal completed/cancelled. `waiting_manual_merge` is used when the project has auto-merge disabled: the workflow waits until every changed MR is merged by a human.
 
-Project defaults for form: metaRef `main`, development/review adapter `opencode`, image `swarmjet-agent:local`, timeoutSeconds 5400, maxReworks 3, requireCI true, integration startupTimeoutSeconds 180. Model required provider/model (no made-up default). GitLabURL explicit. CredentialRef `GITLAB_TOKEN`, MergeCredentialRef `GITLAB_MERGE_TOKEN`. Repositories require id, projectId, URL,path,targetBranch; createFrom optional only needed to initialize missing target. Integration composeFile is relative to Meta-Repo, checks list has name, service, argv string array, required. At least one required check.
+Project defaults for form: metaRef `main`, development/review adapter chosen from globally enabled agents, image `swarmjet-agent:local`, timeoutSeconds 5400, maxReworks 3, requireCI true, integration startupTimeoutSeconds 180. Model is optional; new tasks use CLI defaults. A legacy OpenCode override uses provider/model. GitLabURL explicit. CredentialRef `GITLAB_TOKEN`, MergeCredentialRef `GITLAB_MERGE_TOKEN`. Repositories require id, projectId, URL,path,targetBranch; createFrom optional only needed to initialize missing target. Integration composeFile is relative to Meta-Repo, checks list has name, service, argv string array, required. At least one required check.
 
 Control plane is one administrator. UI pages: login; task list with stage filtering and new task dialog; task detail with repositories/MRs, timeline, agent runs/logs, assumptions, verification, manual approval and task actions; project list/editor with repository targets, agent/model configs, integration checks. No placeholder/mock data on failures: show actionable error and retry.
 
@@ -38,3 +38,47 @@ Control plane is one administrator. UI pages: login; task list with stage filter
 - 返回 202 和 Initialization；`publication.status` 为 `pending / failed / published`，失败独立于初始化状态。通过原初始化 GET 轮询；成功包含 `url`、`path`、`ref` 和 `sha`。
 
 新建远程固定为 private。Git 操作只推送固定初始化提交到尚不存在的目标分支，拒绝覆盖已有内容，禁用 HTTP 重定向，凭证不进入状态记录。
+
+### 开发任务验收策略
+
+Project.acceptanceStrategy: `repository | gitlab_ci | custom`。新建项目省略时默认 repository；历史项目空值保留原 Compose 行为。策略随项目快照固定在任务中。
+
+自定义 IntegrationConfig 新增 `mode: compose | commands`、`image`、`commands: [{name,path,argv,evidence}]`。repository 的镜像可通过 integration.image 覆盖，具体命令由开发结果 acceptanceCommands 提供；gitlab_ci 不要求 Compose。
+
+AgentResult 增加 `humanAcceptance: {prerequisites: string[], steps: [{action,expected}], notes: string[]}`。平台校验并将清单置于 MR 顶部；Task.acceptanceIncomplete 表示自动验收证据不足，禁止自动合并。
+
+
+### Agent selection
+
+- `GET /api/runtime/agents` returns `{agents:[{id,name,executable,setupCommand}], enabled:[]}`. Supported IDs: `opencode`, `codex`, `dst`, `agy`, `claude`.
+- `PUT /api/runtime/agents` accepts `{enabled:["opencode","codex"]}` with existing administrator auth and CSRF protection. Empty disables all for new tasks. Unknown/duplicate IDs return 400; new installations have no implicit enabled Agents. This endpoint does not install software or start a CLI.
+- Project `development.adapter` is the default for all task roles. One `agent:<id>` Issue label overrides it; unknown, disabled, model-qualified or multiple Agent labels are rejected. Polling leaves rejected Issues unclaimed and updates a deduplicated rejection note; fixing the configuration permits a subsequent poll to accept them. Manual task creation returns 400 for the same errors.
+- At acceptance, both role adapters are fixed in the task project snapshot and model overrides are cleared (`useCliDefaults:true`). Enablement/label edits affect new tasks only. CLI files are snapshotted once at first execution, on the assigned node; resume uses the exact prior CLI session ID.
+- Configured images must contain the selected CLI on every node. `AGENT_CLIS` controls build-time installation independently of platform enablement. Static managed-Meta initialization continues to require OpenCode and its restricted tool policy.
+
+
+### Agent image configuration (single host)
+
+- `GET /api/runtime/images`: `{config, builds, active, defaultImage, agents, parameters, scope:"local"}`. Recipe: `{agents:[], baseImage, extraPackages:[], buildArgs:{...}}`.
+- `PUT /api/runtime/images/config`: save a validated draft. Versions, registries and extra apt packages are allowlisted; credentials in registry URLs and unknown build argument keys are rejected.
+- `POST /api/runtime/images/builds`: save/snapshot that recipe and start one asynchronous build (202). No implicit activation or Agent enablement.
+- `POST /api/runtime/images/import`: `{reference}` checks an existing local image and records its immutable ID (201); no pull.
+- `GET /api/runtime/images/builds/{id}/log`, `POST .../{id}/cancel`, `POST .../{id}/activate`: log, cancellation and explicit activation. Activation requires a successful record and closed configuration terminal (otherwise 409).
+- Build states: `building`, `cancelling`, `succeeded`, `failed`, `cancelled`, `interrupted`. A Worker restart marks unfinished builds interrupted. All routes require administrator authentication, writes require CSRF protection, and the Worker additionally checks its private secret.
+- Applied images override both role image fields when a new single-host task is accepted, using the immutable image ID. Existing task snapshots are never re-resolved. The project-defaults endpoint and configuration terminal also use the applied image. When BUILDER_ADMIN_URL is configured, image routes use the dedicated builder in either execution mode. Legacy distributed deployments without a builder still return 503.
+
+## Managed execution environments (v2)
+
+- `GET /api/networks`: `{profiles, defaultId}`; only public fields, versions, and `hasPassword`.
+- `PUT /api/networks`: profile plus optional `password`; optimistic version check, append-only versions. Omitted password preserves it; changing proxy endpoints with saved credentials requires re-entry.
+- `PUT /api/networks/default`: `{id}`, empty means direct. Choices on a Node or build are `{mode:"default"|"direct"|"profile", id?}`.
+- `GET/PUT /api/registry`: address, repository, pushUser, pullUser, password-presence flags. PUT accepts optional pushPassword/pullPassword, encrypted with the platform master key.
+- `GET /api/nodes`: existing node/load/online fields plus administrator `config` and node `readiness`. Readiness includes config/network versions, default image, per-image states and CLI capabilities.
+- `PUT /api/nodes/{id}/config`: version, name, enabled, archived, capacity, network, image, images, memoryMB, cpus, pidsLimit. Image references must be registry digests. Zero resource limits select 2048 MiB / 2 CPUs / 256 PIDs. Archiving an active node returns 409.
+- `POST /api/nodes/{id}/credential`: create/rotate a node-specific credential, returned once. `DELETE` revokes it.
+- `POST /api/nodes`: authenticated heartbeat, response may include private `desired` configuration and read-only registry credentials. New nodes are paused; heartbeats never overwrite administrator config. Simultaneous live advertisements of the same identity at different addresses are rejected.
+- Runtime routes accept `?node={id}` to address that Node's status, models and configuration terminal. `POST /api/runtime/network-test?node={id}` with `{target}` performs HEAD checks from the Node process and a restricted container, returning scope/status/error; no model requests. `/runtime/agents` remains platform-wide.
+- Image response has `scope:"registry"` for the dedicated builder. Recipes also have repository, platform, network and resolved networkVersion. Successful distributed builds expose `reference` (repository@manifest-digest), distinct from local imageId. Apply by updating target Node configurations; preparation is asynchronous. Local import/activate are rejected by the dedicated builder.
+- Project `nodes` is `{mode:"auto"}` or `{mode:"selected",ids:[...]}`. Empty role images inherit the selected Node's default when this policy is supplied. Tasks freeze the resolved role images, Node config version, and network version.
+
+All management writes retain session/CSRF validation. Network and registry secrets are not returned by normal reads or stored in workflow history. Node protocol calls remain authenticated; production remote transport requires HTTPS.

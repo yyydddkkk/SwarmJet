@@ -21,6 +21,9 @@ import {
 } from "./task-presentation";
 import { ProjectEditor } from "./ProjectEditor";
 const RuntimeSettings = lazy(() => import("./RuntimeSettings"));
+const NodeSettings = lazy(() => import("./NodeSettings"));
+const NetworkSettings = lazy(() => import("./NetworkSettings"));
+const ImageSettings = lazy(() => import("./ImageSettings"));
 const ProjectWizard = lazy(() => import("./ProjectWizard"));
 function Icon({
   name,
@@ -29,6 +32,7 @@ function Icon({
     | "tasks"
     | "projects"
     | "runtime"
+    | "images"
     | "logout"
     | "plus"
     | "search"
@@ -47,6 +51,7 @@ function Icon({
     projects:
       "M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z",
     runtime: "m5 7 5 5-5 5M13 17h6",
+    images: "m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5",
     logout: "M9 4H5v16h4M9 12h12m-5-5 5 5-5 5",
     plus: "M12 5v14M5 12h14",
     search: "m16 16 5 5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
@@ -239,6 +244,8 @@ export default function App() {
     );
   const projectPage = route.startsWith("/projects");
   const runtimePage = route.startsWith("/runtime");
+  const imagesPage = route.startsWith("/images");
+  const nodesPage=route.startsWith("/nodes"), networksPage=route.startsWith("/networks");
   const parts = route.split("?")[0].split("/");
   const selectedProject =
     new URLSearchParams(route.split("?")[1]).get("project") || "";
@@ -270,8 +277,8 @@ export default function App() {
         </div>
         <nav aria-label="主导航">
           <a
-            aria-current={!projectPage && !runtimePage ? "page" : undefined}
-            className={!projectPage && !runtimePage ? "active" : ""}
+            aria-current={!projectPage && !runtimePage && !imagesPage && !nodesPage && !networksPage ? "page" : undefined}
+            className={!projectPage && !runtimePage && !imagesPage && !nodesPage && !networksPage ? "active" : ""}
             href="#/tasks"
           >
             <Icon name="tasks" />
@@ -292,6 +299,11 @@ export default function App() {
           >
             <Icon name="runtime" />
             执行器环境
+          </a>
+          <a href="#/nodes" className={nodesPage?"active":""} aria-current={nodesPage?"page":undefined}><Icon name="projects"/>执行节点</a>
+          <a href="#/networks" className={networksPage?"active":""} aria-current={networksPage?"page":undefined}><Icon name="branch"/>网络配置</a>
+          <a aria-current={imagesPage ? "page" : undefined} className={imagesPage ? "active" : ""} href="#/images">
+            <Icon name="images" />镜像配置
           </a>
         </nav>
         <SidebarProjects route={route} selectedProject={selectedProject} />
@@ -321,17 +333,19 @@ export default function App() {
         <header className="topbar">
           <span>
             工作空间 <span className="slash">/</span>{" "}
-            {runtimePage ? "执行器环境" : projectPage ? "项目配置" : "任务中心"}
+            {nodesPage ? "执行节点" : networksPage ? "网络配置" : imagesPage ? "镜像配置" : runtimePage ? "执行器环境" : projectPage ? "项目配置" : "任务中心"}
           </span>
           <span className="top-note">SwarmJet / 工作空间</span>
         </header>
         <main id="main" tabIndex={-1}>
           <ErrorBox error={error} />
-          {runtimePage ? (
+          {nodesPage ? (<Suspense fallback={<p>正在加载节点…</p>}><NodeSettings/></Suspense>) : networksPage ? (<Suspense fallback={<p>正在加载网络配置…</p>}><NetworkSettings/></Suspense>) : imagesPage ? (
+            <Suspense fallback={<div className="loading">正在加载镜像配置…</div>}><ImageSettings /></Suspense>
+          ) : runtimePage ? (
             <Suspense
               fallback={<div className="loading">正在加载执行器环境…</div>}
             >
-              <RuntimeSettings />
+              <RuntimeSettings key={route} />
             </Suspense>
           ) : projectPage ? (
             <Projects

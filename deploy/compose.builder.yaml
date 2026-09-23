@@ -1,0 +1,77 @@
+# Combine with compose.yaml. The builder is the only owner of build metadata.
+services:
+  api:
+    environment:
+      BUILDER_ADMIN_URL: http://builder:8093
+      NODE_SECRET: ${NODE_SECRET:-${RUNTIME_ADMIN_SECRET}}
+  worker:
+    environment:
+      BUILDER_ADMIN_URL: http://builder:8093
+      NODE_SECRET: ${NODE_SECRET:-${RUNTIME_ADMIN_SECRET}}
+  builder:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: ${IMAGE:-swarmjet:local}
+    command: [builder]
+    restart: unless-stopped
+    stop_grace_period: 45s
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+      SWARMJET_MASTER_KEY: ${SWARMJET_MASTER_KEY:?Set SWARMJET_MASTER_KEY}
+      RUNTIME_ADMIN_SECRET: ${RUNTIME_ADMIN_SECRET:?Set RUNTIME_ADMIN_SECRET}
+      DATA_DIR: /var/lib/swarmjet-builds
+      BUILDKIT_HOST: unix:///run/buildkit/buildkitd.sock
+    volumes:
+      - builder-data:/var/lib/swarmjet-builds
+      - buildkit-socket:/run/buildkit
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      buildkit: {condition: service_started}
+  buildkit:
+    image: moby/buildkit:v0.23.2
+    restart: unless-stopped
+    privileged: true
+    command: [--addr, unix:///run/buildkit/buildkitd.sock, --config, /etc/buildkit/buildkitd.toml]
+    environment:
+      HTTP_PROXY: http://builder:8094
+      HTTPS_PROXY: http://builder:8094
+      NO_PROXY: localhost,127.0.0.1
+    volumes:
+      - buildkit-data:/var/lib/buildkit
+      - buildkit-socket:/run/buildkit
+      - ./buildkitd.toml:/etc/buildkit/buildkitd.toml:ro
+    mem_limit: 2g
+    cpus: 2
+  local-node:
+    image: ${IMAGE:-swarmjet:local}
+    restart: unless-stopped
+    command: [node]
+    environment:
+      NODE_ID: ${LOCAL_NODE_ID:-local}
+      NODE_SECRET: ${NODE_SECRET:-${RUNTIME_ADMIN_SECRET}}
+      CONTROL_PLANE_URL: http://api:8080
+      NODE_ADVERTISE_URL: http://local-node:8092
+      NODE_LISTEN_ADDRESS: :8092
+      NODE_CAPACITY: ${TASK_CONCURRENCY:-2}
+      DATA_DIR: ${DATA_DIR:?Set DATA_DIR}/local-node
+      AGENT_ENV_ALLOWLIST: ${AGENT_ENV_ALLOWLIST:-OPENAI_API_KEY,CODEX_API_KEY,ANTHROPIC_API_KEY,CLAUDE_CODE_OAUTH_TOKEN,DEEPSEEK_API_KEY,GEMINI_API_KEY,AGY_ADC_AUTH,GOOGLE_GEMINI_BASE_URL,OPENCODE_CONFIG_CONTENT}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CODEX_API_KEY: ${CODEX_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AGY_ADC_AUTH: ${AGY_ADC_AUTH:-}
+      GOOGLE_GEMINI_BASE_URL: ${GOOGLE_GEMINI_BASE_URL:-}
+      OPENCODE_CONFIG_CONTENT: ${OPENCODE_CONFIG_CONTENT:-}
+    volumes:
+      - ${DATA_DIR:?Set DATA_DIR}/local-node:${DATA_DIR}/local-node
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      api: {condition: service_healthy}
+
+volumes:
+  builder-data:
+  buildkit-data:
+  buildkit-socket:

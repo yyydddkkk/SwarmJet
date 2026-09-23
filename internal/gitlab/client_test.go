@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"testing"
 	"swarmjet/internal/domain"
+	"testing"
 )
 
 func server(t *testing.T, h http.HandlerFunc) *Client {

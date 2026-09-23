@@ -1,10 +1,28 @@
 # 部署 Go / Temporal 版 swarmjet
 
-部署包含控制台 API、Temporal Worker、PostgreSQL 18、Temporal Server 1.32.0 和 Temporal UI 2.54.1。业务执行器是独立的 OpenCode 镜像，默认不会作为常驻服务启动。这里使用持久化生产 Server，不使用 `temporal server start-dev`。
+部署包含控制台 API、Temporal Worker、PostgreSQL 18、Temporal Server 1.32.0 和 Temporal UI 2.54.1。业务执行器是独立的 Agent CLI 镜像，默认不会作为常驻服务启动。这里使用持久化生产 Server，不使用 `temporal server start-dev`。
 
 所有部署文件集中在 `deploy/`：`compose.yaml` 是唯一的服务定义，`compose.build.yaml` 只补充源码构建配置，两个 Dockerfile 分别构建应用与执行器镜像。构建上下文仍是仓库根目录。
 
-## 本地构建
+## 单机快速部署（源码构建）
+
+服务器先安装 Docker Engine、Docker Compose 插件、Git 和 Python 3。克隆本仓库后，在仓库根目录执行：
+
+```sh
+sudo python3 deploy/install.py
+# 需要多个执行器时，在首次部署指定（初始化始终需要 opencode）：
+# sudo python3 deploy/install.py --agent-clis opencode,codex,claude
+```
+
+脚本自动生成权限为 `0600` 的 `deploy/.env`、独立的数据库和管理员密码、运行终端密钥及连接加密主密钥，创建 `/srv/swarmjet/data`，构建镜像并通过 Compose 完成迁移、启动和健康检查。宿主机不需要安装 Go、Node.js 或 Agent CLI。可用 `--data-dir /绝对路径` 修改首次部署的数据目录。脚本要求本机 Docker socket，支持 `deploy/compose.override.yaml`。
+
+默认只监听服务器本机。在自己的电脑执行 `ssh -N -L 8180:127.0.0.1:8180 用户名@服务器`，然后打开 `http://localhost:8180`。账号为 `admin`，密码在服务器 `deploy/.env` 的 `ADMIN_PASSWORD` 中。登录后在“执行器环境”启用已安装的 Agent、配置模型认证，再添加 GitLab 项目。
+
+初始化验证默认使用 `swarmjet-agent:local`。如果业务项目需要额外工具链或离线依赖，应准备相应镜像并修改 `INIT_VERIFY_IMAGE`；服务启动成功不代表项目验收已通过。
+
+失败后可以重新运行脚本；已有 `.env` 不会被覆盖或补写，密码和主密钥不会轮换。`--data-dir` 和 `--agent-clis` 仅用于首次生成配置，之后直接编辑 `.env`。脚本会重新构建并更新服务，不删除数据；升级前仍应备份 PostgreSQL、数据目录和主密钥。已发布镜像的更新使用下文的 `update.sh`。
+
+## 手动本地构建
 
 从仓库根目录进入 `deploy/` 后执行：
 
@@ -35,7 +53,16 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
 
 访问 `http://localhost:8180`，使用 `.env` 的管理员账号登录。项目配置需要真实 GitLab URL、Meta-Repo、仓库与目标分支、模型 `provider/model`、验收 Compose 与必需检查。项目中配置的 agent image 必须与已构建的 `AGENT_IMAGE` 一致。保存凭证的环境变量名，例如 `GITLAB_TOKEN` 与 `GITLAB_MERGE_TOKEN`，不要把 token 粘贴进项目字段。
 
-独立执行镜像固定 OpenCode `1.18.31`、Node `22.23.1`、glab `1.115.0`、uv 和 pnpm，包含 Git、Python 与编译依赖。主镜像编译 Go `1.27.1` 与 React 控制台，并通过官方 `.sha256` 校验安装 Meta `0.2.22` 的所有运行组件。Meta 发布二进制要求 glibc 2.39，因此主镜像运行层使用 Ubuntu 24.04；agent 保持 Node 22 / Debian bookworm。需要额外业务系统依赖时，构建派生 agent 镜像并在项目中指定。
+独立执行镜像保留 Node `22.23.1`、glab `1.115.0`、uv、pnpm、Git、Python 与编译依赖。`AGENT_CLIS` 构建参数决定安装哪些 CLI，默认仅 `opencode`（受管项目静态初始化需要它），可选 `opencode,codex,dst,agy,claude`，不会默认安装全部。版本固定在 `deploy/Dockerfile.agent` 和 `scripts/install-agent-clis.sh`；Antigravity 使用官方固定版本归档及 SHA-512 校验。应用主镜像和 Agent 镜像独立。
+
+## 页面管理 Agent 镜像与跨机分发
+
+侧边栏“镜像配置”管理 Agent 执行镜像。独立 builder 调用 Compose 管理的持久化 BuildKit，发布到自建 Distribution。平台程序镜像和业务应用镜像仍使用各自发布流程。
+
+源码安装脚本会组合 `compose.yaml`、`compose.build.yaml`、`compose.builder.yaml`。手动部署也应包含 builder 配置。先按 [Distribution 部署说明](../docs/registry.md) 准备仓库，再在页面保存仓库账号和构建参数。构建成功不会自动应用或启用 Agent；选择节点分发后，节点按摘要预拉取并检查 CLI，准备完成才可接单。
+
+节点支持默认镜像及多个额外预加载镜像，项目显式角色镜像优先于节点默认值。已有任务保留原摘要。未启用独立构建服务的旧单机部署仍保留原本地镜像管理路径；本地 image ID 不能直接用于跨机器分发。
+
 
 ## 服务器使用发布镜像
 
@@ -68,9 +95,31 @@ Git HTTPS 认证使用 `/usr/local/bin/swarmjet-askpass`，用户名为 `oauth2`
 
 设置 `RUNTIME_ADMIN_SECRET` 为独立随机值（至少 32 个字符，例如 `openssl rand -hex 32`），重启 API/Worker 后，控制台的“执行器环境”可以打开配置终端。API 通过私有网络连接 Worker 的 8091 端口；该端口不发布到宿主机，API 本身仍然没有 Docker socket。
 
-配置终端使用固定的 `AGENT_IMAGE`，只挂载 `DATA_DIR/runtime-profiles/default/home`。运行 `opencode auth login` 完成 provider 配置；当前镜像也包含 Codex CLI，可以执行 `codex login --device-auth`，但 Codex 的任务执行适配器尚未实现。容器没有额外暴露 OAuth localhost 回调端口，应使用设备码或 API key 登录方式。
+配置终端初始使用部署的 `AGENT_IMAGE`，在页面应用镜像后使用所选镜像摘要，只挂载 `DATA_DIR/runtime-profiles/default/home`。按需打包后，在“执行器环境”勾选需要启用的 Agent 并保存。新安装/升级后没有隐式启用项，管理员需要明确选择；已有任务继续运行，新的接单使用新列表。
 
-退出终端会停止配置容器，登录与配置文件保留。新任务角色会获得独立的 OpenCode 配置副本；已有角色的会话和刷新后的凭据不会被覆盖。这里管理模型服务登录，GitLab 访问仍使用部署环境中的凭据引用。
+```sh
+# 在 deploy/.env 设置 AGENT_CLIS=opencode,codex,claude 后构建
+# 若需要 dst 或 agy，将对应 ID 加入逗号分隔列表。
+docker compose --env-file deploy/.env -f deploy/compose.yaml -f deploy/compose.build.yaml --profile tools build agent-image
+```
+
+重建完成后，按正常发布流程让配置终端和所有执行节点使用新的 `AGENT_IMAGE`。执行器环境页的勾选只控制平台准入，不会构建镜像，也不验证账号额度；镜像配置页的“保存并构建”才会提交构建。项目默认 Agent 和 Issue 的 `agent:*` 标签都必须位于已启用列表中。
+
+| Agent ID | 终端入口 | 复制到任务的配置 |
+|---|---|---|
+| opencode | `opencode auth login` / `opencode` | auth、JSON/JSONC 配置、模型状态文件 |
+| codex | `codex login --device-auth` / `codex` | `.codex/auth.json`、`config.toml` |
+| dst | `dst` | `.dsh/settings.yaml`、`.credentials.yaml`、`.env` |
+| agy | `agy` | Antigravity settings、config、ADC 凭据文件 |
+| claude | `claude` | `.claude/settings.json`、`.credentials.json`、`.claude.json` |
+
+`dst` 固定使用 DSH `0.1.6-alpha.2` 预发行版，已静态核对其发布包支持 `--json` 和 `--session-id`；`0.1.5-rc.2` 不支持，不能直接降级。
+
+`dst` 是 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 的交互入口，任务使用同一 Harness 的 `dsh --profile headless`，共享持久化设置但不加载 TUI 插件，也不复制插件目录、用户补丁、会话数据库或历史。Codex 应使用文件凭据存储；任意主机钥匙串都不会挂载到任务。
+
+Antigravity 的系统钥匙串 OAuth 不能通过复制 Home 在隔离任务间复用。本接入支持 [Gemini API key](https://antigravity.google/docs/cli/install)（设置 `modelProvider: "gemini"` 并通过部署传入 `GEMINI_API_KEY`）或 [ADC](https://antigravity.google/docs/enterprise)（保存 `.config/gcloud/application_default_credentials.json` 并传入 `AGY_ADC_AUTH=true`）。不会将钥匙串登录显示为已验证的任务认证。其他 OAuth 也应采用已安装 CLI 支持的设备码等方式，配置容器不额外暴露 localhost 回调端口。
+
+退出终端会停止配置容器，Home 内的登录和默认模型配置保留。终端里临时 `export` 的变量不会传到新容器，请使用部署环境及 `AGENT_ENV_ALLOWLIST`。新任务首次启动时取得配置快照，开发/审查独立复制，后续配置变化和凭据刷新不会覆盖已有角色；修复失败任务的配置需新建任务取得新快照。GitLab 访问仍通过部署或连接的凭据引用管理。
 
 管理终端不保存录屏、输入内容或 shell 历史，只记录打开/关闭操作。登录配置检测与模型清单不代表模型额度或实际请求权限已经通过验证。
 
@@ -106,9 +155,9 @@ Worker 执行保留期清理：`FAILED_KEEP_DAYS=7` 用于已取消任务的现�
 
 控制面（API、Worker、PostgreSQL、Temporal）保持集中；资源消耗大的任务工作区、Agent、Compose 联调和报告可以放在独立执行节点。任务在创建时固定归属到某个在线且有余量的节点，后续阶段不会换节点。
 
-控制面设置 `NODE_SECRET`（至少 32 字符，两端一致），并把 `EXECUTION_MODE` 设为 `distributed`。`local` 是默认的单机回退：没有注册节点时任务在本机 Worker 执行。
+控制面把 `EXECUTION_MODE` 设为 `distributed`；在执行节点页面为每个 Node 创建独立注册凭据，作为该节点的 `NODE_SECRET`。旧部署的共享 `NODE_SECRET` 保留兼容入口。`local` 是默认的单机回退：没有注册节点时任务在本机 Worker 执行。
 
-执行节点在独立主机运行 `swarmjet node`（可使用 `deploy/compose.node.yaml`）。它需要自己的绝对 `NODE_DATA_DIR`、Docker socket、与项目一致的 Agent 镜像，以及和 Worker 相同的 GitLab/模型环境变量。`NODE_ADVERTISE_URL` 必须是控制面可访问的地址，生产使用 HTTPS。节点向控制面的 `POST /api/nodes` 心跳注册，`GET /api/nodes` 返回在线状态与负载。
+执行节点在独立主机运行 `swarmjet node`（可使用 `deploy/compose.node.yaml`）。它需要自己的绝对 `NODE_DATA_DIR`、Docker socket、与项目一致的 Agent 镜像，以及该节点需要的模型环境变量或持久化 CLI 登录配置。GitLab 阶段凭据由控制面按需发送。`NODE_ADVERTISE_URL` 必须是控制面可访问的地址，生产使用 HTTPS。节点向控制面的 `POST /api/nodes` 心跳注册，`GET /api/nodes` 返回在线状态与负载。
 
 同一任务的准备、开发、验证、审查、合并、取消和清理都通过节点协议在归属节点完成；报告由 API 按节点代理读取；保留期退役在该节点删除本机任务目录。节点失联时任务进入 blocked 并保留 `nodeId` 与现场，不会自动改派到其他节点；节点恢复后重试会用相同执行 ID 接管已有容器。
 
@@ -126,7 +175,7 @@ docker compose exec -T api swarmjet doctor
 docker compose exec -T postgres pg_dumpall -U swarmjet > backup.sql
 ```
 
-备份 PostgreSQL 与 `DATA_DIR`；后者包含任务工作区、受管 Meta-Repo、初始化副本、Git 对象、执行日志和 OpenCode 会话。备份中可能有私有源代码和认证会话，按凭证数据管理。单独备份 `SWARMJET_MASTER_KEY`：没有它，数据库中保存的连接 Token 无法恢复。恢复时保留 `DATA_DIR` 的绝对路径，并恢复相同 Temporal namespace。旧版本 `state.json` 只能通过 `swarmjet legacy-inventory <file>` 生成人工接管清单；不要直接启用旧 Issue 的 `autonomous` 标签造成重复任务。
+备份 PostgreSQL 与 `DATA_DIR`；后者包含任务工作区、受管 Meta-Repo、初始化副本、Git 对象、执行日志和 Agent 会话与配置快照。备份中可能有私有源代码和认证会话，按凭证数据管理。单独备份 `SWARMJET_MASTER_KEY`：没有它，数据库中保存的连接 Token 无法恢复。恢复时保留 `DATA_DIR` 的绝对路径，并恢复相同 Temporal namespace。旧版本 `state.json` 只能通过 `swarmjet legacy-inventory <file>` 生成人工接管清单；不要直接启用旧 Issue 的 `autonomous` 标签造成重复任务。
 
 在仓库根目录执行 `VALIDATE_DEPLOY=1 scripts/test.sh`：Go race tests、React build、发布镜像与源码构建两种 Compose 配置验证。有 `TEST_DATABASE_URL` 时运行独立临时 schema 的 PostgreSQL 集成测试；`RUN_BROWSER_TESTS=1` 额外运行浏览器测试。测试脚本要求本地安装 Go 和 Node.js。可用 `SWARMJET_TEMPORAL_ADDRESS` 与 `SWARMJET_TEMPORAL_NAMESPACE` 指向独立测试 Temporal，运行持久化/Worker 重启测试；该测试使用专属 task queue，不需要模型 key。原生工具链下还可用 `SWARMJET_DOCKER_SMOKE=1` 和 `SWARMJET_META_BIN` 启用实际 Docker / Meta 检查。
 
@@ -137,3 +186,5 @@ docker compose exec -T postgres pg_dumpall -U swarmjet > backup.sql
 以前在仓库根目录保存配置的环境，将 `.env` 和可选的 `.env.development` 移入 `deploy/`；若目标文件已存在，先核对内容，不要直接覆盖。自定义 `compose.override.yaml` 也移入 `deploy/`，其中相对挂载路径需要按新目录调整。保留原 `COMPOSE_PROJECT_NAME`、`DATA_DIR` 和数据库配置，默认项目名仍为 `swarmjet`，无需删除或重建数据卷。
 
 日常 Compose 命令改为在 `deploy/` 执行。本地源码构建显式使用两个 `-f` 时，如有自定义覆盖文件，还需追加 `-f compose.override.yaml`。原生开发命令仍在仓库根目录执行 `./scripts/dev.py start`，环境配置统一从 `deploy/` 读取。
+
+节点配置与心跳观测分开保存。暂停节点不终止已有任务，归档前检查未完成任务与初始化。网络配置修改影响新任务；正在使用的历史版本保留。Docker 拉取镜像代理仍属于 daemon 部署配置，页面中的节点代理用于准备代码、配置终端与任务容器。

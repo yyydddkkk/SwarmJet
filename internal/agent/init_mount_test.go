@@ -27,13 +27,13 @@ func TestInitRoleMountIsolation(t *testing.T) {
 	r := New(dir)
 	r.Executor = f
 	req := domain.AgentRequest{
-		ExecutionID: "initexec",
-		TaskID:      "proj1",
-		Role:        "init",
-		Workspace:   analysis,
+		ExecutionID:  "initexec",
+		TaskID:       "proj1",
+		Role:         "init",
+		Workspace:    analysis,
 		GeneratedDir: generated,
-		Prompt:      "analyze",
-		Config:      domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "test-image", TimeoutSeconds: 300},
+		Prompt:       "analyze",
+		Config:       domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "test-image", TimeoutSeconds: 300},
 	}
 	result, err := r.Start(context.Background(), req)
 	if err != nil {

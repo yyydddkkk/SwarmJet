@@ -15,3 +15,14 @@ CREATE INDEX IF NOT EXISTS active_initializations ON initializations(status) WHE
 CREATE TABLE IF NOT EXISTS nodes(id text PRIMARY KEY, address text NOT NULL, capacity integer NOT NULL, version text NOT NULL DEFAULT '', last_seen timestamptz NOT NULL);
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS node_id text;
 CREATE INDEX IF NOT EXISTS tasks_by_node ON tasks(node_id) WHERE NOT terminal;
+
+CREATE TABLE IF NOT EXISTS platform_settings(name text PRIMARY KEY, body jsonb NOT NULL);
+
+-- Managed execution environment configuration. Credentials are encrypted separately.
+CREATE TABLE IF NOT EXISTS network_profiles(id text NOT NULL, version integer NOT NULL, body jsonb NOT NULL, secret text NOT NULL DEFAULT '', PRIMARY KEY(id,version));
+CREATE TABLE IF NOT EXISTS node_configs(id text PRIMARY KEY REFERENCES nodes(id), version integer NOT NULL, body jsonb NOT NULL);
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS readiness jsonb NOT NULL DEFAULT '{}';
+CREATE TABLE IF NOT EXISTS node_credentials(id text PRIMARY KEY, secret text NOT NULL, revoked boolean NOT NULL DEFAULT false);
+
+-- Existing nodes require explicit environment configuration before new managed work.
+INSERT INTO node_configs(id,version,body) SELECT id,1,jsonb_build_object('version',1,'name',id,'enabled',false,'archived',false,'capacity',capacity,'network',jsonb_build_object('mode','default'),'image','') FROM nodes ON CONFLICT(id) DO NOTHING;

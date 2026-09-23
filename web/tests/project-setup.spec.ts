@@ -136,6 +136,7 @@ async function setupAPI(page: Page, initial?: Project) {
       return route.fulfill({
         json: { agentImage: "swarmjet-agent:configured" },
       });
+    if (pathname === "/api/runtime/agents") return route.fulfill({json:{agents:[{id:"opencode",name:"OpenCode"},{id:"codex",name:"Codex"},{id:"claude",name:"Claude Code"}],enabled:["opencode","codex"]}});
     if (pathname === "/api/runtime/models")
       return route.fulfill({
         json: {
@@ -175,9 +176,7 @@ async function setupAPI(page: Page, initial?: Project) {
   };
 }
 async function completeExecutionAndChecks(page: Page) {
-  await page
-    .getByLabel("开发模型", { exact: true })
-    .fill("example/development");
+  await page.getByLabel("项目默认 Agent",{exact:true}).selectOption("opencode");
   await page
     .getByLabel("联调配置文件", { exact: true })
     .fill("integration/compose.yaml");
@@ -256,8 +255,8 @@ test("import fills identity, paths and dependencies but missing dev needs explic
     id: "imported-draft",
     enabled: true,
     metaRef: "trunk",
-    development: { model: "example/development", adapter: "opencode" },
-    review: { model: "example/development", adapter: "opencode" },
+    development: { model: "", adapter: "opencode" },
+    review: { model: "", adapter: "opencode" },
     integration: {
       checks: [
         {
@@ -349,26 +348,15 @@ for (const source of ["Meta-Repo 地址", "Meta 分支"] as const) {
   });
 }
 
-test("configured model catalog populates choices and links to executor setup", async ({
-  page,
-}) => {
-  await setupAPI(page, blankImported());
+test("project default only lists enabled agents and does not select models", async ({page}) => {
+  await setupAPI(page,blankImported());
   await page.goto("/#/projects/imported-draft");
-  await expect(
-    page.getByRole("link", { name: "登录与 provider 配置" }),
-  ).toHaveAttribute("href", "#/runtime");
-  await page.getByRole("button", { name: "读取模型列表" }).click();
-  await expect(page.locator("#configured-models option")).toHaveCount(2);
-  await expect(
-    page.locator("#configured-models option").first(),
-  ).toHaveAttribute("value", "example/development");
-  await expect(page.getByLabel("开发模型", { exact: true })).toHaveAttribute(
-    "list",
-    "configured-models",
-  );
-  await expect(
-    page.getByText("已读取 2 个模型", { exact: false }),
-  ).toBeVisible();
+  await expect(page.getByRole("link",{name:"启用 Agent 与终端配置"})).toHaveAttribute("href","#/runtime");
+  const selector=page.getByLabel("项目默认 Agent",{exact:true});
+  await selector.selectOption("codex");
+  await expect(selector).toHaveValue("codex");
+  await expect(selector.locator('option[value="claude"]')).toHaveCount(0);
+  await expect(page.getByLabel("开发模型",{exact:true})).toHaveCount(0);
 });
 
 test("argv command formatting preserves spaces, quotes, empty arguments and multiline content", () => {
@@ -445,3 +433,38 @@ for (const viewport of [
     });
   });
 }
+
+test("repository and CI strategies enable without Compose and keep explicit policy", async ({ page }) => {
+  const project = configuredProject();
+  project.integration = { composeFile: "", checks: [], startupTimeoutSeconds: 180 };
+  const state = await setupAPI(page, project);
+  await page.goto("/#/projects/custom-project");
+  await page.getByLabel("验收策略", { exact: true }).selectOption("repository");
+  await expect(page.getByLabel("联调配置文件", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "保存并启用" })).toBeEnabled();
+  await page.getByRole("button", { name: "保存草稿" }).click();
+  await expect.poll(() => state.saves.length).toBe(1);
+  expect(state.saves[0]).toMatchObject({ acceptanceStrategy: "repository", requireCI: false });
+  await page.getByLabel("验收策略", { exact: true }).selectOption("gitlab_ci");
+  await page.getByRole("button", { name: "保存草稿" }).click();
+  await expect.poll(() => state.saves.length).toBe(2);
+  expect(state.saves[1]).toMatchObject({ acceptanceStrategy: "gitlab_ci", requireCI: true });
+});
+
+test("custom command acceptance preserves argv without requiring Compose", async ({ page }) => {
+  const project = configuredProject();
+  project.integration = { composeFile: "", checks: [], startupTimeoutSeconds: 180 };
+  const state = await setupAPI(page, project);
+  await page.goto("/#/projects/custom-project");
+  await page.getByLabel("自定义验收方式", { exact: true }).selectOption("commands");
+  await page.getByLabel("验收镜像", { exact: true }).fill("toolchain:local");
+  await page.getByRole("button", { name: "添加验收命令" }).click();
+  const fieldset = page.locator("fieldset.setup-check").first();
+  await fieldset.getByLabel("名称", { exact: true }).fill("unit");
+  await fieldset.getByLabel("工作目录", { exact: true }).fill("libs/core");
+  await fieldset.getByLabel("执行命令", { exact: true }).fill("node -e 'console.log(123)'");
+  await expect(page.getByRole("button", { name: "保存并启用" })).toBeEnabled();
+  await page.getByRole("button", { name: "保存草稿" }).click();
+  await expect.poll(() => state.saves.length).toBe(1);
+  expect(state.saves[0].integration.commands?.[0]).toMatchObject({ path: "libs/core", argv: ["node", "-e", "console.log(123)"] });
+});

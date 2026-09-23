@@ -1,6 +1,6 @@
 # SwarmJet
 
-可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab + OpenCode 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务创建后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，完成联调后由独立审查 Agent 审查，并自动合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录及人工操作。
+可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab 与 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）、Claude Code 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务创建后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，完成联调后由独立审查 Agent 审查，并自动合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录及人工操作。
 
 ## 架构
 
@@ -14,7 +14,7 @@ flowchart LR
   Temporal <--> Workflow[Go Workflow Worker]
   Temporal --> Activity[Go Activity Worker]
   Activity --> Workspace[meta + 任务私有 Git 副本]
-  Activity --> Agents[OpenCode 开发 / 审查 / 合并]
+  Activity --> Agents[可选 CLI 开发 / 审查 / 合并]
   Activity --> Tests[隔离 Compose 联调]
   Agents --> GitLab
   Activity --> Reports[报告与执行记录]
@@ -40,7 +40,11 @@ Temporal 是运行流程的事实源；业务 PostgreSQL 保存配置、查询�
 
 普通用户不需要理解 Meta-Repo。新建项目时填写 GitLab 地址和 Access Token，验证后搜索并选择子仓库、确认目标分支，随后在页面内嵌终端完成 `opencode auth login` 并选择模型做一次实际调用验证。系统据此创建受管的内部 Meta-Repo，运行初始化 Agent 分析项目，并在独立副本中执行验证。GitLab 连接加密保存（`SWARMJET_MASTER_KEY`）并可跨项目复用；Token 不回显，也不写入日志、URL、任务快照或 Temporal 历史。模型和验收未就绪时项目保持草稿，不接单；初始化未通过验证时也不会自动启用。
 
-控制台的“执行器环境”提供持久化配置终端，可执行 `opencode auth login`，也可使用 `codex login --device-auth` 预先配置 Codex。当前任务执行仅支持 OpenCode；Codex 登录入口不代表已经接入 Codex 任务适配器。终端登录配置保存在独立 profile 中，任务使用私有副本，开发与审查不共享会话。
+控制台的“执行器环境”提供五种 Agent 的适配列表，管理员统一勾选启用，默认全部未勾选；项目选择一个已启用的默认 Agent。CLI 必须安装在配置终端与任务所用的镜像中，勾选启用不会自动安装软件。可通过独立的“镜像配置”页面选择 Agent、设置构建参数，由持久化 BuildKit 构建并发布到 Distribution，再选择执行节点分发，也可继续通过 `AGENT_CLIS=opencode,codex` 等构建参数按需打包，详见 [部署说明](deploy/README.md)。终端配置保存在持久化 Home 中。
+
+Issue 继续用 `autonomous` 接单，可添加一个 `agent:opencode`、`agent:codex`、`agent:dst`、`agent:agy` 或 `agent:claude` 标签，统一指定开发、审查、发布与合并执行器。不加标签沿用项目默认；多个标签、未知或未启用的 Agent 会明确拒绝接单，修正后轮询重试。任务接单后执行器固定，已有任务不会因标签或启用列表变化而切换。
+
+任务不指定模型，使用 CLI 保存的默认配置。首次执行时复制一份任务级配置快照，开发与审查各自获得私有副本和独立会话；合并恢复审查会话。后续终端配置修改影响之后首次启动的新任务，不影响已有任务的角色配置。临时会话切换或终端 `export` 不保证持久化；API key 应配置到部署环境。旧任务仍按旧快照运行。Meta 静态初始化仍使用受限的 OpenCode，创建受管项目的镜像需保留 OpenCode。
 
 自动合并是项目级开关，新项目默认关闭：关闭时系统仍会开发、验证、创建 MR 和审查，但只在全部 MR 被人工合并后才收尾关单。
 
@@ -57,7 +61,7 @@ projects:
 
 各仓库独立配置 `targetBranch`。不存在时须提供 `createFrom`，从明确起点初始化一次。配置修改默认仅影响新任务。Meta-Repo 自身需要改码时，将它登记为 `path: "."` 的仓库，目标分支与 `metaRef` 对齐。
 
-第一版适配器为 `opencode`，开发和审查分别选择模型。模型填写实际可用的 `provider/model`，其他尚未实现的执行器会被明确拒绝。GitLab 凭证可以来自页面保存的连接，也可以来自部署环境变量；项目与任务快照只保存引用。
+执行器选择与模型选择分离：Issue 标签只接受 Agent ID，不接受 `agent:codex/model`。OpenCode 的项目模型字段仅用于旧任务兼容及静态初始化；新开发任务会忽略它。GitLab 凭证来自页面连接或部署环境引用，不放进标签。
 
 联调至少包含一条 required 检查。Compose 使用任务私有网络和卷，不使用固定容器名、共享外部卷、Docker socket、宿主机网络或固定宿主机端口。Worker 凭证不会整体传入联调服务。
 
@@ -69,7 +73,7 @@ projects:
 
 Linux 开发环境需要 Python 3、Node.js、Go 1.25+、Git、`meta` 和可访问的 Docker daemon。先执行 `npm ci --prefix web`。从 `deploy/.env.example` 创建本项目独立的 `deploy/.env`，设置数据库凭据、`DATA_DIR`、执行器配置和 Temporal namespace；可复制 `deploy/.env.development.example` 为 `deploy/.env.development` 覆盖本机工具路径和端口。dotenv 内容作为数据解析，不作为 shell 脚本执行，文件不可提交。
 
-PostgreSQL、Temporal 使用 SwarmJet 自己的 Compose 容器。启动脚本会动态查询 Compose 网络中的地址，不重建依赖、不清空数据；若使用其他数据库或 Temporal，在 `deploy/.env.development` 显式填写地址。首次准备依赖可执行 `(cd deploy && docker compose up -d postgres temporal-namespace temporal-ui)`，不必启动容器版 API、Worker。全新数据库需先在仓库根目录执行 `(cd deploy && docker compose -f compose.yaml -f compose.build.yaml run --build --rm migrate)`；开发启动不会隐式迁移数据库。Agent 镜像的构建见部署文档。
+PostgreSQL、Temporal 使用 SwarmJet 自己的 Compose 容器。启动脚本会动态查询 Compose 网络中的地址，不重建依赖、不清空数据；若使用其他数据库或 Temporal，在 `deploy/.env.development` 显式填写地址。首次准备依赖可执行 `(cd deploy && docker compose up -d postgres temporal-namespace temporal-ui)`，不必启动容器版 API、Worker。全新数据库需先在仓库根目录执行 `(cd deploy && docker compose -f compose.yaml -f compose.build.yaml run --build --rm migrate)`；开发启动会在启动进程前执行幂等数据库迁移。Agent 镜像的构建见部署文档。
 
 ```bash
 ./scripts/dev.py start    # 编译 Go，检查依赖，停止旧容器版 API/Worker，启动本地三进程
@@ -78,7 +82,7 @@ PostgreSQL、Temporal 使用 SwarmJet 自己的 Compose 容器。启动脚本会
 ./scripts/dev.py stop     # 只停止本地进程，保留依赖和数据
 ```
 
-开发页面默认 **http://localhost:5273**，API 为 `127.0.0.1:8180`，Worker 管理接口为 `127.0.0.1:8191`。Vite 代理 API、事件流和终端 WebSocket；开发环境的登录 Origin 使用 5273。进程日志位于 `.cache/dev/`，不提交到 Git。启动后项目状态与任务记录保存在 SwarmJet 数据库，已阻塞的任务不会被脚本自动重试。
+开发页面默认 **http://localhost:5273**，API 为 `127.0.0.1:8180`，Worker 管理接口为 `127.0.0.1:8191`，独立构建服务为 `127.0.0.1:8193`。Vite 代理 API、事件流和终端 WebSocket；开发环境的登录 Origin 使用 5273。进程日志位于 `.cache/dev/`，不提交到 Git。启动后项目状态与任务记录保存在 SwarmJet 数据库，已阻塞的任务不会被脚本自动重试。
 
 启动脚本会为宿主机 Git 设置仓库内的 `scripts/askpass.sh`；手动启动 Worker 时可用 `SWARMJET_GIT_ASKPASS` 指定该绝对路径。Agent 容器继续使用镜像内的凭据助手。
 
@@ -107,6 +111,8 @@ SWARMJET_DOCKER_TEST=1 go test ./internal/integration
 
 ## 部署与迁移
 
+单机首次部署：服务器安装 Docker Engine、Compose 插件和 Python 3，获取源码后执行 `sudo python3 deploy/install.py`，自动生成配置与密钥、构建镜像并启动服务。默认通过 SSH 隧道访问；首次安装多个执行器可加 `--agent-clis opencode,codex,claude`。详细步骤见 [单机快速部署](deploy/README.md#单机快速部署源码构建)。
+
 步骤见 [deploy/README.md](deploy/README.md)。管理程序支持 `serve`、`worker`、`node`、`migrate`、`doctor`、`legacy-inventory`。
 
 Worker 经 Docker socket 创建同宿主机的任务容器，`DATA_DIR` 必须是宿主机与容器内一致的绝对路径。Agent 仅挂载自己的私有 Git 副本、当前执行目录、角色会话及只读报告；共享缓存和调度记录不暴露给 Agent。需要多机时，启动 `swarmjet node` 执行节点并在控制面设置 `EXECUTION_MODE=distributed`，任务会固定归属到节点；节点失联保留现场并 blocked，不自动迁移。
@@ -130,3 +136,9 @@ Worker 经 Docker socket 创建同宿主机的任务容器，`DATA_DIR` 必须�
 ## 发布与贡献
 
 从源码安装见 [部署指南](deploy/README.md)，贡献与检查见 [CONTRIBUTING.md](CONTRIBUTING.md)。CI 使用标准 GitLab Container Registry，不依赖私有构建工具。当前尚未指定许可证；公开发布前需要明确代码授权与许可证。
+
+### 节点、代理与跨机器镜像
+
+“执行节点”管理节点容量、网络配置、默认及额外预加载镜像；项目选择自动调度或指定节点范围。一个 Node 可使用多个镜像，任务固定节点、各角色镜像摘要和网络配置版本。新节点默认暂停，完成镜像准备后再启用。
+
+“网络配置”集中管理代理，Node 和构建服务按需引用。构建服务使用独立 BuildKit；镜像通过自建 Distribution 分发。部署及权限配置见 [仓库与构建服务](docs/registry.md)，测试记录见 [分布式验收](docs/distributed-validation.md)。

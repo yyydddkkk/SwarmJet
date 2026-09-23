@@ -1,0 +1,21 @@
+# Native development: Unix socket plus loopback-only build proxy on the host.
+name: ${COMPOSE_PROJECT_NAME:-swarmjet}-buildkit-dev
+services:
+  buildkit:
+    image: moby/buildkit:v0.23.2
+    privileged: true
+    restart: unless-stopped
+    network_mode: host
+    command: [--addr, unix:///run/buildkit/buildkitd.sock, --group, '${DEV_BUILDKIT_GID:-1000}', --config, /etc/buildkit/buildkitd.toml]
+    environment:
+      HTTP_PROXY: http://127.0.0.1:${DEV_BUILDER_PROXY_PORT:-8194}
+      HTTPS_PROXY: http://127.0.0.1:${DEV_BUILDER_PROXY_PORT:-8194}
+      NO_PROXY: localhost,127.0.0.1
+    volumes:
+      - ${DEV_BUILDKIT_DIR:?Set DEV_BUILDKIT_DIR}:/run/buildkit
+      - buildkit-cache:/var/lib/buildkit
+      - ./buildkitd.toml:/etc/buildkit/buildkitd.toml:ro
+    cpus: 2
+    mem_limit: 2g
+volumes:
+  buildkit-cache:

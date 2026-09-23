@@ -13,9 +13,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"swarmjet/internal/domain"
 	"sync"
 	"time"
-	"swarmjet/internal/domain"
 )
 
 type Client struct {
@@ -230,6 +230,7 @@ type Pipeline struct {
 	Status string `json:"status"`
 }
 type MergeRequest struct {
+	Description         string    `json:"description"`
 	IID                 int64     `json:"iid"`
 	URL                 string    `json:"web_url"`
 	SourceBranch        string    `json:"source_branch"`
@@ -357,5 +358,10 @@ func (c *Client) Merge(ctx context.Context, repoID, mr int64, sha, target string
 		return errors.New("merge request is not ready for exact-SHA merge")
 	}
 	_, err = c.request(ctx, "PUT", mrPath(repoID, mr)+"/merge", map[string]any{"sha": sha, "auto_merge": false, "should_remove_source_branch": false}, nil)
+	return err
+}
+
+func (c *Client) UpdateMRDescription(ctx context.Context, repoID, iid int64, description string) error {
+	_, err := c.request(ctx, "PUT", mrPath(repoID, iid), map[string]string{"description": description}, nil)
 	return err
 }

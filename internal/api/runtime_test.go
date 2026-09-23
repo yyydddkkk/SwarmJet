@@ -1,11 +1,44 @@
 package api
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestImageRoutesProxyMethodAndBodyWithoutBrowserCredentials(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/images/builds" {
+			t.Errorf("wrong request %s %s", r.Method, r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != `{"agents":["codex"]}` {
+			t.Errorf("lost build config %s", body)
+		}
+		if r.Header.Get("X-SwarmJet-Runtime-Secret") != "worker-secret" || r.Header.Get("Cookie") != "" {
+			t.Error("incorrect proxy authentication")
+		}
+		w.WriteHeader(202)
+		w.Write([]byte(`{"id":"build-id","status":"building"}`))
+	}))
+	defer worker.Close()
+	a := &server{cfg: Config{RuntimeURL: worker.URL, RuntimeSecret: "worker-secret"}}
+	r := httptest.NewRequest("POST", "http://console/api/runtime/images/builds", strings.NewReader(`{"agents":["codex"]}`))
+	r.Header.Set("Cookie", "swarmjet_session=private")
+	w := httptest.NewRecorder()
+	a.runtime(w, r)
+	if w.Code != 202 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	a.cfg.RequireNode = true
+	w = httptest.NewRecorder()
+	a.runtime(w, httptest.NewRequest("GET", "http://console/api/runtime/images", nil))
+	if w.Code != 503 {
+		t.Fatal("distributed build management implicitly allowed", w.Code)
+	}
+}
 
 func TestRuntimeProxyPrivateAuthenticationAndPath(t *testing.T) {
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,8 @@
+[worker.oci]
+  gc = true
+  max-parallelism = 2
+  reservedSpace = "1GB"
+  maxUsedSpace = "10GB"
+# Private CA / registry mirrors can be mounted and configured here.
+# [registry."registry.example.com:5443"]
+#   ca = ["/etc/buildkit/certs/ca.crt"]

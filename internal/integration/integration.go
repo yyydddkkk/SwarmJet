@@ -12,8 +12,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 	"swarmjet/internal/domain"
+	"swarmjet/internal/networkconfig"
+	"time"
 )
 
 type Executor func(context.Context, string, []string, []string) ([]byte, int, error)
@@ -146,6 +147,7 @@ func (m *Manager) run(ctx context.Context, ws domain.Workspace, dir string, args
 	return run(ctx, dir, args, m.environment(ws))
 }
 func (m *Manager) report(ws domain.Workspace, name string, b []byte) (string, error) {
+	b = []byte(networkconfig.Redact(string(b), m.Env))
 	if _, e := projectName(ws.TaskID); e != nil {
 		return "", e
 	}
@@ -317,6 +319,10 @@ func (m *Manager) checked(ctx context.Context, ws domain.Workspace, cfg domain.I
 	return args, root, c, e
 }
 func (m *Manager) Start(ctx context.Context, ws domain.Workspace, cfg domain.IntegrationConfig) error {
+	if cfg.Mode == "commands" {
+		return nil
+	}
+
 	timeout := cfg.StartupTimeoutSeconds
 	if timeout <= 0 {
 		timeout = 180
@@ -339,6 +345,10 @@ func (m *Manager) Start(ctx context.Context, ws domain.Workspace, cfg domain.Int
 	return saveErr
 }
 func (m *Manager) Verify(ctx context.Context, ws domain.Workspace, cfg domain.IntegrationConfig) ([]domain.Verification, error) {
+	if cfg.Mode == "commands" {
+		return m.verifyCommands(ctx, ws, cfg)
+	}
+
 	args, root, c, e := m.checked(ctx, ws, cfg)
 	if e != nil {
 		return nil, e
@@ -383,6 +393,13 @@ func (m *Manager) stopMarker(taskID string) string {
 	return filepath.Join(m.DataDir, "integration-state", taskID+".stopped")
 }
 func (m *Manager) Stop(ctx context.Context, ws domain.Workspace, cfg domain.IntegrationConfig) error {
+	if ws.Root == "" {
+		return nil
+	}
+	if cfg.Mode == "commands" || cfg.ComposeFile == "" {
+		return m.stopCommands(ctx, ws)
+	}
+
 	if ws.Root == "" {
 		return nil
 	}

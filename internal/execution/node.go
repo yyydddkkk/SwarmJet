@@ -54,7 +54,8 @@ type NodeResolver interface {
 // LocalNode adapts the in-process managers and is the default execution host.
 // An empty ID means tasks without an assignment keep using it.
 type LocalNode struct {
-	NodeID string
+	StaticAnalysis func(context.Context, AnalysisParams) (AnalysisResult, error)
+	NodeID         string
 	AgentBackend
 	Workspace   *workspace.Manager
 	Integration IntegrationRunner

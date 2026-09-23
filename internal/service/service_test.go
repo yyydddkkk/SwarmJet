@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"swarmjet/internal/domain"
+	"swarmjet/internal/imagebuild"
 	"swarmjet/internal/store"
 )
 
@@ -140,11 +141,14 @@ func scanTestStore(t *testing.T) *store.Store {
 	if err = s.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
+	if err = s.SetEnabledAgents(ctx, []string{"opencode", "codex"}); err != nil {
+		t.Fatal(err)
+	}
 	return s
 }
 
 func scanProject(gitlabURL string) domain.Project {
-	return domain.Project{ID: "scan", Name: "Scan", Enabled: true, MetaURL: "https://git.example/group/meta.git", MetaRef: "main", GitLabURL: gitlabURL, CredentialRef: "GITLAB_TOKEN", MergeCredentialRef: "GITLAB_MERGE_TOKEN", Repositories: []domain.Repository{{ID: "service", ProjectID: 7, URL: "https://git.example/group/service.git", Path: "service", TargetBranch: "main"}}, Development: domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "agent:test", TimeoutSeconds: 300}, Review: domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "agent:test", TimeoutSeconds: 300}, Integration: domain.IntegrationConfig{ComposeFile: "compose.yml", StartupTimeoutSeconds: 30, Checks: []domain.Check{{Name: "test", Service: "test", Command: []string{"true"}, Required: true}}}, MaxReworks: 3}
+	return domain.Project{ID: "scan", Name: "Scan", Enabled: true, MetaURL: gitlabURL + "/group/meta.git", MetaRef: "main", GitLabURL: gitlabURL, CredentialRef: "GITLAB_TOKEN", MergeCredentialRef: "GITLAB_MERGE_TOKEN", Repositories: []domain.Repository{{ID: "service", ProjectID: 7, URL: gitlabURL + "/group/service.git", Path: "service", TargetBranch: "main"}}, Development: domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "agent:test", TimeoutSeconds: 300}, Review: domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "agent:test", TimeoutSeconds: 300}, Integration: domain.IntegrationConfig{ComposeFile: "compose.yml", StartupTimeoutSeconds: 30, Checks: []domain.Check{{Name: "test", Service: "test", Command: []string{"true"}, Required: true}}}, MaxReworks: 3}
 }
 
 func TestScanUsesDistributedSchedulingPolicy(t *testing.T) {
@@ -178,5 +182,80 @@ func TestScanUsesDistributedSchedulingPolicy(t *testing.T) {
 	tasks, err = s.Tasks(ctx)
 	if err != nil || len(tasks) != 1 || tasks[0].NodeID != "node-1" {
 		t.Fatalf("tasks=%+v err=%v", tasks, err)
+	}
+}
+
+func TestScanRejectsAgentConflictWithoutClaimAndFreezesSelection(t *testing.T) {
+	s := scanTestStore(t)
+	ctx := context.Background()
+	labels := []string{"autonomous", "agent:codex", "agent:opencode"}
+	var mu sync.Mutex
+	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/notes") {
+			w.Write([]byte(`[]`))
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		json.NewEncoder(w).Encode([]map[string]any{{"project_id": 7, "iid": 1, "state": "opened", "labels": labels}})
+	}))
+	defer gitlab.Close()
+	p := scanProject(gitlab.URL)
+	if _, err := s.SaveProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	imageDir := t.TempDir()
+	digest := "sha256:" + strings.Repeat("a", 64)
+	images, err := imagebuild.New(imageDir, func(ctx context.Context, args []string, out io.Writer) error {
+		_, err := io.WriteString(out, digest)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := images.Import(ctx, "agent:configured")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = images.Activate(ctx, image.ID); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{DataDir: imageDir, Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }}
+	if err := svc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if seen, err := s.HasSource(ctx, p.GitLabURL, domain.Issue{ProjectID: 7, IID: 1}); err != nil || seen {
+		t.Fatal("invalid labels claimed issue", seen, err)
+	}
+	mu.Lock()
+	labels = []string{"autonomous", "agent:codex"}
+	mu.Unlock()
+	if err := svc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := s.Tasks(ctx)
+	if err != nil || len(tasks) != 1 {
+		t.Fatal(tasks, err)
+	}
+	if tasks[0].Project.Development.Image != digest || tasks[0].Project.Review.Image != digest {
+		t.Fatal("active image was not captured at acceptance")
+	}
+	if tasks[0].Project.Development.Adapter != "codex" || tasks[0].Project.Review.Adapter != "codex" || tasks[0].Project.Development.Model != "" || !tasks[0].Project.Development.UseCLIDefaults {
+		t.Fatal("agent selection not frozen", tasks[0].Project)
+	}
+	// Disabling a selected adapter or changing labels never rewrites a claimed task.
+	if err := s.SetEnabledAgents(ctx, []string{}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	labels = []string{"autonomous", "agent:opencode"}
+	mu.Unlock()
+	if err := svc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err = s.Tasks(ctx)
+	if err != nil || len(tasks) != 1 || tasks[0].Project.Development.Adapter != "codex" {
+		t.Fatal("existing snapshot changed", tasks, err)
 	}
 }

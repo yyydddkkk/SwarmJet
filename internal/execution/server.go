@@ -211,6 +211,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) dispatch(ctx context.Context, req rpcRequest) (any, error) {
 	switch req.Method {
+	case "staticAnalysis":
+		var p AnalysisParams
+		if e := decodeParams(req.Params, &p); e != nil {
+			return nil, e
+		}
+		n, ok := h.Node.(interface {
+			Analyze(context.Context, AnalysisParams) (AnalysisResult, error)
+		})
+		if !ok {
+			return nil, errors.New("节点不支持静态初始化")
+		}
+		return n.Analyze(ctx, p)
+
 	case "syncManagedMeta":
 		var p syncManagedMetaParams
 		if e := decodeParams(req.Params, &p); e != nil {

@@ -1,5 +1,5 @@
-// Package agent supervises durable OpenCode containers. The CLI contract is documented
-// at https://dev.opencode.ai/docs/cli/ (run --format json --session --file --auto).
+// Package agent supervises durable CLI containers. Adapter contracts and
+// configuration isolation are documented in README.md.
 package agent
 
 import (
@@ -130,6 +130,10 @@ func New(dataDir string) *Runtime {
 }
 
 type record struct {
+	CLIFailure       string           `json:"cliFailure,omitempty"`
+	Adapter          string           `json:"adapter,omitempty"`
+	ProfileHome      string           `json:"profileHome,omitempty"`
+	ProfileSnapshot  string           `json:"profileSnapshot,omitempty"`
 	Execution        domain.Execution `json:"execution"`
 	TaskID           string           `json:"taskId"`
 	Role             string           `json:"role"`
@@ -234,11 +238,15 @@ func (r *Runtime) Resume(ctx context.Context, req domain.AgentRequest) (domain.E
 	return r.Start(ctx, req)
 }
 func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Execution, error) {
-	if req.Config.Adapter != "opencode" {
-		return domain.Execution{}, errors.New("unsupported agent adapter")
+	adapter, adapterErr := adapterFor(req.Config.Adapter)
+	if adapterErr != nil {
+		return domain.Execution{}, adapterErr
 	}
-	if req.Config.Image == "" || req.Config.Model == "" {
-		return domain.Execution{}, errors.New("agent image and model are required")
+	if strings.HasPrefix(req.SessionID, "-") || strings.ContainsAny(req.SessionID, "\x00\r\n") {
+		return domain.Execution{}, errors.New("invalid session ID")
+	}
+	if req.Config.Image == "" {
+		return domain.Execution{}, errors.New("agent image is required")
 	}
 	if !identifier.MatchString(req.ExecutionID) || !identifier.MatchString(req.TaskID) {
 		return domain.Execution{}, errors.New("invalid task or execution ID")
@@ -286,7 +294,7 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 	rec, err := r.read(req.ExecutionID)
 	originalStart := rec.StartedAt
 	if err == nil {
-		if rec.TaskID != req.TaskID || rec.Workspace != workspace || rec.Role != req.Role {
+		if rec.TaskID != req.TaskID || rec.Workspace != workspace || rec.Role != req.Role || (rec.Adapter != "" && rec.Adapter != req.Config.Adapter) {
 			return domain.Execution{}, errors.New("execution ID belongs to another request")
 		}
 		if terminal(rec.Execution.Status) {
@@ -315,11 +323,27 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 	if err = atomicWrite(promptPath, []byte(prompt)); err != nil {
 		return domain.Execution{}, err
 	}
-	rec = record{Execution: domain.Execution{ID: req.ExecutionID, SessionID: req.SessionID, ContainerID: "sj-agent-" + req.ExecutionID, Status: "starting", ExitCode: -1, LogPath: filepath.Join(dir, "output.jsonl")}, TaskID: req.TaskID, Role: req.Role, Workspace: workspace, StartedAt: time.Now().UTC(), Timeout: req.Config.TimeoutSeconds, ResultPath: resultPath}
+	rec = record{Adapter: req.Config.Adapter, Execution: domain.Execution{ID: req.ExecutionID, SessionID: req.SessionID, ContainerID: "sj-agent-" + req.ExecutionID, Status: "starting", ExitCode: -1, LogPath: filepath.Join(dir, "output.jsonl")}, TaskID: req.TaskID, Role: req.Role, Workspace: workspace, StartedAt: time.Now().UTC(), Timeout: req.Config.TimeoutSeconds, ResultPath: resultPath}
 	if !originalStart.IsZero() {
 		rec.StartedAt = originalStart
 	}
 	args := []string{"create", "--name", rec.Execution.ContainerID, "--label", "swarmjet.execution=" + req.ExecutionID, "--mount", bindMount(dir, false), "--workdir", workspace}
+	if req.Config.DockerNetwork != "" {
+		if !identifier.MatchString(req.Config.DockerNetwork) {
+			return rec.Execution, errors.New("invalid task network")
+		}
+		args = append(args, "--network", req.Config.DockerNetwork)
+	}
+	if req.Config.MemoryMB > 0 {
+		args = append(args, "--memory", strconv.Itoa(req.Config.MemoryMB)+"m")
+	}
+	if req.Config.CPUs > 0 {
+		args = append(args, "--cpus", strconv.FormatFloat(req.Config.CPUs, 'f', -1, 64))
+	}
+	if req.Config.PidsLimit > 0 {
+		args = append(args, "--pids-limit", strconv.Itoa(req.Config.PidsLimit))
+	}
+	args = append(args, "--cap-drop=ALL", "--security-opt=no-new-privileges")
 	if req.Role == "init" {
 		// The analyzed business sources are read-only; only the generated
 		// directory is writable. This is enforced by mounts, not by prompt text.
@@ -334,6 +358,14 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 		return domain.Execution{}, err
 	}
 	args = append(args, "--mount", bindMount(reports, true))
+	if req.Config.UseCLIDefaults || adapter.ID != "opencode" {
+		home, snapshot, profileErr := r.prepareCLIProfile(req, adapter)
+		if profileErr != nil {
+			return domain.Execution{}, profileErr
+		}
+		rec.ProfileHome, rec.ProfileSnapshot = home, snapshot
+		args = append(args, "--mount", bindMount(home, false))
+	}
 	// Persist only credential names; docker receives values via its process environment.
 	env := []string{}
 	for k := range req.Env {
@@ -347,27 +379,36 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 		args = append(args, "--env", k)
 		env = append(env, k+"="+req.Env[k])
 	}
-	// Developer history is isolated; merge reuses only this task's review scope.
-	home, config, authPath, snapshotPath, hasAuth, profileErr := r.prepareProfile(req.TaskID, req.Role, req.ExecutionID)
-	if profileErr != nil {
-		return domain.Execution{}, profileErr
+	if rec.ProfileHome != "" {
+		// Runtime-owned homes win over any deployment/request environment entry.
+		for _, entry := range adapter.environment(rec.ProfileHome) {
+			args = append(args, "--env", entry)
+		}
 	}
-	rec.AuthPath = authPath
-	rec.AuthSnapshotPath = snapshotPath
-	rec.AuthRequired = hasAuth
-	// OpenCode creates startup files (including .gitignore) in XDG_CONFIG_HOME.
-	// This is a private task/role copy; the shared profile remains unmounted.
-	args = append(args, "--mount", bindMount(home, false), "--env", "HOME="+home, "--env", "XDG_DATA_HOME="+home, "--mount", bindMount(config, false), "--env", "XDG_CONFIG_HOME="+config)
+	if rec.ProfileHome == "" {
+		// Developer history is isolated; merge reuses only this task's review scope.
+		home, config, authPath, snapshotPath, hasAuth, profileErr := r.prepareProfile(req.TaskID, req.Role, req.ExecutionID)
+		if profileErr != nil {
+			return domain.Execution{}, profileErr
+		}
+		rec.AuthPath = authPath
+		rec.AuthSnapshotPath = snapshotPath
+		rec.AuthRequired = hasAuth
+		// OpenCode creates startup files (including .gitignore) in XDG_CONFIG_HOME.
+		// This is a private task/role copy; the shared profile remains unmounted.
+		args = append(args, "--mount", bindMount(home, false), "--env", "HOME="+home, "--env", "XDG_DATA_HOME="+home, "--mount", bindMount(config, false), "--env", "XDG_CONFIG_HOME="+config)
+	}
 	if req.Role == "init" {
 		// Static initialization may read sources and write generated documents,
 		// but cannot run repository commands or delegate execution.
 		args = append(args, "--env", `OPENCODE_CONFIG_CONTENT={"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow","list":"allow","edit":"allow","write":"allow","external_directory":"allow","bash":"deny","task":"deny","skill":"deny"}}`)
 	}
-	// --file is variadic: place the message first so it cannot become a second filename.
-	args = append(args, "--entrypoint", "opencode", req.Config.Image, "run", "Execute the instructions in the attached task file. Write the required result artifact.", "--format", "json", "--auto", "--dir", workspace, "-m", req.Config.Model, "--file", promptPath)
-	if req.SessionID != "" {
-		args = append(args, "--session", req.SessionID)
+	command, commandErr := adapter.command(req, promptPath)
+	if commandErr != nil {
+		return domain.Execution{}, commandErr
 	}
+	args = append(args, "--entrypoint", adapter.Executable, req.Config.Image)
+	args = append(args, command...)
 	if err = r.save(rec); err != nil {
 		return rec.Execution, err
 	}
@@ -468,7 +509,7 @@ func (r *Runtime) reconcile(ctx context.Context, rec record) (domain.Execution, 
 	}
 	if c.State.Status == "created" {
 		if _, err = r.run(ctx, []string{"start", rec.Execution.ContainerID}, nil); err != nil {
-			return rec.Execution, errors.New("docker start failed")
+			return rec.Execution, fmt.Errorf("cannot start %s; ensure its CLI is installed in the task image (AGENT_CLIS) and executable", rec.Adapter)
 		}
 		rec.Execution.Status = "running"
 		return rec.Execution, r.save(rec)
@@ -482,8 +523,14 @@ func (r *Runtime) reconcile(ctx context.Context, rec record) (domain.Execution, 
 	} else {
 		rec.Execution.ExitCode = c.State.ExitCode
 		rec.Execution.Status = "failed"
-		rec.Execution.FailureReason = fmt.Sprintf("agent process exited with code %d", c.State.ExitCode)
-		if c.State.ExitCode == 0 {
+		rec.Execution.FailureReason = fmt.Sprintf("agent %s process exited with code %d; inspect execution logs for configuration or authentication errors", rec.Adapter, c.State.ExitCode)
+		if c.State.ExitCode == 127 {
+			rec.Execution.FailureReason = "Agent CLI is not installed in the task image; rebuild with the selected AGENT_CLIS"
+		}
+		if c.State.ExitCode == 0 && rec.CLIFailure != "" {
+			rec.Execution.FailureReason = rec.CLIFailure
+		}
+		if c.State.ExitCode == 0 && rec.CLIFailure == "" {
 			result, resultErr := ReadResult(rec.ResultPath, rec.Role)
 			if resultErr != nil {
 				rec.Execution.FailureReason = "invalid result.json: " + redact(resultErr.Error(), secrets)
@@ -537,6 +584,14 @@ func (r *Runtime) collectLogs(ctx context.Context, rec *record, c container) ([]
 		}
 	}
 	clean, session := ParseJSONL(logs, secrets)
+	if rec.Adapter != "" {
+		adapter, err := adapterFor(rec.Adapter)
+		if err != nil {
+			return nil, err
+		}
+		session = adapter.session(logs)
+		rec.CLIFailure = adapter.terminalFailure(logs)
+	}
 	if session != "" {
 		rec.Execution.SessionID = session
 	}

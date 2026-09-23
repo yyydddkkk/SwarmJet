@@ -190,6 +190,10 @@ func TestLoginPostgres(t *testing.T) {
 	if err = isolated.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	if err = isolated.SetEnabledAgents(context.Background(), []string{"opencode", "codex"}); err != nil {
+		t.Fatal(err)
+	}
+
 	h := New(isolated, Config{Username: "admin", Password: "secret", AllowedOrigin: "https://console.test", SecureCookies: true})
 	r := httptest.NewRequest("POST", "https://console.test/api/login", strings.NewReader(`{"username":"admin","password":"secret"}`))
 	r.Header.Set("Origin", "https://console.test")

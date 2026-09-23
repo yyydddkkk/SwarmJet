@@ -1,4 +1,13 @@
-# OpenCode runtime
+# Agent CLI runtime
+
+
+New Issue tasks select one of `opencode`, `codex`, `dst`, `agy`, or `claude` through the shared catalog (`internal/agentcli`). `adapter.go` owns argv, environment, exact-session extraction and terminal-event failures. Docker lifecycle and `AgentResult` validation stay common. Agents are not launched to probe model availability.
+
+The following OpenCode-specific paths describe **legacy tasks and static initialization**. New tasks have `AgentConfig.UseCLIDefaults=true`, an empty model override, and a task snapshot under `agent-profiles/{taskID}/{adapter}/snapshot`. `dev` and `review` homes are seeded from that immutable snapshot, not independently from the live master profile. Merge uses `review`. Snapshots are taken on first execution, including empty profiles, and retained with the task. Only the catalog's explicit configuration/credential file allowlist is copied, with bounded no-symlink reads and atomic publication. New homes use normal HOME/XDG locations plus CODEX_HOME or DSH_HOME. Both original and refreshed credentials are redacted. New CLI adapters require independent command and event fixtures; optional real-provider tests are separate.
+
+`dst` invokes `dsh --profile headless --json`, not the interactive TUI. Antigravity requires portable API-key/ADC authentication; shared OS keyrings are not supported. Static initialization remains OpenCode-only because its policy forbids shell execution/delegation.
+
+CLI contracts: [Codex](https://developers.openai.com/codex/noninteractive/), [Claude Code](https://code.claude.com/docs/en/headless), [DSH headless](https://github.com/deepseek-ai/deepseek-harness/tree/main/packages/bundle/headless), [Antigravity](https://antigravity.google/docs/cli/headless/).
 
 `New(dataDir)` exposes `Start(ctx, AgentRequest)`, `Inspect(ctx, executionID)`,
 `Resume(ctx, AgentRequest)`, and `Cancel(ctx, executionID)`.
@@ -15,7 +24,7 @@ credential-helper path. The pipeline supplies the URL and phase-specific token,
 not a path to a configuration file created on the orchestration host. The request
 environment is copied before adding runtime-specific values.
 
-Requests require adapter `opencode`, an explicit container image containing the
+Legacy requests require adapter `opencode`, an explicit container image containing the
 `opencode` executable, a `provider/model` model, an absolute workspace beneath
 `dataDir`, stable task/execution IDs, and role `dev`, `review`, or `merge`.
 `Resume` requires the exact prior `SessionID`; it never uses `--continue`.

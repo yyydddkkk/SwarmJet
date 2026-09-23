@@ -410,9 +410,10 @@ type AddressLookup interface {
 // Pool builds RemoteNode transports and caches one per node, rebuilding it when
 // the registered address changes.
 type Pool struct {
-	Lookup AddressLookup
-	Secret string
-	HTTP   *http.Client
+	SecretFor func(context.Context, string) (string, error)
+	Lookup    AddressLookup
+	Secret    string
+	HTTP      *http.Client
 	// Now is propagated to RemoteNode for deterministic clock tests.
 	Now   func() time.Time
 	mu    sync.Mutex
@@ -430,15 +431,22 @@ func (p *Pool) Node(ctx context.Context, id string) (Node, error) {
 	if address == "" {
 		return nil, fmt.Errorf("execution node %s has no address", id)
 	}
+	secret := p.Secret
+	if p.SecretFor != nil {
+		secret, e = p.SecretFor(ctx, id)
+		if e != nil {
+			return nil, e
+		}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.nodes == nil {
 		p.nodes = map[string]*RemoteNode{}
 	}
-	if existing, ok := p.nodes[id]; ok && existing.BaseURL == strings.TrimRight(address, "/") && existing.Secret == p.Secret {
+	if existing, ok := p.nodes[id]; ok && existing.BaseURL == strings.TrimRight(address, "/") && existing.Secret == secret {
 		return existing, nil
 	}
-	n := NewRemoteNode(id, address, p.Secret, p.HTTP)
+	n := NewRemoteNode(id, address, secret, p.HTTP)
 	n.Now = p.Now
 	p.nodes[id] = n
 	return n, nil

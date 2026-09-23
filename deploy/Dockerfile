@@ -16,6 +16,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+COPY image_assets.go ./
+COPY deploy/Dockerfile.agent ./deploy/Dockerfile.agent
+COPY scripts/install-agent-clis.sh scripts/askpass.sh ./scripts/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/swarmjet ./cmd/swarmjet
 
 FROM ${DOCKER_IMAGE} AS docker-cli

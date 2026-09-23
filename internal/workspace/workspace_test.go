@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 	"swarmjet/internal/domain"
+	"testing"
 )
 
 func fixture(t *testing.T) (*Manager, domain.Project) {

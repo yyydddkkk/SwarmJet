@@ -1,0 +1,106 @@
+flowchart TB
+    user["管理员 / 开发者"]
+    gitlab["GitLab：Issue、代码仓库、MR、CI"]
+    models["模型服务"]
+
+    subgraph controlPlane["控制面：单机 Compose 集中部署"]
+        web["React 控制台：由 API 提供静态文件"]
+        api["swarmjet serve：管理 API、认证、节点注册"]
+        ingress["Issue 扫描 / Webhook 唤醒扫描"]
+        outbox["持久化任务与命令 / Outbox 投递"]
+        db[("PostgreSQL：业务配置、任务投影、命令、审计、节点")]
+        temporal["Temporal Server：持久化流程调度"]
+        temporalDb[("同一 PostgreSQL 实例：Temporal 独立数据库")]
+        temporalUi["Temporal UI"]
+
+        subgraph workerProcess["swarmjet worker 进程"]
+            workflow["Workflow：阶段、暂停、恢复、返工、人工批准"]
+            activities["Activities：开发、验收、审查、发布、合并协调"]
+            routing["执行路由：按 Task.NodeID 选择本机或远程 Node"]
+            maintenance["任务现场与报告保留期清理"]
+            initflow["项目初始化：connect → analyze → verify"]
+            runtimeAdmin["执行器配置终端 / 模型验证"]
+        end
+
+        subgraph localExecution["控制面本机执行环境：宿主 Docker + DATA_DIR"]
+            localNode["LocalNode：进程内执行后端"]
+            localAgents["任务 Agent 容器：开发、审查、合并角色"]
+            localTests["任务验收容器 / Compose 联调"]
+            localData[("任务私有工作区、角色会话、配置快照、报告")]
+            setupContainers["初始化、初始化验证、配置终端容器"]
+            controlData[("受管 Meta-Repo、初始化现场、执行器配置")]
+        end
+    end
+
+    subgraph remoteExecution["可选执行节点 × N：各自独立主机，使用 compose.node.yaml"]
+        remoteNode["swarmjet node：签名 HTTP 执行接口"]
+        remoteAgents["本机 Docker：任务 Agent 容器"]
+        remoteTests["本机 Docker：验收容器 / Compose 联调"]
+        remoteData[("节点独立 DATA_DIR：工作区、会话、配置、报告")]
+    end
+
+    user --> web
+    web --> api
+    gitlab -->|"Webhook"| ingress
+    ingress -->|"轮询 Issue"| gitlab
+    api --> outbox
+    ingress --> outbox
+    api <--> db
+    outbox <--> db
+    outbox -->|"启动 Workflow / 发送命令信号"| temporal
+    temporal <--> temporalDb
+    temporalUi --> temporal
+    workflow <-->|"任务队列 / 流程历史"| temporal
+    temporal -->|"Activity 调度"| activities
+    activities -->|"保存查询投影"| db
+    activities <-->|"核实 MR、CI、合并状态 / 同步 Issue"| gitlab
+    activities --> routing
+    maintenance --> routing
+    routing -->|"NodeID 为空"| localNode
+    routing -->|"固定 NodeID：HMAC 签名 HTTP"| remoteNode
+
+    localNode --> localAgents
+    localNode --> localTests
+    localNode --> localData
+    localAgents <--> localData
+    localAgents <--> gitlab
+    localAgents --> models
+
+    remoteNode -.->|"注册 / 每 10 秒心跳"| api
+    remoteNode --> remoteAgents
+    remoteNode --> remoteTests
+    remoteNode --> remoteData
+    remoteAgents <--> remoteData
+    remoteAgents <--> gitlab
+    remoteAgents --> models
+    api -->|"按节点代理读取报告"| remoteNode
+    api -->|"只读访问本机报告"| localData
+
+    api -->|"初始化状态 / 操作"| db
+    initflow <--> db
+    initflow --> setupContainers
+    initflow <--> controlData
+    initflow <-->|"仓库连接与克隆"| gitlab
+    api -->|"私有管理接口"| runtimeAdmin
+    runtimeAdmin --> setupContainers
+    setupContainers <--> controlData
+    setupContainers -->|"初始化分析 / 模型验证"| models
+    controlData -->|"本机配置快照 / Meta 准备"| localNode
+    controlData -->|"Activities 导出 Git bundle，经节点协议安装 Meta"| remoteNode
+
+    %% local 模式优先选择可用节点，无可用节点时才回退本机。
+    %% distributed 模式必须分配节点，无可用节点时不接单。
+    %% 创建任务时按在线状态与容量固定 NodeID，后续不自动迁移。
+    %% 节点不连接 PostgreSQL 或 Temporal；执行失败/超时后任务 blocked，保留现场。
+    %% 初始化和配置终端仍在控制面本机执行；模型配置尚无跨节点自动分发。
+    %% 初始化验证容器无网络；图中模型连接仅表示分析和模型验证调用。
+    %% Agent 角色按阶段串行执行，任务之间可以并行；合并复用审查会话。
+
+    classDef external fill:#f1f5f9,stroke:#64748b,color:#0f172a
+    classDef control fill:#eff6ff,stroke:#2563eb,color:#1e3a8a
+    classDef execution fill:#ecfdf5,stroke:#059669,color:#064e3b
+    classDef storage fill:#fffbeb,stroke:#d97706,color:#78350f
+    class user,gitlab,models external
+    class web,api,ingress,outbox,temporal,temporalUi,workflow,activities,routing,maintenance,initflow,runtimeAdmin control
+    class localNode,localAgents,localTests,setupContainers,remoteNode,remoteAgents,remoteTests execution
+    class db,temporalDb,localData,controlData,remoteData storage

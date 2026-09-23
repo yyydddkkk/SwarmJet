@@ -4,11 +4,11 @@
 
 Routes:
 
-- `GET /status`: image availability, detected CLI installation when the setup container is running, configured provider names, configuration presence, and Codex auth presence. It does not create/start an absent or stopped container. `toolsChecked=false` means the installed-tool flags have not yet been checked; it does not mean the tools are missing. `codex.executionSupported` is always false: this page can configure Codex, but task execution remains the existing OpenCode adapter.
+- `GET /status`: image availability, detected CLI installation when the setup container is running, configured provider names, configuration presence, and Codex auth presence. It does not create/start an absent or stopped container. `toolsChecked=false` means the installed-tool flags have not yet been checked; it does not mean the tools are missing. `agents` reports installation/config-file presence for all five supported CLIs; config presence is not proof of valid authentication. `codex.executionSupported` is true. Platform enablement is separately stored in PostgreSQL through the console API `/api/runtime/agents`, not in worker-local profile metadata.
 - `GET /models`: starts the setup container if necessary, executes only `opencode models` with a 30-second timeout and a 2 MiB output cap, and returns catalog IDs belonging to configured provider names. This does not check credentials, credits, quotas, or model access and does not invoke a model.
 - `GET /terminal`: WebSocket terminal, one session per profile across service processes, maximum 60 minutes. Client messages are JSON `{"type":"input","data":"..."}` or `{"type":"resize","cols":120,"rows":40}`. Server terminal output is binary; text frames contain `{"type":"error","message":"..."}` or `{"type":"exit","code":0}`. Closing the session stops only its ownership-checked setup container so shell children cannot remain running.
 
-The deployment fixes `Config.Image`; users cannot choose an arbitrary image or mount. The container is `sj-config-<SHA256-prefix-of-absolute-dataDir>`, with `swarmjet.runtime-profile=default` and `swarmjet.runtime-root=<same hash>` ownership labels. An unowned same-name container is never adopted, stopped, or removed. Owned containers may be recreated when the configured image changes, retaining profile files.
+`Config.Image` is the deployment fallback. The authenticated image-management routes may activate a successfully built or inspected local image by immutable ID; arbitrary mounts remain unavailable. The container is `sj-config-<SHA256-prefix-of-absolute-dataDir>`, with `swarmjet.runtime-profile=default` and `swarmjet.runtime-root=<same hash>` ownership labels. An unowned same-name container is never adopted, stopped, or removed. Owned containers may be recreated when the configured image changes, retaining profile files.
 
 `GetProfileDirs(dataDir)` returns these host paths:
 
@@ -30,3 +30,24 @@ The task runtime may **copy a reviewed allowlist of these credential/config file
 Use device/browser authorization supported by the installed CLI; for example, Codex device login can be performed from this terminal. The service does not expose arbitrary localhost callback ports. `DockerCommand` and `TerminalCommand` are injectable for isolated lifecycle/PTY tests; production uses the fixed `docker` executable and fixed shell command.
 
 Opt-in real Docker validation uses only a new temporary profile: `SWARMJET_RUNTIME_IMAGE=swarmjet-agent:config-ui go test ./internal/runtimeadmin -run TestActualDockerTerminal -v`. It verifies actual OpenCode/Codex launch, PTY input/output and resize, disabled history, disconnect shutdown, and profile-file persistence across reconnects, then removes only its owned setup container and temporary directory. It does not log in, query paid models, or read real authentication.
+
+
+## Agent image management
+
+Authenticated routes under `/images` are proxied by `/api/runtime/images` in single-host mode:
+
+- `GET /images`: draft, parameter catalog, build history, active image and deployment fallback. Does not start a build or a CLI.
+- `PUT /images/config`: validate and persist a recipe.
+- `POST /images/builds`: validate/save the supplied recipe, snapshot it and asynchronously build with the Worker's Docker daemon; returns 202.
+- `POST /images/import`: inspect `{reference}` in local Docker and record an immutable ID, without pulling or activating.
+- `GET /images/builds/{id}/log`: bounded build log.
+- `POST /images/builds/{id}/cancel`: cancel only the current owned build.
+- `POST /images/builds/{id}/activate`: require a successful record, recheck its immutable ID, then atomically save active image metadata. Returns 409 while a setup terminal is connected.
+
+`internal/imagebuild` owns build persistence and lifecycle. Its injected Runner permits tests without Docker builds or models. The build context is embedded in the Worker binary and includes only the Agent Dockerfile and installation/askpass scripts. Recipes contain no deployment environment or credential values. One management Worker owns an image-manager directory. Restarted builds are interrupted rather than silently retried. The local control plane reads the shared active image file only at task acceptance; running tasks retain their original project snapshots.
+
+## Dedicated builder and node environments
+
+`swarmjet builder` owns image metadata through PostgreSQL and a session advisory lock. It connects to independently managed BuildKit through a Unix socket (or authenticated remote endpoint) and pushes immutable registry references. `ImagesOnly` disables terminal routes on the builder; `DisableImages` prevents ordinary Workers and Nodes from constructing competing managers. Legacy local management remains available without BUILDER_ADMIN_URL.
+
+Node runtime handlers use the Node's applied image and network revision. Open terminal requests pin their handler; after they close, a changed revision recreates the configuration container. Proxy variables are included, including explicit empty values for direct mode. Node configuration files remain local; task profiles are private snapshots.

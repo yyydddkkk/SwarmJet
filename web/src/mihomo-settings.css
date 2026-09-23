@@ -1,0 +1,22 @@
+.mihomo-panel {padding:24px}
+.mihomo-head {display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:20px}
+.mihomo-head p,.mihomo-help {font-size:12px;line-height:1.7;color:var(--muted);margin:8px 0 16px}
+.mihomo-panel h3 {font-size:14px;margin:0 0 16px}
+.mihomo-import {display:grid;grid-template-columns:1fr 2fr;gap:20px}
+.mihomo-editor {font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;resize:vertical;white-space:pre}
+.mihomo-upload {position:relative;overflow:hidden;cursor:pointer;font-size:13px}
+.mihomo-upload input {position:absolute;inset:0;opacity:0;cursor:pointer}
+.mihomo-workspace {display:grid;grid-template-columns:minmax(180px,1fr) minmax(0,2fr);gap:28px;border-top:1px solid var(--line);margin-top:24px;padding-top:24px}
+.mihomo-revisions {display:flex;flex-direction:column;gap:8px;max-height:560px;overflow:auto}
+.mihomo-revisions button {display:flex;flex-direction:column;align-items:flex-start;white-space:normal;text-align:left;padding:12px;gap:6px;background:white;border:1px solid var(--line)}
+.mihomo-revisions .selected {border-color:var(--primary,#335de8);background:#f4f7ff}
+.mihomo-revisions span,.mihomo-revisions small {font-size:11px;color:var(--muted)}
+.mihomo-workspace .image-actions {margin:12px 0 18px}
+.mihomo-probe {border-left:3px solid #bd4e42;padding:14px 16px;background:#fff8f7;margin:16px 0;font-size:13px}
+.mihomo-probe.passed {border-color:#238762;background:#f4fbf7}
+.mihomo-probe small {color:var(--muted)}
+.mihomo-panel .mihomo-section {border-top:1px solid var(--line);padding-top:12px;margin-top:16px}
+.mihomo-group {display:flex;align-items:end;gap:12px;margin:14px 0}
+.mihomo-group .field {flex:1;min-width:0;margin:0}
+.mihomo-panel code,.mihomo-panel li {overflow-wrap:anywhere}
+@media(max-width:760px){.mihomo-panel{padding:18px}.mihomo-import,.mihomo-workspace{grid-template-columns:1fr}.mihomo-head{flex-wrap:wrap}.mihomo-group{align-items:stretch;flex-direction:column}}

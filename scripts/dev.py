@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import secrets
 import signal
 import socket
 import subprocess
@@ -44,6 +45,34 @@ def environment():
     env["DEV_API_URL"] = "http://" + env["LISTEN_ADDRESS"]
     env["RUNTIME_ADMIN_LISTEN"] = "127.0.0.1:" + env.get("DEV_RUNTIME_PORT", "8191")
     env["RUNTIME_ADMIN_URL"] = "http://" + env["RUNTIME_ADMIN_LISTEN"]
+    if not env.get("NODE_SECRET"):
+        secret_path = STATE / "node-secret"
+        if not secret_path.exists():
+            secret_path.write_text(secrets.token_hex(32))
+            secret_path.chmod(0o600)
+        env["NODE_SECRET"] = secret_path.read_text().strip()
+    env["BUILDER_LISTEN_ADDRESS"] = "127.0.0.1:" + env.get("DEV_BUILDER_PORT", "8193")
+    env["BUILDER_ADMIN_URL"] = "http://" + env["BUILDER_LISTEN_ADDRESS"]
+    env["BUILDER_PROXY_LISTEN"] = "127.0.0.1:" + env.get("DEV_BUILDER_PROXY_PORT", "8194")
+    env["DEV_BUILDKIT_DIR"] = str(STATE / "buildkit")
+    env["DEV_BUILDKIT_GID"] = str(os.getgid())
+    env["BUILDKIT_HOST"] = "unix://" + env["DEV_BUILDKIT_DIR"] + "/buildkitd.sock"
+    if env.get("MIHOMO_ENABLED") == "1":
+        secret_path = STATE / "mihomo-secret"
+        if not env.get("MIHOMO_ADMIN_SECRET"):
+            try:
+                fd = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "w") as secret_file:
+                    secret_file.write(secrets.token_hex(32))
+            except FileExistsError:
+                pass
+            env["MIHOMO_ADMIN_SECRET"] = secret_path.read_text().strip()
+        env["MIHOMO_ADMIN_LISTEN"] = "127.0.0.1:" + env.get("DEV_MIHOMO_PORT", "8195")
+        env["MIHOMO_ADMIN_URL"] = "http://" + env["MIHOMO_ADMIN_LISTEN"]
+        env.setdefault("MIHOMO_PROXY_LISTEN", "127.0.0.1:17890")
+        env.setdefault("MIHOMO_PUBLIC_URL", "http://" + env["MIHOMO_PROXY_LISTEN"])
+        env.setdefault("MIHOMO_DATA_DIR", str(Path(env["DATA_DIR"]).resolve() / "mihomo"))
+        env.setdefault("MIHOMO_RUNTIME_DIR", str(STATE / "mihomo-runtime"))
     env["SECURE_COOKIES"] = "false"
     env["SWARMJET_GIT_ASKPASS"] = str(ROOT / "scripts/askpass.sh")
     env.setdefault("GIT_AUTHOR_NAME", "swarmjet")
@@ -154,29 +183,46 @@ def supervise():
             run([str(binary), "doctor"], env=env)
             if stopping:
                 return
+            # Rebuilt code may depend on new tables (for example enabled Agents).
+            # Apply the same idempotent migration used by Compose before serving.
+            run([str(binary), "migrate"], env=env)
             # Stop only the old app processes. Never run compose down or remove volumes.
             compose(env, "stop", "api", "worker")
+            Path(env["DEV_BUILDKIT_DIR"]).mkdir(parents=True, exist_ok=True)
+            run(["docker", "compose", "-f", str(DEPLOY / "compose.buildkit-dev.yaml"), "up", "-d"], env=env)
             for port in (env["DEV_WEB_PORT"], env.get("DEV_API_PORT", "8180"),
-                         env.get("DEV_RUNTIME_PORT", "8191")):
+                         env.get("DEV_RUNTIME_PORT", "8191"), env.get("DEV_BUILDER_PORT", "8193"),
+                         env.get("DEV_BUILDER_PROXY_PORT", "8194"), env.get("DEV_NODE_PORT", "8192")):
                 with socket.socket() as probe:
                     probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     probe.bind(("127.0.0.1", int(port)))
             commands = {
                 "worker": [str(binary), "worker"],
+                "builder": [str(binary), "builder"],
+                "node": [str(binary), "node"],
                 "api": [str(binary), "serve"],
                 "web": ["node", str(ROOT / "web/node_modules/vite/bin/vite.js"),
                         "--host", "127.0.0.1", "--port", env["DEV_WEB_PORT"], "--strictPort"],
             }
+            if env.get("MIHOMO_ENABLED") == "1":
+                commands["mihomo"] = [str(binary), "mihomo"]
             for name, command in commands.items():
+                child_env = env
+                if name == "node":
+                    child_env = {k: v for k, v in env.items() if k not in {"DATABASE_URL", "ADMIN_PASSWORD", "SWARMJET_MASTER_KEY", "RUNTIME_ADMIN_SECRET", "MIHOMO_ADMIN_SECRET"}}
+                    child_env.update(NODE_ID="local", DATA_DIR=str(data / "local-node"),
+                                     NODE_LISTEN_ADDRESS="127.0.0.1:" + env.get("DEV_NODE_PORT", "8192"),
+                                     NODE_ADVERTISE_URL="http://127.0.0.1:" + env.get("DEV_NODE_PORT", "8192"),
+                                     CONTROL_PLANE_URL=env["DEV_API_URL"])
                 with (STATE / (name + ".log")).open("ab") as log:
                     child = subprocess.Popen(command, cwd=ROOT / "web" if name == "web" else ROOT,
-                                             env=env, stdout=log, stderr=log, start_new_session=True)
+                                             env=child_env, stdout=log, stderr=log, start_new_session=True)
                 children.append((name, child))
             deadline = time.monotonic() + 45
             ready = False
             while not stopping:
                 for name, child in children:
-                    if child.poll() is not None:
+                    if child.poll() is not None and name != "mihomo":
                         raise RuntimeError(f"{name} exited ({child.returncode}); see .cache/dev/{name}.log")
                 if not ready:
                     ready = (reachable(env["DEV_API_URL"] + "/healthz") and
@@ -216,7 +262,7 @@ def start():
             raise RuntimeError("Startup failed; see .cache/dev/supervisor.log (may contain private diagnostics)")
         if READY.exists():
             print("Native development ready: " + json.loads(READY.read_text())["url"])
-            print("Logs: .cache/dev/{api,worker,web}.log")
+            print("Logs: .cache/dev/{api,worker,node,builder,web}.log")
             return
         time.sleep(0.5)
     child.terminate()

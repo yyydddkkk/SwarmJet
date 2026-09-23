@@ -10,12 +10,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"testing"
-	"time"
 	"swarmjet/internal/agent"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/store"
 	"swarmjet/internal/workspace"
+	"testing"
+	"time"
 )
 
 func fixture(t *testing.T) (*Manager, domain.Task) {
@@ -67,7 +67,7 @@ func TestEligibilityProtectsActivePausedAndRecentTasks(t *testing.T) {
 }
 func TestCleanupOnlyOwnTaskDirectoriesAndStoppedContainers(t *testing.T) {
 	m, task := fixture(t)
-	for _, d := range []string{"task-sources", "opencode", "runs"} {
+	for _, d := range []string{"task-sources", "opencode", "agent-profiles", "runs"} {
 		put(t, filepath.Join(m.DataDir, d, task.ID, "own"), []byte("own"))
 		put(t, filepath.Join(m.DataDir, d, "sibling", "keep"), []byte("keep"))
 	}
@@ -90,7 +90,7 @@ func TestCleanupOnlyOwnTaskDirectoriesAndStoppedContainers(t *testing.T) {
 	if len(removed) != 1 || removed[0] != "container rm sj-agent-old-execution" {
 		t.Fatalf("unexpected removal %v", removed)
 	}
-	for _, d := range []string{"task-sources", "opencode", "runs"} {
+	for _, d := range []string{"task-sources", "opencode", "agent-profiles", "runs"} {
 		if _, e := os.Stat(filepath.Join(m.DataDir, d, task.ID)); !errors.Is(e, os.ErrNotExist) {
 			t.Fatalf("task dir remains %s", d)
 		}

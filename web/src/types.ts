@@ -93,6 +93,8 @@ export interface Initialization {
   agentStopped?: boolean;
 }
 export interface Project {
+  nodes?: {mode:string;ids?:string[]};
+  acceptanceStrategy?: "repository" | "gitlab_ci" | "custom";
   id: string;
   name: string;
   metaUrl: string;
@@ -110,6 +112,9 @@ export interface Project {
   development: AgentConfig;
   review: AgentConfig;
   integration: {
+    mode?: "compose" | "commands";
+    image?: string;
+    commands?: { name: string; path: string; argv: string[]; evidence: string }[];
     composeFile: string;
     checks: Check[] | null;
     startupTimeoutSeconds: number;

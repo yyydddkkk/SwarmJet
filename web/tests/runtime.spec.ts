@@ -4,13 +4,21 @@ const status = {
   profile: "default",
   image: "swarmjet-agent:local",
   available: true,
+  toolsChecked:true,
+  agents:[{id:"opencode",installed:true,configured:true,executionSupported:true},{id:"codex",installed:true,configured:false,executionSupported:true}],
   opencode: { installed: true, configured: true, providers: ["example"] },
   codex: { installed: true, configured: false, executionSupported: false },
 };
 async function runtimeAPI(page: Page) {
   let modelCalls = 0;
+  let enabled:string[] = [];
+  const agents=[{id:"opencode",name:"OpenCode",executable:"opencode",setupCommand:"opencode auth login"},{id:"codex",name:"Codex",executable:"codex",setupCommand:"codex login --device-auth"},{id:"dst",name:"DeepSeek Harness TUI",executable:"dsh",setupCommand:"dst"},{id:"agy",name:"Antigravity",executable:"agy",setupCommand:"agy"},{id:"claude",name:"Claude Code",executable:"claude",setupCommand:"claude"}];
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/runtime/agents") {
+      if(route.request().method()==="PUT") enabled=route.request().postDataJSON().enabled;
+      return route.fulfill({json:{agents,enabled}});
+    }
     if (path === "/api/session")
       return route.fulfill({ json: { username: "admin" } });
     if (path === "/api/runtime/status") return route.fulfill({ json: status });
@@ -45,12 +53,13 @@ test("runtime status and model catalog are explicit, searchable and copyable", a
   await expect(
     page.getByRole("heading", { name: "执行器环境", exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", {name:"展开 OpenCode 详情",exact:true}).click();
   await expect(
     page.getByRole("region", { name: "OpenCode 环境状态" }),
-  ).toContainText("检测到登录配置");
+  ).toContainText("已检测到（不代表认证有效）");
   await expect(
     page.getByRole("region", { name: "Codex 环境状态" }),
-  ).toContainText("任务适配器尚未实现");
+  ).toContainText("agent:codex");
   expect(connections).toBe(0);
   expect(modelCalls()).toBe(0);
   await page.getByRole("button", { name: "刷新模型列表", exact: true }).click();
@@ -259,4 +268,23 @@ test("floating terminal opens on demand, maximizes, preserves Escape and closes 
   await expect(page.locator(".xterm")).toHaveCount(0);
   await launch.click();
   await expect.poll(() => connections).toBe(2);
+});
+
+
+test("agents start unchecked and only explicit saved selections persist", async ({page})=>{
+  await runtimeAPI(page);
+  await page.goto("/#/runtime");
+  await expect(page.getByRole("checkbox")).toHaveCount(5);
+  await expect(page.getByRole("checkbox",{checked:true})).toHaveCount(0);
+  await expect(page.getByText("工具安装",{exact:true}).first()).not.toBeVisible();
+  await page.getByRole("button",{name:"展开 OpenCode 详情",exact:true}).click();
+  await expect(page.getByText("工具安装",{exact:true}).first()).toBeVisible();
+  await expect(page.getByRole("region",{name:"Codex 环境状态"}).getByText("工具安装",{exact:true})).not.toBeVisible();
+  await page.getByRole("button",{name:"收起 OpenCode 详情",exact:true}).click();
+  await page.getByRole("checkbox",{name:"Codex",exact:true}).check();
+  await page.getByRole("button",{name:"保存启用列表",exact:true}).click();
+  await expect(page.getByRole("status").filter({hasText:"启用列表已保存"})).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("checkbox",{name:"Codex",exact:true})).toBeChecked();
+  await expect(page.getByRole("checkbox",{checked:true})).toHaveCount(1);
 });

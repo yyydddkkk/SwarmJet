@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -29,6 +30,8 @@ import (
 	"swarmjet/internal/integration"
 	"swarmjet/internal/maintenance"
 	"swarmjet/internal/managedmeta"
+	"swarmjet/internal/networkconfig"
+	"swarmjet/internal/nodeenvironment"
 	"swarmjet/internal/pipeline"
 	"swarmjet/internal/runtimeadmin"
 	"swarmjet/internal/secretbox"
@@ -92,10 +95,49 @@ func runNode(ctx context.Context) error {
 			im.Env[k] = os.Getenv(k)
 		}
 	}
-	local := &execution.LocalNode{NodeID: id, AgentBackend: agent.New(data), Workspace: wm, Integration: im, DataDir: data}
+	environment := nodeenvironment.New(data, id)
+	local := &execution.LocalNode{NodeID: id, AgentBackend: &execution.EnvironmentBackend{AgentBackend: agent.New(data), Env: nodeAgentEnv()}, Workspace: wm, Integration: im, DataDir: data}
+	local.StaticAnalysis = func(ctx context.Context, p execution.AnalysisParams) (execution.AnalysisResult, error) {
+		return initflow.AnalyzeAtNode(ctx, data, local.AgentBackend, p, nil)
+	}
 	// MaxBody accommodates a base64 managed Meta-Repo bundle in addition to the
 	// small agent and integration requests.
-	server := &http.Server{Addr: env("NODE_LISTEN_ADDRESS", ":8092"), Handler: &execution.Handler{Node: local, Secret: secret, MaxBody: 32 << 20}, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
+	rpc := &execution.Handler{Node: local, Secret: secret, MaxBody: 32 << 20}
+	var adminMu sync.Mutex
+	var admin http.Handler
+	adminRequests := 0
+	adminVersion := ""
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/runtime/") {
+			rpc.ServeHTTP(w, r)
+			return
+		}
+		active := environment.Active()
+		if active == nil {
+			http.Error(w, "节点镜像尚未就绪", 503)
+			return
+		}
+		key := fmt.Sprintf("%d/%s/%d", active.Config.Version, active.Network.ID, active.Network.Version)
+		adminMu.Lock()
+		busy := adminRequests > 0
+		if h, ok := admin.(interface{ TerminalActive() bool }); ok {
+			busy = busy || h.TerminalActive()
+		}
+		if admin == nil || adminVersion != key && !busy {
+			vars := nodeAgentEnv()
+			for k, v := range active.Env {
+				vars[k] = v
+			}
+			admin = runtimeadmin.New(runtimeadmin.Config{DataDir: data, Image: active.Config.Image, Secret: secret, Env: vars, DockerNetwork: "sj-node-" + id, Revision: key, DisableImages: true})
+			adminVersion = key
+		}
+		h := admin
+		adminRequests++
+		defer func() { adminMu.Lock(); adminRequests--; adminMu.Unlock() }()
+		adminMu.Unlock()
+		http.StripPrefix("/runtime", h).ServeHTTP(w, r)
+	})
+	server := &http.Server{Addr: env("NODE_LISTEN_ADDRESS", ":8092"), Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 	go func() {
 		<-ctx.Done()
 		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -107,7 +149,7 @@ func runNode(ctx context.Context) error {
 	}}
 	go func() {
 		send := func() {
-			b, _ := json.Marshal(domain.Node{ID: id, Address: advertise, Capacity: capacity, Version: "swarmjet-node"})
+			b, _ := json.Marshal(domain.Node{ID: id, Address: advertise, Capacity: capacity, Version: "swarmjet-node-v2", Readiness: environment.Status()})
 			hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			req, err := http.NewRequestWithContext(hctx, http.MethodPost, strings.TrimRight(control, "/")+"/api/nodes", bytes.NewReader(b))
@@ -121,7 +163,12 @@ func runNode(ctx context.Context) error {
 				slog.Warn("node heartbeat failed", "error", err)
 				return
 			}
-			_, _ = io.Copy(io.Discard, resp.Body)
+			if resp.StatusCode == http.StatusOK {
+				var reply nodeenvironment.Reply
+				if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&reply) == nil && reply.Desired != nil {
+					environment.Apply(ctx, *reply.Desired)
+				}
+			}
 			_ = resp.Body.Close()
 			if resp.StatusCode != http.StatusOK {
 				slog.Warn("node heartbeat rejected", "status", resp.StatusCode)
@@ -153,7 +200,7 @@ func run() error {
 		mode = os.Args[1]
 	}
 	if mode == "help" || mode == "--help" {
-		fmt.Println("swarmjet serve | worker | node | migrate | doctor | legacy-inventory <state.json>")
+		fmt.Println("swarmjet serve | worker | node | builder | mihomo | migrate | doctor | legacy-inventory <state.json>")
 		return nil
 	}
 	if mode == "legacy-inventory" {
@@ -172,6 +219,9 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if mode == "mihomo" {
+		return runMihomo(ctx)
+	}
 	if mode == "node" {
 		return runNode(ctx)
 	}
@@ -189,6 +239,12 @@ func run() error {
 	if boxErr != nil {
 		slog.Warn("saved GitLab connections disabled; set SWARMJET_MASTER_KEY to a stable 32-byte key", "reason", boxErr.Error())
 		box = nil
+	}
+	nodeSecret := func(ctx context.Context, id string) (string, error) {
+		return networkconfig.NodeSecret(ctx, s, box, id, os.Getenv("NODE_SECRET"))
+	}
+	if mode == "builder" {
+		return runBuilder(ctx, s, box)
 	}
 	resolver := &credentials.Resolver{Store: s, Box: box, Env: os.Getenv}
 	// bound resolves a project token and refuses to send a saved connection to a
@@ -227,9 +283,17 @@ func run() error {
 		if len(password) < 12 {
 			return fmt.Errorf("ADMIN_PASSWORD must contain at least 12 characters")
 		}
+		initNodes := &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}
 		initializer := &initflow.Manager{Store: s, DataDir: data, Managed: managedmeta.New(data), Credential: resolver.Resolve, CredentialFor: boundProject, Logger: slog.Default()}
-		handler := api.New(s, api.Config{Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET")}})
-		svc := &service.Service{Store: s, Temporal: tc, ResolveCredential: resolver.Resolve, ProjectCredential: bound, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Wake: make(chan struct{}, 1)}
+		initializer.CancelAnalysis = func(ctx context.Context, in domain.Initialization) error {
+			n, e := initNodes.Node(ctx, in.NodeID)
+			if e != nil {
+				return e
+			}
+			return n.CancelTask(ctx, in.ProjectID)
+		}
+		handler := api.New(s, api.Config{Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), BuilderURL: os.Getenv("BUILDER_ADMIN_URL"), MihomoURL: os.Getenv("MIHOMO_ADMIN_URL"), MihomoSecret: os.Getenv("MIHOMO_ADMIN_SECRET"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}})
+		svc := &service.Service{DataDir: data, Store: s, Temporal: tc, ResolveCredential: resolver.Resolve, ProjectCredential: bound, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Wake: make(chan struct{}, 1)}
 		go svc.Run(ctx)
 		a := &pipeline.Activities{Store: s, Credential: resolver.Resolve, ProjectCredential: bound}
 		go svc.Sync(ctx, a)
@@ -273,23 +337,61 @@ func run() error {
 			agentEnv[k] = v
 		}
 	}
-	for _, k := range strings.Split(env("AGENT_ENV_ALLOWLIST", "OPENAI_API_KEY,ANTHROPIC_API_KEY,DEEPSEEK_API_KEY,OPENCODE_CONFIG_CONTENT"), ",") {
+	for _, k := range strings.Split(env("AGENT_ENV_ALLOWLIST", "OPENAI_API_KEY,CODEX_API_KEY,ANTHROPIC_API_KEY,CLAUDE_CODE_OAUTH_TOKEN,DEEPSEEK_API_KEY,GEMINI_API_KEY,AGY_ADC_AUTH,GOOGLE_GEMINI_BASE_URL,OPENCODE_CONFIG_CONTENT"), ",") {
 		k = strings.TrimSpace(k)
 		if v := os.Getenv(k); k != "" && v != "" {
 			agentEnv[k] = v
 		}
 	}
 	localAgents := agent.New(data)
-	nodes := &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET")}
-	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: localAgents, Integration: im, Nodes: nodes, IntegrationEnv: im.Env, DataDir: data, Concurrency: n, Credential: resolver.Resolve, ProjectCredential: bound, AgentEnv: agentEnv}
+	nodes := &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}
+	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: localAgents, Integration: im, Nodes: nodes, IntegrationEnv: im.Env, DataDir: data, Concurrency: n, Credential: resolver.Resolve, ProjectCredential: bound, AgentEnv: agentEnv, NetworkEnv: func(ctx context.Context, ref domain.NetworkVersion) (map[string]string, error) {
+		return networkconfig.Resolve(ctx, s, box, ref)
+	}}
 	// Initialization is resumed here so a worker restart recovers running jobs.
 	initMgr := &initflow.Manager{Store: s, DataDir: data, Managed: managedmeta.New(data), Credential: resolver.Resolve, CredentialFor: boundProject, Agents: localAgents, VerifyImage: os.Getenv("INIT_VERIFY_IMAGE"), Logger: slog.Default()}
+	if os.Getenv("EXECUTION_MODE") == "distributed" || os.Getenv("BUILDER_ADMIN_URL") != "" {
+		initMgr.RemoteAnalysis = func(ctx context.Context, in *domain.Initialization, p domain.Project) (execution.AnalysisResult, error) {
+			assigned, e := s.AssignInitializationNode(ctx, *in, p)
+			if e != nil {
+				return execution.AnalysisResult{}, e
+			}
+			*in = assigned
+			n, e := nodes.Node(ctx, in.NodeID)
+			if e != nil {
+				return execution.AnalysisResult{}, e
+			}
+			remote, ok := n.(interface {
+				Analyze(context.Context, execution.AnalysisParams) (execution.AnalysisResult, error)
+			})
+			if !ok {
+				return execution.AnalysisResult{}, fmt.Errorf("节点不支持静态初始化")
+			}
+			vars, e := networkconfig.Resolve(ctx, s, box, in.Network)
+			if e != nil {
+				return execution.AnalysisResult{}, e
+			}
+			token, e := bound(p, false)
+			if e != nil {
+				return execution.AnalysisResult{}, e
+			}
+			vars["GITLAB_TOKEN"] = token
+			return remote.Analyze(ctx, execution.AnalysisParams{Initialization: *in, Project: p, Env: vars})
+		}
+	}
+	initMgr.CancelAnalysis = func(ctx context.Context, in domain.Initialization) error {
+		n, e := nodes.Node(ctx, in.NodeID)
+		if e != nil {
+			return e
+		}
+		return n.CancelTask(ctx, in.ProjectID)
+	}
 	go initMgr.Run(ctx)
 	if secret := os.Getenv("RUNTIME_ADMIN_SECRET"); secret != "" {
 		if len(secret) < 32 {
 			return fmt.Errorf("RUNTIME_ADMIN_SECRET must contain at least 32 characters")
 		}
-		admin := &http.Server{Addr: env("RUNTIME_ADMIN_LISTEN", ":8091"), Handler: runtimeadmin.New(runtimeadmin.Config{DataDir: data, Image: env("AGENT_IMAGE", "swarmjet-agent:local"), Secret: secret, Env: agentEnv}), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
+		admin := &http.Server{Addr: env("RUNTIME_ADMIN_LISTEN", ":8091"), Handler: runtimeadmin.New(runtimeadmin.Config{DataDir: data, Image: env("AGENT_IMAGE", "swarmjet-agent:local"), Secret: secret, Env: agentEnv, DisableImages: os.Getenv("BUILDER_ADMIN_URL") != ""}), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 		go func() {
 			if err := admin.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				slog.Error("runtime admin stopped", "error", err)

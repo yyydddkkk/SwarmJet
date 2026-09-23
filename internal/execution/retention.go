@@ -120,7 +120,7 @@ func RetireTask(ctx context.Context, cfg RetireConfig, t domain.Task) error {
 		return errors.New("active or paused task cannot be retired")
 	}
 	paths := []string{}
-	for _, category := range []string{"task-sources", "opencode", "runs"} {
+	for _, category := range []string{"task-sources", "opencode", "agent-profiles", "runs"} {
 		p, e := retirePath(cfg.DataDir, category, t.ID)
 		if e != nil {
 			return e

@@ -19,18 +19,27 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"swarmjet/internal/agentcli"
+	"swarmjet/internal/imagebuild"
 	"sync"
 	"time"
 )
 
 type DockerRunner func(context.Context, []string, []string) ([]byte, error)
 type Config struct {
+	ConfigureImages        func(*imagebuild.Manager) error
+	ImagesOnly             bool
+	DisableImages          bool
+	DockerNetwork          string
+	Revision               string
+	ImageRunner            imagebuild.Runner
 	DataDir, Image, Secret string
 	Env                    map[string]string
 	DockerCommand          DockerRunner
 	TerminalCommand        func(context.Context, []string, []string) *exec.Cmd
 }
 type server struct {
+	imageManager   *imagebuild.Manager
 	cfg            Config
 	dirs           ProfileDirs
 	name, identity string
@@ -49,12 +58,18 @@ func New(cfg Config) http.Handler {
 	sum := sha256.Sum256([]byte(abs))
 	identity := hex.EncodeToString(sum[:12])
 	s := &server{cfg: cfg, dirs: GetProfileDirs(abs), name: "sj-config-" + identity, identity: identity, secret: sha256.Sum256([]byte(cfg.Secret)), terminal: make(chan struct{}, 1), initErr: e}
-	if missingDir || cfg.Image == "" || strings.HasPrefix(cfg.Image, "-") || strings.ContainsAny(abs, ",\n\r") {
+	if missingDir || (cfg.Image == "" && !cfg.ImagesOnly) || strings.HasPrefix(cfg.Image, "-") || strings.ContainsAny(abs, ",\n\r") {
 		s.initErr = errors.New("runtime profile configuration is incomplete")
 	}
 	safe := map[string]string{}
 	for k, v := range cfg.Env {
-		if _, ok := providerEnv[k]; (ok || k == "OPENCODE_CONFIG_CONTENT") && v != "" {
+		isProxy := false
+		for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"} {
+			if k == name {
+				isProxy = true
+			}
+		}
+		if _, ok := providerEnv[k]; isProxy || (ok || k == "OPENCODE_CONFIG_CONTENT") && v != "" {
 			if k == "OPENCODE_CONFIG_CONTENT" && len(v) > maxInlineConfig {
 				s.initErr = errors.New("inline provider configuration exceeds size limit")
 				continue
@@ -63,16 +78,33 @@ func New(cfg Config) http.Handler {
 		}
 	}
 	s.cfg.Env = safe
+	if s.initErr == nil && !cfg.DisableImages {
+		s.imageManager, _ = imagebuild.New(cfg.DataDir, cfg.ImageRunner)
+		if s.imageManager != nil && cfg.ConfigureImages != nil {
+			if err := cfg.ConfigureImages(s.imageManager); err != nil {
+				s.initErr = err
+				s.imageManager = nil
+			}
+		}
+	}
 	return s
 }
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.ImagesOnly && !strings.HasPrefix(r.URL.Path, "/images") {
+		writeJSON(w, 404, map[string]string{"error": "构建服务仅提供镜像接口"})
+		return
+	}
 	provided := sha256.Sum256([]byte(r.Header.Get("X-SwarmJet-Runtime-Secret")))
 	if s.cfg.Secret == "" || subtle.ConstantTimeCompare(provided[:], s.secret[:]) != 1 {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "运行环境鉴权失败"})
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	if r.Method != http.MethodGet && !(r.Method == http.MethodPost && r.URL.Path == "/verify") {
+	if r.URL.Path == "/images" || strings.HasPrefix(r.URL.Path, "/images/") {
+		s.images(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && !(r.Method == http.MethodPost && (r.URL.Path == "/verify" || r.URL.Path == "/network-test")) {
 		w.Header().Set("Allow", "GET, POST")
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "不支持此请求方法"})
 		return
@@ -82,6 +114,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
+	case "/network-test":
+		s.checkNetwork(w, r)
 	case "/status":
 		s.status(w, r)
 	case "/models":
@@ -200,8 +234,18 @@ func (s *server) inspect(ctx context.Context) (profileContainer, bool, error) {
 	}
 	return c, true, nil
 }
+func (s *server) currentImage() (string, error) {
+	if s.cfg.DockerNetwork != "" {
+		return s.cfg.Image, nil
+	}
+	return imagebuild.CurrentImage(s.cfg.DataDir, s.cfg.Image)
+}
 func (s *server) image(ctx context.Context) (string, error) {
-	b, e := s.docker(ctx, nil, "image", "inspect", "--format", "{{.Id}}", s.cfg.Image)
+	configured, e := s.currentImage()
+	if e != nil {
+		return "", e
+	}
+	b, e := s.docker(ctx, nil, "image", "inspect", "--format", "{{.Id}}", configured)
 	if e != nil || strings.TrimSpace(string(b)) == "" {
 		return "", errors.New("运行环境镜像不可用")
 	}
@@ -213,6 +257,10 @@ func (s *server) ensure(ctx context.Context) error {
 	if e := ensureProfileHome(s.dirs.Home); e != nil {
 		return errors.New("运行环境配置目录不可用。")
 	}
+	configured, e := s.currentImage()
+	if e != nil {
+		return e
+	}
 	image, e := s.image(ctx)
 	if e != nil {
 		return e
@@ -221,7 +269,7 @@ func (s *server) ensure(ctx context.Context) error {
 	if e != nil {
 		return e
 	}
-	if exists && (c.Config.Image != s.cfg.Image || c.Config.User != runtimeUser() || (c.Image != "" && c.Image != image)) {
+	if exists && ((s.cfg.Revision != "" && c.Config.Labels["swarmjet.runtime-revision"] != s.cfg.Revision) || c.Config.Image != configured || c.Config.User != runtimeUser() || (c.Image != "" && c.Image != image)) {
 		if _, e = s.docker(ctx, nil, "container", "stop", "--time", "5", s.name); e != nil {
 			return errors.New("无法停止旧版本运行环境容器")
 		}
@@ -231,7 +279,10 @@ func (s *server) ensure(ctx context.Context) error {
 		exists = false
 	}
 	if !exists {
-		args := []string{"container", "create", "--name", s.name, "--user", runtimeUser(), "--label", "swarmjet.runtime-profile=default", "--label", "swarmjet.runtime-root=" + s.identity, "--mount", "type=bind,src=" + s.dirs.Home + ",dst=/runtime-home", "--workdir", "/runtime-home", "--env", "HOME=/runtime-home", "--env", "XDG_DATA_HOME=/runtime-home/.local/share", "--env", "XDG_CONFIG_HOME=/runtime-home/.config", "--env", "CODEX_HOME=/runtime-home/.codex", "--env", "HISTFILE=/dev/null", "--env", "HISTSIZE=0", "--env", "HISTFILESIZE=0"}
+		args := []string{"container", "create", "--name", s.name, "--user", runtimeUser(), "--label", "swarmjet.runtime-profile=default", "--label", "swarmjet.runtime-root=" + s.identity, "--label", "swarmjet.runtime-revision=" + s.cfg.Revision, "--mount", "type=bind,src=" + s.dirs.Home + ",dst=/runtime-home", "--workdir", "/runtime-home", "--env", "HOME=/runtime-home", "--env", "XDG_DATA_HOME=/runtime-home/.local/share", "--env", "XDG_CONFIG_HOME=/runtime-home/.config", "--env", "CODEX_HOME=/runtime-home/.codex", "--env", "HISTFILE=/dev/null", "--env", "HISTSIZE=0", "--env", "HISTFILESIZE=0"}
+		if s.cfg.DockerNetwork != "" {
+			args = append(args, "--network", s.cfg.DockerNetwork)
+		}
 		keys := []string{}
 		for k := range s.cfg.Env {
 			keys = append(keys, k)
@@ -240,7 +291,7 @@ func (s *server) ensure(ctx context.Context) error {
 		for _, k := range keys {
 			args = append(args, "--env", k)
 		}
-		args = append(args, "--entrypoint", "/bin/sh", s.cfg.Image, "-c", "exec sleep infinity")
+		args = append(args, "--entrypoint", "/bin/sh", configured, "-c", "exec sleep infinity")
 		if _, e = s.docker(ctx, s.cfg.Env, args...); e != nil {
 			return errors.New("无法创建运行环境容器")
 		}
@@ -270,18 +321,28 @@ func (s *server) stop(ctx context.Context) error {
 	}
 	return nil
 }
-func (s *server) installed(ctx context.Context) (bool, bool, bool) {
-	b, e := s.docker(ctx, nil, "exec", s.name, "/bin/sh", "-c", "command -v opencode >/dev/null 2>&1 && printf 'opencode\\n'; command -v codex >/dev/null 2>&1 && printf 'codex\\n'; true")
+func (s *server) installed(ctx context.Context) (map[string]bool, bool) {
+	script := ""
+	for _, spec := range agentcli.Catalog() {
+		script += "command -v " + spec.Executable + " >/dev/null 2>&1 && printf '" + spec.ID + "\\n'; "
+	}
+	script += "true"
+	b, e := s.docker(ctx, nil, "exec", s.name, "/bin/sh", "-c", script)
+	found := map[string]bool{}
 	if e != nil {
-		return false, false, false
+		return found, false
 	}
-	names := strings.Fields(string(b))
-	open, codex := false, false
-	for _, name := range names {
-		open = open || name == "opencode"
-		codex = codex || name == "codex"
+	for _, name := range strings.Fields(string(b)) {
+		found[name] = true
 	}
-	return open, codex, true
+	return found, true
+}
+
+type agentStatus struct {
+	ID                 string `json:"id"`
+	Installed          bool   `json:"installed"`
+	Configured         bool   `json:"configured"`
+	ExecutionSupported bool   `json:"executionSupported"`
 }
 
 type openCodeStatus struct {
@@ -296,6 +357,7 @@ type codexStatus struct {
 	ExecutionSupported bool `json:"executionSupported"`
 }
 type statusResponse struct {
+	Agents       []agentStatus  `json:"agents"`
 	Profile      string         `json:"profile"`
 	Image        string         `json:"image"`
 	Available    bool           `json:"available"`
@@ -306,8 +368,22 @@ type statusResponse struct {
 }
 
 func (s *server) status(w http.ResponseWriter, r *http.Request) {
+	configured, err := s.currentImage()
+	if err != nil {
+		writeJSON(w, 503, map[string]string{"error": "当前镜像配置不可读"})
+		return
+	}
 	metadata := profileInfo(s.dirs, s.cfg.Env)
-	out := statusResponse{Profile: "default", Image: s.cfg.Image, OpenCode: openCodeStatus{Configured: len(metadata.Providers) > 0, Providers: metadata.Providers, ConfigExists: metadata.ConfigExists}, Codex: codexStatus{Configured: metadata.CodexConfigured}}
+	out := statusResponse{Profile: "default", Image: configured, OpenCode: openCodeStatus{Configured: len(metadata.Providers) > 0, Providers: metadata.Providers, ConfigExists: metadata.ConfigExists}, Codex: codexStatus{Configured: metadata.CodexConfigured, ExecutionSupported: true}}
+	for _, spec := range agentcli.Catalog() {
+		configured := false
+		for _, name := range spec.Files {
+			if b, e := readProfileFile(s.dirs.Home, name); e == nil && len(b) > 0 {
+				configured = true
+			}
+		}
+		out.Agents = append(out.Agents, agentStatus{ID: spec.ID, Configured: configured, ExecutionSupported: true})
+	}
 	if _, e := s.image(r.Context()); e != nil {
 		out.Message = "配置的运行环境镜像不可用。"
 		writeJSON(w, 200, out)
@@ -319,10 +395,15 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		out.Available = false
 		out.Message = e.Error()
 	} else if exists && c.State.Running {
-		if c.Config.Image != s.cfg.Image {
+		if c.Config.Image != configured {
 			out.Message = "配置终端将使用当前指定镜像重新创建，已保存的配置会保留。"
 		} else {
-			out.OpenCode.Installed, out.Codex.Installed, out.ToolsChecked = s.installed(r.Context())
+			installed, checked := s.installed(r.Context())
+			out.ToolsChecked = checked
+			out.OpenCode.Installed, out.Codex.Installed = installed["opencode"], installed["codex"]
+			for i := range out.Agents {
+				out.Agents[i].Installed = installed[out.Agents[i].ID]
+			}
 		}
 	} else {
 		out.Message = "打开终端或刷新模型后，将启动配置环境并检测已安装的工具。"
@@ -421,3 +502,6 @@ func (s *server) verify(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "model": model, "message": "最小实际调用成功。", "durationSeconds": int(time.Since(started).Seconds())})
 }
+
+// TerminalActive allows the node's versioned handler to preserve open terminals.
+func (s *server) TerminalActive() bool { return len(s.terminal) > 0 }

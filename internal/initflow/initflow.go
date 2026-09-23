@@ -46,6 +46,10 @@ type Cloner func(ctx context.Context, project domain.Project, repo domain.Reposi
 type Runner func(ctx context.Context, dir string, argv []string) (int, string, error)
 
 type Manager struct {
+	CancelAnalysis func(context.Context, domain.Initialization) error
+	RemoteAnalysis func(context.Context, *domain.Initialization, domain.Project) (execution.AnalysisResult, error)
+	AnalysisEnv    map[string]string
+
 	Store      Repository
 	DataDir    string
 	Agents     execution.AgentBackend
@@ -202,10 +206,10 @@ func (m *Manager) stopCancelled(ctx context.Context, init domain.Initialization)
 	// Verification containers are owned by this coordinator, not the agent
 	// backend, so they are cleaned even when the agent was already stopped.
 	m.cleanupVerifyContainers(init.ProjectID)
-	if init.AgentStopped || m.Agents == nil {
+	if init.AgentStopped || (m.Agents == nil && m.CancelAnalysis == nil) {
 		return
 	}
-	if err := m.Agents.CancelTask(ctx, init.ProjectID); err != nil {
+	if err := m.cancelAnalysis(ctx, init); err != nil {
 		m.log("stop cancelled initialization "+init.ProjectID, err)
 		return
 	}
@@ -316,8 +320,10 @@ func (m *Manager) Cancel(ctx context.Context, projectID string) error {
 	if domain.InitTerminal(init.Status) {
 		return nil
 	}
-	if m.Agents != nil {
-		_ = m.Agents.CancelTask(ctx, projectID)
+	if m.Agents != nil || m.CancelAnalysis != nil {
+		if err = m.cancelAnalysis(ctx, init); err != nil {
+			return err
+		}
 	}
 	init.Status = domain.InitCancelled
 	init.Stage = "cancelled"
@@ -342,8 +348,10 @@ func (m *Manager) Retry(ctx context.Context, projectID string) error {
 	if !retryable {
 		return errors.New("当前初始化状态不可重试")
 	}
-	if m.Agents != nil {
-		_ = m.Agents.CancelTask(ctx, projectID)
+	if m.Agents != nil || m.CancelAnalysis != nil {
+		if err = m.cancelAnalysis(ctx, init); err != nil {
+			return err
+		}
 	}
 	init.Status = domain.InitPending
 	init.Error = ""
@@ -519,4 +527,17 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (m *Manager) cancelAnalysis(ctx context.Context, in domain.Initialization) error {
+	if in.NodeID != "" {
+		if m.CancelAnalysis == nil {
+			return errors.New("远程初始化取消接口未配置")
+		}
+		return m.CancelAnalysis(ctx, in)
+	}
+	if m.Agents != nil {
+		return m.Agents.CancelTask(ctx, in.ProjectID)
+	}
+	return nil
 }

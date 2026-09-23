@@ -169,14 +169,20 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84261302)"); e != nil {
 		return t, e
 	}
-	node, found, e := pickNode(ctx, tx)
+	node, found, e := pickTaskNode(ctx, tx, &t)
 	if e != nil {
 		return t, e
 	}
 	if found {
 		t.NodeID = node
-	} else if requireNode {
-		return t, ErrNoNode
+	} else {
+		managed := false
+		if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM node_configs)`).Scan(&managed); e != nil {
+			return t, e
+		}
+		if requireNode || managed || t.Project.Nodes.Mode == "selected" {
+			return t, fmt.Errorf("%w: %s", ErrNoNode, t.Message)
+		}
 	}
 	b, _ := json.Marshal(t)
 	source := fmt.Sprintf("%s/%d/%d", domain.GitLabIdentity(t.Project.GitLabURL), t.Issue.ProjectID, t.Issue.IID)
@@ -197,30 +203,6 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 	return t, tx.Commit(ctx)
 }
 
-// pickNode chooses the least loaded online node with spare capacity. Ties break
-// by id so consecutive assignments are deterministic.
-func pickNode(ctx context.Context, tx pgx.Tx) (string, bool, error) {
-	rows, e := tx.Query(ctx, `SELECT n.id
-		FROM nodes n
-		LEFT JOIN (
-			SELECT node_id, count(*) AS running FROM tasks
-			WHERE NOT terminal AND node_id IS NOT NULL GROUP BY node_id
-		) r ON r.node_id = n.id
-		WHERE n.last_seen > now() - $1::interval AND COALESCE(r.running,0) < n.capacity
-		ORDER BY COALESCE(r.running,0) ASC, n.id ASC LIMIT 1`, fmt.Sprintf("%f seconds", domain.NodeOnlineAfter.Seconds()))
-	if e != nil {
-		return "", false, e
-	}
-	defer rows.Close()
-	if !rows.Next() {
-		return "", false, rows.Err()
-	}
-	var id string
-	if e = rows.Scan(&id); e != nil {
-		return "", false, e
-	}
-	return id, true, rows.Err()
-}
 func (s *Store) Task(ctx context.Context, id string) (domain.Task, error) {
 	var b []byte
 	e := s.Pool.QueryRow(ctx, "SELECT body FROM tasks WHERE id=$1", id).Scan(&b)
@@ -371,15 +353,44 @@ func (s *Store) HeartbeatNode(ctx context.Context, n domain.Node) error {
 	if n.Capacity < 1 {
 		n.Capacity = 1
 	}
-	_, e := s.Pool.Exec(ctx, `INSERT INTO nodes(id,address,capacity,version,last_seen)
-		VALUES($1,$2,$3,$4,now())
-		ON CONFLICT(id) DO UPDATE SET address=excluded.address, capacity=excluded.capacity, version=excluded.version, last_seen=now()`, n.ID, n.Address, n.Capacity, n.Version)
-	return e
+	b, e := json.Marshal(n.Readiness)
+	if e != nil {
+		return e
+	}
+	tx, e := s.Pool.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	tag, e := tx.Exec(ctx, `INSERT INTO nodes(id,address,capacity,version,last_seen,readiness) VALUES($1,$2,$3,$4,now(),$5)
+ ON CONFLICT(id) DO UPDATE SET address=excluded.address,capacity=excluded.capacity,version=excluded.version,last_seen=now(),readiness=excluded.readiness
+ WHERE nodes.address=excluded.address OR nodes.last_seen<now()-interval '30 seconds'`, n.ID, n.Address, n.Capacity, n.Version, b)
+	if e != nil {
+		return e
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: 此节点 ID 正在另一个地址发送心跳", ErrConflict)
+	}
+	if n.Version != "" {
+		c := domain.NodeConfig{Version: 1, Name: n.ID, Capacity: n.Capacity, Network: domain.NetworkChoice{Mode: "default"}}
+		raw, e := json.Marshal(c)
+		if e != nil {
+			return e
+		}
+		if _, e = tx.Exec(ctx, `INSERT INTO node_configs(id,version,body) VALUES($1,1,$2) ON CONFLICT(id) DO NOTHING`, n.ID, raw); e != nil {
+			return e
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) Node(ctx context.Context, id string) (domain.Node, error) {
 	var n domain.Node
-	e := s.Pool.QueryRow(ctx, "SELECT id,address,capacity,version,last_seen FROM nodes WHERE id=$1", id).Scan(&n.ID, &n.Address, &n.Capacity, &n.Version, &n.LastSeen)
+	var readiness []byte
+	e := s.Pool.QueryRow(ctx, "SELECT id,address,capacity,version,last_seen,readiness FROM nodes WHERE id=$1", id).Scan(&n.ID, &n.Address, &n.Capacity, &n.Version, &n.LastSeen, &readiness)
+	if e == nil {
+		e = json.Unmarshal(readiness, &n.Readiness)
+	}
 	return n, mapErr(e)
 }
 
@@ -390,7 +401,7 @@ func (s *Store) NodeAddress(ctx context.Context, id string) (string, error) {
 }
 
 func (s *Store) Nodes(ctx context.Context) ([]domain.Node, error) {
-	rows, e := s.Pool.Query(ctx, "SELECT id,address,capacity,version,last_seen FROM nodes ORDER BY id")
+	rows, e := s.Pool.Query(ctx, "SELECT id,address,capacity,version,last_seen,readiness FROM nodes ORDER BY id")
 	if e != nil {
 		return nil, e
 	}
@@ -398,7 +409,11 @@ func (s *Store) Nodes(ctx context.Context) ([]domain.Node, error) {
 	out := []domain.Node{}
 	for rows.Next() {
 		var n domain.Node
-		if e = rows.Scan(&n.ID, &n.Address, &n.Capacity, &n.Version, &n.LastSeen); e != nil {
+		var readiness []byte
+		if e = rows.Scan(&n.ID, &n.Address, &n.Capacity, &n.Version, &n.LastSeen, &readiness); e != nil {
+			return nil, e
+		}
+		if e = json.Unmarshal(readiness, &n.Readiness); e != nil {
 			return nil, e
 		}
 		out = append(out, n)
@@ -407,12 +422,14 @@ func (s *Store) Nodes(ctx context.Context) ([]domain.Node, error) {
 }
 
 func (s *Store) NodeStatuses(ctx context.Context) ([]domain.NodeStatus, error) {
-	rows, e := s.Pool.Query(ctx, `SELECT n.id,n.address,n.capacity,n.version,n.last_seen,
+	rows, e := s.Pool.Query(ctx, `SELECT n.id,n.address,n.capacity,n.version,n.last_seen,n.readiness,
 		COALESCE(r.running,0), (n.last_seen > now() - $1::interval) AS online
 		FROM nodes n
 		LEFT JOIN (
-			SELECT node_id, count(*) AS running FROM tasks
-			WHERE NOT terminal AND node_id IS NOT NULL GROUP BY node_id
+			SELECT node_id,count(*) AS running FROM (
+ SELECT node_id FROM tasks WHERE NOT terminal AND node_id IS NOT NULL
+ UNION ALL SELECT body->>'nodeId' FROM initializations WHERE status NOT IN ('ready','cancelled') AND COALESCE(body->>'nodeId','')<>''
+ ) work GROUP BY node_id
 		) r ON r.node_id = n.id
 		ORDER BY n.id`, fmt.Sprintf("%f seconds", domain.NodeOnlineAfter.Seconds()))
 	if e != nil {
@@ -422,10 +439,26 @@ func (s *Store) NodeStatuses(ctx context.Context) ([]domain.NodeStatus, error) {
 	out := []domain.NodeStatus{}
 	for rows.Next() {
 		var v domain.NodeStatus
-		if e = rows.Scan(&v.Node.ID, &v.Node.Address, &v.Node.Capacity, &v.Node.Version, &v.Node.LastSeen, &v.Running, &v.Online); e != nil {
+		var readiness []byte
+		if e = rows.Scan(&v.Node.ID, &v.Node.Address, &v.Node.Capacity, &v.Node.Version, &v.Node.LastSeen, &readiness, &v.Running, &v.Online); e != nil {
+			return nil, e
+		}
+		if e = json.Unmarshal(readiness, &v.Node.Readiness); e != nil {
 			return nil, e
 		}
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	rows.Close()
+	for i := range out {
+		c, err := s.NodeConfig(ctx, out[i].Node.ID)
+		if err == nil {
+			out[i].Config = &c
+		} else if !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
+	}
+	return out, nil
 }

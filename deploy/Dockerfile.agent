@@ -4,19 +4,25 @@ ARG AGENT_BASE_IMAGE=node:22.23.1-bookworm-slim
 FROM ${AGENT_BASE_IMAGE}
 ARG OPENCODE_VERSION=1.18.31
 ARG CODEX_VERSION=0.155.1
+ARG CLAUDE_VERSION=2.1.278
+# Exact-session resume and --json require this published prerelease.
+ARG DSH_VERSION=0.1.6-alpha.2
+ARG DST_VERSION=0.10.2
+ARG AGENT_CLIS=opencode
 ARG GLAB_VERSION=1.115.0
 ARG UV_VERSION=0.8.22
 ARG PNPM_VERSION=10.17.1
+ARG EXTRA_APT_PACKAGES=
 ARG TARGETARCH
 ARG NPM_REGISTRY=https://registry.npmjs.org
 ARG PYPI_INDEX=https://pypi.org/simple
 ARG GLAB_RELEASE_URL=https://gitlab.com/gitlab-org/cli/-/releases
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git jq ripgrep python3 python3-pip python3-venv build-essential pkg-config libpq-dev openssh-client procps \
+ && apt-get install -y --no-install-recommends ca-certificates curl git jq ripgrep python3 python3-pip python3-venv build-essential pkg-config libpq-dev openssh-client procps ${EXTRA_APT_PACKAGES} \
  && rm -rf /var/lib/apt/lists/*
 RUN pip3 install --no-cache-dir --break-system-packages --index-url "${PYPI_INDEX}" "uv==${UV_VERSION}" \
- && npm install --global --registry "${NPM_REGISTRY}" "opencode-ai@${OPENCODE_VERSION}" "@openai/codex@${CODEX_VERSION}" "pnpm@${PNPM_VERSION}" \
- && opencode --version && codex --version && uv --version && pnpm --version
+ && npm install --global --registry "${NPM_REGISTRY}" "pnpm@${PNPM_VERSION}" \
+ && uv --version && pnpm --version
 RUN set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     archive="glab_${GLAB_VERSION}_linux_${arch}.tar.gz"; \
@@ -28,10 +34,12 @@ RUN set -eu; \
     install -m 0755 bin/glab /usr/local/bin/glab; \
     rm -rf "$archive" checksums.txt bin; \
     glab --version
+COPY scripts/install-agent-clis.sh /tmp/install-agent-clis.sh
+RUN bash /tmp/install-agent-clis.sh && rm /tmp/install-agent-clis.sh
 COPY scripts/askpass.sh /usr/local/bin/swarmjet-askpass
 RUN chmod 0755 /usr/local/bin/swarmjet-askpass
 ENV GIT_TERMINAL_PROMPT=0 ELECTRON_SKIP_BINARY_DOWNLOAD=1
 WORKDIR /workspace
 # The supervisor supplies container identity, mounts, permissions, environment and argv.
-ENTRYPOINT ["opencode"]
-CMD ["--version"]
+ENTRYPOINT ["/bin/bash"]
+CMD ["--noprofile", "--norc"]
