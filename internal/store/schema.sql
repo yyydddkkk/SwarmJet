@@ -24,5 +24,17 @@ CREATE TABLE IF NOT EXISTS node_configs(id text PRIMARY KEY REFERENCES nodes(id)
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS readiness jsonb NOT NULL DEFAULT '{}';
 CREATE TABLE IF NOT EXISTS node_credentials(id text PRIMARY KEY, secret text NOT NULL, revoked boolean NOT NULL DEFAULT false);
 
+-- Explicit issue comments request the next task round. A note is claimed in
+-- the same transaction that creates its task, so webhook/poll retries are safe.
+CREATE TABLE IF NOT EXISTS issue_run_commands(source text NOT NULL, note_id bigint NOT NULL, body text NOT NULL, created_at timestamptz NOT NULL, claimed_task_id text REFERENCES tasks(id), PRIMARY KEY(source,note_id));
+CREATE INDEX IF NOT EXISTS pending_issue_run_commands ON issue_run_commands(source,created_at,note_id) WHERE claimed_task_id IS NULL;
+CREATE TABLE IF NOT EXISTS feature_epochs(name text PRIMARY KEY, enabled_at timestamptz NOT NULL);
+INSERT INTO feature_epochs(name,enabled_at) VALUES('issue_round_comments',now()) ON CONFLICT DO NOTHING;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS gitlab_synced_at timestamptz;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS gitlab_sync_retry_at timestamptz;
+CREATE INDEX IF NOT EXISTS tasks_pending_gitlab_sync ON tasks(updated_at) WHERE gitlab_synced_at IS NULL OR updated_at > gitlab_synced_at;
+CREATE INDEX IF NOT EXISTS tasks_page ON tasks(updated_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS tasks_by_project_page ON tasks(project_id,updated_at DESC,id DESC);
+
 -- Existing nodes require explicit environment configuration before new managed work.
 INSERT INTO node_configs(id,version,body) SELECT id,1,jsonb_build_object('version',1,'name',id,'enabled',false,'archived',false,'capacity',capacity,'network',jsonb_build_object('mode','default'),'image','') FROM nodes ON CONFLICT(id) DO NOTHING;

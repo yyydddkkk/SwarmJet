@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { api, APIError, getLog } from "./api";
-import type { Task, TaskEvent, Project, Execution } from "./types";
+import type { Task, TaskPage, TaskEvent, Project, Execution } from "./types";
 import {
   taskView,
   nextAction,
@@ -507,6 +507,10 @@ function SidebarProjects({
 
 function Tasks({ projectId }: { projectId: string }) {
   const [tasks, setTasks] = useState<Task[]>([]),
+    [page, setPage] = useState<TaskPage | null>(null),
+    [attention, setAttention] = useState<Task[]>([]),
+    [cursor, setCursor] = useState(""),
+    [history, setHistory] = useState<string[]>([]),
     [projects, setProjects] = useState<Project[]>([]),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
@@ -517,11 +521,21 @@ function Tasks({ projectId }: { projectId: string }) {
     [create, setCreate] = useState(false);
   const refresh = useCallback(async () => {
     try {
-      const [t, p] = await Promise.all([
-        api<Task[] | null>("/tasks"),
+      const params = new URLSearchParams({ limit: "50", view });
+      if (projectFilter) params.set("project", projectFilter);
+      if (filter) params.set("stage", filter);
+      if (search.trim()) params.set("q", search.trim());
+      if (cursor) params.set("cursor", cursor);
+      const attentionParams = new URLSearchParams({ limit: "4", view: "attention" });
+      if (projectFilter) attentionParams.set("project", projectFilter);
+      const [t, urgent, p] = await Promise.all([
+        api<TaskPage>(`/tasks?${params}`),
+        api<TaskPage>(`/tasks?${attentionParams}`),
         api<Project[] | null>("/projects"),
       ]);
-      setTasks(t || []);
+      setTasks(t.items || []);
+      setPage(t);
+      setAttention(urgent.items || []);
       setProjects(p || []);
       setError("");
     } catch (e) {
@@ -529,7 +543,8 @@ function Tasks({ projectId }: { projectId: string }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [projectFilter, filter, search, view, cursor]);
+  useEffect(() => { setProjectFilter(projectId); setCursor(""); setHistory([]); }, [projectId]);
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => {
@@ -537,22 +552,9 @@ function Tasks({ projectId }: { projectId: string }) {
     }, 5000);
     return () => clearInterval(timer);
   }, [refresh]);
-  const scoped = tasks.filter(
-    (t) => !projectFilter || t.project.id === projectFilter,
-  );
-  const attention = scoped.filter((t) => taskView(t) === "attention");
-  const active = scoped.filter((t) => taskView(t) === "active");
-  const ended = scoped.filter((t) => taskView(t) === "ended");
-  const rows = scoped
-    .filter(
-      (t) =>
-        (view === "all" || taskView(t) === view) &&
-        (!filter || t.stage === filter) &&
-        `${t.issue.title} ${t.issue.iid} ${t.project.name} ${t.id}`
-          .toLowerCase()
-          .includes(search.trim().toLowerCase()),
-    )
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const counts = page?.counts || { all: 0, active: 0, attention: 0, ended: 0, completed: 0 };
+  const rows = tasks;
+  const resetPage = () => { setCursor(""); setHistory([]); };
   const projectOptions = Array.from(
     new Map(
       [...tasks.map((t) => t.project), ...projects].map((p) => [p.id, p]),
@@ -572,21 +574,19 @@ function Tasks({ projectId }: { projectId: string }) {
       <div className="task-overview" aria-label="任务概况">
         <span>
           <i className="live-dot" />
-          <strong>{loading ? "—" : active.length}</strong> 项任务正在推进
+          <strong>{loading ? "—" : counts.active}</strong> 项任务正在推进
         </span>
         <span>
           <Icon name="check" />
           <strong>
-            {loading
-              ? "—"
-              : scoped.filter((t) => t.stage === "completed").length}
+            {loading ? "—" : counts.completed}
           </strong>{" "}
           项已完成
         </span>
         <small>
           {projectOptions.find((p) => p.id === projectFilter)?.name ||
             "全部项目"}{" "}
-          · {scoped.length} 项任务
+          · {counts.all} 项任务
         </small>
       </div>
       <ErrorBox error={error} retry={refresh} />
@@ -597,20 +597,21 @@ function Tasks({ projectId }: { projectId: string }) {
         >
           <div className="section-heading">
             <h2 id="attention-title">
-              需要你处理 <span className="count">{attention.length}</span>
+              需要你处理 <span className="count">{counts.attention}</span>
             </h2>
-            {attention.length > 4 && (
+            {counts.attention > 4 && (
               <button
                 onClick={() => {
                   setView("attention");
                   setFilter("");
                   setSearch("");
+                  resetPage();
                   document
                     .getElementById("task-list")
                     ?.scrollIntoView({ block: "start" });
                 }}
               >
-                查看全部 {attention.length} 项
+                查看全部 {counts.attention} 项
               </button>
             )}
           </div>
@@ -652,10 +653,10 @@ function Tasks({ projectId }: { projectId: string }) {
           <div className="view-tabs" aria-label="任务视图">
             {(
               [
-                ["all", "全部任务", scoped.length],
-                ["active", "进行中", active.length],
-                ["attention", "需要处理", attention.length],
-                ["ended", "已结束", ended.length],
+                ["all", "全部任务", counts.all],
+                ["active", "进行中", counts.active],
+                ["attention", "需要处理", counts.attention],
+                ["ended", "已结束", counts.ended],
               ] as const
             ).map(([key, label, count]) => (
               <button
@@ -664,6 +665,7 @@ function Tasks({ projectId }: { projectId: string }) {
                 onClick={() => {
                   setView(key);
                   setFilter("");
+                  resetPage();
                 }}
               >
                 {label}
@@ -678,7 +680,7 @@ function Tasks({ projectId }: { projectId: string }) {
               aria-label="搜索任务"
               placeholder="搜索任务或编号…"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); resetPage(); }}
             />
           </div>
         </div>
@@ -687,7 +689,7 @@ function Tasks({ projectId }: { projectId: string }) {
             <select
               aria-label="筛选项目"
               value={projectFilter}
-              onChange={(e) => setProjectFilter(e.target.value)}
+              onChange={(e) => { setProjectFilter(e.target.value); resetPage(); }}
             >
               <option value="">全部项目</option>
               {projectOptions.map((p) => (
@@ -699,7 +701,7 @@ function Tasks({ projectId }: { projectId: string }) {
             <select
               aria-label="筛选任务阶段"
               value={filter}
-              onChange={(e) => setFilter(e.target.value)}
+              onChange={(e) => { setFilter(e.target.value); resetPage(); }}
             >
               <option value="">全部阶段</option>
               {Object.entries(stages).map(([v, s]) => (
@@ -779,7 +781,11 @@ function Tasks({ projectId }: { projectId: string }) {
         <div className="table-foot">
           每 5 秒自动更新{" "}
           <span>
-            显示 {rows.length} / {scoped.length} 项任务
+            显示 {rows.length} / {page?.total || 0} 项任务
+          </span>
+          <span className="task-page-actions">
+            <button disabled={history.length === 0} onClick={() => { setCursor(history[history.length - 1]); setHistory(history.slice(0, -1)); }}>上一页</button>
+            <button disabled={!page?.nextCursor} onClick={() => { setHistory([...history, cursor]); setCursor(page?.nextCursor || ""); }}>下一页</button>
           </span>
         </div>
       </section>
@@ -944,6 +950,7 @@ function TaskDetail({ id }: { id: string }) {
         <div>
           <div className="eyebrow">
             {task.project.name} <span> / Issue #{task.issue.iid}</span>
+            {task.round ? <span> / 第 {task.round} 轮</span> : null}
           </div>
           <h1>{task.issue.title}</h1>
           <p>
@@ -1002,6 +1009,8 @@ function TaskDetail({ id }: { id: string }) {
               <p>{task.message || stages[task.stage] || task.stage}</p>
             </div>
             <small>返工 {task.reworks} 次 · 每 3 秒自动更新</small>
+            {task.previousTaskId && <small>上一轮：<a href={`#/tasks/${encodeURIComponent(task.previousTaskId)}`}>{task.previousTaskId.slice(0, 12)}</a></small>}
+            {task.triggerText && <p>本轮补充需求：{task.triggerText}</p>}
           </section>
           {taskView(task) === "attention" &&
             task.stage !== "waiting_approval" && (

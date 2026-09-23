@@ -18,7 +18,7 @@ export function taskView(task: Task): Exclude<TaskView, "all"> {
 }
 
 export function nextAction(task: Task): string {
-  if (["completed", "cancelled"].includes(task.stage)) return "查看交付记录";
+  if (["completed", "cancelled"].includes(task.stage)) return task.stage === "completed" && task.round ? "已交付；Issue 保持打开，可复核或发起下一轮" : "查看交付记录";
   if (task.paused) return "任务已暂停，工作现场已保留。确认后可继续执行。";
   switch (task.stage) {
     case "waiting_approval":

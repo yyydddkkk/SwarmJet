@@ -6,7 +6,7 @@ flowchart TB
     subgraph controlPlane["控制面：单机 Compose 集中部署"]
         web["React 控制台：由 API 提供静态文件"]
         api["swarmjet serve：管理 API、认证、节点注册"]
-        ingress["Issue 扫描 / Webhook 唤醒扫描"]
+        ingress["Issue 与评论扫描 / Webhook 唤醒扫描"]
         outbox["持久化任务与命令 / Outbox 投递"]
         db[("PostgreSQL：业务配置、任务投影、命令、审计、节点")]
         temporal["Temporal Server：持久化流程调度"]
@@ -14,7 +14,7 @@ flowchart TB
         temporalUi["Temporal UI"]
 
         subgraph workerProcess["swarmjet worker 进程"]
-            workflow["Workflow：阶段、暂停、恢复、返工、人工批准"]
+            workflow["Workflow：轮次、暂停、恢复、返工、自动合并"]
             activities["Activities：开发、验收、审查、发布、合并协调"]
             routing["执行路由：按 Task.NodeID 选择本机或远程 Node"]
             maintenance["任务现场与报告保留期清理"]
@@ -42,7 +42,7 @@ flowchart TB
     user --> web
     web --> api
     gitlab -->|"Webhook"| ingress
-    ingress -->|"轮询 Issue"| gitlab
+    ingress -->|"轮询 Issue 与 /swarmjet run 评论"| gitlab
     api --> outbox
     ingress --> outbox
     api <--> db
@@ -54,6 +54,7 @@ flowchart TB
     temporal -->|"Activity 调度"| activities
     activities -->|"保存查询投影"| db
     activities <-->|"核实 MR、CI、合并状态 / 同步 Issue"| gitlab
+    activities -->|"按审查提交发布人工复核指引"| gitlab
     activities --> routing
     maintenance --> routing
     routing -->|"NodeID 为空"| localNode
@@ -94,6 +95,7 @@ flowchart TB
     %% 节点不连接 PostgreSQL 或 Temporal；执行失败/超时后任务 blocked，保留现场。
     %% 初始化和配置终端仍在控制面本机执行；模型配置尚无跨节点自动分发。
     %% 初始化验证容器无网络；图中模型连接仅表示分析和模型验证调用。
+    %% Issue 保持打开；每条显式 /swarmjet run 评论去重后排队下一轮 Task。
     %% Agent 角色按阶段串行执行，任务之间可以并行；合并复用审查会话。
 
     classDef external fill:#f1f5f9,stroke:#64748b,color:#0f172a

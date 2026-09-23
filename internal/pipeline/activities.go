@@ -230,14 +230,40 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			if d.ProjectID == t.Issue.ProjectID && d.IID == t.Issue.IID {
 				return out, temporal.NewNonRetryableApplicationError("Issue depends on itself", "dependency", nil)
 			}
-			issue, e := c.GetIssue(ctx, d.ProjectID, d.IID)
-			if e != nil {
-				return out, e
+			key := fmt.Sprintf("%d/%d", d.ProjectID, d.IID)
+			upstreamID := t.DependencyTasks[key]
+			if upstreamID == "" && t.Round > 0 {
+				upstream, err := a.Store.LatestTaskForIssue(ctx, t.Project.GitLabURL, domain.Issue{ProjectID: d.ProjectID, IID: d.IID})
+				if err != nil && !errors.Is(err, store.ErrNotFound) {
+					return out, err
+				}
+				if err == nil && upstream.Stage != "cancelled" {
+					if t.DependencyTasks == nil {
+						t.DependencyTasks = map[string]string{}
+					}
+					t.DependencyTasks[key] = upstream.ID
+					upstreamID = upstream.ID
+				}
 			}
-			if issue.State != "closed" {
-				out.Ready = false
-				t.Message = fmt.Sprintf("等待依赖 %d#%d", d.ProjectID, d.IID)
+			if upstreamID != "" {
+				upstream, err := a.Store.Task(ctx, upstreamID)
+				if err != nil {
+					return out, err
+				}
+				if upstream.Stage == "completed" {
+					continue
+				}
+			} else {
+				issue, err := c.GetIssue(ctx, d.ProjectID, d.IID)
+				if err != nil {
+					return out, err
+				}
+				if issue.State == "closed" {
+					continue
+				}
 			}
+			out.Ready = false
+			t.Message = fmt.Sprintf("等待依赖 %d#%d", d.ProjectID, d.IID)
 		}
 	case "preparing":
 		for _, r := range t.Project.Repositories {
@@ -357,7 +383,7 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 				if mr == nil || mr.SHA != r.HeadSHA {
 					return out, fmt.Errorf("missing or stale MR for %s", r.RepositoryID)
 				}
-				if t.Project.AcceptanceStrategy != "" || t.HumanAcceptance != nil {
+				if t.Round == 0 && (t.Project.AcceptanceStrategy != "" || t.HumanAcceptance != nil) {
 					description, e := manualDescription(t, r, mr.Description)
 					if e != nil {
 						return StepResult{Task: t}, temporal.NewNonRetryableApplicationError(e.Error(), "human_acceptance", e)
@@ -385,6 +411,11 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 				t.Workspace = w
 				t.Message = "审查期间代码发生变化，重新验证"
 				out.Rework = true
+			}
+			if t.Round > 0 && !out.Rework && ex.Result != nil && ex.Result.Outcome == "approved" {
+				if e := publishIssueReviewGuide(ctx, c, t); e != nil {
+					return out, e
+				}
 			}
 		}
 	case "verifying":
@@ -467,7 +498,7 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			return out, e
 		}
 		t.Issue = fresh
-		if t.Project.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
+		if t.Round == 0 && t.Project.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
 			t.Stage = "waiting_approval"
 			out.Ready = false
 			break
@@ -644,7 +675,7 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			return out, e
 		}
 		t.Issue = fresh
-		if t.Project.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
+		if t.Round == 0 && t.Project.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
 			t.Stage = "waiting_approval"
 			out.Task = t
 			out.Ready = false
@@ -671,8 +702,10 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		if _, e = n.Cleanup(ctx, t.ID, t.Workspace, taskIntegration(t), a.integrationEnv(t)); e != nil {
 			return out, e
 		}
-		if e = c.CloseIssue(ctx, t.Issue); e != nil {
-			return out, e
+		if t.Round == 0 {
+			if e = c.CloseIssue(ctx, t.Issue); e != nil {
+				return out, e
+			}
 		}
 		_ = a.Store.ReleaseLeases(ctx, t.ID)
 	default:
@@ -723,7 +756,7 @@ func (a *Activities) gates(ctx context.Context, c *gitlab.Client, t *domain.Task
 	if t.ReviewDigest == "" || t.ReviewDigest != domain.Digest(t.Workspace.Revisions) {
 		return false, "STALE: review digest no longer matches", nil
 	}
-	if requiresApproval(*t) && t.ApprovalDigest != t.ReviewDigest {
+	if t.Round == 0 && requiresApproval(*t) && t.ApprovalDigest != t.ReviewDigest {
 		return false, "manual approval required", nil
 	}
 	required := 0
@@ -959,19 +992,32 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 func prompt(t domain.Task, phase string, merge *domain.Revision) string {
 	b, _ := json.MarshalIndent(struct {
 		Issue                domain.Issue
+		Round                int
+		PreviousTaskID       string
+		TriggerText          string
 		Workspace            domain.Workspace
 		Notes                []string
 		Checks               []domain.Verification
 		AcceptanceCommands   []domain.AcceptanceCommand
 		AcceptanceIncomplete bool
-	}{t.Issue, t.Workspace, t.Notes, t.Verification, t.AcceptanceCommands, t.AcceptanceIncomplete}, "", "  ")
+	}{t.Issue, t.Round, t.PreviousTaskID, t.TriggerText, t.Workspace, t.Notes, t.Verification, t.AcceptanceCommands, t.AcceptanceIncomplete}, "", "  ")
 	base := `You are swarmjet's agent. Read applicable repository AGENTS.md and the Meta-Repo plan.md / architecture / integration instructions. Stay within this task's registered repositories and task branches. Preserve Git hooks. Record assumptions and continue despite ambiguous requirements; only return blocked when a concrete obstacle remains after reasonable attempts. Never include secrets in output. Changes to migrations, CI or deployment config may be prepared but require separate human approval before merging. Never execute production deployment. All task MRs and commit messages must reference the source issue WITHOUT closing keywords (Closes/Fixes/Resolves); the workflow closes it after every repository completes.\n`
+	if t.Round > 0 {
+		base = `You are swarmjet's agent. Read applicable repository AGENTS.md and the Meta-Repo plan.md / architecture / integration instructions. Stay within this task's registered repositories and task branches. Preserve Git hooks. Record assumptions and continue despite ambiguous requirements; only return blocked when a concrete obstacle remains after reasonable attempts. Never include secrets in output. Never execute production deployment. This is one round of a long-lived source Issue. The Issue stays open after merge. Address the current Issue description and the TriggerText for this round; use PreviousTaskID only as prior-delivery context. All task MRs and commit messages must reference the source Issue WITHOUT closing keywords (Closes/Fixes/Resolves). Required verification, independent review and GitLab merge checks remain mandatory.\n`
+	}
 
 	config, _ := json.Marshal(t.Project)
 	base += "\nProject acceptance policy: " + string(config) + "\n"
 	plan, _ := json.Marshal(t.HumanAcceptance)
 	base += "\nHuman acceptance plan: " + string(plan) + "\n"
-	base += `For developing and publishing, return humanAcceptance in the result: {"prerequisites":["test environment, account/role, setup data, start instructions or URLs; explicitly state unknowns"],"steps":[{"action":"specific user operation or command","expected":"observable expected result"}],"notes":["edge cases, unverified areas, risks and cleanup"]}. Include a prominent Chinese heading "真人测试验收" at the very top of every MR description, with unchecked checkboxes, concrete steps and expected results. Never claim human sign-off or tick human checkboxes. Do not use production data or expose credentials. Update the checklist when code changes.
+	if t.Round > 0 {
+		base += `For developing and publishing, return humanAcceptance in the result: {"prerequisites":["test environment, account/role, setup data, start instructions or URLs; explicitly state unknowns"],"steps":[{"action":"specific user operation or command","expected":"observable expected result"}],"notes":["edge cases, unverified areas, risks and cleanup"]}. The platform publishes this as an informational post-merge review guide on the source Issue. Do not put a human sign-off checklist in MR descriptions or claim a person tested the change. Do not use production data or expose credentials. Update the guide when code changes.
+`
+	} else {
+		base += `For developing and publishing, return humanAcceptance in the result: {"prerequisites":["test environment, account/role, setup data, start instructions or URLs; explicitly state unknowns"],"steps":[{"action":"specific user operation or command","expected":"observable expected result"}],"notes":["edge cases, unverified areas, risks and cleanup"]}. Include a prominent Chinese heading "真人测试验收" at the very top of every MR description, with unchecked checkboxes, concrete steps and expected results. Never claim human sign-off or tick human checkboxes. Do not use production data or expose credentials. Update the checklist when code changes.
+`
+	}
+	base += `
 For acceptanceStrategy=repository, statically read AGENTS.md, package scripts, CI and development docs and return acceptanceCommands:[{"name":"check name","path":"exact registered repository path","argv":["executable","argument"],"evidence":"repository file and rule explaining why this check covers the change"}]. The platform executes these commands; your claimed pass is not evidence. If no applicable checks can be identified return an empty list and explain what a human must verify. The verification image and toolchain are platform configuration, not something you may invent.
 For gitlab_ci, publish branches and MRs first, never use ci.skip; the platform waits for the exact commit CI. Reviewers must assess the adequacy of the checks and the human checklist, including task coverage and missing/weak tests. Missing infrastructure is not a passing check; describe it explicitly. You may approve code subject to human acceptance, but the platform must prohibit automatic merge when checks are incomplete.
 `
@@ -984,7 +1030,7 @@ For gitlab_ci, publish branches and MRs first, never use ci.skip; the platform w
 		base += `Independently review the entire repository change set and actual verification reports. Check task coverage, cross-repository contracts and tests. Do not modify code, push, approve on GitLab or merge. Return approved, changes_requested with precise findings, or blocked. A no-change result must be independently justified.\n`
 	case "merging", "partial_merge":
 		m, _ := json.Marshal(merge)
-		base += `Review, tests and any required human approval passed. Merge ONLY this MR using GitLab API via glab, with exact sha and target verification. If already merged report success; never force push or bypass GitLab checks. Do not change code. Return merged/blocked. MR: ` + string(m) + "\n"
+		base += `Review and required tests passed. Merge ONLY this MR using GitLab API via glab, with exact sha and target verification. If already merged report success; never force push or bypass GitLab checks. Do not change code. Return merged/blocked. MR: ` + string(m) + "\n"
 	}
 	return base + "\nTask snapshot:\n" + string(b)
 }
@@ -993,24 +1039,33 @@ func (a *Activities) Sync(ctx context.Context, t domain.Task) error {
 	if e != nil {
 		return e
 	}
-	add := []string{"swarmjet:" + t.Stage}
-	if len(t.Assumptions) > 0 {
-		add = append(add, "needs-clarification")
-	}
-	fresh, e := c.GetIssue(ctx, t.Issue.ProjectID, t.Issue.IID)
+	latest, e := a.Store.LatestTaskForIssue(ctx, t.Project.GitLabURL, t.Issue)
 	if e != nil {
 		return e
 	}
-	remove := []string{}
-	for _, l := range fresh.Labels {
-		if strings.HasPrefix(l, "swarmjet:") && l != "swarmjet:"+t.Stage {
-			remove = append(remove, l)
+	if latest.ID == t.ID {
+		add := []string{"swarmjet:" + t.Stage}
+		if len(t.Assumptions) > 0 {
+			add = append(add, "needs-clarification")
+		}
+		fresh, err := c.GetIssue(ctx, t.Issue.ProjectID, t.Issue.IID)
+		if err != nil {
+			return err
+		}
+		remove := []string{}
+		for _, l := range fresh.Labels {
+			if strings.HasPrefix(l, "swarmjet:") && l != "swarmjet:"+t.Stage || l == "needs-clarification" && len(t.Assumptions) == 0 {
+				remove = append(remove, l)
+			}
+		}
+		if err = c.UpdateLabels(ctx, t.Issue, add, remove); err != nil {
+			return err
 		}
 	}
-	if e = c.UpdateLabels(ctx, t.Issue, add, remove); e != nil {
-		return e
-	}
 	body := fmt.Sprintf("**%s** · %s\n\n%s", t.Stage, t.ID, t.Message)
+	if t.Round > 0 {
+		body = fmt.Sprintf("**%s** · %s · 第 %d 轮\n\n%s", t.Stage, t.ID, t.Round, t.Message)
+	}
 	for _, r := range t.Workspace.Revisions {
 		if r.MRURL != "" {
 			body += "\n- " + r.RepositoryID + ": " + r.MRURL

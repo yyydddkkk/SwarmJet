@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import type { Project, Task } from "../src/types";
+import { taskView } from "../src/task-presentation";
 const project: Project = {
   id: "platform",
   name: "平台工程",
@@ -179,15 +180,44 @@ async function mock(page: Page, loggedIn = true, taskList: Task[] = [task]) {
       (t) => path === `/api/tasks/${encodeURIComponent(t.id)}`,
     );
     if (requestedTask) return json(requestedTask);
-    if (path === "/api/tasks")
-      return json(
-        method === "POST" ? task : taskList,
-        method === "POST" ? 202 : 200,
-      );
+    if (path === "/api/tasks") {
+      if (method === "POST") return json(task, 202);
+      const query = new URL(request.url()).searchParams;
+      const scoped = taskList.filter((t) => !query.get("project") || t.project.id === query.get("project"));
+      const counts = {
+        all: scoped.length,
+        active: scoped.filter((t) => taskView(t) === "active").length,
+        attention: scoped.filter((t) => taskView(t) === "attention").length,
+        ended: scoped.filter((t) => taskView(t) === "ended").length,
+        completed: scoped.filter((t) => t.stage === "completed").length,
+      };
+      const needle = (query.get("q") || "").toLowerCase();
+      const items = scoped.filter((t) =>
+        (!query.get("view") || query.get("view") === "all" || taskView(t) === query.get("view")) &&
+        (!query.get("stage") || t.stage === query.get("stage")) &&
+        (!needle || `${t.issue.title} ${t.issue.iid} ${t.project.name} ${t.id}`.toLowerCase().includes(needle)));
+      const offset = Number(query.get("cursor") || 0), limit = Number(query.get("limit") || 50);
+      return json({ items: items.slice(offset, offset + limit), nextCursor: offset + limit < items.length ? String(offset + limit) : "", total: items.length, counts });
+    }
     return json({ error: "not found" }, 404);
   });
   return { commands, getSaved: () => saved };
 }
+test("task center pages through more than fifty results", async ({ page }) => {
+  const many = Array.from({ length: 55 }, (_, index): Task => ({
+    ...task,
+    id: `task-${String(index + 1).padStart(3, "0")}`,
+    issue: { ...task.issue, iid: index + 1, title: `任务 ${index + 1}` },
+  }));
+  await mock(page, true, many);
+  await page.goto("/#/tasks");
+  await expect(page.getByRole("row")).toHaveCount(51);
+  await page.getByRole("button", { name: "下一页" }).click();
+  await expect(page.getByRole("row")).toHaveCount(6);
+  await expect(page.getByRole("link", { name: "任务 55", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "上一页" }).click();
+  await expect(page.getByRole("row")).toHaveCount(51);
+});
 test("login, task filtering, exact-digest approval errors, logs and logout", async ({
   page,
 }) => {

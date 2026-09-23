@@ -32,7 +32,9 @@ async function runtimeAPI(page: Page) {
         },
       });
     }
-    if (path === "/api/tasks" || path === "/api/projects")
+    if (path === "/api/tasks")
+      return route.fulfill({ json: {items: [], total: 0, counts: {all: 0, active: 0, attention: 0, ended: 0, completed: 0}} });
+    if (path === "/api/projects")
       return route.fulfill({ json: [] });
     return route.fulfill({ status: 404, json: { error: "not found" } });
   });

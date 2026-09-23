@@ -24,6 +24,22 @@ type Client struct {
 	notes          sync.Mutex
 }
 
+type IssueNote struct {
+	ID        int64     `json:"id"`
+	Body      string    `json:"body"`
+	System    bool      `json:"system"`
+	Internal  bool      `json:"internal"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Author    struct {
+		ID int64 `json:"id"`
+	} `json:"author"`
+}
+
+func (c *Client) ListIssueNotes(ctx context.Context, issue domain.Issue) ([]IssueNote, error) {
+	return paginate[IssueNote](ctx, c, issuePath(issue)+"/notes", url.Values{"sort": {"asc"}, "order_by": {"created_at"}})
+}
+
 func New(baseURL, token string) *Client {
 	baseURL = strings.TrimRight(baseURL, "/")
 	if !strings.HasSuffix(baseURL, "/api/v4") {
@@ -328,6 +344,55 @@ func (c *Client) UpsertProgress(ctx context.Context, issue domain.Issue, taskID,
 	}
 	_, err = c.request(ctx, "POST", issuePath(issue)+"/notes", map[string]string{"body": body}, nil)
 	return err
+}
+
+// UpsertIssueReview keeps a revision-specific review guide in the source
+// Issue. Previous guides remain readable, but are marked superseded when the
+// reviewed commit set changes.
+func (c *Client) UpsertIssueReview(ctx context.Context, issue domain.Issue, taskID, digest, body string) (string, error) {
+	c.notes.Lock()
+	defer c.notes.Unlock()
+	prefix := "<!-- swarmjet-review:" + taskID + ":"
+	marker := prefix + digest + " -->"
+	body = marker + "\n" + body
+	notes, err := c.ListIssueNotes(ctx, issue)
+	if err != nil {
+		return "", err
+	}
+	var current int64
+	for _, note := range notes {
+		if !strings.HasPrefix(note.Body, prefix) {
+			continue
+		}
+		if strings.HasPrefix(note.Body, marker+"\n") {
+			current = note.ID
+			if note.Body != body {
+				if _, err = c.request(ctx, "PUT", fmt.Sprintf("%s/notes/%d", issuePath(issue), note.ID), map[string]string{"body": body}, nil); err != nil {
+					return "", err
+				}
+			}
+			continue
+		}
+		if !strings.Contains(note.Body, "此版本已失效") {
+			old := note.Body + "\n\n> 此版本已失效；请查看该 Issue 中最新的 SwarmJet 复核指引。"
+			if _, err = c.request(ctx, "PUT", fmt.Sprintf("%s/notes/%d", issuePath(issue), note.ID), map[string]string{"body": old}, nil); err != nil {
+				return "", err
+			}
+		}
+	}
+	if current == 0 {
+		var created struct {
+			ID int64 `json:"id"`
+		}
+		if _, err = c.request(ctx, "POST", issuePath(issue)+"/notes", map[string]string{"body": body}, &created); err != nil {
+			return "", err
+		}
+		if created.ID < 1 {
+			return "", errors.New("GitLab returned no review note ID")
+		}
+		current = created.ID
+	}
+	return strings.Split(issue.URL, "#")[0] + fmt.Sprintf("#note_%d", current), nil
 }
 func (c *Client) CloseIssue(ctx context.Context, issue domain.Issue) error {
 	i, err := c.GetIssue(ctx, issue.ProjectID, issue.IID)

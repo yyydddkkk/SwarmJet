@@ -33,6 +33,49 @@ func TestHumanAcceptanceSectionAndRevisionReset(t *testing.T) {
 		t.Fatal("missing human instructions accepted")
 	}
 }
+func TestIssueReviewGuideIsInformationalAndRevisionBound(t *testing.T) {
+	task := domain.Task{ID: "run-2", Round: 2, HumanAcceptance: &domain.ManualAcceptance{Prerequisites: []string{"测试环境"}, Steps: []domain.ManualStep{{Action: "创建项目", Expected: "项目出现在列表"}}}, Workspace: domain.Workspace{Revisions: []domain.Revision{{RepositoryID: "api", MRURL: "https://gitlab.test/mr/1", HeadSHA: "abc", TargetBranch: "main", Changed: true}}}}
+	body, err := issueReviewGuide(task)
+	if err != nil || !strings.Contains(body, "第 2 轮") || !strings.Contains(body, "https://gitlab.test/mr/1") || !strings.Contains(body, "abc") || !strings.Contains(body, "/swarmjet run") || strings.Contains(body, "- [ ]") {
+		t.Fatalf("invalid guide: %s %v", body, err)
+	}
+}
+func TestPublishIssueReviewGuideLinksMR(t *testing.T) {
+	var noteBody, mrBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/issues/2/notes") && r.Method == "GET":
+			_, _ = w.Write([]byte(`[]`))
+		case strings.HasSuffix(r.URL.Path, "/issues/2/notes") && r.Method == "POST":
+			var input struct {
+				Body string `json:"body"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&input)
+			noteBody = input.Body
+			_, _ = w.Write([]byte(`{"id":10}`))
+		case strings.HasSuffix(r.URL.Path, "/merge_requests/3") && r.Method == "GET":
+			_ = json.NewEncoder(w).Encode(gitlab.MergeRequest{IID: 3, Description: "MR summary", SHA: "head", SourceBranch: "branch", TargetBranch: "main"})
+		case strings.HasSuffix(r.URL.Path, "/merge_requests/3") && r.Method == "PUT":
+			var input struct {
+				Description string `json:"description"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&input)
+			mrBody = input.Description
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	task := domain.Task{ID: "round", Round: 1, Issue: domain.Issue{ProjectID: 1, IID: 2, URL: server.URL + "/issues/2"}, HumanAcceptance: &domain.ManualAcceptance{Prerequisites: []string{"test env"}, Steps: []domain.ManualStep{{Action: "create", Expected: "visible"}}}, Workspace: domain.Workspace{Revisions: []domain.Revision{{RepositoryID: "api", ProjectID: 1, MRIID: 3, MRURL: server.URL + "/mr/3", HeadSHA: "head", Branch: "branch", TargetBranch: "main", Changed: true}}}}
+	if err := publishIssueReviewGuide(context.Background(), gitlab.New(server.URL, "token"), task); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(noteBody, "人工复核指引") || !strings.Contains(mrBody, "#note_10") || !strings.Contains(mrBody, "MR summary") || strings.Contains(mrBody, "- [ ]") {
+		t.Fatalf("note=%q MR=%q", noteBody, mrBody)
+	}
+}
 func TestStrategyCIRequiresCurrentCommit(t *testing.T) {
 	for _, status := range []string{"success", "running", "failed", "skipped", "old-sha"} {
 		t.Run(status, func(t *testing.T) {

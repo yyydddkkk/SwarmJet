@@ -516,8 +516,32 @@ func validDependencies(refs []domain.IssueRef, self domain.IssueRef) bool {
 func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		tasks, err := a.s.Tasks(r.Context())
+		query := r.URL.Query()
+		limit := 50
+		if raw := query.Get("limit"); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < 1 || value > 100 {
+				problem(w, 400, "invalid task page limit")
+				return
+			}
+			limit = value
+		}
+		view := query.Get("view")
+		if view != "" && view != "all" && view != "active" && view != "attention" && view != "ended" {
+			problem(w, 400, "invalid task view")
+			return
+		}
+		project := query.Get("project")
+		if project != "" && !domain.IDPattern.MatchString(project) {
+			problem(w, 400, "invalid project filter")
+			return
+		}
+		tasks, err := a.s.TaskPage(r.Context(), store.TaskPageOptions{ProjectID: project, Stage: query.Get("stage"), View: view, Search: query.Get("q"), Cursor: query.Get("cursor"), Limit: limit})
 		if err != nil {
+			if strings.Contains(err.Error(), "task cursor") || strings.Contains(err.Error(), "task search") {
+				problem(w, 400, err.Error())
+				return
+			}
 			failure(w, err)
 			return
 		}
@@ -591,6 +615,14 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 		}
 		now := time.Now().UTC()
 		t := domain.Task{ID: id, Project: p, Issue: issue, Dependencies: req.Dependencies, Stage: "queued", Executions: map[string]domain.Execution{}, Verification: []domain.Verification{}, Assumptions: []string{}, Notes: []string{}, CreatedAt: now, UpdatedAt: now}
+		pending, err := a.s.PendingIssueRunCommands(r.Context(), p.GitLabURL, issue)
+		if err != nil {
+			failure(w, err)
+			return
+		}
+		if pending {
+			t.TriggerNoteIDs = []int64{}
+		}
 		scheduled, err := a.s.CreateTaskScheduled(r.Context(), t, a.cfg.RequireNode)
 		if errors.Is(err, store.ErrNoNode) {
 			problem(w, 503, err.Error())
