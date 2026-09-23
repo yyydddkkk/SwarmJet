@@ -70,6 +70,33 @@ func (s *Store) SaveNetwork(ctx context.Context, p domain.NetworkProfile, secret
 	}
 	return p, tx.Commit(ctx)
 }
+func (s *Store) DeleteNetwork(ctx context.Context, id string, version int) error {
+	tx, e := s.Pool.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(84261303)`); e != nil {
+		return e
+	}
+	var current int
+	if e = tx.QueryRow(ctx, `SELECT COALESCE(MAX(version),0) FROM network_profiles WHERE id=$1`, id).Scan(&current); e != nil {
+		return e
+	}
+	if current == 0 {
+		return ErrNotFound
+	}
+	if current != version {
+		return ErrConflict
+	}
+	if _, e = tx.Exec(ctx, `DELETE FROM network_profiles WHERE id=$1`, id); e != nil {
+		return e
+	}
+	if _, e = tx.Exec(ctx, `UPDATE platform_settings SET body='""'::jsonb WHERE name='default_network' AND body=to_jsonb($1::text)`, id); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}
 func (s *Store) Setting(ctx context.Context, name string, out any) error {
 	var b []byte
 	e := s.Pool.QueryRow(ctx, `SELECT body FROM platform_settings WHERE name=$1`, name).Scan(&b)

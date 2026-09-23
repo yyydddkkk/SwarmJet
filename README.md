@@ -69,17 +69,17 @@ projects:
 
 ## 本地开发（推荐）
 
-前端、API 和 Worker 直接在宿主机运行，修改页面由 Vite 热更新；Go 代码修改后重启本地进程即可，不构建应用镜像。`deploy/` 中的 Dockerfile 和 Compose 用于部署；现阶段 Agent、联调验收仍通过容器隔离执行。
+前端、API 和 Worker 直接在宿主机运行。Vite 热更新页面；Go 源码变化时，开发启动器自动重新编译并重启 Go 进程，不构建应用镜像。编译失败时保留旧进程，并在 `.cache/dev/supervisor.log` 记录错误。`deploy/` 中的 Dockerfile 和 Compose 用于部署；现阶段 Agent、联调验收仍通过容器隔离执行。
 
-Linux 开发环境需要 Python 3、Node.js、Go 1.25+、Git、`meta` 和可访问的 Docker daemon。先执行 `npm ci --prefix web`。从 `deploy/.env.example` 创建本项目独立的 `deploy/.env`，设置数据库凭据、`DATA_DIR`、执行器配置和 Temporal namespace；可复制 `deploy/.env.development.example` 为 `deploy/.env.development` 覆盖本机工具路径和端口。dotenv 内容作为数据解析，不作为 shell 脚本执行，文件不可提交。
+Linux 开发环境需要 Node.js、Go 1.25+、Git、`meta` 和可访问的 Docker daemon。先执行 `npm ci --prefix web`。从 `deploy/.env.example` 创建本项目独立的 `deploy/.env`，设置数据库凭据、`DATA_DIR`、执行器配置和 Temporal namespace；可复制 `deploy/.env.development.example` 为 `deploy/.env.development` 覆盖本机工具路径和端口。dotenv 内容作为数据解析，不作为 shell 脚本执行，文件不可提交。启动器自身需要先编译，Go 不在 PATH 时用 `GO_BINARY=/path/to/go ./scripts/dev start`。
 
 PostgreSQL、Temporal 使用 SwarmJet 自己的 Compose 容器。启动脚本会动态查询 Compose 网络中的地址，不重建依赖、不清空数据；若使用其他数据库或 Temporal，在 `deploy/.env.development` 显式填写地址。首次准备依赖可执行 `(cd deploy && docker compose up -d postgres temporal-namespace temporal-ui)`，不必启动容器版 API、Worker。全新数据库需先在仓库根目录执行 `(cd deploy && docker compose -f compose.yaml -f compose.build.yaml run --build --rm migrate)`；开发启动会在启动进程前执行幂等数据库迁移。Agent 镜像的构建见部署文档。
 
 ```bash
-./scripts/dev.py start    # 编译 Go，检查依赖，停止旧容器版 API/Worker，启动本地三进程
-./scripts/dev.py status
-./scripts/dev.py restart  # Go 代码修改后重新编译并重启；不构建镜像
-./scripts/dev.py stop     # 只停止本地进程，保留依赖和数据
+./scripts/dev start    # 编译 Go，检查依赖，停止旧容器版 API/Worker，启动本地进程并监视 Go 源码
+./scripts/dev status
+./scripts/dev restart  # 仅需要重新读取开发环境配置时使用
+./scripts/dev stop     # 只停止本地进程，保留依赖和数据
 ```
 
 开发页面默认 **http://localhost:5273**，API 为 `127.0.0.1:8180`，Worker 管理接口为 `127.0.0.1:8191`，独立构建服务为 `127.0.0.1:8193`。Vite 代理 API、事件流和终端 WebSocket；开发环境的登录 Origin 使用 5273。进程日志位于 `.cache/dev/`，不提交到 Git。启动后项目状态与任务记录保存在 SwarmJet 数据库，已阻塞的任务不会被脚本自动重试。

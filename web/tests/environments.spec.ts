@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 const ref = "registry.test/swarmjet/agent@sha256:" + "a".repeat(64);
 async function mock(page: Page) {
   const profiles: any[] = [];
+  let defaultId = "";
   let saved: any;
   const nodes = [
     {
@@ -37,6 +38,19 @@ async function mock(page: Page) {
     if (path === "/api/session")
       return route.fulfill({ json: { username: "admin" } });
     if (path === "/api/projects") return route.fulfill({ json: [] });
+    if (path === "/api/networks/default" && r.method() === "PUT") {
+      defaultId = r.postDataJSON().id;
+      return route.fulfill({ json: { id: defaultId } });
+    }
+    if (path === "/api/networks" && r.method() === "DELETE") {
+      const id = u.searchParams.get("id");
+      const index = profiles.findIndex((p) => p.id === id);
+      if (index < 0 || String(profiles[index].version) !== u.searchParams.get("version"))
+        return route.fulfill({ status: 409, json: { error: "stale version" } });
+      profiles.splice(index, 1);
+      if (defaultId === id) defaultId = "";
+      return route.fulfill({ status: 204 });
+    }
     if (path === "/api/networks") {
       if (r.method() === "PUT") {
         saved = r.postDataJSON();
@@ -46,7 +60,7 @@ async function mock(page: Page) {
         json:
           r.method() === "PUT"
             ? profiles[profiles.length - 1]
-            : { profiles, defaultId: "" },
+            : { profiles, defaultId },
       });
     }
     if (path === "/api/nodes") return route.fulfill({ json: nodes });
@@ -89,6 +103,18 @@ test("network editor creates versioned profile without placing password in the l
     page.getByText("private-fixture-password", { exact: true }),
   ).toHaveCount(0);
   await expect(page.getByLabel("新密码（留空保留）")).toHaveValue("");
+});
+test("saved network profile can be deleted and default returns to direct", async ({ page }) => {
+  await mock(page);
+  await page.goto("/#/networks");
+  await page.getByLabel("名称", { exact: true }).fill("临时出口");
+  await page.getByRole("button", { name: "保存配置", exact: true }).click();
+  await page.getByLabel("默认网络").selectOption({ label: "临时出口" });
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "删除配置" }).click();
+  await expect(page.getByRole("status")).toContainText("网络配置已删除");
+  await expect(page.getByText("临时出口", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("默认网络")).toHaveValue("");
 });
 test("node drain preserves image and scopes network tests to selected node", async ({
   page,

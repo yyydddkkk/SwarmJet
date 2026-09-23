@@ -97,6 +97,23 @@
 .wizard-targets {
   margin-top: 20px;
 }
+.wizard-targets .field > label {
+  font-size: 12px;
+  font-weight: 550;
+  color: #485465;
+}
+.wizard-branch-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: #b42318;
+  font-size: 12px;
+}
+.wizard-branch-error button {
+  min-height: 28px;
+  padding: 2px 8px;
+}
 .wizard-toggle {
   margin: 16px 0;
 }

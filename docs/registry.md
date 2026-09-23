@@ -53,6 +53,6 @@ Nginx worker 必须能读取两份 htpasswd 文件，例如文件权限 0644、T
 - [Distribution 部署说明](https://distribution.github.io/distribution/about/deploying/)
 - [Buildx remote driver](https://docs.docker.com/build/builders/drivers/remote/)
 
-原生开发通过 `scripts/dev.py restart` 启动独立 builder 进程和持久化 BuildKit 容器。构建服务日志为 `.cache/dev/builder.log`；停止开发进程不会删除 BuildKit 缓存。平台镜像构建前需要先保存仓库配置才能发布。
+原生开发通过 `scripts/dev start` 启动独立 builder 进程和持久化 BuildKit 容器。构建服务日志为 `.cache/dev/builder.log`；停止开发进程不会删除 BuildKit 缓存。平台镜像构建前需要先保存仓库配置才能发布。
 
 单机部署及原生开发会注册一个默认暂停的 `local` 节点，使用独立的 local-node 数据目录。构建成功后可把镜像分发给它，完成节点专属 CLI 登录配置后再启用。原有 Worker 配置终端用于历史本机环境，登录状态不会自动复制到新节点。

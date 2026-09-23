@@ -185,6 +185,6 @@ docker compose exec -T postgres pg_dumpall -U swarmjet > backup.sql
 
 以前在仓库根目录保存配置的环境，将 `.env` 和可选的 `.env.development` 移入 `deploy/`；若目标文件已存在，先核对内容，不要直接覆盖。自定义 `compose.override.yaml` 也移入 `deploy/`，其中相对挂载路径需要按新目录调整。保留原 `COMPOSE_PROJECT_NAME`、`DATA_DIR` 和数据库配置，默认项目名仍为 `swarmjet`，无需删除或重建数据卷。
 
-日常 Compose 命令改为在 `deploy/` 执行。本地源码构建显式使用两个 `-f` 时，如有自定义覆盖文件，还需追加 `-f compose.override.yaml`。原生开发命令仍在仓库根目录执行 `./scripts/dev.py start`，环境配置统一从 `deploy/` 读取。
+日常 Compose 命令改为在 `deploy/` 执行。本地源码构建显式使用两个 `-f` 时，如有自定义覆盖文件，还需追加 `-f compose.override.yaml`。原生开发命令仍在仓库根目录执行 `./scripts/dev start`，环境配置统一从 `deploy/` 读取。
 
 节点配置与心跳观测分开保存。暂停节点不终止已有任务，归档前检查未完成任务与初始化。网络配置修改影响新任务；正在使用的历史版本保留。Docker 拉取镜像代理仍属于 daemon 部署配置，页面中的节点代理用于准备代码、配置终端与任务容器。

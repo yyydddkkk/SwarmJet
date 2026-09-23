@@ -100,6 +100,35 @@ func TestNetworkVersionConflictAndDirect(t *testing.T) {
 	}
 }
 
+func TestDeleteNetworkRemovesVersionsAndResetsDefault(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	p, e := s.SaveNetwork(ctx, domain.NetworkProfile{ID: "unused", Name: "unused"}, "encrypted")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = s.SetSetting(ctx, "default_network", p.ID); e != nil {
+		t.Fatal(e)
+	}
+	newer, e := s.SaveNetwork(ctx, p, "encrypted")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = s.DeleteNetwork(ctx, p.ID, p.Version); !errors.Is(e, ErrConflict) {
+		t.Fatalf("stale delete: %v", e)
+	}
+	if e = s.DeleteNetwork(ctx, p.ID, newer.Version); e != nil {
+		t.Fatal(e)
+	}
+	if _, _, e = s.NetworkProfile(ctx, domain.NetworkVersion{ID: p.ID, Version: p.Version}); !errors.Is(e, ErrNotFound) {
+		t.Fatalf("old version remains: %v", e)
+	}
+	var defaultID string
+	if e = s.Setting(ctx, "default_network", &defaultID); e != nil || defaultID != "" {
+		t.Fatalf("default not reset: %q, %v", defaultID, e)
+	}
+}
+
 func TestNodeSupportsDifferentImagesForTaskRoles(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

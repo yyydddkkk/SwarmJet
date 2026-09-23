@@ -118,6 +118,12 @@ export default function ProjectWizard({
   const [repositoryCache, setRepositoryCache] = useState<Record<number, ConnectionRepository>>({});
   const repositoryRequest = useRef(0);
   const [targets, setTargets] = useState<Record<number, string>>({});
+  const [branchOptions, setBranchOptions] = useState<Record<number, string[]>>({});
+  const [branchErrors, setBranchErrors] = useState<Record<number, string>>({});
+  const [loadingBranches, setLoadingBranches] = useState<Record<number, boolean>>({});
+  const [manualTargets, setManualTargets] = useState<Record<number, boolean>>({});
+  const branchRequestGeneration = useRef(0);
+  const pendingBranches = useRef(new Set<string>());
   const [name, setName] = useState("");
   const [metaRef, setMetaRef] = useState("main");
   const [autoMerge, setAutoMerge] = useState(false);
@@ -204,6 +210,11 @@ export default function ProjectWizard({
   );
 
   async function useConnection(connection: Connection) {
+    branchRequestGeneration.current++;
+    setBranchOptions({});
+    setBranchErrors({});
+    setLoadingBranches({});
+    setManualTargets({});
     setConnectionId(connection.id);
     setGitlabUrl(connection.gitlabUrl);
     setVerifyResult({
@@ -239,6 +250,11 @@ export default function ProjectWizard({
       setMergeToken("");
       setConnections((old) => [...old.filter((c) => c.id !== saved.id), saved]);
       setConnectionId(saved.id);
+      branchRequestGeneration.current++;
+      setBranchOptions({});
+      setBranchErrors({});
+      setLoadingBranches({});
+      setManualTargets({});
       setSelected([]);
       setTargets({});
       setStep(1);
@@ -252,19 +268,52 @@ export default function ProjectWizard({
   }
 
   function toggleRepo(repo: ConnectionRepository) {
+    if (!selected.includes(repo.id) && branchOptions[repo.id] === undefined) {
+      void loadBranches(connectionId, repo.id);
+    }
     setSelected((old) =>
       old.includes(repo.id)
         ? old.filter((id) => id !== repo.id)
         : [...old, repo.id],
     );
     setTargets((old) =>
-      old[repo.id]
+      Object.hasOwn(old, repo.id)
         ? old
         : {
             ...old,
             [repo.id]: repo.defaultBranch || "dev",
           },
     );
+  }
+
+  async function loadBranches(id: string, repoID: number) {
+    const generation = branchRequestGeneration.current;
+    const key = `${generation}:${repoID}`;
+    if (pendingBranches.current.has(key)) return;
+    pendingBranches.current.add(key);
+    setBranchErrors((old) => ({ ...old, [repoID]: "" }));
+    setLoadingBranches((old) => ({ ...old, [repoID]: true }));
+    try {
+      const names = await api<string[]>(
+        `/connections/${encodeURIComponent(id)}/repositories/${repoID}/branches`,
+      );
+      if (generation === branchRequestGeneration.current) {
+        setBranchOptions((old) => ({ ...old, [repoID]: names || [] }));
+      }
+    } catch (e) {
+      if (generation === branchRequestGeneration.current) {
+        setBranchErrors((old) => ({ ...old, [repoID]: (e as Error).message }));
+      }
+    } finally {
+      pendingBranches.current.delete(key);
+      if (generation === branchRequestGeneration.current) {
+        setLoadingBranches((old) => ({ ...old, [repoID]: false }));
+      }
+    }
+  }
+
+  function targetFor(repo: ConnectionRepository): string {
+    return targets[repo.id] ?? (repo.defaultBranch || "dev");
   }
 
   const connection = useMemo(
@@ -278,7 +327,7 @@ export default function ProjectWizard({
       projectId: repo.id,
       url: repo.httpUrlToRepo,
       path: layout.paths[repo.id],
-      targetBranch: targets[repo.id] || repo.defaultBranch || "dev",
+      targetBranch: targetFor(repo).trim(),
       createFrom: "",
       dependsOn: [],
       sensitivePaths: [],
@@ -493,7 +542,7 @@ export default function ProjectWizard({
   }
 
   const canLeaveConnection = !!connectionId;
-  const canLeaveRepos = selected.length > 0;
+  const canLeaveRepos = selectedRepos.length > 0 && selectedRepos.every((repo) => !!targetFor(repo).trim());
   const canLeaveConfirm =
     !!name.trim() && !!metaRef.trim() && selected.length > 0;
 
@@ -703,24 +752,47 @@ export default function ProjectWizard({
             {selectedRepos.length > 0 && (
               <div className="wizard-targets">
                 <h3>目标分支</h3>
-                {selectedRepos.map((repo) => (
-                  <Field
-                    key={repo.id}
-                    label={repo.name + " 的目标分支"}
-                    hint={"将作为 " + layout.paths[repo.id] + " 的工作目录"}
-                  >
-                    <input
-                      value={targets[repo.id] || repo.defaultBranch || "dev"}
-                      aria-label={repo.name + " 的目标分支"}
-                      onChange={(e) =>
-                        setTargets((old) => ({
-                          ...old,
-                          [repo.id]: e.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
-                ))}
+                {selectedRepos.map((repo) => {
+                  const choices = branchOptions[repo.id] ?? (repo.defaultBranch ? [repo.defaultBranch] : []);
+                  const target = targetFor(repo);
+                  const manual = !!manualTargets[repo.id] || !choices.includes(target);
+                  return (
+                    <div className="field" key={repo.id}>
+                      <label htmlFor={`wizard-target-${repo.id}`}>{repo.name} 的目标分支</label>
+                      <select
+                        id={`wizard-target-${repo.id}`}
+                        value={manual ? "" : target}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setManualTargets((old) => ({ ...old, [repo.id]: value === "" }));
+                          setTargets((old) => ({ ...old, [repo.id]: value }));
+                        }}
+                      >
+                        {choices.map((branch) => <option key={branch} value={branch}>{branch}</option>)}
+                        <option value="">手动输入分支名…</option>
+                      </select>
+                      {manual && (
+                        <input
+                          value={target}
+                          aria-label={repo.name + " 的自定义目标分支"}
+                          placeholder="输入目标分支名"
+                          onChange={(e) => setTargets((old) => ({ ...old, [repo.id]: e.target.value }))}
+                        />
+                      )}
+                      <small>将作为 {layout.paths[repo.id]} 的工作目录</small>
+                      {loadingBranches[repo.id] && <small role="status">正在读取 GitLab 分支…</small>}
+                      {branchOptions[repo.id] !== undefined && !loadingBranches[repo.id] && (
+                        <small role="status">已读取 {branchOptions[repo.id].length} 个 GitLab 分支</small>
+                      )}
+                      {branchErrors[repo.id] && (
+                        <div className="wizard-branch-error" role="alert">
+                          分支列表读取失败：{branchErrors[repo.id]}
+                          <button type="button" onClick={() => void loadBranches(connectionId, repo.id)}>重试</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
             <div className="actions wizard-actions">
@@ -805,7 +877,7 @@ export default function ProjectWizard({
                     <code>{layout.paths[repo.id]}</code>
                     <span>{repo.pathWithNamespace}</span>
                     <span className="tag">
-                      目标 {targets[repo.id] || repo.defaultBranch || "dev"}
+                      目标 {targetFor(repo)}
                     </span>
                   </li>
                 ))}

@@ -105,6 +105,22 @@ export default function NetworkSettings() {
       setBusy(false);
     }
   }
+  async function remove() {
+    if (!draft.version || !window.confirm(`确定删除“${draft.name}”吗？该配置的所有版本都会删除，引用它的节点、构建或任务可能无法继续使用代理。`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api<void>(`/networks?id=${encodeURIComponent(draft.id)}&version=${draft.version}`, "DELETE");
+      setDraft(blank());
+      setPassword("");
+      await load();
+      setNotice("网络配置已删除。");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div className="image-settings network-settings">
       <div className="page-head">
@@ -235,6 +251,9 @@ export default function NetworkSettings() {
               <button className="primary" disabled={busy} onClick={save}>
                 保存配置
               </button>
+              {draft.version > 0 && <button className="network-delete" disabled={busy} onClick={remove}>
+                删除配置
+              </button>}
             </div>
           </div>
         </section>

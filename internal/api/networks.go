@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/store"
@@ -11,6 +12,20 @@ import (
 func (a *server) networks(w http.ResponseWriter, r *http.Request) {
 	if a.s == nil {
 		problem(w, 503, "配置存储未就绪")
+		return
+	}
+	if r.URL.Path == "/api/networks" && r.Method == "DELETE" {
+		id := r.URL.Query().Get("id")
+		version, e := strconv.Atoi(r.URL.Query().Get("version"))
+		if !domain.IDPattern.MatchString(id) || version < 1 || e != nil {
+			problem(w, 400, "网络配置 ID 或版本无效")
+			return
+		}
+		if e = a.s.DeleteNetwork(r.Context(), id, version); e != nil {
+			failure(w, e)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if r.URL.Path == "/api/networks/default" {

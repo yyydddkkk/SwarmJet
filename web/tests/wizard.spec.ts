@@ -46,8 +46,9 @@ function initRecord(id: string, status: string) {
   };
 }
 
-async function setupWizard(page: Page, options?: { verifyFails?: boolean }) {
+async function setupWizard(page: Page, options?: { verifyFails?: boolean; branchFailsOnce?: boolean }) {
   const verifyFails = options?.verifyFails ?? false;
+  let branchFails = options?.branchFailsOnce ?? false;
   const saves: Project[] = [];
   let initId = "";
   let answered = false;
@@ -137,6 +138,14 @@ async function setupWizard(page: Page, options?: { verifyFails?: boolean }) {
         },
       });
     }
+    if (pathname === "/api/connections/c1/repositories/101/branches" && branchFails) {
+      branchFails = false;
+      return route.fulfill({ status: 502, json: { error: "GitLab 暂时不可用" } });
+    }
+    if (pathname === "/api/connections/c1/repositories/101/branches")
+      return route.fulfill({ json: ["dev", "main", "release/next"] });
+    if (pathname === "/api/connections/c1/repositories/102/branches" || pathname === "/api/connections/c1/repositories/103/branches")
+      return route.fulfill({ json: ["main"] });
     if (pathname === "/api/runtime/agents") return route.fulfill({json:{agents:[{id:"opencode",name:"OpenCode"},{id:"codex",name:"Codex"}],enabled:["opencode","codex"]}});
     if (pathname === "/api/runtime/status")
       return route.fulfill({
@@ -230,17 +239,25 @@ test("wizard connects, paginates repos, verifies a model and completes initializ
   await expect(page.getByText("team/core", { exact: false })).toBeVisible();
   await page.getByText("Core", { exact: true }).click();
   await expect(page.getByLabel("选择仓库 team/core", { exact: true })).toBeChecked();
-  await page.getByLabel("Core 的目标分支").fill("feature/test");
+  await expect(page.getByLabel("Core 的目标分支")).toContainText("release/next");
+  await page.getByLabel("Core 的目标分支").selectOption("release/next");
+  await expect(page.getByLabel("Core 的目标分支")).toHaveValue("release/next");
+  await page.getByLabel("Core 的目标分支").selectOption("");
+  const customBranch = page.getByLabel("Core 的自定义目标分支");
+  await customBranch.fill("feature/test");
   await page.getByRole("button", { name: "下一页" }).click();
   await expect(page.getByText("team/web", { exact: false })).toBeVisible();
   await page.getByLabel("选择仓库 team/web", { exact: true }).check();
-  await expect(page.getByLabel("Core 的目标分支")).toHaveValue("feature/test");
+  await expect(customBranch).toHaveValue("feature/test");
   await page.getByLabel("选择仓库 team/web", { exact: true }).uncheck();
   await page.getByRole("button", { name: "上一页" }).click();
   await expect(page.getByText("team/core", { exact: false })).toBeVisible();
   await page.getByRole("checkbox").first().check();
-  await expect(page.getByLabel("Core 的目标分支")).toHaveValue("feature/test");
-  await page.getByLabel("Core 的目标分支").fill("dev");
+  await expect(customBranch).toHaveValue("feature/test");
+  await customBranch.fill("");
+  await expect(customBranch).toHaveValue("");
+  await expect(page.getByRole("button", { name: "下一步", exact: true })).toBeDisabled();
+  await page.getByLabel("Core 的目标分支").selectOption("dev");
   await page.getByRole("button", { name: "下一步" }).click();
   await expect(page.getByRole("checkbox", { name: /自动合并/ })).not.toBeChecked();
   await expect(page.getByText("目标 dev")).toBeVisible();
@@ -300,6 +317,19 @@ test("failed model verification blocks initialization", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: "创建项目并开始初始化" }),
   ).toBeDisabled();
+});
+
+test("wizard shows branch read errors and retries", async ({ page }) => {
+  await setupWizard(page, { branchFailsOnce: true });
+  await page.goto("/#/projects/new");
+  await page.getByLabel("GitLab 地址").fill("https://gitlab.example");
+  await page.getByLabel("Access Token").fill("glpat-secret-value");
+  await page.getByRole("button", { name: "验证并继续" }).click();
+  await page.getByLabel("选择仓库 team/core").check();
+  await expect(page.getByRole("alert")).toContainText("分支列表读取失败");
+  await page.getByRole("button", { name: "重试" }).click();
+  await expect(page.getByText("已读取 3 个 GitLab 分支")).toBeVisible();
+  await expect(page.getByLabel("Core 的目标分支")).toContainText("release/next");
 });
 
 test("wizard stays within a small viewport", async ({ page }) => {

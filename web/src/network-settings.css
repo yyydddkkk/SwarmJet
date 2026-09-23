@@ -28,6 +28,8 @@
 .network-options .network-fields > .field:first-child { grid-column: 1 / -1; }
 .network-settings .environment-check { border-top: 1px solid var(--line); padding-top: 17px; }
 .network-save { margin-top: 20px; }
+.network-settings .network-delete { color: var(--status-danger); margin-left: auto; }
+.network-settings .network-delete:hover { border-color: var(--status-danger); background: #fff5f4; }
 .network-footnote { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 16px 0 28px; }
 .network-mihomo { border-top: 1px solid var(--line); padding-top: 20px; }
 .network-settings .network-mihomo-toggle { display: flex; justify-content: space-between; align-items: center; gap: 18px; width: 100%; padding: 16px 20px; text-align: left; white-space: normal; background: #fff; }

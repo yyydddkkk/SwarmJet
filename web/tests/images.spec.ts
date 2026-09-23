@@ -98,6 +98,28 @@ test("existing local image can be checked without starting a build", async ({ pa
   expect(backend.state.active).toBeNull();
 });
 
+test("registry passwords can be revealed independently without changing their values", async ({ page }) => {
+  await imagesAPI(page);
+  await page.route("**/api/registry", (route) => route.fulfill({ json: {
+    address: "registry.test:5443", repository: "swarmjet/agent", pushUser: "builder", pullUser: "reader",
+    hasPushPassword: false, hasPullPassword: false,
+  } }));
+  await page.goto("/#/images");
+  await page.getByRole("tab", { name: "仓库设置" }).click();
+  await page.getByText("Distribution 镜像仓库").click();
+  const push = page.getByLabel("推送密码（留空保留）");
+  const pull = page.getByLabel("拉取密码（留空保留）");
+  await push.fill("push-secret");
+  await pull.fill("pull-secret");
+  await page.getByRole("button", { name: "显示推送密码" }).click();
+  await expect(push).toHaveAttribute("type", "text");
+  await expect(push).toHaveValue("push-secret");
+  await expect(pull).toHaveAttribute("type", "password");
+  await page.getByRole("button", { name: "隐藏推送密码" }).click();
+  await expect(push).toHaveAttribute("type", "password");
+  await expect(pull).toHaveValue("pull-secret");
+});
+
 for (const width of [1440, 390]) test(`image settings fit ${width}px and expose advanced options on demand`, async ({ page }) => {
   await imagesAPI(page);
   await page.setViewportSize({ width, height: 1000 });

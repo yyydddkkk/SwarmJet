@@ -215,6 +215,32 @@ func TestConnectionRepositoriesSendsSavedTokenAndPaginates(t *testing.T) {
 	}
 }
 
+func TestConnectionBranchesUsesSavedToken(t *testing.T) {
+	box := newConnectionBox(t)
+	sealed, _ := box.Seal(mustJSON(t, credentials.Payload{Token: "glpat-saved-value"}))
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v4/projects/11/repository/branches" || r.Header.Get("PRIVATE-TOKEN") != "glpat-saved-value" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"name": "dev"}, {"name": "release/next"}})
+	}))
+	defer remote.Close()
+	conns := newFakeConnections()
+	conns.items["c1"] = domain.Connection{ID: "c1", GitLabURL: remote.URL, Version: 1}
+	conns.secrets["c1"] = sealed
+	apiServer := &server{cfg: Config{Box: box}, conns: conns}
+	rec := callHandler(t, "GET", "/api/connections/c1/repositories/11/branches", nil, func(w http.ResponseWriter, r *http.Request) {
+		apiServer.connection(w, r, "c1", []string{"repositories", "11", "branches"})
+	})
+	if rec.Code != http.StatusOK || rec.Body.String() != "[\"dev\",\"release/next\"]\n" {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "glpat-saved-value") {
+		t.Fatal("token leaked in branch listing")
+	}
+}
+
 func TestCredentialResolvesConnectionReference(t *testing.T) {
 	box := newConnectionBox(t)
 	sealed, _ := box.Seal(mustJSON(t, credentials.Payload{Token: "primary", MergeToken: "merge"}))

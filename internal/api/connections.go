@@ -160,6 +160,19 @@ func (a *server) connections(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *server) connection(w http.ResponseWriter, r *http.Request, id string, tail []string) {
+	if len(tail) == 3 && tail[0] == "repositories" && tail[2] == "branches" {
+		if r.Method != http.MethodGet {
+			problem(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		projectID, err := strconv.ParseInt(tail[1], 10, 64)
+		if err != nil || projectID <= 0 {
+			problem(w, http.StatusBadRequest, "invalid project ID")
+			return
+		}
+		a.connectionBranches(w, r, id, projectID)
+		return
+	}
 	if len(tail) == 1 && tail[0] == "repositories" {
 		if r.Method != http.MethodGet {
 			problem(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -371,4 +384,33 @@ func (a *server) connectionRepositories(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	respond(w, http.StatusOK, result)
+}
+
+func (a *server) connectionBranches(w http.ResponseWriter, r *http.Request, id string, projectID int64) {
+	if a.conns == nil {
+		problem(w, http.StatusNotFound, "not found")
+		return
+	}
+	c, err := a.conns.Connection(r.Context(), id)
+	if err != nil {
+		failure(w, err)
+		return
+	}
+	token, err := a.connectionToken(id, false)
+	if err != nil {
+		problem(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	branches, err := gitlab.New(c.GitLabURL, token).ListBranches(ctx, projectID)
+	if err != nil {
+		gitlabProblem(w, err)
+		return
+	}
+	names := make([]string, 0, len(branches))
+	for _, branch := range branches {
+		names = append(names, branch.Name)
+	}
+	respond(w, http.StatusOK, names)
 }
