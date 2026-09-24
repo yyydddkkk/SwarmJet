@@ -17,6 +17,7 @@ import (
 	"swarmjet/internal/domain"
 	"swarmjet/internal/execution"
 	"swarmjet/internal/gitlab"
+	"swarmjet/internal/labels"
 	"swarmjet/internal/managedmeta"
 	"swarmjet/internal/store"
 	"swarmjet/internal/workspace"
@@ -1251,6 +1252,9 @@ func (a *Activities) Sync(ctx context.Context, t domain.Task) error {
 		add := []string{"swarmjet:" + t.Stage}
 		if len(t.Assumptions) > 0 {
 			add = append(add, "needs-clarification")
+		}
+		if _, err := labels.Ensure(ctx, c, t.Issue.ProjectID, labels.System(t.Stage, len(t.Assumptions) > 0)); err != nil {
+			return err
 		}
 		fresh, err := c.GetIssue(ctx, t.Issue.ProjectID, t.Issue.IID)
 		if err != nil {

@@ -321,6 +321,22 @@ func (c *Client) UpdateLabels(ctx context.Context, issue domain.Issue, add, remo
 	_, err := c.request(ctx, "PUT", issuePath(issue), body, nil)
 	return err
 }
+
+type ProjectLabel struct {
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	Description string `json:"description,omitempty"`
+	Archived    bool   `json:"archived,omitempty"`
+}
+
+func (c *Client) ListProjectLabels(ctx context.Context, projectID int64) ([]ProjectLabel, error) {
+	return paginate[ProjectLabel](ctx, c, project(projectID)+"/labels", nil)
+}
+
+func (c *Client) CreateProjectLabel(ctx context.Context, projectID int64, label ProjectLabel) error {
+	_, err := c.request(ctx, "POST", project(projectID)+"/labels", label, nil)
+	return err
+}
 func (c *Client) UpsertProgress(ctx context.Context, issue domain.Issue, taskID, body string) error {
 	c.notes.Lock()
 	defer c.notes.Unlock()

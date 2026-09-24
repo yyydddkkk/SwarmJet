@@ -151,6 +151,59 @@ func scanProject(gitlabURL string) domain.Project {
 	return domain.Project{ID: "scan", Name: "Scan", Enabled: true, MetaURL: gitlabURL + "/group/meta.git", MetaRef: "main", GitLabURL: gitlabURL, CredentialRef: "GITLAB_TOKEN", MergeCredentialRef: "GITLAB_MERGE_TOKEN", Repositories: []domain.Repository{{ID: "service", ProjectID: 7, URL: gitlabURL + "/group/service.git", Path: "service", TargetBranch: "main"}}, Development: domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "agent:test", TimeoutSeconds: 300}, Review: domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "agent:test", TimeoutSeconds: 300}, Integration: domain.IntegrationConfig{ComposeFile: "compose.yml", StartupTimeoutSeconds: 30, Checks: []domain.Check{{Name: "test", Service: "test", Command: []string{"true"}, Required: true}}}, MaxReworks: 3}
 }
 
+func TestReconcileLabelsTracksEnabledAgentsWithoutEditingExisting(t *testing.T) {
+	s := scanTestStore(t)
+	ctx := context.Background()
+	var mu sync.Mutex
+	remoteLabels := map[string]string{"autonomous": "#123456"}
+	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v4/projects/7/labels" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Method == "POST" {
+			var label struct{ Name, Color string }
+			if err := json.NewDecoder(r.Body).Decode(&label); err != nil {
+				t.Error(err)
+			}
+			remoteLabels[label.Name] = label.Color
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		list := make([]map[string]string, 0, len(remoteLabels))
+		for name, color := range remoteLabels {
+			list = append(list, map[string]string{"name": name, "color": color})
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	}))
+	defer gitlab.Close()
+	if _, err := s.SaveProject(ctx, scanProject(gitlab.URL)); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }}
+	if err := svc.reconcileLabels(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if len(remoteLabels) != 3 || remoteLabels["autonomous"] != "#123456" || remoteLabels["agent:codex"] == "" || remoteLabels["agent:opencode"] == "" {
+		t.Errorf("unexpected labels %+v", remoteLabels)
+	}
+	mu.Unlock()
+	if err := s.SetEnabledAgents(ctx, []string{"codex", "dst"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.reconcileLabels(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if len(remoteLabels) != 4 || remoteLabels["agent:dst"] == "" || remoteLabels["agent:opencode"] == "" {
+		t.Errorf("agent change altered existing labels %+v", remoteLabels)
+	}
+	mu.Unlock()
+}
+
 func TestScanUsesDistributedSchedulingPolicy(t *testing.T) {
 	s := scanTestStore(t)
 	ctx := context.Background()

@@ -127,6 +127,7 @@ async function setupAPI(page: Page, initial?: Project) {
   let failImport = false;
   const saves: Project[] = [];
   const imports: Record<string, unknown>[] = [];
+  let labelsReady = false;
   await page.route("**/api/**", async (route) => {
     const request = route.request(),
       pathname = new URL(request.url()).pathname;
@@ -172,6 +173,14 @@ async function setupAPI(page: Page, initial?: Project) {
     }
     if (pathname === "/api/projects" && request.method() === "GET")
       return route.fulfill({ json: project ? [project] : [] });
+    if (pathname === `/api/projects/${project?.id}/labels`) {
+      if (request.method() === "POST") labelsReady = true;
+      return route.fulfill({ json: { repositories: (project?.repositories || []).map((repo) => ({
+        repositoryId: repo.id, projectId: repo.projectId,
+        labels: [{ name: "autonomous", color: "#2563EB", exists: true, existingColor: "#123456" },
+          { name: "agent:codex", color: "#7C3AED", exists: labelsReady, existingColor: labelsReady ? "#7C3AED" : undefined }],
+      })) } });
+    }
     if (
       (pathname === "/api/projects" && request.method() === "POST") ||
       (pathname.startsWith("/api/projects/") && request.method() === "PUT")
@@ -191,6 +200,16 @@ async function setupAPI(page: Page, initial?: Project) {
     },
   };
 }
+
+test("enabled project can inspect and repair GitLab selection labels", async ({ page }) => {
+  await setupAPI(page, { ...configuredProject(), enabled: true });
+  await page.goto("/#/projects/custom-project");
+  const labels = page.getByRole("region", { name: "GitLab 标签管理" });
+  await expect(labels.getByText("agent:codex · 待创建")).toHaveCount(2);
+  await labels.getByRole("button", { name: "检查并补齐" }).click();
+  await expect(labels.getByText("标签已就绪")).toHaveCount(2);
+  await expect(labels.getByText("agent:codex · 待创建")).toHaveCount(0);
+});
 
 test("new project can import an existing Meta-Repo with a saved GitLab connection", async ({ page }) => {
   const state = await setupAPI(page);
