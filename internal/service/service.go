@@ -19,6 +19,7 @@ import (
 	"swarmjet/internal/domain"
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/imagebuild"
+	"swarmjet/internal/labels"
 	"swarmjet/internal/pipeline"
 	"swarmjet/internal/store"
 )
@@ -39,6 +40,53 @@ type Service struct {
 	Initializer       InitReadiness
 	RequireNode       bool
 	Wake              chan struct{}
+	LabelsWake        chan struct{}
+}
+
+// SyncLabels reconciles selectable labels independently of issue scanning.
+func (s *Service) SyncLabels(ctx context.Context) {
+	tick := time.NewTicker(2 * time.Minute)
+	defer tick.Stop()
+	for {
+		if err := s.reconcileLabels(ctx); err != nil {
+			slog.Warn("GitLab label reconciliation failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		case <-s.LabelsWake:
+		}
+	}
+}
+
+func (s *Service) reconcileLabels(ctx context.Context) error {
+	projects, err := s.Store.Projects(ctx)
+	if err != nil {
+		return err
+	}
+	enabled, err := s.Store.EnabledAgents(ctx)
+	if err != nil {
+		return err
+	}
+	wanted := labels.Selection(enabled)
+	for _, p := range projects {
+		if !p.Enabled || p.ManagedMeta() && (s.Initializer == nil || !s.Initializer.ReadyForTasks(ctx, p.ID)) {
+			continue
+		}
+		token, err := s.projectCredential(p)
+		if err != nil {
+			slog.Warn("GitLab label credential unavailable", "project", p.ID, "error", err)
+			continue
+		}
+		client := gitlab.New(p.GitLabURL, token)
+		for _, repo := range p.Repositories {
+			if _, err := labels.Ensure(ctx, client, repo.ProjectID, wanted); err != nil {
+				slog.Warn("GitLab label setup failed", "project", p.ID, "repo", repo.ID, "error", err)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) projectCredential(p domain.Project) (string, error) {

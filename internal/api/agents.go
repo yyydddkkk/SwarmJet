@@ -22,6 +22,7 @@ func (a *server) agents(w http.ResponseWriter, r *http.Request) {
 			failure(w, err)
 			return
 		}
+		a.wakeLabels()
 	} else if r.Method != "GET" {
 		problem(w, 405, "method not allowed")
 		return

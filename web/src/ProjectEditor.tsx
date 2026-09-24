@@ -3,6 +3,7 @@ import type { AgentConfig, Check, Connection, Project, Repository } from "./type
 import type {NodeView} from "./NodeSettings";
 import { api } from "./api";
 import { useAgentCatalog } from "./agents";
+import { ProjectLabels } from "./ProjectLabels";
 import { ErrorBox, Field } from "./ui";
 import { formatCommand, parseCommand } from "./commands";
 import "./wizard.css";
@@ -470,6 +471,7 @@ export function ProjectEditor({
           {p.enabled ? "已启用" : "草稿 · 未启用"}
         </span>
       </header>
+      {existing && p.enabled && <ProjectLabels projectId={p.id} />}
       <form
         noValidate
         onSubmit={(e) => {

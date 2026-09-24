@@ -27,6 +27,7 @@ import (
 	"swarmjet/internal/execution"
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/imagebuild"
+	"swarmjet/internal/labels"
 	"swarmjet/internal/secretbox"
 	"swarmjet/internal/store"
 )
@@ -40,6 +41,7 @@ type Config struct {
 	NodeSecret                                            string
 	RequireNode                                           bool
 	Nodes                                                 execution.NodeResolver
+	LabelsWake                                            chan struct{}
 	SecureCookies                                         bool
 	ResolveCredential                                     func(string) (string, error)
 	// Box encrypts saved connection tokens. nil disables connection storage
@@ -441,6 +443,9 @@ func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Pr
 		failure(w, err)
 		return
 	}
+	if p.Enabled {
+		a.wakeLabels()
+	}
 	respond(w, 200, p)
 }
 func (a *server) project(w http.ResponseWriter, r *http.Request, id string, tail []string) {
@@ -472,6 +477,10 @@ func (a *server) project(w http.ResponseWriter, r *http.Request, id string, tail
 		a.initialization(w, r, id, tail[1:])
 		return
 	}
+	if len(tail) == 1 && tail[0] == "labels" {
+		a.projectLabels(w, r, id)
+		return
+	}
 	if len(tail) == 1 && tail[0] == "check" && r.Method == "POST" {
 		p, err := a.s.Project(r.Context(), id)
 		if err != nil {
@@ -482,6 +491,63 @@ func (a *server) project(w http.ResponseWriter, r *http.Request, id string, tail
 		return
 	}
 	problem(w, 404, "API route not found")
+}
+
+func (a *server) wakeLabels() {
+	if a.cfg.LabelsWake == nil {
+		return
+	}
+	select {
+	case a.cfg.LabelsWake <- struct{}{}:
+	default:
+	}
+}
+
+func (a *server) projectLabels(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != "GET" && r.Method != "POST" {
+		problem(w, 405, "method not allowed")
+		return
+	}
+	p, err := a.s.Project(r.Context(), id)
+	if err != nil {
+		failure(w, err)
+		return
+	}
+	if !p.Enabled {
+		problem(w, 409, "项目启用后才能管理 GitLab 标签")
+		return
+	}
+	enabled, err := a.s.EnabledAgents(r.Context())
+	if err != nil {
+		failure(w, err)
+		return
+	}
+	client, err := a.client(p)
+	if err != nil {
+		problem(w, 503, "GitLab credential unavailable")
+		return
+	}
+	wanted := labels.Selection(enabled)
+	type repoStatus struct {
+		RepositoryID string          `json:"repositoryId"`
+		ProjectID    int64           `json:"projectId"`
+		Labels       []labels.Status `json:"labels"`
+		Error        string          `json:"error,omitempty"`
+	}
+	out := make([]repoStatus, 0, len(p.Repositories))
+	for _, repo := range p.Repositories {
+		item := repoStatus{RepositoryID: repo.ID, ProjectID: repo.ProjectID}
+		if r.Method == "POST" {
+			item.Labels, err = labels.Ensure(r.Context(), client, repo.ProjectID, wanted)
+		} else {
+			item.Labels, err = labels.Plan(r.Context(), client, repo.ProjectID, wanted)
+		}
+		if err != nil {
+			item.Error = err.Error()
+		}
+		out = append(out, item)
+	}
+	respond(w, 200, map[string]any{"repositories": out})
 }
 func (a *server) credential(ref string) (string, error) {
 	// Saved connections are resolved locally so the console never depends on a
