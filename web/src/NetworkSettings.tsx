@@ -16,7 +16,7 @@ const blank = (): NetworkProfile => ({
   hasPassword: false,
   revoked: false,
 });
-export default function NetworkSettings() {
+export default function NetworkSettings({ embedded = false }: { embedded?: boolean }) {
   const profileRef = useRef<HTMLDialogElement>(null);
   const mihomoRef = useRef<HTMLDialogElement>(null);
   const editorGeneration = useRef(0);
@@ -156,7 +156,7 @@ export default function NetworkSettings() {
     <div className="settings-page network-settings">
       <div className="page-head">
         <div>
-          <h1>网络配置</h1>
+          {embedded ? <h2>网络与代理</h2> : <h1>网络配置</h1>}
           <p>统一维护代理，由构建服务和执行节点按需选择。</p>
         </div>
         <button className="primary" onClick={() => openProfile(blank())}>新增配置</button>

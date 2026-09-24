@@ -180,6 +180,10 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		problem(w, 401, "authentication required")
 		return
 	}
+	if r.URL.Path == "/api/system" || r.URL.Path == "/api/system/checks" {
+		a.system(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/mihomo/") {
 		a.mihomo(w, r)
 		return

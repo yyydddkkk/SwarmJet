@@ -238,6 +238,7 @@ func environment() (map[string]string, error) {
 	setDefault(env, "DEV_WEB_PORT", "5273")
 	env["PUBLIC_ORIGIN"] = "http://localhost:" + env["DEV_WEB_PORT"]
 	env["LISTEN_ADDRESS"] = "127.0.0.1:" + value(env, "DEV_API_PORT", "8180")
+	env["SWARMJET_HOST_LISTEN_ADDRESS"] = env["LISTEN_ADDRESS"]
 	env["DEV_API_URL"] = "http://" + env["LISTEN_ADDRESS"]
 	env["RUNTIME_ADMIN_LISTEN"] = "127.0.0.1:" + value(env, "DEV_RUNTIME_PORT", "8191")
 	env["RUNTIME_ADMIN_URL"] = "http://" + env["RUNTIME_ADMIN_LISTEN"]

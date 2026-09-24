@@ -104,9 +104,8 @@ test("registry passwords can be revealed independently without changing their va
     address: "registry.test:5443", repository: "swarmjet/agent", pushUser: "builder", pullUser: "reader",
     hasPushPassword: false, hasPullPassword: false,
   } }));
-  await page.goto("/#/images");
-  await page.getByRole("tab", { name: "仓库设置" }).click();
-  await page.getByText("Distribution 镜像仓库").click();
+  await page.goto("/#/settings/registry");
+  await expect(page.getByText("Distribution 镜像仓库")).toBeVisible();
   const push = page.getByLabel("推送密码（留空保留）");
   const pull = page.getByLabel("拉取密码（留空保留）");
   await push.fill("push-secret");
@@ -127,9 +126,8 @@ test("builtin registry is the default and a custom address can be saved", async 
     if (route.request().method() === "PUT") config = { ...config, ...route.request().postDataJSON() };
     return route.fulfill({ json: config });
   });
-  await page.goto("/#/images");
-  await page.getByRole("tab", { name: "仓库设置" }).click();
-  await page.getByText("Distribution 镜像仓库").click();
+  await page.goto("/#/settings/registry");
+  await expect(page.getByText("Distribution 镜像仓库")).toBeVisible();
   await expect(page.getByLabel("仓库来源")).toHaveValue("builtin");
   await expect(page.getByText("10.0.0.20:5443")).toBeVisible();
   await page.getByLabel("仓库来源").selectOption("custom");
@@ -147,9 +145,8 @@ test("admin can reveal generated registry credentials on demand", async ({ page 
     pushUser: "builder", pullUser: "reader", hasPushPassword: true, hasPullPassword: true,
   } }));
   await page.route("**/api/registry/reveal", (route) => route.fulfill({ json: { pushPassword: "generated-push", pullPassword: "generated-pull" } }));
-  await page.goto("/#/images");
-  await page.getByRole("tab", { name: "仓库设置" }).click();
-  await page.getByText("Distribution 镜像仓库").click();
+  await page.goto("/#/settings/registry");
+  await expect(page.getByText("Distribution 镜像仓库")).toBeVisible();
   await expect(page.getByText("generated-push")).toHaveCount(0);
   await page.getByRole("button", { name: "查看已保存密码" }).click();
   await expect(page.getByLabel("推送密码", { exact: true })).toHaveValue("generated-push");

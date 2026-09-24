@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import type { AgentSpec } from "./agents";
-import RegistrySettings from "./RegistrySettings";
 import { NetworkSelect, type NetworkChoice } from "./NetworkSelect";
 import type { NodeView } from "./NodeSettings";
 import { ConfirmDialog, Field } from "./ui";
@@ -51,7 +50,7 @@ const running = (b: Build) =>
   b.status === "building" || b.status === "cancelling";
 
 export default function ImageSettings() {
-	const [tab, setTab] = useState<"images" | "build" | "settings">("build");
+	const [tab, setTab] = useState<"images" | "build">("build");
   const [targets, setTargets] = useState<string[]>([]);
   const [nodes, setNodes] = useState<NodeView[]>([]);
   const reloadNodes = useCallback(() => api<NodeView[]>("/nodes").then(setNodes), []);
@@ -158,16 +157,15 @@ export default function ImageSettings() {
           <h1>镜像管理</h1>
           <p>查看仓库版本、分发到 Node，并构建包含 Agent CLI 的 Runner 镜像。</p>
         </div>
-        <a className="button" href="#/runtime">
-          Runner 环境
-        </a>
+        <div className="image-head-actions">
+          <a className="button" href="#/settings/registry">仓库设置</a>
+          <a className="button" href="#/runtime">Runner 环境</a>
+        </div>
       </div>
       <div className="image-tabs" role="tablist" aria-label="镜像管理视图">
         <button role="tab" aria-selected={tab === "images"} onClick={() => setTab("images")}>仓库镜像</button>
         <button role="tab" aria-selected={tab === "build"} onClick={() => setTab("build")}>镜像构建</button>
-        <button role="tab" aria-selected={tab === "settings"} onClick={() => setTab("settings")}>仓库设置</button>
       </div>
-      {tab === "settings" && <RegistrySettings />}
       {tab === "images" && <RegistryInventory builds={view?.builds || []} nodes={nodes} reloadNodes={reloadNodes} onBuild={() => setTab("build")} />}
       {error && (
         <div className="error" role="alert">

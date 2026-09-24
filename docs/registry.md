@@ -27,7 +27,7 @@ Distribution 保存镜像内容，通过 Registry API 提供上传和拉取。�
 
 单独部署时运行 `docker compose -p swarmjet-registry --env-file /absolute/registry.env -f deploy/compose.registry.yaml up -d`。与平台组合部署时追加 `-f deploy/compose.registry.yaml`。备份 registry-data 卷、CA 私钥和私有配置。不要对业务 Docker 执行全局 prune。
 
-平台默认使用自动生成的局域网仓库。在“镜像管理 → 仓库设置”选择自定义时，填写 host:port、镜像路径、builder 推送账号和 reader 拉取账号。自定义密码加密存储，不需要给 Node 推送权限。仓库镜像清单读取此路径的实时 tag 与摘要，包含外部推送的镜像；新构建也只发布到此路径。
+平台默认使用自动生成的局域网仓库。在“系统设置 → 镜像仓库”选择自定义时，填写 host:port、镜像路径、builder 推送账号和 reader 拉取账号。自定义密码加密存储，不需要给 Node 推送权限。系统设置概览显示生效地址，并可从控制面检查仓库 TLS 与拉取认证；Node 心跳不等于 Docker 拉取验证。仓库镜像清单读取此路径的实时 tag 与摘要，包含外部推送的镜像；新构建也只发布到此路径。
 
 页面删除以 manifest 摘要为单位，同摘要的所有 tag 一起失效。节点、项目、未结束任务或初始化仍引用该摘要时会拒绝删除；页面无法得知仓库外部客户端的引用。当前 Compose 示例已启用 manifest 删除，升级已有仓库容器后才会生效。删除不会立即回收磁盘，构建记录和已完成任务历史仍保留原摘要。
 

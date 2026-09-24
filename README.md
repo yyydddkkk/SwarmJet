@@ -141,4 +141,4 @@ Worker 经 Docker socket 创建同宿主机的任务容器，`DATA_DIR` 必须�
 
 “执行节点”管理节点容量、网络配置、默认及额外预加载镜像；项目选择自动调度或指定节点范围。一个 Node 可使用多个镜像，任务固定节点、各角色镜像摘要和网络配置版本。新节点默认暂停，完成镜像准备后再启用。
 
-“网络配置”集中管理代理，Node 和构建服务按需引用。构建服务使用独立 BuildKit；镜像通过自建 Distribution 分发。部署及权限配置见 [仓库与构建服务](docs/registry.md)，测试记录见 [分布式验收](docs/distributed-validation.md)。
+“系统设置”显示当前生效的服务地址、仓库及 Node 心跳检查，并集中管理网络代理和镜像仓库。Node 和构建服务按需引用网络配置；部署地址仍在服务器环境文件中修改并重启生效。构建服务使用独立 BuildKit；镜像通过自建 Distribution 分发。部署及权限配置见 [仓库与构建服务](docs/registry.md)，测试记录见 [分布式验收](docs/distributed-validation.md)。

@@ -33,7 +33,7 @@ type Config = {
   hasPushPassword: boolean;
   hasPullPassword: boolean;
 };
-export default function RegistrySettings() {
+export default function RegistrySettings({ expanded = false }: { expanded?: boolean }) {
   const [c, setC] = useState<Config>({
       mode: "custom",
       address: "",
@@ -54,7 +54,7 @@ export default function RegistrySettings() {
       .catch((e) => setMessage(e.message));
   }, []);
   return (
-    <details className="panel">
+    <details className="panel" open={expanded}>
       <summary>Distribution 镜像仓库</summary>
       <div className="panel-body">
         <Field label="仓库来源">

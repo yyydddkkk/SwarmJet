@@ -62,7 +62,7 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
 
 侧边栏“镜像管理”管理 Agent 执行镜像。独立 builder 调用 Compose 管理的持久化 BuildKit，发布到自建 Distribution。平台程序镜像和业务应用镜像仍使用各自发布流程。
 
-源码安装脚本会组合 `compose.yaml`、`compose.build.yaml`、`compose.builder.yaml` 和 `compose.registry.yaml`。手动部署也应包含 builder 与 registry 配置；镜像管理页默认使用局域网 TLS 仓库，可按需查看自动生成的账号密码或切换自定义仓库。其他节点需信任仓库 CA 后才能拉取镜像。构建成功不会自动应用或启用 Agent；选择节点分发后，节点按摘要预拉取并检查 CLI，准备完成才可接单。
+源码安装脚本会组合 `compose.yaml`、`compose.build.yaml`、`compose.builder.yaml` 和 `compose.registry.yaml`。手动部署也应包含 builder 与 registry 配置；“系统设置 → 镜像仓库”默认使用局域网 TLS 仓库，可按需查看自动生成的账号密码或切换自定义仓库。概览页可检查控制面到仓库的 TLS 与认证连接，部署地址仍需在服务器环境文件中修改并重启。其他节点需信任仓库 CA 后才能拉取镜像。构建成功不会自动应用或启用 Agent；选择节点分发后，节点按摘要预拉取并检查 CLI，准备完成才可接单。
 
 本机原生开发的 `scripts/dev start` 也会自动使用同一份 `compose.registry.yaml`，私有配置保存在 `DATA_DIR/registry-config`。
 

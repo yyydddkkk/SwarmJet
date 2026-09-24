@@ -13,12 +13,14 @@ export function Icon({
     | "arrow"
     | "bolt"
     | "branch"
+    | "settings"
     | "alert"
     | "check";
 }) {
   const paths = {
     bolt: "m13 2-9 12h7l-1 8 10-13h-7l1-7Z",
     branch: "M6 3v12a4 4 0 0 0 4 4h8M6 8h7a4 4 0 0 0 4-4V3",
+    settings: "M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",
     alert: "M12 8v5m0 3v.1M12 3 2 21h20L12 3Z",
     check: "m5 12 4 4L19 6",
     tasks: "M8 5h12M8 12h12M8 19h12M3 5h.01M3 12h.01M3 19h.01",

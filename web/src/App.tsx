@@ -11,6 +11,7 @@ const RuntimeSettings = lazy(() => import("./RuntimeSettings"));
 const NodeSettings = lazy(() => import("./NodeSettings"));
 const NetworkSettings = lazy(() => import("./NetworkSettings"));
 const ImageSettings = lazy(() => import("./ImageSettings"));
+const SystemSettings = lazy(() => import("./SystemSettings"));
 
 export default function App() {
   const [user, setUser] = useState<string | null>(null),
@@ -57,6 +58,7 @@ export default function App() {
   const projectPage = route.startsWith("/projects");
   const runtimePage = route.startsWith("/runtime");
   const imagesPage = route.startsWith("/images");
+  const settingsPage = route.startsWith("/settings");
   const nodesPage=route.startsWith("/nodes"), networksPage=route.startsWith("/networks");
   const parts = route.split("?")[0].split("/");
   const selectedProject =
@@ -89,8 +91,8 @@ export default function App() {
         </div>
         <nav aria-label="主导航">
           <a
-            aria-current={!projectPage && !runtimePage && !imagesPage && !nodesPage && !networksPage ? "page" : undefined}
-            className={!projectPage && !runtimePage && !imagesPage && !nodesPage && !networksPage ? "active" : ""}
+            aria-current={!projectPage && !runtimePage && !imagesPage && !nodesPage && !networksPage && !settingsPage ? "page" : undefined}
+            className={!projectPage && !runtimePage && !imagesPage && !nodesPage && !networksPage && !settingsPage ? "active" : ""}
             href="#/tasks"
           >
             <Icon name="tasks" />
@@ -113,9 +115,11 @@ export default function App() {
             Runner 环境
           </a>
           <a href="#/nodes" className={nodesPage?"active":""} aria-current={nodesPage?"page":undefined}><Icon name="nodes"/>Node 管理</a>
-          <a href="#/networks" className={networksPage?"active":""} aria-current={networksPage?"page":undefined}><Icon name="branch"/>网络配置</a>
           <a aria-current={imagesPage ? "page" : undefined} className={imagesPage ? "active" : ""} href="#/images">
             <Icon name="images" />镜像管理
+          </a>
+          <a aria-current={settingsPage ? "page" : undefined} className={settingsPage ? "active" : ""} href="#/settings">
+            <Icon name="settings" />系统设置
           </a>
         </nav>
         <SidebarProjects route={route} selectedProject={selectedProject} />
@@ -145,14 +149,14 @@ export default function App() {
         <header className="topbar">
           <span>
             工作空间 <span className="slash">/</span>{" "}
-            {nodesPage ? "Node 管理" : networksPage ? "网络配置" : imagesPage ? "镜像管理" : runtimePage ? "Runner 环境" : projectPage ? "项目配置" : "任务中心"}
+            {settingsPage ? "系统设置" : nodesPage ? "Node 管理" : networksPage ? "网络配置" : imagesPage ? "镜像管理" : runtimePage ? "Runner 环境" : projectPage ? "项目配置" : "任务中心"}
           </span>
           <span className="top-note">SwarmJet / 工作空间</span>
         </header>
         <main id="main" tabIndex={-1}>
           <ErrorBox error={error} />
           <Suspense fallback={<div className="loading">正在加载页面…</div>}>
-          {nodesPage ? (<Suspense fallback={<p>正在加载节点…</p>}><NodeSettings/></Suspense>) : networksPage ? (<Suspense fallback={<p>正在加载网络配置…</p>}><NetworkSettings/></Suspense>) : imagesPage ? (
+          {settingsPage ? (<SystemSettings section={parts[2] || "overview"} />) : nodesPage ? (<Suspense fallback={<p>正在加载节点…</p>}><NodeSettings/></Suspense>) : networksPage ? (<Suspense fallback={<p>正在加载网络配置…</p>}><NetworkSettings/></Suspense>) : imagesPage ? (
             <Suspense fallback={<div className="loading">正在加载镜像管理…</div>}><ImageSettings /></Suspense>
           ) : runtimePage ? (
             <Suspense
