@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS leases(name text PRIMARY KEY, owner text NOT NULL, ex
 CREATE TABLE IF NOT EXISTS connections(id text PRIMARY KEY, version integer NOT NULL, body jsonb NOT NULL, secret text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS initializations(id text PRIMARY KEY, project_id text NOT NULL, status text NOT NULL, body jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS active_initializations ON initializations(status) WHERE status NOT IN ('ready','cancelled');
+CREATE TABLE IF NOT EXISTS repository_changes(id text PRIMARY KEY, project_id text NOT NULL REFERENCES projects(id), status text NOT NULL, body jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_repository_change ON repository_changes(project_id) WHERE status IN ('pending','waiting');
 CREATE TABLE IF NOT EXISTS nodes(id text PRIMARY KEY, address text NOT NULL, capacity integer NOT NULL, version text NOT NULL DEFAULT '', last_seen timestamptz NOT NULL);
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS node_id text;
 CREATE INDEX IF NOT EXISTS tasks_by_node ON tasks(node_id) WHERE NOT terminal;

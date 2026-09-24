@@ -28,6 +28,7 @@ import (
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/imagebuild"
 	"swarmjet/internal/labels"
+	"swarmjet/internal/repochange"
 	"swarmjet/internal/secretbox"
 	"swarmjet/internal/store"
 )
@@ -51,7 +52,13 @@ type Config struct {
 	Box *secretbox.Box
 	// Initializer runs the durable managed-Meta initialization. nil disables the
 	// initialization endpoints.
-	Initializer Initializer
+	Initializer       Initializer
+	RepositoryChanges interface {
+		Start(context.Context, string, repochange.AddRequest) (domain.RepositoryChange, error)
+		List(context.Context, string) ([]domain.RepositoryChange, error)
+		Available(context.Context, string, string, int) (gitlab.ProjectPage, error)
+		Retry(context.Context, string, string) (domain.RepositoryChange, error)
+	}
 }
 type server struct {
 	s        *store.Store
@@ -489,6 +496,10 @@ func (a *server) project(w http.ResponseWriter, r *http.Request, id string, tail
 	}
 	if len(tail) >= 1 && tail[0] == "initialization" {
 		a.initialization(w, r, id, tail[1:])
+		return
+	}
+	if len(tail) >= 1 && tail[0] == "repository-changes" {
+		a.repositoryChanges(w, r, id, tail[1:])
 		return
 	}
 	if len(tail) == 1 && tail[0] == "labels" {

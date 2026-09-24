@@ -127,6 +127,8 @@ async function setupAPI(page: Page, initial?: Project) {
   let failImport = false;
   const saves: Project[] = [];
   const imports: Record<string, unknown>[] = [];
+  const additions: Record<string, unknown>[] = [];
+  const changes: Record<string, unknown>[] = [];
   let labelsReady = false;
   await page.route("**/api/**", async (route) => {
     const request = route.request(),
@@ -173,6 +175,16 @@ async function setupAPI(page: Page, initial?: Project) {
     }
     if (pathname === "/api/projects" && request.method() === "GET")
       return route.fulfill({ json: project ? [project] : [] });
+    if (pathname === `/api/projects/${project?.id}/repository-changes`) {
+      if (request.method() === "GET" && new URL(request.url()).searchParams.get("available") === "true")
+        return route.fulfill({ json: { projects: [{ id: 103, name: "worker", pathWithNamespace: "team/worker", defaultBranch: "main", httpUrlToRepo: "https://gitlab.example/team/worker.git", archived: false }], hasNext: false } });
+      if (request.method() === "GET") return route.fulfill({ json: changes });
+      const input = request.postDataJSON();
+      additions.push(input);
+      const change = { id: "change-1", projectId: project?.id, repository: { id: input.alias, path: input.path }, status: "waiting", mergeRequestUrl: "https://gitlab.example/team/meta/-/merge_requests/8" };
+      changes.push(change);
+      return route.fulfill({ status: 202, json: change });
+    }
     if (pathname === `/api/projects/${project?.id}/labels`) {
       if (request.method() === "POST") labelsReady = true;
       return route.fulfill({ json: { repositories: (project?.repositories || []).map((repo) => ({
@@ -195,11 +207,24 @@ async function setupAPI(page: Page, initial?: Project) {
   return {
     saves,
     imports,
+    additions,
     failImport: () => {
       failImport = true;
     },
   };
 }
+
+test("existing project can request a new repository without editing Meta YAML", async ({ page }) => {
+  const state = await setupAPI(page, configuredProject());
+  await page.goto("/#/projects/custom-project");
+  await page.getByText("＋ 选择要加入的仓库").click();
+  await page.getByRole("button", { name: "team/worker" }).click();
+  await expect(page.getByLabel("仓库标识")).toHaveValue("worker");
+  await page.getByRole("button", { name: "提交新增请求" }).click();
+  await expect.poll(() => state.additions.length).toBe(1);
+  expect(state.additions[0]).toMatchObject({ gitlabProjectId: 103, alias: "worker", path: "worker", targetBranch: "main" });
+  await expect(page.getByRole("link", { name: "查看 MR" })).toHaveAttribute("href", "https://gitlab.example/team/meta/-/merge_requests/8");
+});
 
 test("enabled project can inspect and repair GitLab selection labels", async ({ page }) => {
   await setupAPI(page, { ...configuredProject(), enabled: true });

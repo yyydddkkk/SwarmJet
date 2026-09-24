@@ -517,6 +517,25 @@ func TestResultFalseNeedsHelpAndBlockedValidation(t *testing.T) {
 	}
 }
 
+func TestBlockedResultKeepsObstacleWhenAcceptanceShapeIsInvalid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "result.json")
+	body := `{"outcome":"blocked","summary":"Development incomplete","needsHelp":"The existing worktree needs a writable continuation","humanAcceptance":{"prerequisites":["test environment"],"steps":["open the page","stop generation"],"expectedResults":["button resets"],"notes":"not verified"}}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ReadResult(path, "dev")
+	if err != nil || result.Outcome != "blocked" || result.NeedsHelp != "The existing worktree needs a writable continuation" || result.HumanAcceptance != nil {
+		t.Fatalf("blocked result lost the actual obstacle: result=%+v err=%v", result, err)
+	}
+	changed := strings.Replace(body, `"outcome":"blocked"`, `"outcome":"changed"`, 1)
+	if err := os.WriteFile(path, []byte(changed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadResult(path, "dev"); err == nil {
+		t.Fatal("accepted malformed acceptance guide for completed work")
+	}
+}
+
 func TestInvalidResultPreservesFailureReason(t *testing.T) {
 	r, f, req := setup(t)
 	ex, err := r.Start(context.Background(), req)

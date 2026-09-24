@@ -787,7 +787,8 @@ func ReadResult(path, role string) (domain.AgentResult, error) {
 	}
 	var wire struct {
 		domain.AgentResult
-		NeedsHelp json.RawMessage `json:"needsHelp"`
+		NeedsHelp       json.RawMessage `json:"needsHelp"`
+		HumanAcceptance json.RawMessage `json:"humanAcceptance"`
 	}
 	if err = json.Unmarshal(b, &wire); err != nil {
 		var typeErr *json.UnmarshalTypeError
@@ -797,6 +798,21 @@ func ReadResult(path, role string) (domain.AgentResult, error) {
 		return result, errors.New("expected a valid JSON object")
 	}
 	result = wire.AgentResult
+	acceptance := bytes.TrimSpace(wire.HumanAcceptance)
+	if len(acceptance) > 0 && !bytes.Equal(acceptance, []byte("null")) {
+		var guide domain.ManualAcceptance
+		if parseErr := json.Unmarshal(acceptance, &guide); parseErr == nil {
+			result.HumanAcceptance = &guide
+		} else if result.Outcome != "blocked" {
+			var typeErr *json.UnmarshalTypeError
+			if errors.As(parseErr, &typeErr) {
+				return result, fmt.Errorf("field humanAcceptance.%s must be %s", typeErr.Field, typeErr.Type)
+			}
+			return result, errors.New("humanAcceptance must be a valid object")
+		}
+		// A blocked result has no completed change to validate manually. Preserve
+		// its needsHelp instead of masking the obstacle with a malformed guide.
+	}
 	// Older prompts did not state the type, so models commonly used false for
 	// "no help needed". Normalize only that unambiguous value; true is not an
 	// explanation and blocked outcomes still require a non-empty string below.

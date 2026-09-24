@@ -110,7 +110,7 @@ func TestResultRecoveryIgnoresOtherExecutionFailures(t *testing.T) {
 func TestResultRecoveryPromptOnlyDescribesExistingWork(t *testing.T) {
 	task := domain.Task{Issue: domain.Issue{Title: "show two decimal places"}}
 	prompt := resultRecoveryPrompt(task, "developing", nil, domain.Execution{ID: "first"})
-	for _, want := range []string{"read-only", "Do not edit files", "acceptanceCommands", "show two decimal places", "first"} {
+	for _, want := range []string{"read-only", "Do not edit files", "acceptanceCommands", "show two decimal places", "first", `"steps":[{"action":`, "When outcome is blocked, omit humanAcceptance"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing %q from repair prompt", want)
 		}

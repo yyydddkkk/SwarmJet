@@ -4,6 +4,7 @@ import type {NodeView} from "./NodeSettings";
 import { api } from "./api";
 import { useAgentCatalog } from "./agents";
 import { ProjectLabels } from "./ProjectLabels";
+import { AddRepository } from "./AddRepository";
 import { ErrorBox, Field } from "./ui";
 import { formatCommand, parseCommand } from "./commands";
 import "./wizard.css";
@@ -465,7 +466,7 @@ export function ProjectEditor({
         <div>
           <div className="eyebrow">WORKSPACE SETUP</div>
           <h1>{existing ? p.name : "连接你的开发工作区"}</h1>
-          <p>从 Meta-Repo 读取仓库信息。先保存，准备好后再开启自动开发。</p>
+          <p>{managed ? "管理参与开发的仓库；系统维护 Meta 清单。" : "从已有 Meta-Repo 读取仓库信息。先保存，准备好后再开启自动开发。"}</p>
         </div>
         <span className={`status ${p.enabled ? "completed" : "paused"}`}>
           {p.enabled ? "已启用" : "草稿 · 未启用"}
@@ -935,7 +936,7 @@ export function ProjectEditor({
                       ↳
                     </span>
                     <strong>不需要逐项填写仓库信息</strong>
-                    <p>在上方读取 Meta-Repo 清单，即可批量导入所有仓库。</p>
+                    <p>{managed ? "初始化完成后，已选择的仓库会在这里显示。" : "在上方读取 Meta-Repo 清单，即可批量导入所有仓库。"}</p>
                   </div>
                 )}
                 <details className="setup-advanced">
@@ -954,7 +955,7 @@ export function ProjectEditor({
                     启用后请展开对应仓库的高级设置。标识、路径及依赖应与 Meta
                     清单保持一致。
                   </p>
-                  <button
+                  {!existing && <button
                     type="button"
                     disabled={!manual}
                     onClick={() =>
@@ -974,8 +975,9 @@ export function ProjectEditor({
                     }
                   >
                     ＋ 添加仓库
-                  </button>
+                  </button>}
                 </details>
+                {existing && <AddRepository project={p} onApplied={(updated) => { setP(updated); onSaved(updated); }} />}
               </div>
             </section>
             <section className="panel setup-section" id="execution">

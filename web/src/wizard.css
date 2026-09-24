@@ -248,3 +248,7 @@
 .meta-publication { margin-top: 24px; padding-top: 20px; border-top: 1px solid #d5dce5; }
 .meta-publication .field { display: grid; gap: 8px; margin: 14px 0; }
 .meta-publication p, .meta-publication a { overflow-wrap: anywhere; }
+.add-repository { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.add-repository h3 { margin: 0 0 8px; }
+.add-repository .setup-advanced { margin-top: 14px; }
+.repository-search-results { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 18px; }

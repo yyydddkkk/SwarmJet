@@ -1179,7 +1179,7 @@ func resultRecoveryPrompt(t domain.Task, phase string, merge *domain.Revision, f
 	}{t.Issue, t.Round, t.TriggerText, t.Project, t.Workspace, t.Verification, t.AcceptanceCommands, t.HumanAcceptance, phase, merge, failed.ID}, "", "  ")
 	return `The preceding Agent CLI process exited successfully but did not provide a valid result.json. This is a result handoff recovery, not a new work attempt. The task source tree is mounted read-only. Inspect the existing task worktree, commits, relevant repository instructions, and verification reports to determine what actually happened. Do not edit files, run tests that write files, commit, push, create or change MRs, or merge. Never claim work was done without evidence; if the outcome cannot be determined, return blocked with a concrete needsHelp. Do not include secrets.
 
-For developing or publishing, include humanAcceptance with prerequisites, concrete steps and expected results, and notes. For acceptanceStrategy=repository, statically identify acceptanceCommands from applicable repository files; the platform executes them and does not trust claims of passing checks. Use the allowed outcome for the role and phase: dev developing=changed/no_change/blocked; dev publishing=changed/blocked; review=approved/changes_requested/blocked; merge=merged/blocked. For publishing or merging, inspect GitLab state without mutation before reporting success.
+For a completed developing or publishing outcome, include humanAcceptance exactly as ` + humanAcceptanceShape + `. Each steps item must be an object with action and expected strings; notes must be a string array. Do not use a separate expectedResults field. When outcome is blocked, omit humanAcceptance and put the concrete obstacle in needsHelp as a non-empty string. For acceptanceStrategy=repository, statically identify acceptanceCommands from applicable repository files; the platform executes them and does not trust claims of passing checks. Use the allowed outcome for the role and phase: dev developing=changed/no_change/blocked; dev publishing=changed/blocked; review=approved/changes_requested/blocked; merge=merged/blocked. For publishing or merging, inspect GitLab state without mutation before reporting success.
 
 ` + gitLabOutputLanguage + `
 
@@ -1188,6 +1188,8 @@ Task context:
 }
 
 const gitLabOutputLanguage = `Write GitLab MR titles, descriptions, and comments in natural Chinese by default, including review feedback. Write user-facing result fields (summary, assumptions, findings, needsHelp, and humanAcceptance) in Chinese so the platform's Issue comments also read naturally. Keep code identifiers, file paths, commands, API names, product names, and established technical terms in their original form where that reads better; do not translate them mechanically. Follow an explicit language requirement in the task or repository when present.`
+
+const humanAcceptanceShape = `{"prerequisites":["test environment, account or role, setup data"],"steps":[{"action":"specific user operation or command","expected":"observable expected result"}],"notes":["edge cases, unverified areas, risks and cleanup"]}`
 
 func prompt(t domain.Task, phase string, merge *domain.Revision) string {
 	b, _ := json.MarshalIndent(struct {
@@ -1211,12 +1213,13 @@ func prompt(t domain.Task, phase string, merge *domain.Revision) string {
 	base += "\nProject acceptance policy: " + string(config) + "\n"
 	plan, _ := json.Marshal(t.HumanAcceptance)
 	base += "\nHuman acceptance plan: " + string(plan) + "\n"
-	if t.Round > 0 {
-		base += `For developing and publishing, return humanAcceptance in the result: {"prerequisites":["test environment, account/role, setup data, start instructions or URLs; explicitly state unknowns"],"steps":[{"action":"specific user operation or command","expected":"observable expected result"}],"notes":["edge cases, unverified areas, risks and cleanup"]}. The platform publishes this as an informational post-merge review guide on the source Issue. Do not put a human sign-off checklist in MR descriptions or claim a person tested the change. Do not use production data or expose credentials. Update the guide when code changes.
-`
-	} else {
-		base += `For developing and publishing, return humanAcceptance in the result: {"prerequisites":["test environment, account/role, setup data, start instructions or URLs; explicitly state unknowns"],"steps":[{"action":"specific user operation or command","expected":"observable expected result"}],"notes":["edge cases, unverified areas, risks and cleanup"]}. Include a prominent Chinese heading "真人测试验收" at the very top of every MR description, with unchecked checkboxes, concrete steps and expected results. Never claim human sign-off or tick human checkboxes. Do not use production data or expose credentials. Update the checklist when code changes.
-`
+	if phase == "developing" || phase == "publishing" {
+		base += "For a completed developing or publishing outcome, return humanAcceptance exactly as " + humanAcceptanceShape + ". Each steps item must have action and expected strings; notes must be a string array. Do not use separate expectedResults. When outcome is blocked, omit humanAcceptance and provide the concrete obstacle in needsHelp. Do not use production data or expose credentials. Update the guide when code changes.\n"
+		if t.Round > 0 {
+			base += "The platform publishes this as an informational post-merge review guide on the source Issue. Do not put a human sign-off checklist in MR descriptions or claim a person tested the change.\n"
+		} else {
+			base += "Include a prominent Chinese heading \"真人测试验收\" at the very top of every MR description, with unchecked checkboxes, concrete steps and expected results. Never claim human sign-off or tick human checkboxes.\n"
+		}
 	}
 	base += `
 For acceptanceStrategy=repository, statically read AGENTS.md, package scripts, CI and development docs and return acceptanceCommands:[{"name":"check name","path":"exact registered repository path","argv":["executable","argument"],"evidence":"repository file and rule explaining why this check covers the change"}]. The platform executes these commands; your claimed pass is not evidence. If no applicable checks can be identified return an empty list and explain what a human must verify. The verification image and toolchain are platform configuration, not something you may invent.
