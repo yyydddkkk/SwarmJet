@@ -94,7 +94,8 @@ export interface Initialization {
 }
 export interface Project {
   nodes?: {mode:string;ids?:string[]};
-  acceptanceStrategy?: "repository" | "gitlab_ci" | "custom";
+  acceptanceStrategy?: "none" | "repository" | "gitlab_ci" | "custom";
+  reviewMode?: "none" | "independent";
   id: string;
   name: string;
   metaUrl: string;
@@ -185,6 +186,7 @@ export interface Task {
   dependencyTasks?: Record<string, string>;
   id: string;
   project: Project;
+  autoMergeOverride?: boolean | null;
   issue: Issue;
   dependencies: IssueRef[] | null;
   stage: string;
@@ -223,6 +225,7 @@ export interface Command {
   id: string;
   kind: string;
   text: string;
+  autoMerge?: boolean;
   digest: string;
   dependencies?: IssueRef[];
 }

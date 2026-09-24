@@ -154,6 +154,39 @@ func TestCommandDeduplicationAndDelivery(t *testing.T) {
 		t.Fatalf("%+v %v", pending, err)
 	}
 }
+
+func TestTaskAutoMergeCommandIsSerializedWithMergeStage(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	p, err := s.SaveProject(ctx, testProject())
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := testTask("toggle-task", p, 44)
+	if err := s.CreateTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	off := false
+	command := domain.Command{ID: "turn-off", Kind: "set_auto_merge", AutoMerge: &off}
+	if err := s.EnqueueAutoMerge(ctx, task.ID, command); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := s.LatestAutoMergeRequest(ctx, task.ID)
+	if err != nil || latest == nil || *latest {
+		t.Fatalf("queued off switch not visible to merge gate: %v %v", latest, err)
+	}
+	if err := s.EnqueueAutoMerge(ctx, task.ID, command); err != nil {
+		t.Fatal("same command must be idempotent", err)
+	}
+	task.Stage = "merging"
+	if err := s.SaveTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	on := true
+	if err := s.EnqueueAutoMerge(ctx, task.ID, domain.Command{ID: "turn-on", Kind: "set_auto_merge", AutoMerge: &on}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("merge stage accepted a late switch: %v", err)
+	}
+}
 func TestLeaseContentionRenewalAndRelease(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

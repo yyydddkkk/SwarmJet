@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -143,6 +145,21 @@ func (a *Activities) SaveTask(ctx context.Context, t domain.Task) error {
 func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error) {
 	t := in.Task
 	out := StepResult{Task: t, Ready: true}
+	if in.Phase == "acquiring_merge" || in.Phase == "merging" || in.Phase == "partial_merge" {
+		allowed, err := a.taskAutoMergeAllowed(ctx, t)
+		if err != nil {
+			return out, err
+		}
+		if !allowed {
+			disabled := false
+			t.AutoMergeOverride = &disabled
+			t.Stage = "waiting_manual_merge"
+			t.Message = "此任务已关闭自动合并，等待人工合并 MR"
+			out.Task = t
+			out.Ready = false
+			return out, nil
+		}
+	}
 	if t.NodeConfigVersion > 0 && a.NetworkEnv != nil && in.Phase != "cancel" && in.Phase != "recover" && in.Phase != "finalize" {
 		env, e := a.NetworkEnv(ctx, t.Network)
 		if e != nil {
@@ -312,7 +329,56 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		}
 		t.Workspace = w
 	case "developing", "publishing", "reviewing":
+		if t.Workspace.Root == "" {
+			// A prior remote call can lose its response while the Node still
+			// retains the private worktree. Resume that durable Node state.
+			n, err := a.node(ctx, t)
+			if err != nil {
+				return out, err
+			}
+			env, err := a.gitEnv(t)
+			if err != nil {
+				return out, err
+			}
+			t.Workspace, err = n.PrepareWorkspace(ctx, t.ID, t.Project, env)
+			if err != nil {
+				return out, err
+			}
+		}
 		if in.Phase == "publishing" {
+			// An Agent may fast-forward a repository it did not otherwise change
+			// while resolving a stale target. Normalize baselines before deciding
+			// which branches need publishing, or upstream-only commits look like
+			// task changes and create unrelated MRs.
+			n, err := a.node(ctx, t)
+			if err != nil {
+				return out, err
+			}
+			env, err := a.gitEnv(t)
+			if err != nil {
+				return out, err
+			}
+			current, err := n.InspectWorkspace(ctx, t.Workspace, t.Project, env)
+			if err != nil {
+				return out, err
+			}
+			normalized, err := n.RefreshTargets(ctx, current, t.Project, env)
+			if errors.Is(err, workspace.ErrNeedsSync) {
+				t.Workspace = current
+				t.Message = "目标分支已前进：" + err.Error()
+				out.Task = t
+				out.Rework = true
+				return out, nil
+			}
+			if err != nil {
+				return out, err
+			}
+			current = normalized
+			current, err = n.InspectWorkspace(ctx, current, t.Project, env)
+			if err != nil {
+				return out, err
+			}
+			t.Workspace = current
 			changed := false
 			for _, r := range t.Workspace.Revisions {
 				changed = changed || r.Changed
@@ -327,22 +393,27 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		}
 		t.Executions[roleFor(in.Phase)] = ex
 		if ex.Status != "succeeded" {
-			message := "Agent execution " + ex.Status + ": " + ex.ID
-			if ex.FailureReason != "" {
-				message += ": " + ex.FailureReason
-			}
-			return StepResult{Task: t}, temporal.NewNonRetryableApplicationError(message, "agent_execution", nil)
+			return StepResult{Task: t}, agentExecutionError(ex, in.ExecutionID)
 		}
 		if ex.Result != nil {
 			if in.Phase == "developing" {
-				t.AcceptanceCommands = ex.Result.AcceptanceCommands
+				if t.Project.AcceptanceStrategy == "none" {
+					t.AcceptanceCommands = nil
+				} else {
+					t.AcceptanceCommands = ex.Result.AcceptanceCommands
+				}
 				t.AcceptanceIncomplete = false
 			}
 			if ex.Result.HumanAcceptance != nil {
 				t.HumanAcceptance = ex.Result.HumanAcceptance
 			}
 		}
-		if in.Phase == "developing" && t.Project.AcceptanceStrategy != "" && ex.Result != nil && ex.Result.Outcome != "blocked" {
+		if in.Phase == "publishing" && ex.Result != nil && ex.Result.Outcome == "blocked" {
+			t.Message = ex.Result.NeedsHelp
+			out.Task = t
+			return out, nil
+		}
+		if in.Phase == "developing" && t.Project.AcceptanceStrategy != "" && t.Project.AcceptanceStrategy != "none" && ex.Result != nil && ex.Result.Outcome != "blocked" {
 			// New strategies publish before verification: capture the developer's
 			// committed revisions now, rather than relying on the later verify step.
 			node, err := a.node(ctx, t)
@@ -383,7 +454,7 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 				if mr == nil || mr.SHA != r.HeadSHA {
 					return out, fmt.Errorf("missing or stale MR for %s", r.RepositoryID)
 				}
-				if t.Round == 0 && (t.Project.AcceptanceStrategy != "" || t.HumanAcceptance != nil) {
+				if t.Round == 0 && ((t.Project.AcceptanceStrategy != "" && t.Project.AcceptanceStrategy != "none") || t.HumanAcceptance != nil) {
 					description, e := manualDescription(t, r, mr.Description)
 					if e != nil {
 						return StepResult{Task: t}, temporal.NewNonRetryableApplicationError(e.Error(), "human_acceptance", e)
@@ -396,6 +467,11 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 				}
 				t.Workspace.Revisions[i].MRIID = mr.IID
 				t.Workspace.Revisions[i].MRURL = mr.URL
+			}
+			if t.Round > 0 && !t.Project.IndependentReview() {
+				if e := publishIssueReviewGuide(ctx, c, t); e != nil {
+					return out, e
+				}
 			}
 		}
 		if in.Phase == "reviewing" {
@@ -448,6 +524,11 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			return out, e
 		}
 		t.Workspace = w
+		if t.Project.AcceptanceStrategy == "none" {
+			t.Verification = nil
+			t.AcceptanceIncomplete = false
+			break
+		}
 		if t.Project.AcceptanceStrategy != "" {
 			out.Ready, out.Waiting, e = a.strategyVerification(ctx, c, n, &t)
 			if e != nil {
@@ -498,7 +579,7 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			return out, e
 		}
 		t.Issue = fresh
-		if t.Round == 0 && t.Project.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
+		if t.Round == 0 && t.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
 			t.Stage = "waiting_approval"
 			out.Ready = false
 			break
@@ -549,21 +630,23 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			out.Rework = true
 			return out, nil
 		}
-		required := 0
-		for _, v := range t.Verification {
-			if !v.Required {
-				continue
+		if t.Project.AcceptanceStrategy != "none" {
+			required := 0
+			for _, v := range t.Verification {
+				if !v.Required {
+					continue
+				}
+				required++
+				if !t.AcceptanceIncomplete && (!v.Passed || v.RevisionDigest != t.ReviewDigest) {
+					t.Message = "必需验收未通过或已过期，需要重新验证"
+					out.Task = t
+					out.Rework = true
+					return out, nil
+				}
 			}
-			required++
-			if !t.AcceptanceIncomplete && (!v.Passed || v.RevisionDigest != t.ReviewDigest) {
-				t.Message = "必需验收未通过或已过期，需要重新验证"
-				out.Task = t
-				out.Rework = true
-				return out, nil
+			if required == 0 && !t.AcceptanceIncomplete {
+				return out, temporal.NewNonRetryableApplicationError("no required verification executed", "verification", nil)
 			}
-		}
-		if required == 0 && !t.AcceptanceIncomplete {
-			return out, temporal.NewNonRetryableApplicationError("no required verification executed", "verification", nil)
 		}
 		allMerged := true
 		for i, r := range t.Workspace.Revisions {
@@ -647,6 +730,9 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 					return out, e
 				}
 				t.Executions["merge"] = ex
+				if ex.Status != "succeeded" {
+					return StepResult{Task: t}, agentExecutionError(ex, mi.ExecutionID)
+				}
 				mr, e := c.GetMR(ctx, r.ProjectID, r.MRIID)
 				if e != nil {
 					return out, e
@@ -675,7 +761,7 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			return out, e
 		}
 		t.Issue = fresh
-		if t.Round == 0 && t.Project.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
+		if t.Round == 0 && t.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
 			t.Stage = "waiting_approval"
 			out.Task = t
 			out.Ready = false
@@ -741,7 +827,23 @@ func requiresApproval(t domain.Task) bool {
 func mergeLock(t domain.Task, r domain.Revision) string {
 	return fmt.Sprintf("merge:%s:%d:%s", domain.GitLabIdentity(t.Project.GitLabURL), r.ProjectID, r.TargetBranch)
 }
+func (a *Activities) taskAutoMergeAllowed(ctx context.Context, t domain.Task) (bool, error) {
+	if !t.AutoMergeEnabled() {
+		return false, nil
+	}
+	if a.Store == nil {
+		return true, nil
+	}
+	latest, err := a.Store.LatestAutoMergeRequest(ctx, t.ID)
+	if err != nil {
+		return false, err
+	}
+	return latest == nil || *latest, nil
+}
 func (a *Activities) gates(ctx context.Context, c *gitlab.Client, t *domain.Task) (bool, string, error) {
+	if !t.AutoMergeEnabled() {
+		return false, "此任务已关闭自动合并", nil
+	}
 	if t.AcceptanceIncomplete {
 		return false, "验收不完整，只能人工处理，禁止自动合并", nil
 	}
@@ -759,17 +861,19 @@ func (a *Activities) gates(ctx context.Context, c *gitlab.Client, t *domain.Task
 	if t.Round == 0 && requiresApproval(*t) && t.ApprovalDigest != t.ReviewDigest {
 		return false, "manual approval required", nil
 	}
-	required := 0
-	for _, v := range t.Verification {
-		if v.Required {
-			required++
+	if t.Project.AcceptanceStrategy != "none" {
+		required := 0
+		for _, v := range t.Verification {
+			if v.Required {
+				required++
+			}
+			if v.Required && (!v.Passed || v.RevisionDigest != t.ReviewDigest) {
+				return false, "verification not passed for reviewed revisions", nil
+			}
 		}
-		if v.Required && (!v.Passed || v.RevisionDigest != t.ReviewDigest) {
-			return false, "verification not passed for reviewed revisions", nil
+		if required == 0 {
+			return false, "required verification is missing", nil
 		}
-	}
-	if required == 0 {
-		return false, "required verification is missing", nil
 	}
 	for i, r := range t.Workspace.Revisions {
 		if !r.Changed {
@@ -823,21 +927,86 @@ func (a *Activities) gates(ctx context.Context, c *gitlab.Client, t *domain.Task
 	return true, "", nil
 }
 func (a *Activities) execute(ctx context.Context, in StepInput, t domain.Task) (domain.Execution, error) {
-	return a.runAgent(ctx, in, t, nil)
+	return withResultRecovery(ctx, in, t, roleFor(in.Phase), func(ctx context.Context, in StepInput, t domain.Task, repair bool) (domain.Execution, error) {
+		return a.runAgent(ctx, in, t, nil, repair)
+	})
+}
+func agentExecutionError(ex domain.Execution, originalID string) error {
+	message := "Agent execution " + ex.Status + ": " + ex.ID
+	if ex.ID != originalID {
+		message = "Agent 结果补写失败: " + ex.ID
+	}
+	if ex.FailureReason != "" {
+		message += ": " + ex.FailureReason
+	}
+	return temporal.NewNonRetryableApplicationError(message, "agent_execution", nil)
 }
 func (a *Activities) executeMerge(ctx context.Context, in StepInput, t domain.Task, r domain.Revision) (domain.Execution, error) {
-	return a.runAgent(ctx, in, t, &r)
+	return withResultRecovery(ctx, in, t, "merge", func(ctx context.Context, in StepInput, t domain.Task, repair bool) (domain.Execution, error) {
+		return a.runAgent(ctx, in, t, &r, repair)
+	})
 }
-func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, merge *domain.Revision) (domain.Execution, error) {
+
+// A successful CLI process without a valid result is an incomplete handoff.
+// Give it one new, isolated result-only execution. A blocked task with the same
+// failure resumes at that handoff rather than repeating already committed work.
+func withResultRecovery(ctx context.Context, in StepInput, t domain.Task, role string, run func(context.Context, StepInput, domain.Task, bool) (domain.Execution, error)) (domain.Execution, error) {
+	if t.Executions == nil {
+		t.Executions = map[string]domain.Execution{}
+	}
+	if old := t.Executions[role]; invalidAgentResult(old) || interruptedResultRepair(old) {
+		in.ExecutionID = resultRecoveryID(in.ExecutionID)
+		return run(ctx, in, t, true)
+	}
+	first, err := run(ctx, in, t, false)
+	if err != nil || !invalidAgentResult(first) {
+		return first, err
+	}
+	t.Executions[role] = first
+	in.ExecutionID = resultRecoveryID(in.ExecutionID)
+	return run(ctx, in, t, true)
+}
+
+func resultRecoveryID(id string) string {
+	if len(id)+len("-result") <= 128 {
+		return id + "-result"
+	}
+	hash := sha256.Sum256([]byte(id))
+	return id[:128-17] + "-" + hex.EncodeToString(hash[:8])
+}
+
+func invalidAgentResult(ex domain.Execution) bool {
+	return ex.Status == "failed" && ex.ExitCode == 0 && (ex.FailureCode == "invalid_result" || strings.HasPrefix(ex.FailureReason, "invalid result.json:"))
+}
+
+func agentSettings(t domain.Task, role string) (domain.AgentConfig, string, string) {
+	if role == "review" {
+		return t.Project.Review, t.Executions["review"].SessionID, ""
+	}
+	if role == "merge" {
+		if t.Project.IndependentReview() {
+			return t.Project.Review, t.Executions["review"].SessionID, ""
+		}
+		prior := t.Executions["merge"]
+		if prior.SessionID == "" {
+			prior = t.Executions["dev"]
+		}
+		return t.Project.Development, prior.SessionID, "dev"
+	}
+	return t.Project.Development, t.Executions[role].SessionID, ""
+}
+
+func interruptedResultRepair(ex domain.Execution) bool {
+	return ex.Status == "cancelled" && (ex.ResultRepair || strings.HasSuffix(ex.ID, "-result"))
+}
+
+func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, merge *domain.Revision, repair bool) (domain.Execution, error) {
 	n, e := a.node(ctx, t)
 	if e != nil {
 		return domain.Execution{}, e
 	}
 	role := roleFor(in.Phase)
-	cfg := t.Project.Development
-	if role != "dev" {
-		cfg = t.Project.Review
-	}
+	cfg, sessionID, profileScope := agentSettings(t, role)
 	env := map[string]string{"GIT_AUTHOR_NAME": "swarmjet", "GIT_AUTHOR_EMAIL": "swarmjet@localhost", "GIT_COMMITTER_NAME": "swarmjet", "GIT_COMMITTER_EMAIL": "swarmjet@localhost"}
 	if t.NodeConfigVersion > 0 {
 		env = map[string]string{}
@@ -865,11 +1034,15 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 			env[k] = value
 		}
 	}
-	prior := t.Executions[role]
-	if role == "merge" {
-		prior = t.Executions["review"]
+	req := domain.AgentRequest{ExecutionID: in.ExecutionID, TaskID: t.ID, Role: role, Workspace: t.Workspace.Root, Prompt: prompt(t, in.Phase, merge), SessionID: sessionID, ProfileScope: profileScope, Config: cfg, Env: env}
+	if repair {
+		req.SessionID = "" // start with a small, fresh context
+		req.Prompt = resultRecoveryPrompt(t, in.Phase, merge, t.Executions[role])
+		req.ReadOnlyWorkspace = true
+		if req.Config.TimeoutSeconds == 0 || req.Config.TimeoutSeconds > 900 {
+			req.Config.TimeoutSeconds = 900
+		}
 	}
-	req := domain.AgentRequest{ExecutionID: in.ExecutionID, TaskID: t.ID, Role: role, Workspace: t.Workspace.Root, Prompt: prompt(t, in.Phase, merge), SessionID: prior.SessionID, Config: cfg, Env: env}
 	// Durable execution IDs adopt an already-running container after Activity retries.
 	slot := ""
 	limit := a.Concurrency
@@ -989,6 +1162,27 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 	}
 	return ex, nil
 }
+func resultRecoveryPrompt(t domain.Task, phase string, merge *domain.Revision, failed domain.Execution) string {
+	context, _ := json.MarshalIndent(struct {
+		Issue               domain.Issue
+		Round               int
+		TriggerText         string
+		Project             domain.Project
+		Workspace           domain.Workspace
+		Verification        []domain.Verification
+		AcceptanceCommands  []domain.AcceptanceCommand
+		HumanAcceptance     *domain.ManualAcceptance
+		Phase               string
+		Merge               *domain.Revision
+		PreviousExecutionID string
+	}{t.Issue, t.Round, t.TriggerText, t.Project, t.Workspace, t.Verification, t.AcceptanceCommands, t.HumanAcceptance, phase, merge, failed.ID}, "", "  ")
+	return `The preceding Agent CLI process exited successfully but did not provide a valid result.json. This is a result handoff recovery, not a new work attempt. The task source tree is mounted read-only. Inspect the existing task worktree, commits, relevant repository instructions, and verification reports to determine what actually happened. Do not edit files, run tests that write files, commit, push, create or change MRs, or merge. Never claim work was done without evidence; if the outcome cannot be determined, return blocked with a concrete needsHelp. Do not include secrets.
+
+For developing or publishing, include humanAcceptance with prerequisites, concrete steps and expected results, and notes. For acceptanceStrategy=repository, statically identify acceptanceCommands from applicable repository files; the platform executes them and does not trust claims of passing checks. Use the allowed outcome for the role and phase: dev developing=changed/no_change/blocked; dev publishing=changed/blocked; review=approved/changes_requested/blocked; merge=merged/blocked. For publishing or merging, inspect GitLab state without mutation before reporting success.
+
+Task context:
+` + string(context)
+}
 func prompt(t domain.Task, phase string, merge *domain.Revision) string {
 	b, _ := json.MarshalIndent(struct {
 		Issue                domain.Issue
@@ -1003,7 +1197,7 @@ func prompt(t domain.Task, phase string, merge *domain.Revision) string {
 	}{t.Issue, t.Round, t.PreviousTaskID, t.TriggerText, t.Workspace, t.Notes, t.Verification, t.AcceptanceCommands, t.AcceptanceIncomplete}, "", "  ")
 	base := `You are swarmjet's agent. Read applicable repository AGENTS.md and the Meta-Repo plan.md / architecture / integration instructions. Stay within this task's registered repositories and task branches. Preserve Git hooks. Record assumptions and continue despite ambiguous requirements; only return blocked when a concrete obstacle remains after reasonable attempts. Never include secrets in output. Changes to migrations, CI or deployment config may be prepared but require separate human approval before merging. Never execute production deployment. All task MRs and commit messages must reference the source issue WITHOUT closing keywords (Closes/Fixes/Resolves); the workflow closes it after every repository completes.\n`
 	if t.Round > 0 {
-		base = `You are swarmjet's agent. Read applicable repository AGENTS.md and the Meta-Repo plan.md / architecture / integration instructions. Stay within this task's registered repositories and task branches. Preserve Git hooks. Record assumptions and continue despite ambiguous requirements; only return blocked when a concrete obstacle remains after reasonable attempts. Never include secrets in output. Never execute production deployment. This is one round of a long-lived source Issue. The Issue stays open after merge. Address the current Issue description and the TriggerText for this round; use PreviousTaskID only as prior-delivery context. All task MRs and commit messages must reference the source Issue WITHOUT closing keywords (Closes/Fixes/Resolves). Required verification, independent review and GitLab merge checks remain mandatory.\n`
+		base = `You are swarmjet's agent. Read applicable repository AGENTS.md and the Meta-Repo plan.md / architecture / integration instructions. Stay within this task's registered repositories and task branches. Preserve Git hooks. Record assumptions and continue despite ambiguous requirements; only return blocked when a concrete obstacle remains after reasonable attempts. Never include secrets in output. Never execute production deployment. This is one round of a long-lived source Issue. The Issue stays open after merge. Address the current Issue description and the TriggerText for this round; use PreviousTaskID only as prior-delivery context. All task MRs and commit messages must reference the source Issue WITHOUT closing keywords (Closes/Fixes/Resolves). GitLab merge checks remain mandatory. Independent review and platform verification apply only when enabled in the project.\n`
 	}
 
 	config, _ := json.Marshal(t.Project)
@@ -1019,7 +1213,7 @@ func prompt(t domain.Task, phase string, merge *domain.Revision) string {
 	}
 	base += `
 For acceptanceStrategy=repository, statically read AGENTS.md, package scripts, CI and development docs and return acceptanceCommands:[{"name":"check name","path":"exact registered repository path","argv":["executable","argument"],"evidence":"repository file and rule explaining why this check covers the change"}]. The platform executes these commands; your claimed pass is not evidence. If no applicable checks can be identified return an empty list and explain what a human must verify. The verification image and toolchain are platform configuration, not something you may invent.
-For gitlab_ci, publish branches and MRs first, never use ci.skip; the platform waits for the exact commit CI. Reviewers must assess the adequacy of the checks and the human checklist, including task coverage and missing/weak tests. Missing infrastructure is not a passing check; describe it explicitly. You may approve code subject to human acceptance, but the platform must prohibit automatic merge when checks are incomplete.
+For gitlab_ci, publish branches and MRs first, never use ci.skip; the platform waits for the exact commit CI. When independent review is enabled, reviewers assess the adequacy of the checks and the human checklist, including task coverage and missing/weak tests. Missing infrastructure is not a passing check; describe it explicitly. The platform must prohibit automatic merge when enabled checks are incomplete.
 `
 	switch phase {
 	case "developing":
@@ -1027,10 +1221,14 @@ For gitlab_ci, publish branches and MRs first, never use ci.skip; the platform w
 	case "publishing":
 		base += `Push each changed task branch and create or update one GitLab MR per source/target pair using glab. Use the provided exact target per repository. Include verification and assumptions in MR descriptions. Do not modify code or merge. Use changed/blocked outcome.\n`
 	case "reviewing":
-		base += `Independently review the entire repository change set and actual verification reports. Check task coverage, cross-repository contracts and tests. Do not modify code, push, approve on GitLab or merge. Return approved, changes_requested with precise findings, or blocked. A no-change result must be independently justified.\n`
+		if t.Project.AcceptanceStrategy == "none" {
+			base += `Independently review the entire repository change set and development test evidence. Extra platform acceptance is disabled for this project. Check task coverage, cross-repository contracts and tests; request changes if evidence is inadequate. Do not modify code, push, approve on GitLab or merge. Return approved, changes_requested with precise findings, or blocked. A no-change result must be independently justified.\n`
+		} else {
+			base += `Independently review the entire repository change set and actual verification reports. Check task coverage, cross-repository contracts and tests. Do not modify code, push, approve on GitLab or merge. Return approved, changes_requested with precise findings, or blocked. A no-change result must be independently justified.\n`
+		}
 	case "merging", "partial_merge":
 		m, _ := json.Marshal(merge)
-		base += `Review and required tests passed. Merge ONLY this MR using GitLab API via glab, with exact sha and target verification. If already merged report success; never force push or bypass GitLab checks. Do not change code. Return merged/blocked. MR: ` + string(m) + "\n"
+		base += `Merge ONLY this MR using GitLab API via glab, with exact sha and target verification. If already merged report success; never force push or bypass GitLab checks. Do not change code. Return merged/blocked. MR: ` + string(m) + "\n"
 	}
 	return base + "\nTask snapshot:\n" + string(b)
 }

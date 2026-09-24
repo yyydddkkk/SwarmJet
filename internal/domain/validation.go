@@ -18,6 +18,9 @@ var IDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$`)
 // ValidateProjectForSave accepts incomplete disabled drafts while rejecting unsafe
 // supplied values. Enabling a project always requires the execution contract.
 func ValidateProjectForSave(p Project) error {
+	if p.ReviewMode != "" && p.ReviewMode != "none" && p.ReviewMode != "independent" {
+		return fmt.Errorf("unknown review mode")
+	}
 	if err := p.Nodes.Validate(); err != nil {
 		return err
 	}
@@ -220,6 +223,9 @@ func safeRepositoryURL(raw string) bool {
 }
 
 func ValidateProject(p Project) error {
+	if p.ReviewMode != "" && p.ReviewMode != "none" && p.ReviewMode != "independent" {
+		return fmt.Errorf("unknown review mode")
+	}
 	if !IDPattern.MatchString(p.ID) || strings.TrimSpace(p.Name) == "" {
 		return fmt.Errorf("project id and name are required; id must be a safe identifier")
 	}
@@ -283,7 +289,11 @@ func ValidateProject(p Project) error {
 			}
 		}
 	}
-	for _, a := range []AgentConfig{p.Development, p.Review} {
+	agents := []AgentConfig{p.Development}
+	if p.IndependentReview() {
+		agents = append(agents, p.Review)
+	}
+	for _, a := range agents {
 		if _, ok := agentcli.Lookup(a.Adapter); !ok || (a.Image == "" && p.Nodes.Mode == "") || a.TimeoutSeconds < 1 || a.TimeoutSeconds > 86400 {
 			return fmt.Errorf("enabled agent must have a supported adapter, image and timeout 1..86400")
 		}
@@ -294,7 +304,7 @@ func ValidateProject(p Project) error {
 	if err := validateAcceptance(p); err != nil {
 		return err
 	}
-	if p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" {
+	if p.AcceptanceStrategy == "none" || p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" {
 		return nil
 	}
 	if p.Integration.Mode == "commands" {
@@ -414,7 +424,7 @@ func GitLabIdentity(raw string) string {
 
 func validateAcceptance(p Project) error {
 	switch p.AcceptanceStrategy {
-	case "", "custom", "repository", "gitlab_ci":
+	case "", "none", "custom", "repository", "gitlab_ci":
 	default:
 		return fmt.Errorf("unknown acceptance strategy")
 	}

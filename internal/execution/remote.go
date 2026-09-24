@@ -188,21 +188,23 @@ type idParams struct {
 // Env out of JSON so credentials never reach Temporal; the remote protocol adds
 // it back for the authenticated node call only.
 type agentWire struct {
-	ExecutionID string             `json:"executionId"`
-	TaskID      string             `json:"taskId"`
-	Role        string             `json:"role"`
-	Workspace   string             `json:"workspace"`
-	Prompt      string             `json:"prompt"`
-	SessionID   string             `json:"sessionId"`
-	Config      domain.AgentConfig `json:"config"`
-	Env         map[string]string  `json:"env,omitempty"`
+	ExecutionID       string             `json:"executionId"`
+	TaskID            string             `json:"taskId"`
+	Role              string             `json:"role"`
+	Workspace         string             `json:"workspace"`
+	Prompt            string             `json:"prompt"`
+	SessionID         string             `json:"sessionId"`
+	ProfileScope      string             `json:"profileScope,omitempty"`
+	ReadOnlyWorkspace bool               `json:"readOnlyWorkspace,omitempty"`
+	Config            domain.AgentConfig `json:"config"`
+	Env               map[string]string  `json:"env,omitempty"`
 }
 
 func wireAgent(req domain.AgentRequest) agentWire {
-	return agentWire{ExecutionID: req.ExecutionID, TaskID: req.TaskID, Role: req.Role, Workspace: req.Workspace, Prompt: req.Prompt, SessionID: req.SessionID, Config: req.Config, Env: req.Env}
+	return agentWire{ExecutionID: req.ExecutionID, TaskID: req.TaskID, Role: req.Role, Workspace: req.Workspace, Prompt: req.Prompt, SessionID: req.SessionID, ProfileScope: req.ProfileScope, ReadOnlyWorkspace: req.ReadOnlyWorkspace, Config: req.Config, Env: req.Env}
 }
 func (w agentWire) request() domain.AgentRequest {
-	return domain.AgentRequest{ExecutionID: w.ExecutionID, TaskID: w.TaskID, Role: w.Role, Workspace: w.Workspace, Prompt: w.Prompt, SessionID: w.SessionID, Config: w.Config, Env: w.Env}
+	return domain.AgentRequest{ExecutionID: w.ExecutionID, TaskID: w.TaskID, Role: w.Role, Workspace: w.Workspace, Prompt: w.Prompt, SessionID: w.SessionID, ProfileScope: w.ProfileScope, ReadOnlyWorkspace: w.ReadOnlyWorkspace, Config: w.Config, Env: w.Env}
 }
 
 type agentParams struct {

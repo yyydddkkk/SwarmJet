@@ -43,11 +43,17 @@ Control plane is one administrator. UI pages: login; task list with stage filter
 
 ### 开发任务验收策略
 
-Project.acceptanceStrategy: `repository | gitlab_ci | custom`。新建项目省略时默认 repository；历史项目空值保留原 Compose 行为。策略随项目快照固定在任务中。
+Project.acceptanceStrategy: `none | repository | gitlab_ci | custom`。新建项目省略时默认 `none`，跳过平台额外验收；已启用的 GitLab CI 要求及合并检查仍执行。历史项目空值保留原 Compose 行为。策略随项目快照固定在任务中，修改项目配置不改变已创建任务。
+
+Project.reviewMode: `none | independent`。新项目默认 `none`，不启动审查 Agent；合并 Agent 沿用开发 Agent 的配置和会话。历史项目空值保留独立审查。关闭审查不会关闭 GitLab MR、目标分支或合并检查。
+
+`Task.autoMergeOverride` 为可选布尔值；空值继承任务快照中的 `Project.autoMerge`。任务详情可发送 `set_auto_merge` 指令，参数为 `autoMerge: boolean`。指令异步送达，界面只在任务状态实际更新后显示生效。进入合并执行或已有仓库合并后不再接受切换；合并门禁同时核对尚未送达的关闭指令，关闭后进入 `waiting_manual_merge`，重新开启则在条件满足时继续自动合并。
+
+管理员可对已暂停、已有提交且开发 Runner 已停止的任务发送 `continue_committed` 命令（需填写 `text` 说明），让该任务从发布阶段继续，并为本任务关闭额外验收。后续仍核对工作树、MR、项目已启用的独立审查和合并条件；项目默认策略不受此命令影响。
 
 自定义 IntegrationConfig 新增 `mode: compose | commands`、`image`、`commands: [{name,path,argv,evidence}]`。repository 的镜像可通过 integration.image 覆盖，具体命令由开发结果 acceptanceCommands 提供；gitlab_ci 不要求 Compose。
 
-AgentResult 的 `humanAcceptance: {prerequisites: string[], steps: [{action,expected}], notes: string[]}` 用于来源 Issue 中按任务轮次与审查提交绑定的人工复核指引；MR 描述保留其链接。`Task.acceptanceIncomplete` 表示自动验收证据不足，禁止自动合并。Issue 常开；仅新的 `/swarmjet run` 评论触发后续任务，评论 ID 持久化去重。
+AgentResult 的 `humanAcceptance: {prerequisites: string[], steps: [{action,expected}], notes: string[]}` 用于来源 Issue 中按任务轮次与审查提交绑定的人工复核指引；MR 描述保留其链接。`Verification.environmentFailure` 标识工具链未能可靠启动或加载；此类失败保留报告但不计入代码返工。`Task.acceptanceIncomplete` 表示自动验收证据不足，禁止自动合并。Issue 常开；仅新的 `/swarmjet run` 评论触发后续任务，评论 ID 持久化去重。
 
 
 ### Agent selection

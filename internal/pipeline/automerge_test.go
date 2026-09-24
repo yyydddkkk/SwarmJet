@@ -3,7 +3,9 @@ package pipeline
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/mock"
 	"swarmjet/internal/domain"
 )
 
@@ -62,6 +64,90 @@ func TestWorkflowAutoMergeDefaultsPreserveLegacyBehavior(t *testing.T) {
 				t.Fatalf("legacy merge path changed: %s %v", final.Stage, h.counts)
 			}
 		})
+	}
+}
+
+func TestTaskAutoMergeOverrideWinsOverProjectDefault(t *testing.T) {
+	task := workflowTask()
+	task.Project.AutoMerge = autoMerge(true)
+	if !task.AutoMergeEnabled() {
+		t.Fatal("project default was not inherited")
+	}
+	task.AutoMergeOverride = autoMerge(false)
+	if task.AutoMergeEnabled() {
+		t.Fatal("task switch did not override project default")
+	}
+	task.Project.AutoMerge = autoMerge(false)
+	task.AutoMergeOverride = autoMerge(true)
+	if !task.AutoMergeEnabled() {
+		t.Fatal("task could not opt into automatic merge")
+	}
+}
+
+func TestTurningOffAutoMergeDuringDevelopmentKeepsManualMergePath(t *testing.T) {
+	h := newWorkflowHarness(t)
+	task := workflowTask()
+	task.Project.AutoMerge = autoMerge(true)
+	h.env.OnActivity("Step", mock.Anything, mock.MatchedBy(func(in StepInput) bool { return in.Phase == "developing" })).After(2 * time.Second).Return(func(_ context.Context, in StepInput) (StepResult, error) { return successfulStep(in), nil }).Once()
+	var phases []string
+	h.env.OnActivity("Step", mock.Anything, mock.Anything).Return(func(_ context.Context, in StepInput) (StepResult, error) {
+		phases = append(phases, in.Phase)
+		return successfulStep(in), nil
+	})
+	h.signalAfter(time.Second, domain.Command{ID: "disable-task-merge", Kind: "set_auto_merge", AutoMerge: autoMerge(false)})
+	final := h.run(t, task)
+	sawManual := false
+	for _, phase := range phases {
+		if phase == "acquiring_merge" || phase == "merging" {
+			t.Fatalf("task switch was lost during Agent execution: phases=%v", phases)
+		}
+		sawManual = sawManual || phase == "waiting_manual_merge"
+	}
+	if final.Stage != "completed" || final.AutoMergeEnabled() || !sawManual {
+		t.Fatalf("task switch was lost during Agent execution: stage=%s phases=%v enabled=%v", final.Stage, phases, final.AutoMergeEnabled())
+	}
+}
+
+func TestTurningOffAutoMergeDuringMergeGateStopsBeforeMerge(t *testing.T) {
+	h := newWorkflowHarness(t)
+	task := workflowTask()
+	task.Stage = "acquiring_merge"
+	task.ReviewDigest = domain.Digest(task.Workspace.Revisions)
+	h.env.OnActivity("Step", mock.Anything, mock.MatchedBy(func(in StepInput) bool { return in.Phase == "acquiring_merge" })).After(2 * time.Second).Return(func(_ context.Context, in StepInput) (StepResult, error) { return successfulStep(in), nil }).Once()
+	var phases []string
+	h.env.OnActivity("Step", mock.Anything, mock.Anything).Return(func(_ context.Context, in StepInput) (StepResult, error) {
+		phases = append(phases, in.Phase)
+		return successfulStep(in), nil
+	})
+	h.signalAfter(time.Second, domain.Command{ID: "disable-before-merge", Kind: "set_auto_merge", AutoMerge: autoMerge(false)})
+	final := h.run(t, task)
+	if final.Stage != "completed" || final.AutoMergeEnabled() {
+		t.Fatalf("switch not retained: %+v", final)
+	}
+	for _, phase := range phases {
+		if phase == "merging" {
+			t.Fatalf("merge started after off command: %v", phases)
+		}
+	}
+}
+
+func TestTaskCanTurnAutoMergeBackOnBeforeMerge(t *testing.T) {
+	h := newWorkflowHarness(t)
+	task := workflowTask()
+	task.Stage = "waiting_manual_merge"
+	task.ReviewDigest = domain.Digest(task.Workspace.Revisions)
+	task.AutoMergeOverride = autoMerge(false)
+	h.step = func(_ context.Context, in StepInput, _ int) (StepResult, error) {
+		out := successfulStep(in)
+		if in.Phase == "waiting_manual_merge" {
+			out.Ready = false
+		}
+		return out, nil
+	}
+	h.signalAfter(time.Second, domain.Command{ID: "enable-before-merge", Kind: "set_auto_merge", AutoMerge: autoMerge(true)})
+	final := h.run(t, task)
+	if final.Stage != "completed" || !final.AutoMergeEnabled() || h.counts["acquiring_merge"] != 1 || h.counts["merging"] != 1 {
+		t.Fatalf("task did not resume automatic merge: stage=%s phases=%v enabled=%v", final.Stage, h.phases, final.AutoMergeEnabled())
 	}
 }
 

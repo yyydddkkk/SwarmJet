@@ -7,9 +7,39 @@ import (
 	"net/http/httptest"
 	"strings"
 	"swarmjet/internal/domain"
+	"swarmjet/internal/execution"
 	"swarmjet/internal/gitlab"
 	"testing"
 )
+
+type commandAcceptanceNode struct {
+	execution.Node
+	checks []domain.Verification
+}
+
+func (n commandAcceptanceNode) StartIntegration(context.Context, domain.Workspace, domain.IntegrationConfig, map[string]string) error {
+	return nil
+}
+func (n commandAcceptanceNode) VerifyIntegration(context.Context, domain.Workspace, domain.IntegrationConfig, map[string]string) ([]domain.Verification, error) {
+	return n.checks, nil
+}
+func (n commandAcceptanceNode) StopIntegration(context.Context, domain.Workspace, domain.IntegrationConfig, map[string]string) error {
+	return nil
+}
+
+func TestRepositoryAcceptanceKeepsEnvironmentFailureOutOfCodeRework(t *testing.T) {
+	for _, broken := range []bool{false, true} {
+		task := domain.Task{Project: domain.Project{AcceptanceStrategy: "repository", Development: domain.AgentConfig{Image: "toolchain:test"}, Repositories: []domain.Repository{{Path: "repos/app"}}}, Workspace: domain.Workspace{Revisions: []domain.Revision{{RepositoryID: "app", HeadSHA: "head", Changed: true}}}, AcceptanceCommands: []domain.AcceptanceCommand{{Name: "lint", Path: "repos/app", Argv: []string{"pnpm", "lint"}, Evidence: "package.json"}}}
+		check := domain.Verification{Name: "lint", Required: true, ExitCode: 2, EnvironmentFailure: broken}
+		ready, waiting, err := (&Activities{}).strategyVerification(context.Background(), nil, commandAcceptanceNode{checks: []domain.Verification{check}}, &task)
+		if err != nil || waiting || ready != broken || task.AcceptanceIncomplete != broken {
+			t.Fatalf("broken=%v ready=%v waiting=%v incomplete=%v err=%v", broken, ready, waiting, task.AcceptanceIncomplete, err)
+		}
+		if broken && (len(task.Verification) != 2 || !strings.Contains(task.Message, "验收环境")) {
+			t.Fatalf("missing diagnostic verification: %+v %q", task.Verification, task.Message)
+		}
+	}
+}
 
 func TestHumanAcceptanceSectionAndRevisionReset(t *testing.T) {
 	task := domain.Task{HumanAcceptance: &domain.ManualAcceptance{Prerequisites: []string{"测试账号；启动本地服务"}, Steps: []domain.ManualStep{{Action: "登录后创建项目", Expected: "项目列表出现新项目"}}, Notes: []string{"完成后删除测试项目"}}}

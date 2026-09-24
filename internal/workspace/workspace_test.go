@@ -184,12 +184,56 @@ func TestInspectKeepsPublishedMetadataAndEmptyCommits(t *testing.T) {
 		t.Fatalf("incorrect inspection %#v", r)
 	}
 }
-func TestRefreshTargetsRequiresSyncAndPreservesInitial(t *testing.T) {
+func TestRefreshTargetsIgnoresAdvancedUnchangedRepository(t *testing.T) {
 	m, p := fixture(t)
 	ctx := context.Background()
 	ws, e := m.Prepare(ctx, "task", p)
 	if e != nil {
 		t.Fatal(e)
+	}
+	// This task changes b while a's target advances independently.
+	taskB := filepath.Join(ws.Root, "libs/b")
+	os.WriteFile(filepath.Join(taskB, "task-change"), []byte("task change"), 0600)
+	gitTest(t, m, taskB, "add", ".")
+	gitTest(t, m, taskB, "commit", "-m", "task change")
+	ws, e = m.Inspect(ctx, ws, p)
+	if e != nil || ws.Revisions[0].Changed || !ws.Revisions[1].Changed {
+		t.Fatalf("unexpected starting revisions: %+v %v", ws.Revisions, e)
+	}
+	initial := ws.Revisions[0].BaseSHA
+	remote := p.Repositories[0].URL
+	os.WriteFile(filepath.Join(remote, "advanced"), []byte("target advanced"), 0600)
+	gitTest(t, m, remote, "add", ".")
+	gitTest(t, m, remote, "commit", "-m", "advance target")
+	got, e := m.RefreshTargets(ctx, ws, p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if got.Revisions[0].BaseSHA != initial || got.Revisions[0].InitialSHA != initial || got.Revisions[0].Changed {
+		t.Fatalf("unchanged repository baseline moved: %#v", got.Revisions[0])
+	}
+	got, e = m.Inspect(ctx, got, p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if got.Revisions[0].Changed || !got.Revisions[1].Changed {
+		t.Fatal("unrelated target advance changed task scope")
+	}
+}
+func TestRefreshTargetsRequiresSyncForChangedRepository(t *testing.T) {
+	m, p := fixture(t)
+	ctx := context.Background()
+	ws, e := m.Prepare(ctx, "task", p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	taskRepo := filepath.Join(ws.Root, "a")
+	os.WriteFile(filepath.Join(taskRepo, "task-change"), []byte("task change"), 0600)
+	gitTest(t, m, taskRepo, "add", ".")
+	gitTest(t, m, taskRepo, "commit", "-m", "task change")
+	ws, e = m.Inspect(ctx, ws, p)
+	if e != nil || !ws.Revisions[0].Changed {
+		t.Fatal("task change missing", e)
 	}
 	initial := ws.Revisions[0].BaseSHA
 	remote := p.Repositories[0].URL
@@ -198,23 +242,49 @@ func TestRefreshTargetsRequiresSyncAndPreservesInitial(t *testing.T) {
 	gitTest(t, m, remote, "commit", "-m", "advance target")
 	target := gitTest(t, m, remote, "rev-parse", "HEAD")
 	if _, e = m.RefreshTargets(ctx, ws, p); !errors.Is(e, ErrNeedsSync) {
-		t.Fatalf("expected needs sync: %v", e)
+		t.Fatalf("changed repository accepted stale target: %v", e)
 	}
-	taskRepo := filepath.Join(ws.Root, "a")
-	gitTest(t, m, taskRepo, "merge", "--ff-only", target)
+	gitTest(t, m, taskRepo, "merge", "--no-edit", target)
 	got, e := m.RefreshTargets(ctx, ws, p)
 	if e != nil {
 		t.Fatal(e)
 	}
 	if got.Revisions[0].BaseSHA != target || got.Revisions[0].InitialSHA != initial {
-		t.Fatalf("wrong baseline %#v", got.Revisions[0])
+		t.Fatalf("wrong changed repository baseline %#v", got.Revisions[0])
 	}
 	got, e = m.Inspect(ctx, got, p)
+	if e != nil || !got.Revisions[0].Changed {
+		t.Fatal("task change lost after synchronization", e)
+	}
+}
+func TestRefreshTargetsNormalizesUpstreamOnlyFastForward(t *testing.T) {
+	m, p := fixture(t)
+	ctx := context.Background()
+	ws, e := m.Prepare(ctx, "task", p)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if got.Revisions[0].Changed {
-		t.Fatal("updated target marked task change")
+	initial := ws.Revisions[0].BaseSHA
+	remote := p.Repositories[0].URL
+	os.WriteFile(filepath.Join(remote, "advanced"), []byte("upstream only"), 0600)
+	gitTest(t, m, remote, "add", ".")
+	gitTest(t, m, remote, "commit", "-m", "advance target")
+	target := gitTest(t, m, remote, "rev-parse", "HEAD")
+	if _, e = m.RefreshTargets(ctx, ws, p); e != nil {
+		t.Fatal(e)
+	}
+	gitTest(t, m, filepath.Join(ws.Root, "a"), "merge", "--ff-only", target)
+	ws, e = m.Inspect(ctx, ws, p)
+	if e != nil || !ws.Revisions[0].Changed {
+		t.Fatal("upstream fast-forward did not appear as a change before normalization", e)
+	}
+	ws, e = m.RefreshTargets(ctx, ws, p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	ws, e = m.Inspect(ctx, ws, p)
+	if e != nil || ws.Revisions[0].Changed || ws.Revisions[0].BaseSHA != target || ws.Revisions[0].InitialSHA != initial {
+		t.Fatalf("upstream-only commit still appears as task work: %+v %v", ws.Revisions[0], e)
 	}
 }
 func TestReleaseRetainsUnmergedBranchAndIsIdempotent(t *testing.T) {

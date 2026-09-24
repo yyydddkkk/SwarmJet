@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
 	"swarmjet/internal/agentcli"
 )
 
@@ -79,6 +80,77 @@ func TestCLIAdaptersLifecycle(t *testing.T) {
 				t.Fatal(finished, err)
 			}
 		})
+	}
+}
+
+func TestDSTHeadlessUsesFrozenTUIModelSelection(t *testing.T) {
+	r, f, req := setup(t)
+	req.Config.Adapter, req.Config.Model, req.Config.UseCLIDefaults = "dst", "", true
+	master := masterHome(r)
+	writeProfileFixture(t, filepath.Join(master, ".dsh/settings.yaml"), "llm-pi-ai:\n  providers:\n    hanhai: {}\n")
+	writeProfileFixture(t, filepath.Join(master, ".dsh/.credentials.yaml"), "refs:\n  HANHAI_API_KEY: private-token\n")
+	model := filepath.Join(master, ".dsh-tui/model.json")
+	writeProfileFixture(t, model, `{"provider":"hanhai","model":"deepseek-flash"}`)
+	if _, err := r.Start(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := r.read(req.ExecutionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := func(path string) (string, string) {
+		t.Helper()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var patch []struct {
+			ID     string `yaml:"id"`
+			Config struct {
+				Provider string `yaml:"provider"`
+				Model    string `yaml:"model"`
+			} `yaml:"config"`
+		}
+		if err := yaml.Unmarshal(b, &patch); err != nil || len(patch) != 1 || patch[0].ID != "agent-default-model" {
+			t.Fatalf("invalid DST model patch: %v", err)
+		}
+		return patch[0].Config.Provider, patch[0].Config.Model
+	}
+	if provider, model := selection(filepath.Join(rec.ProfileHome, dstModelPatchName)); provider != "hanhai" || model != "deepseek-flash" {
+		t.Fatal("TUI selection did not reach the task home")
+	}
+	if b, err := os.ReadFile(filepath.Join(rec.ProfileHome, ".dsh/.credentials.yaml")); err != nil || !strings.Contains(string(b), "private-token") {
+		t.Fatal("DST credentials were not copied to the private home")
+	}
+	for _, args := range f.calls {
+		if len(args) == 0 || args[0] != "create" {
+			continue
+		}
+		joined := strings.Join(args, " ")
+		if !strings.Contains(joined, "--profile headless --patch "+filepath.Join(rec.ProfileHome, dstModelPatchName)+" --json") || strings.Contains(joined, "private-token") || strings.Contains(joined, master) {
+			t.Fatal("DST Runner did not use the private model overlay", args)
+		}
+	}
+	writeProfileFixture(t, model, `{"provider":"new-provider","model":"new-model"}`)
+	req.Role, req.ExecutionID = "review", "review-run"
+	if _, err := r.Start(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	review, _ := r.read(req.ExecutionID)
+	if provider, model := selection(filepath.Join(review.ProfileHome, dstModelPatchName)); provider != "hanhai" || model != "deepseek-flash" {
+		t.Fatal("later role adopted a changed TUI selection")
+	}
+	req.TaskID, req.ExecutionID = "next-task", "next-run"
+	req.Workspace = filepath.Join(r.DataDir, "task-sources", req.TaskID, "meta", ".worktrees", req.TaskID)
+	if err := os.MkdirAll(req.Workspace, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Start(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := r.read(req.ExecutionID)
+	if provider, model := selection(filepath.Join(next.ProfileHome, dstModelPatchName)); provider != "new-provider" || model != "new-model" {
+		t.Fatal("new task did not snapshot current TUI selection")
 	}
 }
 

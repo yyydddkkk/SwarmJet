@@ -55,15 +55,17 @@ type IntegrationConfig struct {
 type Project struct {
 	Nodes              NodeSelection `json:"nodes,omitempty"`
 	AcceptanceStrategy string        `json:"acceptanceStrategy,omitempty"`
-	ID                 string        `json:"id"`
-	Name               string        `json:"name"`
-	MetaURL            string        `json:"metaUrl"`
-	MetaRef            string        `json:"metaRef"`
-	Version            int           `json:"version"`
-	Enabled            bool          `json:"enabled"`
-	GitLabURL          string        `json:"gitlabUrl"`
-	CredentialRef      string        `json:"credentialRef"`
-	MergeCredentialRef string        `json:"mergeCredentialRef"`
+	// Empty reviewMode retains independent review for legacy projects.
+	ReviewMode         string `json:"reviewMode,omitempty"`
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	MetaURL            string `json:"metaUrl"`
+	MetaRef            string `json:"metaRef"`
+	Version            int    `json:"version"`
+	Enabled            bool   `json:"enabled"`
+	GitLabURL          string `json:"gitlabUrl"`
+	CredentialRef      string `json:"credentialRef"`
+	MergeCredentialRef string `json:"mergeCredentialRef"`
 	// ConnectionID references a saved GitLab connection. Its token is stored
 	// encrypted outside the project snapshot; only the reference is persisted.
 	ConnectionID string `json:"connectionId,omitempty"`
@@ -82,6 +84,9 @@ type Project struct {
 	MaxReworks   int               `json:"maxReworks"`
 	RequireCI    bool              `json:"requireCI"`
 }
+
+func (p Project) IndependentReview() bool { return p.ReviewMode != "none" }
+
 type IssueRef struct {
 	ProjectID int64 `json:"projectId"`
 	IID       int64 `json:"iid"`
@@ -118,12 +123,15 @@ type Workspace struct {
 	Revisions []Revision `json:"revisions"`
 }
 type Verification struct {
-	Name           string `json:"name"`
-	Required       bool   `json:"required"`
-	Passed         bool   `json:"passed"`
-	ExitCode       int    `json:"exitCode"`
-	Report         string `json:"report"`
-	RevisionDigest string `json:"revisionDigest"`
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+	Passed   bool   `json:"passed"`
+	// EnvironmentFailure means the check could not run reliably, so its failure
+	// must not be treated as evidence that the task code needs rework.
+	EnvironmentFailure bool   `json:"environmentFailure,omitempty"`
+	ExitCode           int    `json:"exitCode"`
+	Report             string `json:"report"`
+	RevisionDigest     string `json:"revisionDigest"`
 }
 type Finding struct {
 	RepositoryID string `json:"repositoryId"`
@@ -149,52 +157,68 @@ type Execution struct {
 	ExitCode      int          `json:"exitCode"`
 	LogPath       string       `json:"logPath"`
 	FailureReason string       `json:"failureReason,omitempty"`
+	FailureCode   string       `json:"failureCode,omitempty"`
+	ResultRepair  bool         `json:"resultRepair,omitempty"`
 	Result        *AgentResult `json:"result,omitempty"`
 }
 type AgentRequest struct {
-	ExecutionID string      `json:"executionId"`
-	TaskID      string      `json:"taskId"`
-	Role        string      `json:"role"`
-	Workspace   string      `json:"workspace"`
-	Prompt      string      `json:"prompt"`
-	SessionID   string      `json:"sessionId"`
-	Config      AgentConfig `json:"config"`
+	ExecutionID string `json:"executionId"`
+	TaskID      string `json:"taskId"`
+	Role        string `json:"role"`
+	Workspace   string `json:"workspace"`
+	Prompt      string `json:"prompt"`
+	SessionID   string `json:"sessionId"`
+	// ProfileScope reuses the development home for a merge without review.
+	ProfileScope string `json:"profileScope,omitempty"`
+	// ReadOnlyWorkspace permits result recovery without changing task sources.
+	ReadOnlyWorkspace bool        `json:"readOnlyWorkspace,omitempty"`
+	Config            AgentConfig `json:"config"`
 	// GeneratedDir is the only writable directory for an init analysis. It is a
 	// backend-local path and is never serialized into workflow history.
 	GeneratedDir string            `json:"-"`
 	Env          map[string]string `json:"-"`
 }
 type Task struct {
-	Round                int                  `json:"round,omitempty"`
-	PreviousTaskID       string               `json:"previousTaskId,omitempty"`
-	TriggerNoteIDs       []int64              `json:"triggerNoteIds,omitempty"`
-	TriggerText          string               `json:"triggerText,omitempty"`
-	DependencyTasks      map[string]string    `json:"dependencyTasks,omitempty"`
-	Network              NetworkVersion       `json:"network,omitempty"`
-	NodeConfigVersion    int                  `json:"nodeConfigVersion,omitempty"`
-	AcceptanceCommands   []AcceptanceCommand  `json:"acceptanceCommands,omitempty"`
-	HumanAcceptance      *ManualAcceptance    `json:"humanAcceptance,omitempty"`
-	AcceptanceIncomplete bool                 `json:"acceptanceIncomplete,omitempty"`
-	Checkpoint           *WorkflowCheckpoint  `json:"checkpoint,omitempty"`
-	ID                   string               `json:"id"`
-	NodeID               string               `json:"nodeId,omitempty"`
-	Project              Project              `json:"project"`
-	Issue                Issue                `json:"issue"`
-	Dependencies         []IssueRef           `json:"dependencies"`
-	Stage                string               `json:"stage"`
-	Message              string               `json:"message"`
-	Workspace            Workspace            `json:"workspace"`
-	Executions           map[string]Execution `json:"executions"`
-	Verification         []Verification       `json:"verification"`
-	Assumptions          []string             `json:"assumptions"`
-	Notes                []string             `json:"notes"`
-	Reworks              int                  `json:"reworks"`
-	ReviewDigest         string               `json:"reviewDigest"`
-	ApprovalDigest       string               `json:"approvalDigest"`
-	Paused               bool                 `json:"paused"`
-	CreatedAt            time.Time            `json:"createdAt"`
-	UpdatedAt            time.Time            `json:"updatedAt"`
+	Round                int                 `json:"round,omitempty"`
+	PreviousTaskID       string              `json:"previousTaskId,omitempty"`
+	TriggerNoteIDs       []int64             `json:"triggerNoteIds,omitempty"`
+	TriggerText          string              `json:"triggerText,omitempty"`
+	DependencyTasks      map[string]string   `json:"dependencyTasks,omitempty"`
+	Network              NetworkVersion      `json:"network,omitempty"`
+	NodeConfigVersion    int                 `json:"nodeConfigVersion,omitempty"`
+	AcceptanceCommands   []AcceptanceCommand `json:"acceptanceCommands,omitempty"`
+	HumanAcceptance      *ManualAcceptance   `json:"humanAcceptance,omitempty"`
+	AcceptanceIncomplete bool                `json:"acceptanceIncomplete,omitempty"`
+	Checkpoint           *WorkflowCheckpoint `json:"checkpoint,omitempty"`
+	ID                   string              `json:"id"`
+	NodeID               string              `json:"nodeId,omitempty"`
+	Project              Project             `json:"project"`
+	// nil inherits the project's snapshot; an explicit value controls this task.
+	AutoMergeOverride *bool                `json:"autoMergeOverride,omitempty"`
+	Issue             Issue                `json:"issue"`
+	Dependencies      []IssueRef           `json:"dependencies"`
+	Stage             string               `json:"stage"`
+	Message           string               `json:"message"`
+	Workspace         Workspace            `json:"workspace"`
+	Executions        map[string]Execution `json:"executions"`
+	Verification      []Verification       `json:"verification"`
+	Assumptions       []string             `json:"assumptions"`
+	Notes             []string             `json:"notes"`
+	Reworks           int                  `json:"reworks"`
+	ReviewDigest      string               `json:"reviewDigest"`
+	ApprovalDigest    string               `json:"approvalDigest"`
+	Paused            bool                 `json:"paused"`
+	CreatedAt         time.Time            `json:"createdAt"`
+	UpdatedAt         time.Time            `json:"updatedAt"`
 }
+
+func (t Task) AutoMergeEnabled() bool {
+	if t.AutoMergeOverride != nil {
+		return *t.AutoMergeOverride
+	}
+	return t.Project.AutoMergeEnabled()
+}
+
 type WorkflowCheckpoint struct {
 	Serial        int             `json:"serial"`
 	PreviousPhase string          `json:"previousPhase"`
@@ -210,6 +234,7 @@ type Command struct {
 	Text         string     `json:"text"`
 	Digest       string     `json:"digest"`
 	Dependencies []IssueRef `json:"dependencies,omitempty"`
+	AutoMerge    *bool      `json:"autoMerge,omitempty"`
 }
 type Event struct {
 	ID        int64     `json:"id"`

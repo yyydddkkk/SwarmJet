@@ -853,8 +853,9 @@ func (m *Manager) Release(ctx context.Context, ws domain.Workspace) error {
 // ErrNeedsSync means the task must incorporate the current target before verification.
 var ErrNeedsSync = errors.New("task branch needs target synchronization")
 
-// RefreshTargets advances comparison baselines only when each fetched target is
-// already contained in its task branch. Original starting points remain immutable.
+// RefreshTargets advances changed repositories only after their task branches
+// contain the latest target. Untouched repositories keep their pinned baseline;
+// unrelated target commits must not force a task to edit or publish them.
 func (m *Manager) RefreshTargets(ctx context.Context, ws domain.Workspace, p domain.Project) (domain.Workspace, error) {
 	s, err := m.load(ws.TaskID)
 	if err != nil {
@@ -901,6 +902,17 @@ func (m *Manager) RefreshTargets(ctx context.Context, ws domain.Workspace, p dom
 		target, err := m.fetch(ctx, filepath.Join(primary, r.Path), url, r.TargetBranch)
 		if err != nil {
 			return ws, err
+		}
+		if !r.Changed {
+			head, err := m.git(ctx, filepath.Join(ws.Root, r.Path), "rev-parse", "HEAD")
+			if err != nil {
+				return ws, err
+			}
+			if head != r.HeadSHA {
+				return ws, fmt.Errorf("repository %s changed since inspection", r.RepositoryID)
+			}
+			s.Workspace.Revisions[i] = r
+			continue
 		}
 		if _, err = m.git(ctx, filepath.Join(ws.Root, r.Path), "merge-base", "--is-ancestor", target, "HEAD"); err != nil {
 			return ws, fmt.Errorf("%w: repository %s target %s advanced to %s", ErrNeedsSync, r.RepositoryID, r.TargetBranch, target)

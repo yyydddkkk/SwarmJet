@@ -3,7 +3,7 @@ import MihomoSettings from "./MihomoSettings";
 import { api } from "./api";
 import { ConfirmDialog, ErrorBox, Field } from "./ui";
 import type { NetworkProfile } from "./NetworkSelect";
-import "./image-settings.css";
+import "./settings-page.css";
 import "./network-settings.css";
 const blank = (): NetworkProfile => ({
   id: `network-${crypto.randomUUID().slice(0, 8)}`,
@@ -153,7 +153,7 @@ export default function NetworkSettings() {
           ? "内核未就绪"
           : "尚未应用配置";
   return (
-    <div className="image-settings network-settings">
+    <div className="settings-page network-settings">
       <div className="page-head">
         <div>
           <h1>网络配置</h1>

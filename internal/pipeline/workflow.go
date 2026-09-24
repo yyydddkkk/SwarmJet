@@ -36,7 +36,9 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 	evergreenVersion := workflow.GetVersion(ctx, "evergreen-issue", workflow.DefaultVersion, 1)
 	evergreen := evergreenVersion >= 1 && t.Round > 0
 	acceptanceVersion := workflow.GetVersion(ctx, "acceptance-strategy", workflow.DefaultVersion, 1)
-	earlyPublish := acceptanceVersion >= 1 && t.Project.AcceptanceStrategy != ""
+	skipAcceptance := t.Project.AcceptanceStrategy == "none"
+	reviewEnabled := t.Project.IndependentReview()
+	earlyPublish := acceptanceVersion >= 1 && t.Project.AcceptanceStrategy != "" && !skipAcceptance
 	commands := workflow.GetSignalChannel(ctx, SignalName)
 	seen := map[string]bool{}
 	cancelled := false
@@ -60,6 +62,7 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 	var activeCancel workflow.CancelFunc
 	interrupted := false
 	controlVersion := 0
+	autoMergeControlVersion := 0
 	applyCommand := func(c domain.Command) {
 		if seen[c.ID] {
 			return
@@ -75,6 +78,46 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 			}
 		case "resume":
 			t.Paused = false
+		case "continue_committed":
+			if t.Paused && t.Stage == "developing" {
+				if activeCancel != nil {
+					interrupted = true
+					activeCancel()
+				}
+				t.Project.AcceptanceStrategy = "none"
+				skipAcceptance = true
+				t.AcceptanceCommands = nil
+				t.Verification = nil
+				t.AcceptanceIncomplete = false
+				t.Notes = append(t.Notes, "管理员确认已有提交，直接进入发布与审查："+c.Text)
+				t.Message = "已确认现有提交，跳过重复开发和额外验收，进入发布与审查"
+				t.Stage = "publishing"
+				t.Paused = false
+			}
+		case "set_auto_merge":
+			if c.AutoMerge == nil || t.Stage == "finalizing" || t.Stage == "completed" || t.Stage == "cancelled" || t.Stage == "partial_merge" {
+				break
+			}
+			if t.Stage == "merging" && *c.AutoMerge {
+				break
+			}
+			value := *c.AutoMerge
+			t.AutoMergeOverride = &value
+			autoMergeControlVersion++
+			if value {
+				t.Notes = append(t.Notes, "管理员开启了此任务自动合并")
+			} else {
+				t.Notes = append(t.Notes, "管理员关闭了此任务自动合并；合并阶段等待人工操作")
+			}
+			if !value && (t.Stage == "acquiring_merge" || t.Stage == "merging") {
+				if activeCancel != nil {
+					interrupted = true
+					activeCancel()
+				}
+				t.Stage = "waiting_manual_merge"
+			} else if !value && t.Stage == "waiting_approval" {
+				t.Stage = "waiting_manual_merge"
+			}
 		case "cancel":
 			cancelled = true
 			if activeCancel != nil {
@@ -118,6 +161,37 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 	}
 	// Yield through durable timers while the background signal handler applies commands.
 	wait := func(test func() bool) error { return workflow.Await(ctx, func() bool { return cancelled || test() }) }
+	advanceAfterReview := func() {
+		// ReviewDigest pins the exact revision set for later merge checks. When
+		// independent review is disabled it is still a revision checkpoint.
+		t.ReviewDigest = domain.Digest(t.Workspace.Revisions)
+		special := false
+		changed := false
+		for _, r := range t.Workspace.Revisions {
+			special = special || r.Sensitive
+			changed = changed || r.Changed
+		}
+		for _, label := range t.Issue.Labels {
+			special = special || label == "no-auto-close"
+		}
+		if autoMergeVersion >= 1 && (!t.AutoMergeEnabled() || t.AcceptanceIncomplete) {
+			if !changed {
+				t.Stage = "finalizing"
+			} else {
+				t.Message = "等待真人验收并人工合并全部 MR"
+				if t.AcceptanceIncomplete {
+					t.Message = "自动验收不完整，禁止自动合并；请按 MR 顶部清单人工验收"
+				}
+				t.Stage = "waiting_manual_merge"
+			}
+		} else if !evergreen && special && t.ApprovalDigest != t.ReviewDigest {
+			t.Stage = "waiting_approval"
+		} else if !changed {
+			t.Stage = "finalizing"
+		} else {
+			t.Stage = "acquiring_merge"
+		}
+	}
 	steps := 0
 	for {
 		steps++
@@ -212,6 +286,7 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 		child, cancel := workflow.WithCancel(ctx)
 		interrupted = false
 		activeCancel = cancel
+		mergeControlAtStart := autoMergeControlVersion
 		var result StepResult
 		err := workflow.ExecuteActivity(child, "Step", StepInput{Phase: t.Stage, Task: t, ExecutionID: op}).Get(child, &result)
 		activeCancel = nil
@@ -238,11 +313,14 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 			continue
 		}
 		// Notes/signals received during an Activity belong to the live workflow state.
-		notes, deps, approval := t.Notes, t.Dependencies, t.ApprovalDigest
+		notes, deps, approval, taskAutoMerge := t.Notes, t.Dependencies, t.ApprovalDigest, t.AutoMergeOverride
 		t = result.Task
 		t.Notes = notes
 		t.Dependencies = deps
 		t.ApprovalDigest = approval
+		if autoMergeControlVersion != mergeControlAtStart {
+			t.AutoMergeOverride = taskAutoMerge
+		}
 		if result.Rework {
 			t.Reworks++
 			t.ApprovalDigest = ""
@@ -279,7 +357,7 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 				continue
 			}
 			t.Assumptions = append(t.Assumptions, ex.Result.Assumptions...)
-			if earlyPublish {
+			if skipAcceptance || earlyPublish {
 				t.Stage = "publishing"
 			} else {
 				t.Stage = "verifying"
@@ -300,7 +378,11 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 
 			if result.Ready {
 				if earlyPublish {
-					t.Stage = "reviewing"
+					if reviewEnabled {
+						t.Stage = "reviewing"
+					} else {
+						advanceAfterReview()
+					}
 				} else {
 					t.Stage = "publishing"
 				}
@@ -308,7 +390,17 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 				t.Reworks++
 				t.ApprovalDigest = ""
 				t.ReviewDigest = ""
-				t.Notes = append(t.Notes, "必需验收失败，请读取报告并修复")
+				failed := []string{}
+				for _, check := range t.Verification {
+					if check.Required && !check.Passed {
+						failed = append(failed, check.Name)
+					}
+				}
+				t.Message = "必需验收未通过，请读取报告并修复"
+				if len(failed) > 0 {
+					t.Message += "：" + strings.Join(failed, "、")
+				}
+				t.Notes = append(t.Notes, t.Message)
 				if t.Reworks > t.Project.MaxReworks {
 					t.Stage = "blocked"
 					previousPhase = "developing"
@@ -317,10 +409,26 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 				}
 			}
 		case "publishing":
-			if earlyPublish {
+			ex := t.Executions["dev"]
+			if ex.Result != nil && ex.Result.Outcome == "blocked" {
+				t.Stage = "blocked"
+				t.Message = ex.Result.NeedsHelp
+				continue
+			}
+			if skipAcceptance {
+				if reviewEnabled {
+					t.Stage = "reviewing"
+				} else {
+					advanceAfterReview()
+				}
+			} else if earlyPublish {
 				t.Stage = "verifying"
 			} else {
-				t.Stage = "reviewing"
+				if reviewEnabled {
+					t.Stage = "reviewing"
+				} else {
+					advanceAfterReview()
+				}
 			}
 		case "reviewing":
 			ex := t.Executions["review"]
@@ -347,38 +455,9 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 				}
 				continue
 			}
-			t.ReviewDigest = domain.Digest(t.Workspace.Revisions)
-			special := false
-			changed := false
-			for _, r := range t.Workspace.Revisions {
-				special = special || r.Sensitive
-				changed = changed || r.Changed
-			}
-			for _, label := range t.Issue.Labels {
-				special = special || label == "no-auto-close"
-			}
-			if autoMergeVersion >= 1 && (!t.Project.AutoMergeEnabled() || t.AcceptanceIncomplete) {
-				// Auto-merge off is distinct from a pending sensitive-change
-				// approval: the system never initiates the merge, so approval
-				// cannot override the closed switch. Wait for a human merge.
-				if !changed {
-					t.Stage = "finalizing"
-				} else {
-					t.Message = "等待真人验收并人工合并全部 MR"
-					if t.AcceptanceIncomplete {
-						t.Message = "自动验收不完整，禁止自动合并；请按 MR 顶部清单人工验收"
-					}
-					t.Stage = "waiting_manual_merge"
-				}
-			} else if !evergreen && special && t.ApprovalDigest != t.ReviewDigest {
-				t.Stage = "waiting_approval"
-			} else if !changed {
-				t.Stage = "finalizing"
-			} else {
-				t.Stage = "acquiring_merge"
-			}
+			advanceAfterReview()
 		case "acquiring_merge":
-			if t.Stage == "waiting_approval" {
+			if t.Stage == "waiting_approval" || t.Stage == "waiting_manual_merge" {
 				continue
 			}
 			if result.Ready {
@@ -400,13 +479,17 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 			if t.Stage == "waiting_approval" {
 				continue
 			}
+			if t.AutoMergeEnabled() && !t.AcceptanceIncomplete && !result.Ready {
+				t.Stage = "acquiring_merge"
+				continue
+			}
 			if result.Ready {
 				t.Stage = "finalizing"
 			} else {
 				waitTick(30 * time.Second)
 			}
 		case "merging", "partial_merge":
-			if t.Stage == "waiting_approval" {
+			if t.Stage == "waiting_approval" || t.Stage == "waiting_manual_merge" {
 				continue
 			}
 			if result.Ready {

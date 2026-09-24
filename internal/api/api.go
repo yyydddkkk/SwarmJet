@@ -373,7 +373,10 @@ func (a *server) projects(w http.ResponseWriter, r *http.Request) {
 }
 func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Project) {
 	if p.Version == 0 && p.AcceptanceStrategy == "" {
-		p.AcceptanceStrategy = "repository"
+		p.AcceptanceStrategy = "none"
+	}
+	if p.Version == 0 && p.ReviewMode == "" {
+		p.ReviewMode = "none"
 	}
 
 	// A saved connection is bound to the GitLab address it was verified against.
@@ -691,7 +694,12 @@ func (a *server) task(w http.ResponseWriter, r *http.Request, id string, tail []
 			problem(w, 409, err.Error())
 			return
 		}
-		if err = a.s.Enqueue(r.Context(), id, c); err != nil {
+		if c.Kind == "set_auto_merge" {
+			err = a.s.EnqueueAutoMerge(r.Context(), id, c)
+		} else {
+			err = a.s.Enqueue(r.Context(), id, c)
+		}
+		if err != nil {
 			failure(w, err)
 			return
 		}
@@ -751,6 +759,38 @@ func validateCommand(t domain.Task, c domain.Command) error {
 	case "retry":
 		if t.Stage != "blocked" {
 			return errors.New("retry requires blocked task")
+		}
+	case "continue_committed":
+		if !t.Paused || t.Stage != "developing" || strings.TrimSpace(c.Text) == "" || t.Workspace.Root == "" {
+			return errors.New("continuing committed work requires a paused development task and reason")
+		}
+		if ex := t.Executions["dev"]; ex.Status == "starting" || ex.Status == "running" {
+			return errors.New("development Runner must stop before continuing committed work")
+		}
+		changed := false
+		for _, r := range t.Workspace.Revisions {
+			changed = changed || r.Changed
+		}
+		if !changed {
+			return errors.New("no committed repository change is recorded")
+		}
+	case "set_auto_merge":
+		if c.AutoMerge == nil {
+			return errors.New("autoMerge value required")
+		}
+		if t.Stage == "merging" || t.Stage == "partial_merge" || t.Stage == "finalizing" {
+			return errors.New("automatic merge cannot change after merging starts")
+		}
+		for _, revision := range t.Workspace.Revisions {
+			if revision.Merged {
+				return errors.New("automatic merge cannot change after a repository is merged")
+			}
+		}
+		if t.Executions["merge"].ID != "" {
+			return errors.New("automatic merge cannot change after merge execution starts")
+		}
+		if *c.AutoMerge && t.AcceptanceIncomplete {
+			return errors.New("automatic merge requires complete acceptance evidence")
 		}
 	case "pause":
 		if t.Paused {

@@ -86,6 +86,52 @@ func TestCommandGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestContinueCommittedRequiresPausedDevelopmentAndReason(t *testing.T) {
+	task := domain.Task{Stage: "developing", Workspace: domain.Workspace{Root: "/node/task", Revisions: []domain.Revision{{RepositoryID: "app", Changed: true}}}}
+	command := domain.Command{ID: "continue-1", Kind: "continue_committed", Text: "Committed work is ready for publishing"}
+	if validateCommand(task, command) == nil {
+		t.Fatal("live development can be skipped without first stopping its Runner")
+	}
+	task.Paused = true
+	if err := validateCommand(task, command); err != nil {
+		t.Fatal(err)
+	}
+	command.Text = " "
+	if validateCommand(task, command) == nil {
+		t.Fatal("operator continuation lacks a reason")
+	}
+	command.Text = "ready"
+	task.Stage = "reviewing"
+	if validateCommand(task, command) == nil {
+		t.Fatal("continuation accepted outside development")
+	}
+}
+
+func TestTaskAutoMergeSwitchClosesAtMergeExecution(t *testing.T) {
+	task := domain.Task{Stage: "reviewing"}
+	off := false
+	cmd := domain.Command{ID: "toggle", Kind: "set_auto_merge", AutoMerge: &off}
+	if err := validateCommand(task, cmd); err != nil {
+		t.Fatal(err)
+	}
+	cmd.AutoMerge = nil
+	if validateCommand(task, cmd) == nil {
+		t.Fatal("missing switch value accepted")
+	}
+	cmd.AutoMerge = &off
+	for _, stage := range []string{"merging", "partial_merge", "finalizing", "completed"} {
+		task.Stage = stage
+		if validateCommand(task, cmd) == nil {
+			t.Fatalf("switch accepted after merge started: %s", stage)
+		}
+	}
+	task.Stage = "blocked"
+	task.Workspace.Revisions = []domain.Revision{{Merged: true}}
+	if validateCommand(task, cmd) == nil {
+		t.Fatal("merged repository allowed switch while task blocked")
+	}
+}
 func TestArtifactConfinement(t *testing.T) {
 	dir := t.TempDir()
 	base := filepath.Join(dir, "runs", "task")

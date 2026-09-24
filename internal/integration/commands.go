@@ -69,9 +69,12 @@ func (m *Manager) verifyCommands(ctx context.Context, ws domain.Workspace, cfg d
 			cancel()
 			return nil, err
 		}
-		args := []string{"run", "--name", name + "-acceptance", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()), "--mount", "type=bind,src=" + root + ",dst=/workspace", "--workdir", "/workspace"}
-		rel, _ := filepath.Rel(root, dir)
-		args[len(args)-1] = "/workspace/" + filepath.ToSlash(rel)
+		// pnpm may install the repository-pinned CLI under HOME=/tmp and execute
+		// it immediately. Docker's default tmpfs is noexec, so permit execution
+		// only in this bounded, container-private temporary directory.
+		// pnpm's generated .bin wrappers embed absolute NODE_PATH entries.
+		// Mount at the Node's original path, matching development Runners.
+		args := []string{"run", "--name", name + "-acceptance", "--read-only", "--tmpfs", "/tmp:exec,mode=1777,size=256m", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()), "--mount", "type=bind,src=" + root + ",dst=" + root, "--workdir", dir}
 		for _, k := range networkconfig.Keys {
 			if _, ok := m.Env[k]; ok {
 				args = append(args, "--env", k)
@@ -94,10 +97,21 @@ func (m *Manager) verifyCommands(ctx context.Context, ws domain.Workspace, cfg d
 		if err != nil {
 			return results, err
 		}
-		results = append(results, domain.Verification{Name: ch.Name, Required: true, Passed: runErr == nil && code == 0, ExitCode: code, Report: report})
+		results = append(results, domain.Verification{Name: ch.Name, Required: true, Passed: runErr == nil && code == 0, EnvironmentFailure: commandEnvironmentFailure(code, output), ExitCode: code, Report: report})
 		if ctx.Err() != nil {
 			return results, ctx.Err()
 		}
 	}
 	return results, nil
+}
+
+// Only known command-start and toolchain-loading failures are classified as
+// environment failures. Ordinary assertions, type errors and lint violations
+// still return to the developer for code rework.
+func commandEnvironmentFailure(code int, output []byte) bool {
+	if code == -1 || code == 125 || code == 126 || code == 127 {
+		return true
+	}
+	message := strings.ToLower(string(output))
+	return strings.Contains(message, "cannot find module") && (strings.Contains(message, "failed to load parser") || strings.Contains(message, "failed to load plugin"))
 }

@@ -1,3 +1,4 @@
+```mermaid
 flowchart TB
     user["管理员 / 开发者"]
     gitlab["GitLab：Issue、代码仓库、MR、CI"]
@@ -67,7 +68,7 @@ flowchart TB
     localAgents <--> gitlab
     localAgents --> models
 
-    remoteNode -.->|"注册 / 每 10 秒心跳"| api
+    remoteNode -.-> api
     remoteNode --> remoteAgents
     remoteNode --> remoteTests
     remoteNode --> remoteData
@@ -89,15 +90,6 @@ flowchart TB
     controlData -->|"本机配置快照 / Meta 准备"| localNode
     controlData -->|"Activities 导出 Git bundle，经节点协议安装 Meta"| remoteNode
 
-    %% local 模式优先选择可用节点，无可用节点时才回退本机。
-    %% distributed 模式必须分配节点，无可用节点时不接单。
-    %% 创建任务时按在线状态与容量固定 NodeID，后续不自动迁移。
-    %% 节点不连接 PostgreSQL 或 Temporal；执行失败/超时后任务 blocked，保留现场。
-    %% 初始化和配置终端仍在控制面本机执行；模型配置尚无跨节点自动分发。
-    %% 初始化验证容器无网络；图中模型连接仅表示分析和模型验证调用。
-    %% Issue 保持打开；每条显式 /swarmjet run 评论去重后排队下一轮 Task。
-    %% Agent 角色按阶段串行执行，任务之间可以并行；合并复用审查会话。
-
     classDef external fill:#f1f5f9,stroke:#64748b,color:#0f172a
     classDef control fill:#eff6ff,stroke:#2563eb,color:#1e3a8a
     classDef execution fill:#ecfdf5,stroke:#059669,color:#064e3b
@@ -106,3 +98,4 @@ flowchart TB
     class web,api,ingress,outbox,temporal,temporalUi,workflow,activities,routing,maintenance,initflow,runtimeAdmin control
     class localNode,localAgents,localTests,setupContainers,remoteNode,remoteAgents,remoteTests execution
     class db,temporalDb,localData,controlData,remoteData storage
+```

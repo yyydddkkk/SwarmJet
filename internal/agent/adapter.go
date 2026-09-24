@@ -24,7 +24,7 @@ func adapterFor(id string) (cliAdapter, error) {
 	return cliAdapter{spec}, nil
 }
 
-func (a cliAdapter) command(req domain.AgentRequest, promptPath string) ([]string, error) {
+func (a cliAdapter) command(req domain.AgentRequest, promptPath, profileHome string) ([]string, error) {
 	if req.Role == "init" && a.ID != "opencode" {
 		return nil, fmt.Errorf("static initialization requires the opencode adapter")
 	}
@@ -53,7 +53,16 @@ func (a cliAdapter) command(req domain.AgentRequest, promptPath string) ([]strin
 		args = append(args, prompt)
 	case "dst":
 		// Requires the pinned DSH 0.1.6-alpha.2 release (older rc lacks these flags).
-		args = []string{"--profile", "headless", "--json"}
+		args = []string{"--profile", "headless"}
+		if profileHome != "" {
+			patchPath := filepath.Join(profileHome, dstModelPatchName)
+			if _, present, err := readProfileFile(patchPath); err != nil {
+				return nil, err
+			} else if present {
+				args = append(args, "--patch", patchPath)
+			}
+		}
+		args = append(args, "--json")
 		if req.SessionID != "" {
 			args = append(args, "--session-id", req.SessionID)
 		}

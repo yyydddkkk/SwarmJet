@@ -114,6 +114,7 @@ func (a *Activities) strategyVerification(ctx context.Context, c *gitlab.Client,
 	t.Verification = checks
 	ready = true
 	required := 0
+	environmentFailures := []string{}
 	for i := range t.Verification {
 		v := &t.Verification[i]
 		v.RevisionDigest = digest
@@ -121,9 +122,12 @@ func (a *Activities) strategyVerification(ctx context.Context, c *gitlab.Client,
 			required++
 			ready = ready && v.Passed
 		}
-		if v.ExitCode == 125 || v.ExitCode == 126 || v.ExitCode == 127 || v.ExitCode == -1 {
-			return incomplete("验收工具链或执行环境不可用，请查看命令报告")
+		if v.EnvironmentFailure || v.ExitCode == 125 || v.ExitCode == 126 || v.ExitCode == 127 || v.ExitCode == -1 {
+			environmentFailures = append(environmentFailures, v.Name)
 		}
+	}
+	if len(environmentFailures) > 0 {
+		return incomplete("验收环境无法运行检查：" + strings.Join(environmentFailures, "、") + "；请查看命令报告")
 	}
 	if required == 0 {
 		return incomplete("没有执行必需验收检查")
@@ -264,7 +268,7 @@ func publishIssueReviewGuide(ctx context.Context, c *gitlab.Client, t domain.Tas
 }
 
 func taskIntegration(t domain.Task) domain.IntegrationConfig {
-	if t.Project.AcceptanceStrategy == "repository" || t.Project.AcceptanceStrategy == "gitlab_ci" {
+	if t.Project.AcceptanceStrategy == "none" || t.Project.AcceptanceStrategy == "repository" || t.Project.AcceptanceStrategy == "gitlab_ci" {
 		return domain.IntegrationConfig{Mode: "commands"}
 	}
 	return t.Project.Integration

@@ -3,15 +3,145 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"swarmjet/internal/domain"
+	"swarmjet/internal/execution"
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/workspace"
 )
+
+type failingPublishNode struct {
+	execution.Node
+	prepared domain.Workspace
+}
+
+func (n *failingPublishNode) PrepareWorkspace(context.Context, string, domain.Project, map[string]string) (domain.Workspace, error) {
+	return n.prepared, nil
+}
+func (n *failingPublishNode) InspectWorkspace(_ context.Context, ws domain.Workspace, _ domain.Project, _ map[string]string) (domain.Workspace, error) {
+	return ws, nil
+}
+func (n *failingPublishNode) RefreshTargets(context.Context, domain.Workspace, domain.Project, map[string]string) (domain.Workspace, error) {
+	return domain.Workspace{}, fmt.Errorf("%w: repository client target advanced", workspace.ErrNeedsSync)
+}
+
+func TestPublishingKeepsWorkspaceWhenRemoteSyncFails(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(fmt.Sprint("missing=", missing), func(t *testing.T) {
+			ws := domain.Workspace{TaskID: "task", Root: "/node/task", Revisions: []domain.Revision{{RepositoryID: "client", Changed: true}}}
+			original := ws
+			if missing {
+				original = domain.Workspace{}
+			}
+			a := Activities{Nodes: fixedNodeResolver{node: &failingPublishNode{prepared: ws}}, ProjectCredential: func(domain.Project, bool) (string, error) { return "token", nil }}
+			task := domain.Task{ID: "task", NodeID: "node", Project: domain.Project{ID: "project", GitLabURL: "http://gitlab.invalid"}, Workspace: original}
+			result, err := a.Step(context.Background(), StepInput{Phase: "publishing", Task: task, ExecutionID: "publish"})
+			if err != nil || !result.Rework || result.Task.Workspace.Root != ws.Root || !strings.Contains(result.Task.Message, "client") {
+				t.Fatalf("remote sync lost workspace: %+v %v", result, err)
+			}
+		})
+	}
+}
+
+func TestResultRecoveryRunsOnceInFreshReadOnlyExecution(t *testing.T) {
+	task := domain.Task{ID: "task", Executions: map[string]domain.Execution{}}
+	in := StepInput{Phase: "developing", ExecutionID: "task-developing-3"}
+	calls := 0
+	run := func(_ context.Context, step StepInput, got domain.Task, repair bool) (domain.Execution, error) {
+		calls++
+		if calls == 1 {
+			if repair || step.ExecutionID != in.ExecutionID {
+				t.Fatalf("first execution: %+v repair=%v", step, repair)
+			}
+			return domain.Execution{ID: step.ExecutionID, Status: "failed", FailureCode: "invalid_result"}, nil
+		}
+		if calls != 2 || !repair || step.ExecutionID != in.ExecutionID+"-result" || got.Executions["dev"].ID != in.ExecutionID {
+			t.Fatalf("repair execution: %+v repair=%v prior=%+v", step, repair, got.Executions["dev"])
+		}
+		return domain.Execution{ID: step.ExecutionID, Status: "succeeded", Result: &domain.AgentResult{Outcome: "changed", Summary: "committed"}}, nil
+	}
+	ex, err := withResultRecovery(context.Background(), in, task, "dev", run)
+	if err != nil || ex.Status != "succeeded" || calls != 2 {
+		t.Fatalf("result recovery: %+v calls=%d err=%v", ex, calls, err)
+	}
+}
+
+func TestResultRecoveryResumesBlockedHandoffWithoutRepeatingWork(t *testing.T) {
+	for _, previous := range []domain.Execution{
+		{ID: "previous", Status: "failed", FailureCode: "invalid_result"},
+		{ID: "legacy", Status: "failed", FailureReason: "invalid result.json: open result.json: no such file or directory"},
+		{ID: "paused-result", Status: "cancelled", ResultRepair: true},
+		{ID: "legacy-result", Status: "cancelled"},
+	} {
+		task := domain.Task{Executions: map[string]domain.Execution{"dev": previous}}
+		calls := 0
+		ex, err := withResultRecovery(context.Background(), StepInput{Phase: "developing", ExecutionID: "retry"}, task, "dev", func(_ context.Context, step StepInput, _ domain.Task, repair bool) (domain.Execution, error) {
+			calls++
+			if !repair || step.ExecutionID != "retry-result" {
+				t.Fatalf("repeated development: %+v repair=%v", step, repair)
+			}
+			return domain.Execution{ID: step.ExecutionID, Status: "failed", FailureCode: "invalid_result"}, nil
+		})
+		if err != nil || calls != 1 || ex.Status != "failed" {
+			t.Fatalf("unbounded recovery: %+v calls=%d err=%v", ex, calls, err)
+		}
+	}
+}
+
+func TestResultRecoveryIgnoresOtherExecutionFailures(t *testing.T) {
+	calls := 0
+	ex, err := withResultRecovery(context.Background(), StepInput{ExecutionID: "run"}, domain.Task{Executions: map[string]domain.Execution{}}, "dev", func(_ context.Context, step StepInput, _ domain.Task, repair bool) (domain.Execution, error) {
+		calls++
+		if repair {
+			t.Fatal("ordinary Agent failure triggered result recovery")
+		}
+		return domain.Execution{ID: step.ExecutionID, Status: "failed", ExitCode: 1}, nil
+	})
+	if err != nil || calls != 1 || ex.Status != "failed" {
+		t.Fatalf("ordinary failure changed: %+v calls=%d err=%v", ex, calls, err)
+	}
+}
+
+func TestResultRecoveryPromptOnlyDescribesExistingWork(t *testing.T) {
+	task := domain.Task{Issue: domain.Issue{Title: "show two decimal places"}}
+	prompt := resultRecoveryPrompt(task, "developing", nil, domain.Execution{ID: "first"})
+	for _, want := range []string{"read-only", "Do not edit files", "acceptanceCommands", "show two decimal places", "first"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("missing %q from repair prompt", want)
+		}
+	}
+}
+
+func TestMergeWithoutReviewReusesDevelopmentSession(t *testing.T) {
+	task := domain.Task{Project: domain.Project{
+		ReviewMode:  "none",
+		Development: domain.AgentConfig{Adapter: "dst", Image: "dev-image"},
+		Review:      domain.AgentConfig{Adapter: "codex", Image: "review-image"},
+	}, Executions: map[string]domain.Execution{"dev": {SessionID: "dev-session"}}}
+	cfg, session, scope := agentSettings(task, "merge")
+	if cfg.Adapter != "dst" || session != "dev-session" || scope != "dev" {
+		t.Fatalf("merge opened another Agent context: adapter=%s session=%s scope=%s", cfg.Adapter, session, scope)
+	}
+	task.Project.ReviewMode = "independent"
+	task.Executions["review"] = domain.Execution{SessionID: "review-session"}
+	cfg, session, scope = agentSettings(task, "merge")
+	if cfg.Adapter != "codex" || session != "review-session" || scope != "" {
+		t.Fatalf("independent review context changed: adapter=%s session=%s scope=%s", cfg.Adapter, session, scope)
+	}
+}
+
+func TestResultRecoveryIDStaysWithinRunnerLimit(t *testing.T) {
+	first := resultRecoveryID(strings.Repeat("a", 128))
+	second := resultRecoveryID(strings.Repeat("a", 127) + "b")
+	if len(first) != 128 || first == second {
+		t.Fatalf("result execution IDs collide or exceed limit: %q %q", first, second)
+	}
+}
 
 func TestWorkspaceManagerPreservesNativeAskpass(t *testing.T) {
 	manager := workspace.New(t.TempDir(), "meta")
@@ -126,6 +256,38 @@ func TestGatesRequireCurrentSuccessfulMandatoryVerification(t *testing.T) {
 			ready, reason, err := (&Activities{}).gates(context.Background(), client, &task)
 			if err != nil || ready || !strings.Contains(reason, "verification") || *requests != 0 {
 				t.Fatalf("ready=%v reason=%q err=%v requests=%d", ready, reason, err, *requests)
+			}
+		})
+	}
+}
+
+func TestGatesAllowOptedOutAcceptanceAfterIndependentReview(t *testing.T) {
+	task := reviewedGateTask()
+	task.Project.AcceptanceStrategy = "none"
+	task.Project.RequireCI = false
+	task.Verification = nil
+	client, _, _ := gateServer(t, func(int) gitlab.MergeRequest { mr := reviewedMR(); mr.HeadPipeline = nil; return mr }, "base-sha")
+	ready, reason, err := (&Activities{}).gates(context.Background(), client, &task)
+	if err != nil || !ready || reason != "" {
+		t.Fatalf("explicitly disabled acceptance blocked reviewed MR: ready=%v reason=%q err=%v", ready, reason, err)
+	}
+	task.ReviewDigest = "stale"
+	ready, reason, err = (&Activities{}).gates(context.Background(), client, &task)
+	if err != nil || ready || !strings.HasPrefix(reason, "STALE:") {
+		t.Fatalf("disabled acceptance bypassed review digest: ready=%v reason=%q err=%v", ready, reason, err)
+	}
+}
+
+func TestMergeActivityStopsBeforeAgentWhenTaskAutoMergeIsOff(t *testing.T) {
+	for _, phase := range []string{"acquiring_merge", "merging"} {
+		t.Run(phase, func(t *testing.T) {
+			task := reviewedGateTask()
+			task.Stage = phase
+			off := false
+			task.AutoMergeOverride = &off
+			result, err := (&Activities{}).Step(context.Background(), StepInput{Phase: phase, Task: task, ExecutionID: "merge"})
+			if err != nil || result.Ready || result.Task.Stage != "waiting_manual_merge" || result.Task.AutoMergeEnabled() {
+				t.Fatalf("automatic merge continued after task switch: %+v err=%v", result, err)
 			}
 		})
 	}

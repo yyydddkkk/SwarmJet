@@ -1,6 +1,6 @@
 # SwarmJet
 
-可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab 与 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）、Claude Code 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务创建后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，完成联调后由独立审查 Agent 审查，并自动合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录及人工操作。
+可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab 与 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）、Claude Code 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务创建后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，可选启动独立审查 Agent，再合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录及人工操作。
 
 ## 架构
 
@@ -28,10 +28,10 @@ Temporal 是运行流程的事实源；业务 PostgreSQL 保存配置、查询�
 1. 登记仓库的 opened Issue 添加 `autonomous` 标签，Webhook 或轮询启动第一轮；后续以 `/swarmjet run` 开头的 Issue 评论排队启动下一轮。
 2. 等待明确的 Issue 阻塞依赖；平台管理的上游以当前轮任务完成为准，普通关联关系不阻塞。
 3. 固定配置与仓库基线，在长期缓存外建立任务私有源仓库和 meta worktree 集合。
-4. 一个开发 Agent 跨仓库实现、补充测试并提交；Worker 执行联调基线及必需测试。
-5. 开发 Agent 推送任务分支并创建 MR，独立审查 Agent 检查整组改动。
-6. 审查失败或目标分支变化时有限次返工，并重新验证、审查当前提交集合；必需验收不完整时禁止自动合并。
-7. 审查 Agent 顺序合并到配置目标分支。允许中间版本暂时不兼容，部分合并保留记录并核实后恢复。
+4. 一个开发 Agent 跨仓库实现、补充测试并提交；开启额外验收时 Worker 执行配置的检查。
+5. 开发 Agent 推送任务分支并创建 MR；启用独立审查时，审查 Agent 检查整组改动。
+6. 审查失败或目标分支变化时有限次返工，并重新审查当前提交集合；启用额外验收后，其必需检查不完整时禁止自动合并。
+7. 合并 Agent 顺序合并到配置目标分支；关闭独立审查时沿用开发会话。允许中间版本暂时不兼容，部分合并保留记录并核实后恢复。
 8. 全部完成后清理任务工作区与联调环境，来源 Issue 保持打开，保留按提交版本发布的人工复核指引及后续讨论。
 
 需求歧义记录假设、添加 `needs-clarification` 并**继续执行**；只有具体障碍无法解决才 blocked。当前轮运行期间的 `/swarmjet run` 评论进入下一轮队列，不改变已审查的提交集合。提交/MR 只引用来源 Issue，不使用 `Closes/Fixes/Resolves` 指令。

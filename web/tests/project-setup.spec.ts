@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { formatCommand, parseCommand } from "../src/commands";
 import type { Project, Repository } from "../src/types";
+const publishedRunner = "registry.test/swarmjet/agent@sha256:" + "a".repeat(64);
 
 const repositories: Repository[] = [
   {
@@ -137,6 +138,10 @@ async function setupAPI(page: Page, initial?: Project) {
       return route.fulfill({
         json: { agentImage: "swarmjet-agent:configured" },
       });
+    if (pathname === "/api/registry/images")
+      return route.fulfill({ json: { repository: "registry.test/swarmjet/agent", images: [
+        { digest: "sha256:" + "a".repeat(64), reference: publishedRunner, tags: ["stable"] },
+      ] } });
     if (pathname === "/api/connections" && request.method() === "GET")
       return route.fulfill({ json: connections });
     if (pathname === "/api/connections/verify" && request.method() === "POST")
@@ -400,6 +405,40 @@ test("project default only lists enabled agents and does not select models", asy
   await expect(page.getByLabel("开发模型",{exact:true})).toHaveCount(0);
 });
 
+test("project Runner image selector supports Node default and published versions for both roles", async ({page}) => {
+  const state = await setupAPI(page, configuredProject());
+  await page.goto("/#/projects/custom-project");
+  await page.getByText("执行环境设置", {exact:false}).click();
+  const development = page.getByLabel("开发 Runner 镜像", {exact:true});
+  await expect(development).toHaveValue("swarmjet-agent:configured");
+  await expect(development.locator(`option[value="${publishedRunner}"]`)).toHaveCount(1);
+  await development.selectOption("");
+  await expect(page.getByRole("button", {name:"保存并启用"})).toBeEnabled();
+  await page.getByRole("checkbox", {name:"审查沿用开发执行环境"}).uncheck();
+  const review = page.getByLabel("审查 Runner 镜像", {exact:true});
+  await review.selectOption("__manual__");
+  await page.getByLabel("审查镜像摘要", {exact:true}).fill(publishedRunner);
+  await review.selectOption(publishedRunner);
+  await page.getByRole("button", {name:"保存草稿"}).click();
+  await expect.poll(() => state.saves.length).toBe(1);
+  expect(state.saves[0].nodes?.mode).toBe("auto");
+  expect(state.saves[0].development.image).toBe("");
+  expect(state.saves[0].review.image).toBe(publishedRunner);
+});
+
+test("legacy local image cannot be enabled for Node scheduling until replaced", async ({page}) => {
+  const state = await setupAPI(page, {...configuredProject(), nodes:{mode:"auto"}});
+  await page.goto("/#/projects/custom-project");
+  await expect(page.getByRole("button", {name:"保存并启用"})).toBeDisabled();
+  await page.getByText("执行环境设置", {exact:false}).click();
+  await page.getByLabel("开发 Runner 镜像", {exact:true}).selectOption("");
+  await expect(page.getByRole("button", {name:"保存并启用"})).toBeEnabled();
+  await page.getByRole("button", {name:"保存草稿"}).click();
+  await expect.poll(() => state.saves.length).toBe(1);
+  expect(state.saves[0].development.image).toBe("");
+  expect(state.saves[0].review.image).toBe("");
+});
+
 test("argv command formatting preserves spaces, quotes, empty arguments and multiline content", () => {
   const examples = [
     ["go", "test", "./..."],
@@ -475,21 +514,41 @@ for (const viewport of [
   });
 }
 
-test("repository and CI strategies enable without Compose and keep explicit policy", async ({ page }) => {
+test("extra acceptance defaults off and repository or CI checks can be enabled", async ({ page }) => {
   const project = configuredProject();
   project.integration = { composeFile: "", checks: [], startupTimeoutSeconds: 180 };
   const state = await setupAPI(page, project);
   await page.goto("/#/projects/custom-project");
-  await page.getByLabel("验收策略", { exact: true }).selectOption("repository");
+  await page.getByLabel("验收策略", { exact: true }).selectOption("none");
   await expect(page.getByLabel("联调配置文件", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "保存并启用" })).toBeEnabled();
   await page.getByRole("button", { name: "保存草稿" }).click();
   await expect.poll(() => state.saves.length).toBe(1);
-  expect(state.saves[0]).toMatchObject({ acceptanceStrategy: "repository", requireCI: false });
-  await page.getByLabel("验收策略", { exact: true }).selectOption("gitlab_ci");
+  expect(state.saves[0]).toMatchObject({ acceptanceStrategy: "none", requireCI: false });
+  await page.getByLabel("验收策略", { exact: true }).selectOption("repository");
+  await expect(page.getByLabel("联调配置文件", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "保存并启用" })).toBeEnabled();
   await page.getByRole("button", { name: "保存草稿" }).click();
   await expect.poll(() => state.saves.length).toBe(2);
-  expect(state.saves[1]).toMatchObject({ acceptanceStrategy: "gitlab_ci", requireCI: true });
+  expect(state.saves[1]).toMatchObject({ acceptanceStrategy: "repository", requireCI: false });
+  await page.getByLabel("验收策略", { exact: true }).selectOption("gitlab_ci");
+  await page.getByRole("button", { name: "保存草稿" }).click();
+  await expect.poll(() => state.saves.length).toBe(3);
+  expect(state.saves[2]).toMatchObject({ acceptanceStrategy: "gitlab_ci", requireCI: true });
+});
+
+test("independent review can be disabled without a review Agent", async ({ page }) => {
+  const project = configuredProject();
+  project.reviewMode = "none";
+  project.review = { adapter: "", model: "", image: "", timeoutSeconds: 0 };
+  const state = await setupAPI(page, project);
+  await page.goto("/#/projects/custom-project");
+  await expect(page.getByLabel("独立审查", { exact: true })).toHaveValue("none");
+  await expect(page.getByLabel("审查 Runner 镜像", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "保存并启用" })).toBeEnabled();
+  await page.getByRole("button", { name: "保存草稿" }).click();
+  await expect.poll(() => state.saves.length).toBe(1);
+  expect(state.saves[0]).toMatchObject({ reviewMode: "none" });
 });
 
 test("custom command acceptance preserves argv without requiring Compose", async ({ page }) => {

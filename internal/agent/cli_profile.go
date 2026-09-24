@@ -57,20 +57,67 @@ func publishProfile(destination, source string, files []string, extra map[string
 	return os.Rename(stage, destination)
 }
 
+const dstModelPatchName = ".swarmjet-dst-model.patch.yml"
+
+// DSH's TUI persists its /model choice outside DSH_HOME. Headless does not
+// read that preference, so freeze its provider/model as a private profile
+// overlay when the task first snapshots the node's setup home.
+func dstModelPatch(master string) ([]byte, error) {
+	b, present, err := readProfileFile(filepath.Join(master, ".dsh-tui", "model.json"))
+	if err != nil || !present {
+		return nil, err
+	}
+	if len(b) > 4096 {
+		return nil, errors.New("DST model preference is too large")
+	}
+	var selection struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	if err := json.Unmarshal(b, &selection); err != nil || strings.TrimSpace(selection.Provider) == "" || strings.TrimSpace(selection.Model) == "" {
+		return nil, errors.New("DST model preference is invalid; select a model again in the node terminal")
+	}
+	patch := []struct {
+		ID     string `yaml:"id"`
+		Config struct {
+			Provider string `yaml:"provider"`
+			Model    string `yaml:"model"`
+		} `yaml:"config"`
+	}{{ID: "agent-default-model"}}
+	patch[0].Config.Provider = selection.Provider
+	patch[0].Config.Model = selection.Model
+	return yaml.Marshal(patch)
+}
+
 func (r *Runtime) prepareCLIProfile(req domain.AgentRequest, a cliAdapter) (string, string, error) {
 	root := filepath.Join(r.DataDir, "agent-profiles", req.TaskID, a.ID)
 	seed := filepath.Join(root, "snapshot")
-	home := filepath.Join(root, roleScope(req.Role))
+	home := filepath.Join(root, requestScope(req))
 	master := filepath.Join(r.DataDir, "runtime-profiles/default/home")
 	// Inline OpenCode settings can include a default model; freeze them with files.
 	extra := map[string][]byte{}
 	if a.ID == "opencode" && req.Env["OPENCODE_CONFIG_CONTENT"] != "" {
 		extra[".inline-opencode.json"] = []byte(req.Env["OPENCODE_CONFIG_CONTENT"])
 	}
+	if a.ID == "dst" {
+		_, seeded, err := readProfileFile(filepath.Join(seed, ".swarmjet-profile"))
+		if err != nil {
+			return "", "", err
+		}
+		if !seeded {
+			patch, err := dstModelPatch(master)
+			if err != nil {
+				return "", "", err
+			}
+			if patch != nil {
+				extra[dstModelPatchName] = patch
+			}
+		}
+	}
 	if err := publishProfile(seed, master, a.Files, extra); err != nil {
 		return "", "", err
 	}
-	files := append(append([]string{}, a.Files...), ".inline-opencode.json")
+	files := append(append([]string{}, a.Files...), ".inline-opencode.json", dstModelPatchName)
 	if err := publishProfile(home, seed, files, nil); err != nil {
 		return "", "", err
 	}

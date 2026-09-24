@@ -236,7 +236,11 @@ func (r *Runtime) profileSecrets(rec record) ([]string, error) {
 	}
 	authPath := rec.AuthPath
 	if authPath == "" {
-		authPath = filepath.Join(r.DataDir, "opencode", rec.TaskID, roleScope(rec.Role), "opencode", "auth.json")
+		scope := roleScope(rec.Role)
+		if rec.ProfileScope != "" {
+			scope = rec.ProfileScope
+		}
+		authPath = filepath.Join(r.DataDir, "opencode", rec.TaskID, scope, "opencode", "auth.json")
 	}
 	out := []string{}
 	for _, item := range []struct {

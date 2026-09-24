@@ -16,6 +16,10 @@ export function ErrorBox({ error, retry }: { error: string; retry?: () => void }
   ) : null;
 }
 
+export function Empty({ children }: { children: ReactNode }) {
+  return <div className="empty">{children}</div>;
+}
+
 export function Field({ label, children, hint }: {
   label: string;
   children: ReactNode;

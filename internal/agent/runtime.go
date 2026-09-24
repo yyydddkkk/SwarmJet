@@ -137,6 +137,7 @@ type record struct {
 	Execution        domain.Execution `json:"execution"`
 	TaskID           string           `json:"taskId"`
 	Role             string           `json:"role"`
+	ProfileScope     string           `json:"profileScope,omitempty"`
 	Workspace        string           `json:"workspace"`
 	StartedAt        time.Time        `json:"startedAt"`
 	Timeout          int              `json:"timeout"`
@@ -231,6 +232,13 @@ func (r *Runtime) read(id string) (record, error) {
 func terminal(s string) bool {
 	return s == "succeeded" || s == "failed" || s == "cancelled" || s == "timed_out"
 }
+
+func requestScope(req domain.AgentRequest) string {
+	if req.ProfileScope != "" {
+		return req.ProfileScope
+	}
+	return roleScope(req.Role)
+}
 func (r *Runtime) Resume(ctx context.Context, req domain.AgentRequest) (domain.Execution, error) {
 	if req.SessionID == "" {
 		return domain.Execution{}, errors.New("resume requires exact session ID")
@@ -253,6 +261,9 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 	}
 	if req.Role != "dev" && req.Role != "review" && req.Role != "merge" && req.Role != "init" {
 		return domain.Execution{}, errors.New("invalid agent role")
+	}
+	if req.ProfileScope != "" && (req.Role != "merge" || req.ProfileScope != "dev") {
+		return domain.Execution{}, errors.New("invalid Agent profile scope")
 	}
 	workspace, err := filepath.Abs(req.Workspace)
 	if err != nil {
@@ -294,7 +305,7 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 	rec, err := r.read(req.ExecutionID)
 	originalStart := rec.StartedAt
 	if err == nil {
-		if rec.TaskID != req.TaskID || rec.Workspace != workspace || rec.Role != req.Role || (rec.Adapter != "" && rec.Adapter != req.Config.Adapter) {
+		if rec.TaskID != req.TaskID || rec.Workspace != workspace || rec.Role != req.Role || rec.ProfileScope != req.ProfileScope || (rec.Adapter != "" && rec.Adapter != req.Config.Adapter) {
 			return domain.Execution{}, errors.New("execution ID belongs to another request")
 		}
 		if terminal(rec.Execution.Status) {
@@ -323,7 +334,7 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 	if err = atomicWrite(promptPath, []byte(prompt)); err != nil {
 		return domain.Execution{}, err
 	}
-	rec = record{Adapter: req.Config.Adapter, Execution: domain.Execution{ID: req.ExecutionID, SessionID: req.SessionID, ContainerID: "sj-agent-" + req.ExecutionID, Status: "starting", ExitCode: -1, LogPath: filepath.Join(dir, "output.jsonl")}, TaskID: req.TaskID, Role: req.Role, Workspace: workspace, StartedAt: time.Now().UTC(), Timeout: req.Config.TimeoutSeconds, ResultPath: resultPath}
+	rec = record{Adapter: req.Config.Adapter, Execution: domain.Execution{ID: req.ExecutionID, SessionID: req.SessionID, ContainerID: "sj-agent-" + req.ExecutionID, Status: "starting", ExitCode: -1, LogPath: filepath.Join(dir, "output.jsonl"), ResultRepair: req.ReadOnlyWorkspace}, TaskID: req.TaskID, Role: req.Role, ProfileScope: req.ProfileScope, Workspace: workspace, StartedAt: time.Now().UTC(), Timeout: req.Config.TimeoutSeconds, ResultPath: resultPath}
 	if !originalStart.IsZero() {
 		rec.StartedAt = originalStart
 	}
@@ -349,7 +360,7 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 		// directory is writable. This is enforced by mounts, not by prompt text.
 		args = append(args, "--mount", bindMount(workspace, true), "--mount", bindMount(generated, false))
 	} else {
-		args = append(args, "--mount", bindMount(taskRoot, false))
+		args = append(args, "--mount", bindMount(taskRoot, req.ReadOnlyWorkspace))
 	}
 	// Match the supervisor so native workers can read/reuse agent-created files.
 	args = append(args, "--user", strconv.Itoa(os.Getuid())+":"+strconv.Itoa(os.Getgid()))
@@ -365,6 +376,13 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 		}
 		rec.ProfileHome, rec.ProfileSnapshot = home, snapshot
 		args = append(args, "--mount", bindMount(home, false))
+	}
+	dstGitLab := adapter.ID == "dst" && req.Env["GITLAB_TOKEN"] != "" && req.Env["GITLAB_URI"] != ""
+	if dstGitLab {
+		if err = prepareDSTGitLab(dir, req.Env); err != nil {
+			return domain.Execution{}, err
+		}
+		args = append(args, "--tmpfs", fmt.Sprintf("%s:rw,mode=0700,uid=%d,gid=%d", dstGitLabConfigDir, os.Getuid(), os.Getgid()))
 	}
 	// Persist only credential names; docker receives values via its process environment.
 	env := []string{}
@@ -387,7 +405,7 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 	}
 	if rec.ProfileHome == "" {
 		// Developer history is isolated; merge reuses only this task's review scope.
-		home, config, authPath, snapshotPath, hasAuth, profileErr := r.prepareProfile(req.TaskID, req.Role, req.ExecutionID)
+		home, config, authPath, snapshotPath, hasAuth, profileErr := r.prepareProfile(req.TaskID, requestScope(req), req.ExecutionID)
 		if profileErr != nil {
 			return domain.Execution{}, profileErr
 		}
@@ -403,11 +421,16 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 		// but cannot run repository commands or delegate execution.
 		args = append(args, "--env", `OPENCODE_CONFIG_CONTENT={"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow","list":"allow","edit":"allow","write":"allow","external_directory":"allow","bash":"deny","task":"deny","skill":"deny"}}`)
 	}
-	command, commandErr := adapter.command(req, promptPath)
+	command, commandErr := adapter.command(req, promptPath, rec.ProfileHome)
 	if commandErr != nil {
 		return domain.Execution{}, commandErr
 	}
-	args = append(args, "--entrypoint", adapter.Executable, req.Config.Image)
+	entrypoint := adapter.Executable
+	if dstGitLab {
+		entrypoint = "/bin/sh"
+		command = append([]string{"-c", dstGitLabBootstrap, "swarmjet-dst-auth"}, command...)
+	}
+	args = append(args, "--entrypoint", entrypoint, req.Config.Image)
 	args = append(args, command...)
 	if err = r.save(rec); err != nil {
 		return rec.Execution, err
@@ -534,6 +557,7 @@ func (r *Runtime) reconcile(ctx context.Context, rec record) (domain.Execution, 
 			result, resultErr := ReadResult(rec.ResultPath, rec.Role)
 			if resultErr != nil {
 				rec.Execution.FailureReason = "invalid result.json: " + redact(resultErr.Error(), secrets)
+				rec.Execution.FailureCode = "invalid_result"
 			}
 			if resultErr == nil {
 				// Treat agent-authored results as untrusted output as well as logs.
@@ -558,6 +582,7 @@ func (r *Runtime) reconcile(ctx context.Context, rec record) (domain.Execution, 
 				rec.Execution.Result = &result
 				rec.Execution.Status = "succeeded"
 				rec.Execution.FailureReason = ""
+				rec.Execution.FailureCode = ""
 			}
 		}
 	}

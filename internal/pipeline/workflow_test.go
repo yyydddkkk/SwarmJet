@@ -113,6 +113,90 @@ func TestWorkflowHappyChanged(t *testing.T) {
 		t.Fatal("review digest missing")
 	}
 }
+
+func TestVerificationFailureReportsFailedChecks(t *testing.T) {
+	h := newWorkflowHarness(t)
+	task := workflowTask()
+	task.Project.MaxReworks = 0
+	h.step = func(_ context.Context, input StepInput, _ int) (StepResult, error) {
+		out := successfulStep(input)
+		if input.Phase == "verifying" {
+			out.Ready = false
+			out.Task.Verification = []domain.Verification{{Name: "web typecheck", Required: true, Passed: false}}
+		}
+		return out, nil
+	}
+	h.env.RegisterDelayedCallback(func() {
+		state := h.state(t)
+		if state.Stage != "blocked" || !strings.Contains(state.Message, "web typecheck") {
+			t.Errorf("verification failure was hidden: stage=%s message=%q", state.Stage, state.Message)
+		}
+		h.env.SignalWorkflow(SignalName, domain.Command{ID: "cancel-after-verification", Kind: "cancel"})
+	}, time.Second)
+	if final := h.run(t, task); final.Stage != "cancelled" {
+		t.Fatal(final.Stage)
+	}
+}
+
+func TestDisabledAcceptanceSkipsVerificationButKeepsReview(t *testing.T) {
+	h := newWorkflowHarness(t)
+	task := workflowTask()
+	task.Project.AcceptanceStrategy = "none"
+	task.Project.Integration = domain.IntegrationConfig{}
+	final := h.run(t, task)
+	if final.Stage != "completed" || h.counts["verifying"] != 0 || h.counts["developing"] != 1 || h.counts["publishing"] != 1 || h.counts["reviewing"] != 1 || h.counts["merging"] != 1 {
+		t.Fatalf("disabled acceptance changed task flow: stage=%s phases=%v", final.Stage, h.phases)
+	}
+}
+
+func TestDisabledReviewSkipsIndependentSessionAndKeepsMergeGate(t *testing.T) {
+	h := newWorkflowHarness(t)
+	task := workflowTask()
+	task.Project.AcceptanceStrategy = "none"
+	task.Project.ReviewMode = "none"
+	final := h.run(t, task)
+	if final.Stage != "completed" || h.counts["verifying"] != 0 || h.counts["reviewing"] != 0 || h.counts["publishing"] != 1 || h.counts["acquiring_merge"] != 1 || h.counts["merging"] != 1 || final.ReviewDigest != domain.Digest(final.Workspace.Revisions) {
+		t.Fatalf("optional review did not preserve merge checks: stage=%s phases=%v digest=%s", final.Stage, h.phases, final.ReviewDigest)
+	}
+}
+
+func TestPausedCommittedWorkCanContinueAtPublishingWithoutExtraAcceptance(t *testing.T) {
+	h := newWorkflowHarness(t)
+	task := workflowTask()
+	task.Stage = "developing"
+	task.Paused = true
+	task.Project.AcceptanceStrategy = "repository"
+	h.signalAfter(time.Second, domain.Command{ID: "continue-committed", Kind: "continue_committed", Text: "Existing committed work is sufficient; proceed to publishing and review"})
+	final := h.run(t, task)
+	if final.Stage != "completed" || final.Paused || final.Project.AcceptanceStrategy != "none" || h.counts["developing"] != 0 || h.counts["verifying"] != 0 || h.counts["publishing"] != 1 || h.counts["reviewing"] != 1 || h.counts["merging"] != 1 {
+		t.Fatalf("committed work did not continue safely: stage=%s phases=%v strategy=%s", final.Stage, h.phases, final.Project.AcceptanceStrategy)
+	}
+}
+
+func TestPublishingBlockedOutcomeKeepsOriginalReason(t *testing.T) {
+	h := newWorkflowHarness(t)
+	task := workflowTask()
+	task.Project.AcceptanceStrategy = "repository"
+	h.step = func(_ context.Context, input StepInput, _ int) (StepResult, error) {
+		out := successfulStep(input)
+		if input.Phase == "publishing" {
+			out.Task.Executions["dev"] = domain.Execution{Status: "succeeded", Result: &domain.AgentResult{Outcome: "blocked", Summary: "branch not pushed", NeedsHelp: "GitLab publishing credential unavailable"}}
+			out.Task.Message = "GitLab publishing credential unavailable"
+		}
+		return out, nil
+	}
+	h.env.RegisterDelayedCallback(func() {
+		state := h.state(t)
+		if state.Stage != "blocked" || state.Message != "GitLab publishing credential unavailable" {
+			t.Errorf("publishing reason was masked: stage=%s message=%q", state.Stage, state.Message)
+		}
+		h.env.SignalWorkflow(SignalName, domain.Command{ID: "cancel-after-block", Kind: "cancel"})
+	}, time.Second)
+	final := h.run(t, task)
+	if final.Stage != "cancelled" || h.counts["publishing"] != 1 {
+		t.Fatalf("unexpected publishing retry: stage=%s counts=%v", final.Stage, h.counts)
+	}
+}
 func TestEvergreenRoundAutoMergesSensitiveChangeWithoutApproval(t *testing.T) {
 	h := newWorkflowHarness(t)
 	task := workflowTask()

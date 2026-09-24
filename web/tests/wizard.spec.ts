@@ -295,6 +295,8 @@ test("wizard connects, paginates repos, verifies a model and completes initializ
     metaMode: "managed",
     connectionId: "c1",
     autoMerge: true,
+    acceptanceStrategy: "none",
+    reviewMode: "none",
     metaUrl: "",
     enabled: false,
     credentialRef: "",

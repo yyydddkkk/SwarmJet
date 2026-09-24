@@ -17,7 +17,8 @@ export const newProject = (): Project => ({
   id: `project-${crypto.randomUUID().slice(0, 8)}`,
   nodes:{mode:"auto"},
   name: "",
-  acceptanceStrategy: "repository",
+  acceptanceStrategy: "none",
+  reviewMode: "none",
   metaUrl: "",
   metaRef: "",
   metaMode: "imported",
@@ -43,6 +44,8 @@ interface Discovery {
   branches: Record<string, string[]>;
   warnings: string[];
 }
+type RegistryImage = { digest: string; reference: string; tags: string[] };
+const registryDigest = /^[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$/;
 const lines = (s: string) =>
   s
     .split("\n")
@@ -69,8 +72,35 @@ export function ProjectEditor({
   const [p, setP] = useState<Project>(() => structuredClone(initial));
   const [nodes,setNodes]=useState<NodeView[]>([]);
   useEffect(()=>{api<NodeView[]>("/nodes").then(setNodes).catch(()=>{});},[]);
+  const [registryImages, setRegistryImages] = useState<RegistryImage[]>([]);
+  const [registryError, setRegistryError] = useState("");
+  const [registryLoading, setRegistryLoading] = useState(false);
+  const [manualImages, setManualImages] = useState({ development: false, review: false });
+  async function loadRegistryImages(signal?: AbortSignal) {
+    setRegistryLoading(true);
+    setRegistryError("");
+    try {
+      const result = await api<{ images: RegistryImage[] }>("/registry/images", "GET", undefined, signal);
+      if (!signal?.aborted) setRegistryImages(result.images || []);
+    } catch (e) {
+      if (!signal?.aborted) setRegistryError((e as Error).message);
+    } finally {
+      if (!signal?.aborted) setRegistryLoading(false);
+    }
+  }
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadRegistryImages(controller.signal);
+    return () => controller.abort();
+  }, []);
   const latestProject = useRef(p);
   latestProject.current = p;
+  const runnerSettings = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (initial.development.image === "swarmjet-agent:local" || initial.review.image === "swarmjet-agent:local") {
+      if (runnerSettings.current) runnerSettings.current.open = true;
+    }
+  }, [initial.development.image, initial.review.image]);
   const {catalog:agentCatalog,error:agentCatalogError} = useAgentCatalog();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -154,6 +184,7 @@ export function ProjectEditor({
       const next = { ...old[role], ...patch };
       return {
         ...old,
+        ...(patch.image === "" && !old.nodes?.mode ? { nodes: { mode: "auto" } } : {}),
         [role]: next,
         ...(role === "development" && shareReview
           ? { review: { ...next } }
@@ -303,10 +334,13 @@ export function ProjectEditor({
   }
   const repositories = p.repositories || [];
   const checks = p.integration.checks || [];
-  const agentsReady = [p.development, p.review].every(
+  const independentReview = (p.reviewMode || "independent") === "independent";
+  const agentsReady = [p.development, ...(independentReview ? [p.review] : [])].every(
     (a) =>
       agentCatalog.enabled.includes(a.adapter) &&
-      a.image.trim() &&
+      (a.image.trim()
+        ? !p.nodes?.mode || registryDigest.test(a.image.trim())
+        : !!p.nodes?.mode) &&
       a.timeoutSeconds > 0 &&
       a.timeoutSeconds <= 86400,
   );
@@ -355,7 +389,7 @@ export function ProjectEditor({
     { id: "connection", label: "Meta-Repo 信息", ok: connectionReady },
     { id: "repositories", label: "仓库与目标分支", ok: repoReady },
     { id: "execution", label: "执行器与运行环境", ok: agentsReady },
-    { id: "verification", label: "开发任务验收策略", ok: checksReady },
+    { id: "verification", label: "额外验收（可选）", ok: checksReady },
   ];
   const ready = readiness.every((r) => r.ok);
   const saving = busy || discovering;
@@ -946,8 +980,7 @@ export function ProjectEditor({
               <div className="setup-section-head">
                 <div>
                   <h2>Runner 与 Agent</h2>
-                  <p>开发与审查使用相同 Agent 的独立会话。</p>
-                  <label className="checkbox"><input type="checkbox" checked={!p.development.image&&!p.review.image} onChange={e=>setP({...p,nodes:p.nodes||{mode:'auto'},development:{...p.development,image:e.target.checked?'':'swarmjet-agent:local'},review:{...p.review,image:e.target.checked?'':'swarmjet-agent:local'}})}/>使用节点默认镜像</label>
+                  <p>{independentReview ? "开发与独立审查使用不同会话。" : "开发、返工与合并沿用开发 Agent 会话。"}</p>
                   <Field label="执行节点范围"><select value={p.nodes?.mode||'auto'} onChange={e=>setP({...p,nodes:{mode:e.target.value,ids:[]}})}><option value="auto">所有符合条件的节点</option><option value="selected">指定节点</option></select></Field>
                   {p.nodes?.mode==='selected'&&nodes.map(n=><label className="checkbox" key={n.node.id}><input type="checkbox" checked={p.nodes?.ids?.includes(n.node.id)||false} onChange={e=>setP({...p,nodes:{mode:'selected',ids:e.target.checked?[...(p.nodes?.ids||[]),n.node.id]:(p.nodes?.ids||[]).filter(id=>id!==n.node.id)}})}/>{n.config?.name||n.node.id}</label>)}
                 </div>
@@ -968,7 +1001,13 @@ export function ProjectEditor({
                     {agentCatalog.agents.filter((a)=>agentCatalog.enabled.includes(a.id)).map((a)=><option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
                 </Field>
-                <label className="checkbox">
+                <Field label="独立审查">
+                  <select value={p.reviewMode || "independent"} onChange={(e) => set("reviewMode", e.target.value as Project["reviewMode"])}>
+                    <option value="none">关闭（默认）</option>
+                    <option value="independent">启动独立审查 Agent</option>
+                  </select>
+                </Field>
+                {independentReview && <label className="checkbox">
                   <input
                     type="checkbox"
                     checked={shareReview}
@@ -978,14 +1017,14 @@ export function ProjectEditor({
                     }}
                   />
                   审查沿用开发执行环境
-                </label>
-                <details className="setup-advanced">
+                </label>}
+                <details className="setup-advanced" ref={runnerSettings}>
                   <summary>
                     执行环境设置<span>镜像与超时已有默认值</span>
                   </summary>
                   <div className="form-grid">
                     {(
-                      ["development", ...(!shareReview ? ["review"] : [])] as (
+                      ["development", ...(independentReview && !shareReview ? ["review"] : [])] as (
                         "development" | "review"
                       )[]
                     ).map((role) => {
@@ -993,16 +1032,36 @@ export function ProjectEditor({
                       return (
                         <div key={role}>
                           <Field
-                            label={`${label}容器镜像`}
-                            hint="决定工具链和运行环境，通常使用部署默认镜像。"
+                            label={`${label} Runner 镜像`}
+                            hint="使用 Node 默认镜像可直接继承该节点已就绪的版本；指定版本需先在 Node 上准备。"
                           >
-                            <input
-                              value={p[role].image}
-                              onChange={(e) =>
-                                updateAgent(role, { image: e.target.value })
+                            <select value={manualImages[role] ? "__manual__" : p[role].image} onChange={(e) => {
+                              if (e.target.value === "__manual__") {
+                                setManualImages((old) => ({ ...old, [role]: true }));
+                              } else {
+                                setManualImages((old) => ({ ...old, [role]: false }));
+                                updateAgent(role, { image: e.target.value });
                               }
-                            />
+                            }}>
+                              <option value="">使用 Node 默认镜像（推荐）</option>
+                              {p[role].image && !registryImages.some((image) => image.reference === p[role].image) && (
+                                <option value={p[role].image}>当前配置（未在仓库列表）：{p[role].image}</option>
+                              )}
+                              {registryImages.map((image) => (
+                                <option key={image.digest} value={image.reference}>
+                                  {image.tags.join("、") || "未命名版本"} · {image.digest.slice(0, 19)}…
+                                </option>
+                              ))}
+                              <option value="__manual__">手动填写镜像摘要…</option>
+                            </select>
                           </Field>
+                          {manualImages[role] && <Field label={`${label}镜像摘要`}>
+                            <input value={p[role].image} placeholder="registry.example.com/swarmjet/agent@sha256:…"
+                              onChange={(e) => updateAgent(role, { image: e.target.value })} />
+                          </Field>}
+                          {p[role].image && !registryDigest.test(p[role].image) && p.nodes?.mode && (
+                            <p className="muted">当前值不是仓库镜像摘要，Node 无法使用它接单；请选择默认镜像或已发布版本。</p>
+                          )}
                           <Field label={`${label}超时（分钟）`}>
                             <input
                               type="number"
@@ -1023,26 +1082,32 @@ export function ProjectEditor({
                       );
                     })}
                   </div>
+                  {registryError && <p className="muted" role="alert">镜像列表读取失败：{registryError}</p>}
+                  {!registryError && !registryLoading && registryImages.length === 0 && <p className="muted">仓库暂无已发布镜像，仍可使用 Node 默认镜像。</p>}
+                  <button type="button" disabled={registryLoading} onClick={() => void loadRegistryImages()}>
+                    {registryLoading ? "读取镜像中…" : "刷新镜像列表"}
+                  </button>
                 </details>
               </div>
             </section>
             <section className="panel setup-section" id="verification">
               <div className="setup-section-head">
                 <div>
-                  <h2>开发任务验收策略</h2>
-                  <p>用于开发完成后的检查，与 Meta 仓库静态初始化无关。人工复核指引会发布到来源 Issue。</p>
+                  <h2>额外验收（可选）</h2>
+                  <p>默认关闭平台重复执行的检查；需要独立运行命令或 CI 时再开启。开发 Agent 仍自行测试。</p>
                 </div>
                 <span className="setup-label">可稍后补充</span>
               </div>
               <div className="panel-padding">
                 <Field label="验收策略">
                   <select value={strategy} onChange={(e) => { setP((old) => ({...old, acceptanceStrategy:e.target.value as Project["acceptanceStrategy"], requireCI:e.target.value === "gitlab_ci"})); }}>
-                    <option value="repository">根据仓库约定验收（推荐）</option>
+                    <option value="none">关闭额外验收（默认）</option>
+                    <option value="repository">根据仓库约定验收</option>
                     <option value="gitlab_ci">使用 GitLab CI</option>
                     <option value="custom">自定义验收（高级）</option>
                   </select>
                 </Field>
-                <p className="notice">{strategy === "repository" ? "Agent 从仓库说明、脚本和 CI 提出针对本次改动的检查，平台执行并记录结果，独立审查 Agent 判断是否充分。缺少工具或检查时保留 MR，交由人工处理，不自动合并。" : strategy === "gitlab_ci" ? "先创建 MR，再等待每个变更仓库当前提交的 CI。旧提交成功、跳过或不存在的流水线不算通过。" : "明确指定验收命令，或通过 Compose 启动多个服务后执行检查。"}</p>
+                <p className="notice">{strategy === "none" ? `开发 Agent 自行运行测试并留下日志；平台跳过额外验收，${independentReview ? "仍执行独立审查与 GitLab 合并检查" : "继续执行 GitLab 合并检查"}。` : strategy === "repository" ? "Agent 从仓库说明、脚本和 CI 提出针对本次改动的检查，平台执行并记录结果；缺少工具或检查时保留 MR，交由人工处理，不自动合并。" : strategy === "gitlab_ci" ? "先创建 MR，再等待每个变更仓库当前提交的 CI。旧提交成功、跳过或不存在的流水线不算通过。" : "明确指定验收命令，或通过 Compose 启动多个服务后执行检查。"}</p>
                 {strategy === "repository" && <Field label="验收镜像（可选）" hint="默认使用开发 Agent 镜像；镜像需要包含项目工具链。"><input value={p.integration.image || ""} placeholder={p.development.image} onChange={(e) => set("integration", {...p.integration, image:e.target.value})} /></Field>}
                 {strategy === "custom" && <>
                   <Field label="自定义验收方式"><select value={p.integration.mode || "compose"} onChange={(e) => set("integration", {...p.integration, mode:e.target.value as "compose" | "commands"})}><option value="commands">隔离容器命令</option><option value="compose">Compose 联调</option></select></Field>
@@ -1201,7 +1266,7 @@ export function ProjectEditor({
                     />
                     要求 GitLab 当前提交的 CI 通过
                   </label>
-                  <p className="muted">迁移、CI 和部署配置变更仍需通过当前提交的验收、审查和 GitLab 合并检查。</p>
+                  <p className="muted">GitLab 合并检查仍会执行；独立审查与额外验收按项目配置运行。</p>
                 </details>
               </div>
             </section>
@@ -1265,14 +1330,14 @@ export function ProjectEditor({
                 <span>
                   <strong>自动合并</strong>
                   <small>
-                    关闭后系统仍会开发、验证、创建 MR 和审查，但不会发起合并；需要在
+                    此设置是新任务默认值，任务详情可在合并前单独调整。关闭后系统仍会开发和创建 MR，但不会发起合并；需要在
                     GitLab 人工合并全部 MR 后该轮任务完成，来源 Issue 保持打开。
                   </small>
                 </span>
               </label>
               <p className="wizard-hint">
                 {(p.autoMerge ?? true)
-                  ? "必需验收、独立审查、当前提交 CI 和目标分支检查通过后自动合并；冲突会交给开发 Agent 返工。"
+                  ? `${strategy === "none" ? "" : "已启用的额外验收、"}${independentReview ? "独立审查、" : ""}已启用的 GitLab CI 要求和目标分支检查通过后自动合并；冲突会交给开发 Agent 返工。`
                   : "当前为人工合并；所有 MR 合并后该轮任务完成，来源 Issue 保持打开。"}
               </p>
             </div>

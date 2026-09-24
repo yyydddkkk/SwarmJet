@@ -3,9 +3,11 @@
 
 New Issue tasks select one of `opencode`, `codex`, `dst`, `agy`, or `claude` through the shared catalog (`internal/agentcli`). `adapter.go` owns argv, environment, exact-session extraction and terminal-event failures. Docker lifecycle and `AgentResult` validation stay common. Agents are not launched to probe model availability.
 
-The following OpenCode-specific paths describe **legacy tasks and static initialization**. New tasks have `AgentConfig.UseCLIDefaults=true`, an empty model override, and a task snapshot under `agent-profiles/{taskID}/{adapter}/snapshot`. `dev` and `review` homes are seeded from that immutable snapshot, not independently from the live master profile. Merge uses `review`. Snapshots are taken on first execution, including empty profiles, and retained with the task. Only the catalog's explicit configuration/credential file allowlist is copied, with bounded no-symlink reads and atomic publication. New homes use normal HOME/XDG locations plus CODEX_HOME or DSH_HOME. Both original and refreshed credentials are redacted. New CLI adapters require independent command and event fixtures; optional real-provider tests are separate.
+The following OpenCode-specific paths describe **legacy tasks and static initialization**. New tasks have `AgentConfig.UseCLIDefaults=true`, an empty model override, and a task snapshot under `agent-profiles/{taskID}/{adapter}/snapshot`. `dev` and `review` homes are seeded from that immutable snapshot, not independently from the live master profile. Merge uses `review` when independent review is enabled; otherwise it reuses the development home and exact session. Snapshots are taken on first execution, including empty profiles, and retained with the task. Only the catalog's explicit configuration/credential file allowlist is copied, with bounded no-symlink reads and atomic publication. New homes use normal HOME/XDG locations plus CODEX_HOME or DSH_HOME. Both original and refreshed credentials are redacted. New CLI adapters require independent command and event fixtures; optional real-provider tests are separate.
 
-`dst` invokes `dsh --profile headless --json`, not the interactive TUI. Antigravity requires portable API-key/ADC authentication; shared OS keyrings are not supported. Static initialization remains OpenCode-only because its policy forbids shell execution/delegation.
+`dst` invokes `dsh --profile headless --json`, not the interactive TUI. On the first task execution, the TUI's saved `.dsh-tui/model.json` provider/model choice is converted into a private `--patch` overlay for headless and frozen with the task profile; allowlisted `.dsh` settings and credentials are copied into the same private home. Antigravity requires portable API-key/ADC authentication; shared OS keyrings are not supported. Static initialization remains OpenCode-only because its policy forbids shell execution/delegation.
+
+DSH deliberately scrubs credential-shaped environment variables from Agent-run shell commands. When a DST execution receives a phase-scoped GitLab token, its launcher writes a private `glab` configuration to container tmpfs, then clears the token from the DSH process environment. A credential-free askpass script in the execution directory reads that tmpfs configuration for Git. Neither task logs nor the persistent `glab` seed config contain the token; the tmpfs disappears with the Runner. The Docker container configuration retains the original environment until task cleanup, as with other adapters.
 
 CLI contracts: [Codex](https://developers.openai.com/codex/noninteractive/), [Claude Code](https://code.claude.com/docs/en/headless), [DSH headless](https://github.com/deepseek-ai/deepseek-harness/tree/main/packages/bundle/headless), [Antigravity](https://antigravity.google/docs/cli/headless/).
 
@@ -47,7 +49,7 @@ mounted into a task. On first role initialization, the runtime copies OpenCode
 `XDG_DATA_HOME={dataDir}/opencode/{taskID}/{dev|review}` holds private history/auth;
 `{scope}-config` is a writable task/role configuration copy so OpenCode can create
 startup files such as `.gitignore`. The shared profile is never mounted into the
-agent. Merge reuses review.
+agent. Merge reuses review when enabled, or development when review is off.
 Agent containers run with the supervisor's UID/GID and use the private role data
 directory as HOME, so native workers can read and reuse their generated files.
 Existing role credentials/history are retained, including refreshed tokens;
@@ -72,6 +74,12 @@ outcome are required. Blocked results also require `needsHelp`. Dev outcomes are
 `changed`, `no_change`, `blocked`; review outcomes are `approved`,
 `changes_requested`, `blocked`; merge outcomes are `merged`, `blocked`.
 Only exit zero plus a valid artifact produces execution status `succeeded`.
+A zero-exit execution with a missing or invalid artifact is marked with
+`failureCode=invalid_result`. The pipeline makes one fresh, bounded result-only
+execution with the task source tree mounted read-only. It must still supply a
+valid artifact; a second failure blocks the task. Retrying an older blocked task
+recognizes the previous `invalid result.json` reason and starts at this handoff
+without repeating its completed development or publication run.
 A succeeded execution can have a blocked business outcome; callers must inspect
 `Result.Outcome`. Other terminal statuses are `failed`, `cancelled`, `timed_out`.
 Persisted execution metadata contains neither prompt text nor environment values;

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { ErrorBox, Field } from "./ui";
 import { NetworkSelect, type NetworkChoice } from "./NetworkSelect";
-import "./image-settings.css";
+import "./settings-page.css";
+import "./node-settings.css";
 type Config = {
   images?: string[];
   memoryMB?: number;
@@ -149,7 +150,7 @@ export default function NodeSettings() {
     }
   }
   return (
-    <div className="image-settings">
+    <div className="settings-page">
       <div className="page-head">
         <div>
           <h1>Node 管理</h1>
@@ -350,7 +351,7 @@ export default function NodeSettings() {
                     >
                       <option value="">暂不指定镜像</option>
                       {draft.image && !registryImages.some((image) => image.reference === draft.image) && (
-                        <option value={draft.image}>当前配置：{draft.image}</option>
+                        <option value={draft.image} title={draft.image}>当前配置：{draft.image.length > 24 ? `${draft.image.slice(0, 24)}…` : draft.image}</option>
                       )}
                       {registryImages.map((image) => (
                         <option key={image.digest} value={image.reference}>

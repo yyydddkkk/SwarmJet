@@ -78,3 +78,25 @@ func TestInitRoleMountIsolation(t *testing.T) {
 		t.Fatal("dev role accepted an initialization workspace")
 	}
 }
+
+func TestResultRecoveryMountsTaskSourcesReadOnly(t *testing.T) {
+	r, f, req := setup(t)
+	req.ReadOnlyWorkspace = true
+	ex, err := r.Start(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ex.ResultRepair {
+		t.Fatal("result recovery marker not retained on execution")
+	}
+	var create []string
+	for _, call := range f.calls {
+		if len(call) > 0 && call[0] == "create" {
+			create = call
+		}
+	}
+	root := filepath.Join(r.DataDir, "task-sources", req.TaskID)
+	if !strings.Contains(strings.Join(create, " "), "src="+root+",dst="+root+",readonly") {
+		t.Fatalf("result recovery can modify task sources: %v", create)
+	}
+}

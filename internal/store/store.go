@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -404,6 +405,67 @@ func (s *Store) Enqueue(ctx context.Context, taskID string, c domain.Command) er
 		}
 	}
 	return nil
+}
+
+// EnqueueAutoMerge serializes the operator's decision with SaveTask's stage
+// update. A request accepted before the merging stage is visible to the merge
+// activity even if command delivery to Temporal is delayed.
+func (s *Store) EnqueueAutoMerge(ctx context.Context, taskID string, c domain.Command) error {
+	if c.Kind != "set_auto_merge" || c.AutoMerge == nil {
+		return ErrConflict
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var stage string
+	if err = tx.QueryRow(ctx, "SELECT stage FROM tasks WHERE id=$1 FOR UPDATE", taskID).Scan(&stage); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	var oldTaskID string
+	var oldBody []byte
+	err = tx.QueryRow(ctx, "SELECT task_id,body FROM commands WHERE id=$1", c.ID).Scan(&oldTaskID, &oldBody)
+	if err == nil {
+		var old domain.Command
+		if json.Unmarshal(oldBody, &old) != nil || oldTaskID != taskID || !reflect.DeepEqual(old, c) {
+			return ErrConflict
+		}
+		return tx.Commit(ctx)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if domain.Terminal(stage) || stage == "merging" || stage == "partial_merge" || stage == "finalizing" {
+		return ErrConflict
+	}
+	body, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO commands(id,task_id,body) VALUES($1,$2,$3)", c.ID, taskID, body); err != nil {
+		return mapErr(err)
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) LatestAutoMergeRequest(ctx context.Context, taskID string) (*bool, error) {
+	var body []byte
+	err := s.Pool.QueryRow(ctx, "SELECT body FROM commands WHERE task_id=$1 AND body->>'kind'='set_auto_merge' ORDER BY created_at DESC,id DESC LIMIT 1", taskID).Scan(&body)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var command domain.Command
+	if err = json.Unmarshal(body, &command); err != nil {
+		return nil, err
+	}
+	return command.AutoMerge, nil
 }
 
 type PendingCommand struct {

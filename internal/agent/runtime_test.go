@@ -209,6 +209,9 @@ func TestMissingMalformedArtifactFails(t *testing.T) {
 			if err != nil || ex.Status != "failed" {
 				t.Fatalf("%+v %v", ex, err)
 			}
+			if ex.FailureCode != "invalid_result" {
+				t.Fatalf("result failure must be identifiable for recovery: %+v", ex)
+			}
 		})
 	}
 }
@@ -254,6 +257,51 @@ func TestResumeExactSession(t *testing.T) {
 	joined := strings.Join(f.calls[0], " ")
 	if !strings.Contains(joined, "--session ses_exact") || strings.Contains(joined, "--continue") {
 		t.Fatal(joined)
+	}
+}
+
+func TestMergeCanResumeDevelopmentHome(t *testing.T) {
+	r, f, req := setup(t)
+	req.Role = "merge"
+	req.ProfileScope = "dev"
+	req.SessionID = "dev-session"
+	if _, err := r.Start(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	var create []string
+	for _, args := range f.calls {
+		if len(args) > 0 && args[0] == "create" {
+			create = args
+		}
+	}
+	joined := strings.Join(create, " ")
+	if !strings.Contains(joined, filepath.Join(r.DataDir, "opencode", req.TaskID, "dev")) || strings.Contains(joined, filepath.Join(r.DataDir, "opencode", req.TaskID, "review")) || !strings.Contains(joined, "--session dev-session") {
+		t.Fatalf("merge did not reuse development profile and session: %s", joined)
+	}
+}
+
+func TestDSTMergeCanResumeDevelopmentProfile(t *testing.T) {
+	r, f, req := setup(t)
+	req.Config.Adapter = "dst"
+	req.Config.UseCLIDefaults = true
+	req.Config.Model = ""
+	req.Role = "merge"
+	req.ProfileScope = "dev"
+	req.SessionID = "dev-session"
+	if _, err := r.Start(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	var create []string
+	for _, args := range f.calls {
+		if len(args) > 0 && args[0] == "create" {
+			create = args
+		}
+	}
+	joined := strings.Join(create, " ")
+	devHome := filepath.Join(r.DataDir, "agent-profiles", req.TaskID, "dst", "dev")
+	reviewHome := filepath.Join(r.DataDir, "agent-profiles", req.TaskID, "dst", "review")
+	if !strings.Contains(joined, devHome) || strings.Contains(joined, reviewHome) || !strings.Contains(joined, "--session-id dev-session") {
+		t.Fatalf("DST merge opened a new context: %s", joined)
 	}
 }
 func TestRecoveryBeforeContainerCreate(t *testing.T) {

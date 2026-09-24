@@ -5,6 +5,7 @@ import RegistrySettings from "./RegistrySettings";
 import { NetworkSelect, type NetworkChoice } from "./NetworkSelect";
 import type { NodeView } from "./NodeSettings";
 import { ConfirmDialog, Field } from "./ui";
+import "./settings-page.css";
 import "./image-settings.css";
 
 type ImageConfig = {
@@ -151,7 +152,7 @@ export default function ImageSettings() {
   }
 
   return (
-    <div className="image-settings">
+    <div className="settings-page image-settings">
       <div className="page-head">
         <div>
           <h1>镜像管理</h1>

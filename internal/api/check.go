@@ -104,7 +104,7 @@ func (a *server) checkManagedMeta(p domain.Project) error {
 			return fmt.Errorf("managed Meta manifest mismatch for repository %s", repo.ID)
 		}
 	}
-	if p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" || p.Integration.Mode == "commands" {
+	if p.AcceptanceStrategy == "none" || p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" || p.Integration.Mode == "commands" {
 		return nil
 	}
 	compose, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p.Integration.ComposeFile)))
@@ -225,7 +225,7 @@ func checkMeta(ctx context.Context, p domain.Project, token string) error {
 			return fmt.Errorf("Meta manifest mismatch for repository %s", repo.ID)
 		}
 	}
-	if p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" || p.Integration.Mode == "commands" {
+	if p.AcceptanceStrategy == "none" || p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" || p.Integration.Mode == "commands" {
 		return nil
 	}
 	compose, err := get(p.Integration.ComposeFile)

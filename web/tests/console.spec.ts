@@ -434,6 +434,31 @@ test("commands use the real API without optimistic completion and note draft sur
   });
 });
 
+test("task auto-merge switch inherits the project default and locks once merging starts", async ({ page }) => {
+  let current: Task = { ...task, stage: "developing", project: { ...project, autoMerge: true }, autoMergeOverride: null };
+  await mock(page, true, [current]);
+  const received: Record<string, unknown>[] = [];
+  await page.route("**/api/tasks/task-001", (route) => route.fulfill({ json: current }));
+  await page.route("**/api/tasks/task-001/commands", (route) => {
+    const body = route.request().postDataJSON();
+    received.push(body);
+    return route.fulfill({ status: 202, json: { accepted: true } });
+  });
+  await page.goto("/#/tasks/task-001");
+  const toggle = page.getByRole("button", { name: "已开启", exact: true });
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await toggle.click();
+  await expect.poll(() => received.length).toBe(1);
+  expect(received[0]).toMatchObject({ kind: "set_auto_merge", autoMerge: false });
+  await expect(page.getByRole("button", { name: "切换中…", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "切换中…", exact: true })).toHaveAttribute("aria-pressed", "true");
+  current = { ...current, autoMergeOverride: false };
+  await expect(page.getByRole("button", { name: "已关闭", exact: true })).toHaveAttribute("aria-pressed", "false");
+  current = { ...current, stage: "merging", autoMergeOverride: true };
+  await page.reload();
+  await expect(page.getByRole("button", { name: "已开启", exact: true })).toBeDisabled();
+});
+
 test("cancel task shows a reversible confirmation before sending the command", async ({ page }) => {
   const state = await mock(page);
   await page.goto("/#/tasks/task-001");

@@ -187,13 +187,16 @@ func TestRemoteNodeRoundTripDeliversCredentials(t *testing.T) {
 	if err != nil || ws.Root != "/node/task-a" {
 		t.Fatalf("workspace=%+v err=%v", ws, err)
 	}
-	ex, err := node.Start(ctx, domain.AgentRequest{ExecutionID: "task-a-dev-1", TaskID: "task-a", Role: "dev", Workspace: ws.Root, Env: map[string]string{"GITLAB_TOKEN": "secret-token", "GIT_ASKPASS": "/askpass"}})
+	ex, err := node.Start(ctx, domain.AgentRequest{ExecutionID: "task-a-dev-1", TaskID: "task-a", Role: "dev", Workspace: ws.Root, ReadOnlyWorkspace: true, Env: map[string]string{"GITLAB_TOKEN": "secret-token", "GIT_ASKPASS": "/askpass"}})
 	if err != nil || ex.Status != "succeeded" || ex.Result == nil || ex.Result.Outcome != "changed" {
 		t.Fatalf("execution=%+v err=%v", ex, err)
 	}
 	started := fake.startedRequests()
 	if len(started) != 1 {
 		t.Fatalf("agent started %d times", len(started))
+	}
+	if !started[0].ReadOnlyWorkspace {
+		t.Fatal("remote node lost result recovery's read-only source mount")
 	}
 	got := started[0].Env
 	if got["GITLAB_TOKEN"] != "secret-token" || got["GIT_ASKPASS"] != "/askpass" {
@@ -205,6 +208,14 @@ func TestRemoteNodeRoundTripDeliversCredentials(t *testing.T) {
 	}
 	if err := node.Cancel(ctx, "task-a-dev-1"); err == nil || !strings.Contains(err.Error(), "node failure") {
 		t.Fatalf("remote error not propagated: %v", err)
+	}
+}
+
+func TestAgentWireKeepsMergeDevelopmentScope(t *testing.T) {
+	req := domain.AgentRequest{ExecutionID: "merge", TaskID: "task", Role: "merge", SessionID: "dev-session", ProfileScope: "dev"}
+	got := wireAgent(req).request()
+	if got.SessionID != req.SessionID || got.ProfileScope != "dev" || got.Role != "merge" {
+		t.Fatalf("remote merge lost development context: %+v", got)
 	}
 }
 

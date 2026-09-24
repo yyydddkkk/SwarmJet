@@ -38,6 +38,39 @@ func TestValidBranch(t *testing.T) {
 	}
 }
 
+func TestEnabledProjectCanDisableExtraAcceptance(t *testing.T) {
+	p := Project{
+		ID: "project", Name: "Project", GitLabURL: "https://gitlab.example", MetaURL: "https://gitlab.example/team/meta.git", MetaRef: "main",
+		CredentialRef: "GITLAB_TOKEN", AcceptanceStrategy: "none",
+		Repositories: []Repository{{ID: "service", ProjectID: 1, URL: "https://gitlab.example/team/service.git", Path: "service", TargetBranch: "main"}},
+		Development:  AgentConfig{Adapter: "dst", Image: "agent:test", TimeoutSeconds: 300},
+		Review:       AgentConfig{Adapter: "dst", Image: "agent:test", TimeoutSeconds: 300},
+	}
+	if err := ValidateProject(p); err != nil {
+		t.Fatal("optional acceptance rejected:", err)
+	}
+	p.AcceptanceStrategy = ""
+	if err := ValidateProject(p); err == nil {
+		t.Fatal("legacy custom acceptance unexpectedly became disabled")
+	}
+}
+
+func TestDisabledIndependentReviewDoesNotRequireReviewAgent(t *testing.T) {
+	p := Project{
+		ID: "project", Name: "Project", GitLabURL: "https://gitlab.example", MetaURL: "https://gitlab.example/team/meta.git", MetaRef: "main",
+		CredentialRef: "GITLAB_TOKEN", AcceptanceStrategy: "none", ReviewMode: "none",
+		Repositories: []Repository{{ID: "service", ProjectID: 1, URL: "https://gitlab.example/team/service.git", Path: "service", TargetBranch: "main"}},
+		Development:  AgentConfig{Adapter: "dst", Image: "agent:test", TimeoutSeconds: 300},
+	}
+	if err := ValidateProject(p); err != nil {
+		t.Fatal(err)
+	}
+	p.ReviewMode = "independent"
+	if err := ValidateProject(p); err == nil {
+		t.Fatal("enabled independent review accepted without a review Agent")
+	}
+}
+
 func draftProject() Project {
 	return Project{ID: "draft", Name: "Draft", MetaURL: "https://gitlab.example/group/meta.git"}
 }
