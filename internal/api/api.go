@@ -25,6 +25,8 @@ import (
 	"swarmjet/internal/credentials"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/execution"
+	"swarmjet/internal/forge"
+	"swarmjet/internal/githubapp"
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/imagebuild"
 	"swarmjet/internal/labels"
@@ -34,6 +36,7 @@ import (
 )
 
 type Config struct {
+	GitHubApp                                             *githubapp.App
 	MihomoURL, MihomoSecret                               string
 	Username, Password, AllowedOrigin, StaticDir, DataDir string
 	DefaultAgentImage                                     string
@@ -249,6 +252,9 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 	case "/api/connections":
 		a.connections(w, r)
 		return
+	case "/api/github/installations":
+		a.githubInstallations(w, r)
+		return
 	case "/api/connections/verify":
 		if r.Method != "POST" {
 			problem(w, 405, "method not allowed")
@@ -296,6 +302,10 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/"), "/")
+	if len(parts) == 4 && parts[0] == "github" && parts[1] == "installations" && parts[3] == "connections" {
+		a.githubInstallationConnection(w, r, parts[2])
+		return
+	}
 	if len(parts) >= 2 && domain.IDPattern.MatchString(parts[1]) {
 		switch parts[0] {
 		case "connections":
@@ -395,6 +405,17 @@ func (a *server) projects(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Project) {
+	if p.Version > 0 && a.s != nil && a.s.Pool != nil {
+		previous, err := a.s.Project(r.Context(), p.ID)
+		if err != nil {
+			failure(w, err)
+			return
+		}
+		if previous.HostingProvider() != p.HostingProvider() {
+			problem(w, http.StatusBadRequest, "已有项目不能切换托管平台。")
+			return
+		}
+	}
 	if p.Version == 0 && p.AcceptanceStrategy == "" {
 		p.AcceptanceStrategy = "none"
 	}
@@ -402,7 +423,7 @@ func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Pr
 		p.ReviewMode = "none"
 	}
 
-	// A saved connection is bound to the GitLab address it was verified against.
+	// A saved connection is bound to its verified hosting platform and origin.
 	if p.ConnectionID != "" {
 		if a.conns == nil {
 			problem(w, 503, "连接存储未启用：请在部署中配置 SWARMJET_MASTER_KEY。")
@@ -413,12 +434,23 @@ func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Pr
 			problem(w, 400, "connectionId 引用了不存在的连接。")
 			return
 		}
-		if p.GitLabURL == "" {
-			p.GitLabURL = connection.GitLabURL
-		}
-		if domain.GitLabIdentity(connection.GitLabURL) != domain.GitLabIdentity(p.GitLabURL) {
-			problem(w, 400, "项目 GitLab 地址与所选连接不一致，已拒绝保存。")
+		if connection.HostingProvider() != p.HostingProvider() {
+			problem(w, 400, "项目平台与连接平台不一致。")
 			return
+		}
+		if p.HostingProvider() == domain.ProviderGitHub {
+			if err := a.validateGitHubProject(r.Context(), p, connection); err != nil {
+				problem(w, 400, err.Error())
+				return
+			}
+		} else {
+			if p.GitLabURL == "" {
+				p.GitLabURL = connection.GitLabURL
+			}
+			if domain.GitLabIdentity(connection.GitLabURL) != domain.GitLabIdentity(p.GitLabURL) {
+				problem(w, 400, "项目 GitLab 地址与所选连接不一致，已拒绝保存。")
+				return
+			}
 		}
 	}
 	if err := domain.ValidateProjectForSave(p); err != nil {
@@ -539,7 +571,7 @@ func (a *server) projectLabels(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	if !p.Enabled {
-		problem(w, 409, "项目启用后才能管理 GitLab 标签")
+		problem(w, 409, "项目启用后才能管理标签")
 		return
 	}
 	enabled, err := a.s.EnabledAgents(r.Context())
@@ -547,7 +579,7 @@ func (a *server) projectLabels(w http.ResponseWriter, r *http.Request, id string
 		failure(w, err)
 		return
 	}
-	client, err := a.client(p)
+	client, err := a.hostClient(p)
 	if err != nil {
 		problem(w, 503, "GitLab credential unavailable")
 		return
@@ -597,6 +629,24 @@ func (a *server) client(p domain.Project) (*gitlab.Client, error) {
 	return gitlab.New(p.GitLabURL, token), nil
 }
 
+func (a *server) hostClient(p domain.Project) (forge.Client, error) {
+	if p.HostingProvider() == domain.ProviderGitHub {
+		if a.conns == nil {
+			return nil, errors.New("GitHub connection storage is unavailable")
+		}
+		connection, err := a.conns.Connection(context.Background(), p.ConnectionID)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]int64, 0, len(p.Repositories))
+		for _, repo := range p.Repositories {
+			ids = append(ids, repo.ProjectID)
+		}
+		return a.githubClient(connection, ids)
+	}
+	return a.client(p)
+}
+
 // projectCredential resolves a project token and enforces that a saved
 // connection is only used with the GitLab address it was verified against.
 func (a *server) projectCredential(p domain.Project) (string, error) {
@@ -621,15 +671,16 @@ func (a *server) projectCredential(p domain.Project) (string, error) {
 	return a.credential(p.CredentialReference())
 }
 func validDependencies(refs []domain.IssueRef, self domain.IssueRef) bool {
-	seen := map[domain.IssueRef]bool{}
+	seen := map[string]bool{}
 	if len(refs) > 100 {
 		return false
 	}
 	for _, ref := range refs {
-		if ref.ProjectID < 1 || ref.IID < 1 || ref == self || seen[ref] {
+		key := fmt.Sprintf("%s/%d/%d", ref.HostingProvider(), ref.ProjectID, ref.IID)
+		if ref.ProjectID < 1 || ref.IID < 1 || ref.HostingProvider() == self.HostingProvider() && ref.ProjectID == self.ProjectID && ref.IID == self.IID || seen[key] {
 			return false
 		}
-		seen[ref] = true
+		seen[key] = true
 	}
 	return true
 }
@@ -685,7 +736,16 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 		for _, repo := range p.Repositories {
 			registered = registered || repo.ProjectID == req.IssueProjectID
 		}
-		if !p.Enabled || !registered || req.IssueIID < 1 || !validDependencies(req.Dependencies, domain.IssueRef{ProjectID: req.IssueProjectID, IID: req.IssueIID}) {
+		for i := range req.Dependencies {
+			if req.Dependencies[i].Provider == "" {
+				req.Dependencies[i].Provider = p.HostingProvider()
+			}
+		}
+		providerMatched := true
+		for _, dependency := range req.Dependencies {
+			providerMatched = providerMatched && dependency.HostingProvider() == p.HostingProvider()
+		}
+		if !p.Enabled || !registered || req.IssueIID < 1 || !providerMatched || !validDependencies(req.Dependencies, domain.IssueRef{Provider: p.HostingProvider(), ProjectID: req.IssueProjectID, IID: req.IssueIID}) {
 			problem(w, 400, "enabled registered issue project and valid dependencies required")
 			return
 		}
@@ -693,7 +753,7 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 			problem(w, 409, "Meta 仓库尚未初始化完成，暂不能接单。")
 			return
 		}
-		client, err := a.client(p)
+		client, err := a.hostClient(p)
 		if err != nil {
 			problem(w, 503, "GitLab credential unavailable")
 			return
@@ -893,7 +953,12 @@ func validateCommand(t domain.Task, c domain.Command) error {
 		}
 	case "cancel":
 	case "dependencies":
-		if !validDependencies(c.Dependencies, domain.IssueRef{ProjectID: t.Issue.ProjectID, IID: t.Issue.IID}) {
+		for _, d := range c.Dependencies {
+			if d.Provider != "" && d.HostingProvider() != t.Project.HostingProvider() {
+				return errors.New("dependency platform differs from task platform")
+			}
+		}
+		if !validDependencies(c.Dependencies, domain.IssueRef{Provider: t.Project.HostingProvider(), ProjectID: t.Issue.ProjectID, IID: t.Issue.IID}) {
 			return errors.New("invalid dependencies")
 		}
 	default:

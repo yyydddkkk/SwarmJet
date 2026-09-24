@@ -31,7 +31,7 @@ func (s *Store) HasSource(ctx context.Context, base string, issue domain.Issue) 
 }
 
 func issueSource(base string, issue domain.Issue) string {
-	return fmt.Sprintf("%s/%d/%d", domain.GitLabIdentity(base), issue.ProjectID, issue.IID)
+	return domain.IssueSource(base, issue)
 }
 
 func (s *Store) FirstTaskCreatedAt(ctx context.Context, base string, issue domain.Issue) (time.Time, error) {
@@ -151,7 +151,7 @@ func (s *Store) SaveProject(ctx context.Context, p domain.Project) (domain.Proje
 				rows.Close()
 				return p, err
 			}
-			if !other.Enabled || domain.GitLabIdentity(other.GitLabURL) != domain.GitLabIdentity(p.GitLabURL) {
+			if !other.Enabled || other.HostingProvider() != p.HostingProvider() || domain.GitLabIdentity(other.HostingURL()) != domain.GitLabIdentity(p.HostingURL()) {
 				continue
 			}
 			for _, r := range p.Repositories {
@@ -217,7 +217,10 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 	if _, e = tx.Exec(ctx, imageGuardLock); e != nil {
 		return t, e
 	}
-	source := issueSource(t.Project.GitLabURL, t.Issue)
+	if t.Project.HostingProvider() == domain.ProviderGitHub {
+		t.Issue.Provider = domain.ProviderGitHub
+	}
+	source := issueSource(t.Project.HostingURL(), t.Issue)
 	var previous string
 	var rounds int64
 	if e = tx.QueryRow(ctx, `SELECT count(*),COALESCE((SELECT id FROM tasks WHERE source=$1 ORDER BY COALESCE((body->>'createdAt')::timestamptz,updated_at) DESC,id DESC LIMIT 1),'') FROM tasks WHERE source=$1`, source).Scan(&rounds, &previous); e != nil {

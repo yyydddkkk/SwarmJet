@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"swarmjet/internal/domain"
+	"swarmjet/internal/forge"
 	"sync"
 	"time"
 )
@@ -24,17 +25,7 @@ type Client struct {
 	notes          sync.Mutex
 }
 
-type IssueNote struct {
-	ID        int64     `json:"id"`
-	Body      string    `json:"body"`
-	System    bool      `json:"system"`
-	Internal  bool      `json:"internal"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Author    struct {
-		ID int64 `json:"id"`
-	} `json:"author"`
-}
+type IssueNote = forge.IssueNote
 
 func (c *Client) ListIssueNotes(ctx context.Context, issue domain.Issue) ([]IssueNote, error) {
 	return paginate[IssueNote](ctx, c, issuePath(issue)+"/notes", url.Values{"sort": {"asc"}, "order_by": {"created_at"}})
@@ -176,13 +167,7 @@ func (c *Client) Dependencies(ctx context.Context, issue domain.Issue) ([]domain
 	return out, nil
 }
 
-type Branch struct {
-	Name      string `json:"name"`
-	Protected bool   `json:"protected"`
-	Commit    struct {
-		ID string `json:"id"`
-	} `json:"commit"`
-}
+type Branch = forge.Branch
 
 func (c *Client) GetBranch(ctx context.Context, projectID int64, name string) (Branch, error) {
 	var b Branch
@@ -240,23 +225,8 @@ func branchSHA(b Branch) (string, error) {
 	return b.Commit.ID, nil
 }
 
-type Pipeline struct {
-	ID     int64  `json:"id"`
-	SHA    string `json:"sha"`
-	Status string `json:"status"`
-}
-type MergeRequest struct {
-	Description         string    `json:"description"`
-	IID                 int64     `json:"iid"`
-	URL                 string    `json:"web_url"`
-	SourceBranch        string    `json:"source_branch"`
-	TargetBranch        string    `json:"target_branch"`
-	SHA                 string    `json:"sha"`
-	State               string    `json:"state"`
-	DetailedMergeStatus string    `json:"detailed_merge_status"`
-	HasConflicts        bool      `json:"has_conflicts"`
-	HeadPipeline        *Pipeline `json:"head_pipeline"`
-}
+type Pipeline = forge.Pipeline
+type MergeRequest = forge.MergeRequest
 
 func mrPath(repoID, iid int64) string {
 	return fmt.Sprintf("%s/merge_requests/%d", project(repoID), iid)
@@ -322,12 +292,7 @@ func (c *Client) UpdateLabels(ctx context.Context, issue domain.Issue, add, remo
 	return err
 }
 
-type ProjectLabel struct {
-	Name        string `json:"name"`
-	Color       string `json:"color"`
-	Description string `json:"description,omitempty"`
-	Archived    bool   `json:"archived,omitempty"`
-}
+type ProjectLabel = forge.ProjectLabel
 
 func (c *Client) ListProjectLabels(ctx context.Context, projectID int64) ([]ProjectLabel, error) {
 	return paginate[ProjectLabel](ctx, c, project(projectID)+"/labels", nil)
@@ -446,3 +411,6 @@ func (c *Client) UpdateMRDescription(ctx context.Context, repoID, iid int64, des
 	_, err := c.request(ctx, "PUT", mrPath(repoID, iid), map[string]string{"description": description}, nil)
 	return err
 }
+
+// The GitLab client is the compatibility adapter for the hosting contract.
+var _ forge.Client = (*Client)(nil)

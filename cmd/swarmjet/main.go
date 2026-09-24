@@ -26,6 +26,10 @@ import (
 	"swarmjet/internal/credentials"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/execution"
+	"swarmjet/internal/forge"
+	"swarmjet/internal/github"
+	"swarmjet/internal/githubapp"
+	"swarmjet/internal/gitlab"
 	"swarmjet/internal/initflow"
 	"swarmjet/internal/integration"
 	"swarmjet/internal/maintenance"
@@ -258,9 +262,52 @@ func run() error {
 		return runBuilder(ctx, s, box)
 	}
 	resolver := &credentials.Resolver{Store: s, Box: box, Env: os.Getenv}
+	var ghApp *githubapp.App
+	if appID := os.Getenv("GITHUB_APP_ID"); appID != "" {
+		id, parseErr := strconv.ParseInt(appID, 10, 64)
+		key, readErr := os.ReadFile(os.Getenv("GITHUB_APP_PRIVATE_KEY_FILE"))
+		if parseErr != nil || readErr != nil {
+			return fmt.Errorf("GitHub App ID or private key is invalid")
+		}
+		ghApp, e = githubapp.New(githubapp.Config{AppID: id, PrivateKeyPEM: key})
+		if e != nil {
+			return e
+		}
+	}
+	var githubTokensMu sync.Mutex
+	githubTokens := map[string]githubapp.Token{}
+	githubToken := func(p domain.Project) (string, error) {
+		if ghApp == nil {
+			return "", fmt.Errorf("GitHub App is not configured")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		connection, err := s.Connection(ctx, p.ConnectionID)
+		if err != nil || connection.HostingProvider() != domain.ProviderGitHub {
+			return "", fmt.Errorf("GitHub installation connection is unavailable")
+		}
+		ids := make([]int64, 0, len(p.Repositories))
+		for _, repo := range p.Repositories {
+			ids = append(ids, repo.ProjectID)
+		}
+		cacheKey := fmt.Sprintf("%s/%d/%s/%v", p.ID, p.Version, p.ConnectionID, ids)
+		githubTokensMu.Lock()
+		defer githubTokensMu.Unlock()
+		if cached, ok := githubTokens[cacheKey]; ok && time.Until(cached.ExpiresAt) > 5*time.Minute {
+			return cached.Token, nil
+		}
+		token, err := ghApp.InstallationToken(ctx, connection.GitHubInstallationID, ids)
+		if err == nil {
+			githubTokens[cacheKey] = token
+		}
+		return token.Token, err
+	}
 	// bound resolves a project token and refuses to send a saved connection to a
 	// GitLab address different from the one it was verified against.
 	bound := func(p domain.Project, merge bool) (string, error) {
+		if p.HostingProvider() == domain.ProviderGitHub {
+			return githubToken(p)
+		}
 		ref := p.CredentialReference()
 		if merge {
 			ref = p.MergeCredentialReference()
@@ -268,6 +315,36 @@ func run() error {
 		return resolver.ResolveFor(ref, p.GitLabURL)
 	}
 	boundProject := func(p domain.Project) (string, error) { return bound(p, false) }
+	forgeClient := func(p domain.Project, merge bool) (forge.Client, error) {
+		if p.HostingProvider() == domain.ProviderGitHub {
+			if ghApp == nil {
+				return nil, fmt.Errorf("GitHub App is not configured")
+			}
+			client := github.New(func(context.Context) (string, error) { return githubToken(p) })
+			client.SetDependencyTokenSource(func(ctx context.Context, repositoryID int64, fullName string) (string, error) {
+				connection, err := s.Connection(ctx, p.ConnectionID)
+				if err != nil || connection.HostingProvider() != domain.ProviderGitHub {
+					return "", fmt.Errorf("GitHub installation connection is unavailable")
+				}
+				var token githubapp.Token
+				if repositoryID > 0 {
+					token, err = ghApp.ReadOnlyInstallationToken(ctx, connection.GitHubInstallationID, []int64{repositoryID})
+				} else {
+					token, err = ghApp.ReadOnlyRepositoryToken(ctx, connection.GitHubInstallationID, fullName)
+				}
+				return token.Token, err
+			})
+			if err := client.SetMergeMethod(p.EffectiveMergeMethod()); err != nil {
+				return nil, err
+			}
+			return client, nil
+		}
+		token, err := bound(p, merge)
+		if err != nil {
+			return nil, err
+		}
+		return gitlab.New(p.GitLabURL, token), nil
+	}
 	tc, e := client.Dial(client.Options{HostPort: env("TEMPORAL_ADDRESS", "localhost:7233"), Namespace: env("TEMPORAL_NAMESPACE", "default")})
 	if e != nil {
 		return e
@@ -295,7 +372,7 @@ func run() error {
 			return fmt.Errorf("ADMIN_PASSWORD must contain at least 12 characters")
 		}
 		initNodes := &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}
-		initializer := &initflow.Manager{Store: s, DataDir: data, Managed: managedmeta.New(data), Credential: resolver.Resolve, CredentialFor: boundProject, Logger: slog.Default()}
+		initializer := &initflow.Manager{Store: s, DataDir: data, Managed: managedmeta.New(data), Credential: resolver.Resolve, CredentialFor: boundProject, ForgeClients: func(p domain.Project) (forge.Client, error) { return forgeClient(p, false) }, Logger: slog.Default()}
 		repositoryChanges := &repochange.Manager{Store: s, Managed: managedmeta.New(data), CredentialFor: boundProject, AskPass: env("SWARMJET_GIT_ASKPASS", "/usr/local/bin/swarmjet-askpass"), Logger: slog.Default()}
 		initializer.CancelAnalysis = func(ctx context.Context, in domain.Initialization) error {
 			n, e := initNodes.Node(ctx, in.NodeID)
@@ -305,14 +382,15 @@ func run() error {
 			return n.CancelTask(ctx, in.ProjectID)
 		}
 		labelsWake := make(chan struct{}, 1)
-		handler := api.New(s, api.Config{Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, RepositoryChanges: repositoryChanges, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), BuilderURL: os.Getenv("BUILDER_ADMIN_URL"), RegistryCAFile: os.Getenv("REGISTRY_CA_FILE"), PlatformImage: os.Getenv("PLATFORM_IMAGE"), MihomoURL: os.Getenv("MIHOMO_ADMIN_URL"), MihomoSecret: os.Getenv("MIHOMO_ADMIN_SECRET"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}, LabelsWake: labelsWake})
-		svc := &service.Service{DataDir: data, Store: s, Temporal: tc, ResolveCredential: resolver.Resolve, ProjectCredential: bound, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Wake: make(chan struct{}, 1), LabelsWake: labelsWake}
+		handler := api.New(s, api.Config{GitHubApp: ghApp, Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, RepositoryChanges: repositoryChanges, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), BuilderURL: os.Getenv("BUILDER_ADMIN_URL"), RegistryCAFile: os.Getenv("REGISTRY_CA_FILE"), PlatformImage: os.Getenv("PLATFORM_IMAGE"), MihomoURL: os.Getenv("MIHOMO_ADMIN_URL"), MihomoSecret: os.Getenv("MIHOMO_ADMIN_SECRET"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}, LabelsWake: labelsWake})
+		svc := &service.Service{DataDir: data, Store: s, Temporal: tc, ResolveCredential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Wake: make(chan struct{}, 1), LabelsWake: labelsWake}
 		go svc.Run(ctx)
 		go svc.SyncLabels(ctx)
-		a := &pipeline.Activities{Store: s, Credential: resolver.Resolve, ProjectCredential: bound}
+		a := &pipeline.Activities{Store: s, Credential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient}
 		go svc.Sync(ctx, a)
 		routes := http.NewServeMux()
 		routes.Handle("/api/webhooks/gitlab", svc.Webhook(os.Getenv("GITLAB_WEBHOOK_SECRET")))
+		routes.Handle("/api/webhooks/github", svc.GitHubWebhook(os.Getenv("GITHUB_WEBHOOK_SECRET")))
 		routes.Handle("/", handler)
 		server := &http.Server{Addr: env("LISTEN_ADDRESS", ":8080"), Handler: routes, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 		go func() {
@@ -359,11 +437,11 @@ func run() error {
 	}
 	localAgents := agent.New(data)
 	nodes := &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}
-	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: localAgents, Integration: im, Nodes: nodes, IntegrationEnv: im.Env, DataDir: data, Concurrency: n, Credential: resolver.Resolve, ProjectCredential: bound, AgentEnv: agentEnv, NetworkEnv: func(ctx context.Context, ref domain.NetworkVersion) (map[string]string, error) {
+	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: localAgents, Integration: im, Nodes: nodes, IntegrationEnv: im.Env, DataDir: data, Concurrency: n, Credential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, AgentEnv: agentEnv, NetworkEnv: func(ctx context.Context, ref domain.NetworkVersion) (map[string]string, error) {
 		return networkconfig.Resolve(ctx, s, box, ref)
 	}}
 	// Initialization is resumed here so a worker restart recovers running jobs.
-	initMgr := &initflow.Manager{Store: s, DataDir: data, Managed: managedmeta.New(data), Credential: resolver.Resolve, CredentialFor: boundProject, Agents: localAgents, VerifyImage: os.Getenv("INIT_VERIFY_IMAGE"), Logger: slog.Default()}
+	initMgr := &initflow.Manager{Store: s, DataDir: data, Managed: managedmeta.New(data), Credential: resolver.Resolve, CredentialFor: boundProject, ForgeClients: func(p domain.Project) (forge.Client, error) { return forgeClient(p, false) }, Agents: localAgents, VerifyImage: os.Getenv("INIT_VERIFY_IMAGE"), Logger: slog.Default()}
 	if os.Getenv("EXECUTION_MODE") == "distributed" || os.Getenv("BUILDER_ADMIN_URL") != "" {
 		initMgr.RemoteAnalysis = func(ctx context.Context, in *domain.Initialization, p domain.Project) (execution.AnalysisResult, error) {
 			assigned, e := s.AssignInitializationNode(ctx, *in, p)
@@ -389,7 +467,11 @@ func run() error {
 			if e != nil {
 				return execution.AnalysisResult{}, e
 			}
-			vars["GITLAB_TOKEN"] = token
+			if p.HostingProvider() == domain.ProviderGitHub {
+				vars["GITHUB_TOKEN"] = token
+			} else {
+				vars["GITLAB_TOKEN"] = token
+			}
 			return remote.Analyze(ctx, execution.AnalysisParams{Initialization: *in, Project: p, Env: vars})
 		}
 	}

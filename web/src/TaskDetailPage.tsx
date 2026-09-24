@@ -4,7 +4,7 @@ import type { Task, TaskEvent, Execution } from "./types";
 import { taskView, nextAction, taskPhase } from "./task-presentation";
 import { TaskTerminal } from "./TaskTerminal";
 import { Icon } from "./ConsoleIcon";
-import { stages, date, Status } from "./TaskStatus";
+import { stageLabel, date, Status } from "./TaskStatus";
 import { ConfirmDialog, Empty, ErrorBox, Field, Modal, Panel } from "./ui";
 
 export default function TaskDetail({ id }: { id: string }) {
@@ -179,7 +179,7 @@ export default function TaskDetail({ id }: { id: string }) {
             </ol>
             <div className="current-progress">
               <Status task={task} />
-              <p>{task.message || stages[task.stage] || task.stage}</p>
+              <p>{task.message || stageLabel(task.stage, task.project.provider)}</p>
             </div>
             <small>返工 {task.reworks} 次 · 每 3 秒自动更新</small>
             {task.previousTaskId && <small>上一轮：<a href={`#/tasks/${encodeURIComponent(task.previousTaskId)}`}>{task.previousTaskId.slice(0, 12)}</a></small>}
@@ -192,7 +192,7 @@ export default function TaskDetail({ id }: { id: string }) {
               >
                 <Icon name="alert" />
                 <div>
-                  <h2>{task.paused ? "任务已暂停" : stages[task.stage]}</h2>
+                  <h2>{task.paused ? "任务已暂停" : stageLabel(task.stage, task.project.provider)}</h2>
                   <p>{nextAction(task)}</p>
                 </div>
               </section>
@@ -265,7 +265,7 @@ export default function TaskDetail({ id }: { id: string }) {
                     </small>
                     {r.mrUrl && (
                       <a href={r.mrUrl} target="_blank" rel="noreferrer">
-                        MR !{r.mrIid} ↗
+                        {task.project.provider === "github" ? "PR #" : "MR !"}{r.mrIid} ↗
                       </a>
                     )}
                     {r.sensitive && (
@@ -429,7 +429,7 @@ export default function TaskDetail({ id }: { id: string }) {
               <div className="task-merge-setting">
                 <div>
                   <strong>此任务自动合并</strong>
-                  <small>{mergeStarted ? "合并流程已开始，开关已锁定。" : autoMergeEnabled ? "开启时，符合合并条件后自动合并 MR。" : "关闭后继续开发与发布，合并时等待你在 GitLab 操作。"}</small>
+                  <small>{mergeStarted ? "合并流程已开始，开关已锁定。" : autoMergeEnabled ? `开启时，符合合并条件后自动合并 ${task.project.provider === "github" ? "PR" : "MR"}。` : `关闭后继续开发与发布，合并时等待你在 ${task.project.provider === "github" ? "GitHub" : "GitLab"} 操作。`}</small>
                 </div>
                 <button
                   type="button"
@@ -516,7 +516,7 @@ export default function TaskDetail({ id }: { id: string }) {
                 [...events].reverse().map((e) => (
                   <li key={e.id}>
                     <time>{date(e.createdAt)}</time>
-                    <strong>{stages[e.kind] || e.kind}</strong>
+                    <strong>{stageLabel(e.kind, task.project.provider)}</strong>
                     <p>{e.message}</p>
                   </li>
                 ))

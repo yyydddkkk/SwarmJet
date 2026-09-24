@@ -16,14 +16,21 @@ type EnvironmentBackend struct {
 func (b *EnvironmentBackend) Start(ctx context.Context, r domain.AgentRequest) (domain.Execution, error) {
 	env := map[string]string{}
 	for k, v := range b.Env {
-		if strings.HasPrefix(k, "GITLAB_") || k == "GIT_ASKPASS" {
+		if strings.HasPrefix(k, "GITLAB_") || githubCredential(k) || k == "GIT_ASKPASS" {
 			continue
 		}
 		env[k] = v
 	}
 	for k, v := range r.Env {
+		if githubCredential(k) {
+			continue
+		}
 		env[k] = v
 	}
 	r.Env = env
 	return b.AgentBackend.Start(ctx, r)
+}
+
+func githubCredential(key string) bool {
+	return strings.HasPrefix(key, "GITHUB_") || key == "GH_TOKEN" || key == "GH_ENTERPRISE_TOKEN"
 }

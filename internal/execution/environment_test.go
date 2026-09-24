@@ -30,3 +30,20 @@ func TestNodeDefaultsCannotIntroduceGitLabPhaseCredential(t *testing.T) {
 		t.Fatal("phase credential was lost")
 	}
 }
+
+func TestGitHubCredentialsNeverReachAgent(t *testing.T) {
+	backend := &envBackend{}
+	wrapper := EnvironmentBackend{AgentBackend: backend, Env: map[string]string{"GITHUB_TOKEN": "ambient", "GITHUB_APP_PRIVATE_KEY": "private", "GH_TOKEN": "ambient-gh"}}
+	_, err := wrapper.Start(context.Background(), domain.AgentRequest{Env: map[string]string{"GITHUB_TOKEN": "requested", "GH_TOKEN": "requested-gh", "OPENAI_API_KEY": "model"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"GITHUB_TOKEN", "GITHUB_APP_PRIVATE_KEY", "GH_TOKEN"} {
+		if _, ok := backend.request.Env[key]; ok {
+			t.Fatalf("%s reached runner", key)
+		}
+	}
+	if backend.request.Env["OPENAI_API_KEY"] != "model" {
+		t.Fatal("model credential lost")
+	}
+}

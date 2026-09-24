@@ -142,6 +142,10 @@ func (a *server) metaPublication(w http.ResponseWriter, r *http.Request, id stri
 		problem(w, 400, "只有受管 Meta 仓库可发布")
 		return
 	}
+	if p.HostingProvider() == domain.ProviderGitHub {
+		problem(w, 400, "GitHub 项目暂不支持远程 Meta 仓库发布")
+		return
+	}
 	c, err := a.client(p)
 	if err != nil {
 		problem(w, 400, "GitLab 连接不可用")

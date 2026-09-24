@@ -46,6 +46,12 @@ type Node interface {
 	Retire(context.Context, domain.Task) error
 }
 
+// WorkspacePublisher publishes already inspected task commits using credentials
+// resolved for this call only. Older nodes may not support platform publication.
+type WorkspacePublisher interface {
+	PushWorkspace(context.Context, domain.Workspace, domain.Project, map[string]string) error
+}
+
 // NodeResolver returns the transport for one registered execution node.
 type NodeResolver interface {
 	Node(context.Context, string) (Node, error)
@@ -99,6 +105,9 @@ func (n *LocalNode) InspectWorkspace(ctx context.Context, ws domain.Workspace, p
 }
 func (n *LocalNode) RefreshTargets(ctx context.Context, ws domain.Workspace, p domain.Project, env map[string]string) (domain.Workspace, error) {
 	return n.workspace(env).RefreshTargets(ctx, ws, p)
+}
+func (n *LocalNode) PushWorkspace(ctx context.Context, ws domain.Workspace, p domain.Project, env map[string]string) error {
+	return n.workspace(env).Push(ctx, ws, p)
 }
 func (n *LocalNode) ReleaseWorkspace(ctx context.Context, ws domain.Workspace) error {
 	return n.Workspace.Release(ctx, ws)

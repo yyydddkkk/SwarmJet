@@ -18,6 +18,9 @@ var IDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$`)
 // ValidateProjectForSave accepts incomplete disabled drafts while rejecting unsafe
 // supplied values. Enabling a project always requires the execution contract.
 func ValidateProjectForSave(p Project) error {
+	if err := validateProviderProject(p); err != nil {
+		return err
+	}
 	if p.ReviewMode != "" && p.ReviewMode != "none" && p.ReviewMode != "independent" {
 		return fmt.Errorf("unknown review mode")
 	}
@@ -46,14 +49,14 @@ func ValidateProjectForSave(p Project) error {
 		}
 	} else if !safeRepositoryURL(p.MetaURL) {
 		return fmt.Errorf("metaUrl must be a valid remote repository URL without credentials, query or fragment")
-	} else if p.GitLabURL != "" && !sameGitLabAuthority(p.GitLabURL, p.MetaURL) {
+	} else if p.GitLabURL != "" && !sameGitLabAuthority(p.HostingURL(), p.MetaURL) {
 		return fmt.Errorf("metaUrl must use the configured GitLab host")
 	}
 	if p.ConnectionID != "" && !IDPattern.MatchString(p.ConnectionID) {
 		return fmt.Errorf("invalid connection reference")
 	}
 	if p.GitLabURL != "" {
-		u, err := url.Parse(p.GitLabURL)
+		u, err := url.Parse(p.HostingURL())
 		if err != nil || !safeRepositoryURL(p.GitLabURL) || (u.Scheme != "http" && u.Scheme != "https") {
 			return fmt.Errorf("invalid GitLab URL")
 		}
@@ -87,7 +90,7 @@ func ValidateProjectForSave(p Project) error {
 			if !safeRepositoryURL(repo.URL) {
 				return fmt.Errorf("invalid repository URL")
 			}
-			if p.GitLabURL != "" && !sameGitLabAuthority(p.GitLabURL, repo.URL) {
+			if p.GitLabURL != "" && !sameGitLabAuthority(p.HostingURL(), repo.URL) {
 				return fmt.Errorf("repository URL must use the configured GitLab host")
 			}
 		}
@@ -223,13 +226,16 @@ func safeRepositoryURL(raw string) bool {
 }
 
 func ValidateProject(p Project) error {
+	if err := validateProviderProject(p); err != nil {
+		return err
+	}
 	if p.ReviewMode != "" && p.ReviewMode != "none" && p.ReviewMode != "independent" {
 		return fmt.Errorf("unknown review mode")
 	}
 	if !IDPattern.MatchString(p.ID) || strings.TrimSpace(p.Name) == "" {
 		return fmt.Errorf("project id and name are required; id must be a safe identifier")
 	}
-	u, e := url.Parse(p.GitLabURL)
+	u, e := url.Parse(p.HostingURL())
 	if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 		return fmt.Errorf("invalid GitLab URL")
 	}
@@ -246,7 +252,7 @@ func ValidateProject(p Project) error {
 	if p.MetaRef == "" || len(p.Repositories) == 0 {
 		return fmt.Errorf("metaUrl, metaRef and repositories are required")
 	}
-	if p.MetaURL != "" && !sameGitLabAuthority(p.GitLabURL, p.MetaURL) {
+	if p.MetaURL != "" && !sameGitLabAuthority(p.HostingURL(), p.MetaURL) {
 		return fmt.Errorf("metaUrl must use the configured GitLab host")
 	}
 	if p.ConnectionID != "" {
@@ -271,7 +277,7 @@ func ValidateProject(p Project) error {
 		if r.URL == "" || !ValidBranch(r.TargetBranch) {
 			return fmt.Errorf("repository %s needs URL and valid targetBranch", r.ID)
 		}
-		if !sameGitLabAuthority(p.GitLabURL, r.URL) {
+		if !sameGitLabAuthority(p.HostingURL(), r.URL) {
 			return fmt.Errorf("repository %s URL must use the configured GitLab host", r.ID)
 		}
 		if r.CreateFrom != "" && !ValidBranch(r.CreateFrom) {
@@ -304,7 +310,7 @@ func ValidateProject(p Project) error {
 	if err := validateAcceptance(p); err != nil {
 		return err
 	}
-	if p.AcceptanceStrategy == "none" || p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" {
+	if p.AcceptanceStrategy == "none" || p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" || p.AcceptanceStrategy == "platform_ci" {
 		return nil
 	}
 	if p.Integration.Mode == "commands" {
@@ -400,8 +406,23 @@ func ValidateConnection(c Connection) error {
 	if !IDPattern.MatchString(c.ID) || strings.TrimSpace(c.Name) == "" {
 		return fmt.Errorf("connection id and name are required")
 	}
-	if _, err := NormalizeGitLabURL(c.GitLabURL); err != nil {
+	if err := c.Provider.Validate(); err != nil {
 		return err
+	}
+	if c.HostingProvider() == ProviderGitHub {
+		if c.GitHubInstallationID <= 0 {
+			return fmt.Errorf("GitHub App installation ID is required")
+		}
+		if c.GitLabURL != "" || c.HasMergeToken {
+			return fmt.Errorf("GitHub App connections must not contain GitLab settings")
+		}
+	} else {
+		if _, err := NormalizeGitLabURL(c.GitLabURL); err != nil {
+			return err
+		}
+		if c.GitHubInstallationID != 0 {
+			return fmt.Errorf("GitLab connections must not contain a GitHub installation")
+		}
 	}
 	if c.Version < 0 {
 		return fmt.Errorf("connection version must not be negative")
@@ -424,7 +445,7 @@ func GitLabIdentity(raw string) string {
 
 func validateAcceptance(p Project) error {
 	switch p.AcceptanceStrategy {
-	case "", "none", "custom", "repository", "gitlab_ci":
+	case "", "none", "custom", "repository", "gitlab_ci", "platform_ci":
 	default:
 		return fmt.Errorf("unknown acceptance strategy")
 	}

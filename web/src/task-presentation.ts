@@ -24,7 +24,7 @@ export function nextAction(task: Task): string {
     case "waiting_approval":
       return "审查已完成，请核对变更并批准当前版本，或退回修改。";
     case "waiting_manual_merge":
-      return "请在 GitLab 合并下方 MR，系统确认全部合并后会完成任务。";
+      return `请在 ${task.project.provider === "github" ? "GitHub" : "GitLab"} 合并下方 ${task.project.provider === "github" ? "PR" : "MR"}，系统确认全部合并后会完成任务。`;
     case "partial_merge":
       return "部分仓库已经合并，请先核对各仓库状态，再处理剩余合并。";
     case "blocked":

@@ -248,6 +248,16 @@ func (h *Handler) dispatch(ctx context.Context, req rpcRequest) (any, error) {
 			return nil, e
 		}
 		return h.Node.RefreshTargets(ctx, p.Workspace, p.Project, p.Env)
+	case "pushWorkspace":
+		var p workspaceParams
+		if e := decodeParams(req.Params, &p); e != nil {
+			return nil, e
+		}
+		publisher, ok := h.Node.(WorkspacePublisher)
+		if !ok {
+			return nil, errors.New("execution node does not support workspace publication")
+		}
+		return nil, publisher.PushWorkspace(ctx, p.Workspace, p.Project, p.Env)
 	case "releaseWorkspace":
 		var p workspaceParams
 		if e := decodeParams(req.Params, &p); e != nil {

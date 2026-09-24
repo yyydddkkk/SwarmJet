@@ -7,7 +7,7 @@ import (
 	"strings"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/execution"
-	"swarmjet/internal/gitlab"
+	"swarmjet/internal/forge"
 )
 
 func acceptanceConfig(t domain.Task) (domain.IntegrationConfig, error) {
@@ -36,7 +36,7 @@ func acceptanceConfig(t domain.Task) (domain.IntegrationConfig, error) {
 	return cfg, nil
 }
 
-func (a *Activities) strategyVerification(ctx context.Context, c *gitlab.Client, n execution.Node, t *domain.Task) (ready, waiting bool, err error) {
+func (a *Activities) strategyVerification(ctx context.Context, c forge.Client, n execution.Node, t *domain.Task) (ready, waiting bool, err error) {
 	t.AcceptanceIncomplete = false
 	t.Verification = nil
 	digest := domain.Digest(t.Workspace.Revisions)
@@ -46,7 +46,38 @@ func (a *Activities) strategyVerification(ctx context.Context, c *gitlab.Client,
 		t.Verification = append(t.Verification, domain.Verification{Name: "验收待人工确认", Required: true, Passed: false, ExitCode: -1, Report: reason, RevisionDigest: digest})
 		return true, false, nil
 	}
-	if t.Project.AcceptanceStrategy == "gitlab_ci" {
+	if t.Project.AcceptanceStrategy == "platform_ci" && t.Project.HostingProvider() == domain.ProviderGitHub {
+		client, err := githubClient(c)
+		if err != nil {
+			return false, false, err
+		}
+		changed := false
+		ready = true
+		for _, r := range t.Workspace.Revisions {
+			if !r.Changed {
+				continue
+			}
+			changed = true
+			checks, checkErr := client.RequiredChecks(ctx, r.ProjectID, r.MRIID, r.HeadSHA)
+			if checkErr != nil {
+				return false, false, checkErr
+			}
+			if checks.RequiredCount == 0 {
+				return incomplete("目标分支没有配置必需检查")
+			}
+			t.Verification = append(t.Verification, domain.Verification{Name: r.RepositoryID + " GitHub 必需检查", Required: true, Passed: checks.Ready, ExitCode: map[bool]int{true: 0, false: 1}[checks.Ready], Report: r.MRURL + " — " + checks.Reason, RevisionDigest: digest})
+			ready = ready && checks.Ready
+			waiting = waiting || checks.Waiting
+		}
+		if !changed {
+			return incomplete("没有变更提交可触发必需检查")
+		}
+		if waiting {
+			t.Message = "等待 GitHub 当前 PR 提交的必需检查"
+		}
+		return ready, waiting, nil
+	}
+	if t.Project.AcceptanceStrategy == "gitlab_ci" || t.Project.AcceptanceStrategy == "platform_ci" && t.Project.HostingProvider() == domain.ProviderGitLab {
 		changed := false
 		ready = true
 		for _, r := range t.Workspace.Revisions {
@@ -222,7 +253,7 @@ func issueReviewGuide(t domain.Task) (string, error) {
 	return b.String(), nil
 }
 
-func publishIssueReviewGuide(ctx context.Context, c *gitlab.Client, t domain.Task) error {
+func publishIssueReviewGuide(ctx context.Context, c forge.Client, t domain.Task) error {
 	changed := false
 	for _, r := range t.Workspace.Revisions {
 		changed = changed || r.Changed
@@ -268,13 +299,13 @@ func publishIssueReviewGuide(ctx context.Context, c *gitlab.Client, t domain.Tas
 }
 
 func taskIntegration(t domain.Task) domain.IntegrationConfig {
-	if t.Project.AcceptanceStrategy == "none" || t.Project.AcceptanceStrategy == "repository" || t.Project.AcceptanceStrategy == "gitlab_ci" {
+	if t.Project.AcceptanceStrategy == "none" || t.Project.AcceptanceStrategy == "repository" || t.Project.AcceptanceStrategy == "gitlab_ci" || t.Project.AcceptanceStrategy == "platform_ci" {
 		return domain.IntegrationConfig{Mode: "commands"}
 	}
 	return t.Project.Integration
 }
 
-func refreshMRVerification(ctx context.Context, c *gitlab.Client, t domain.Task) error {
+func refreshMRVerification(ctx context.Context, c forge.Client, t domain.Task) error {
 	const start = "<!-- swarmjet:verification -->"
 	const end = "<!-- /swarmjet:verification -->"
 	var b strings.Builder

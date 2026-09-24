@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import type { Project } from "./types";
 import { ErrorBox } from "./ui";
 
 type LabelStatus = { name: string; color: string; existingColor?: string; exists: boolean; archived?: boolean };
 type RepositoryStatus = { repositoryId: string; projectId: number; labels: LabelStatus[]; error?: string };
 type LabelReport = { repositories: RepositoryStatus[] };
 
-export function ProjectLabels({ projectId }: { projectId: string }) {
+export function ProjectLabels({ projectId, provider }: { projectId: string; provider?: Project["provider"] }) {
+  const platformName = provider === "github" ? "GitHub" : "GitLab";
   const [report, setReport] = useState<LabelReport | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,16 +36,16 @@ export function ProjectLabels({ projectId }: { projectId: string }) {
       setBusy(false);
     }
   };
-  return <section className="panel panel-padding project-labels" aria-label="GitLab 标签管理">
+  return <section className="panel panel-padding project-labels" aria-label={`${platformName} 标签管理`}>
     <div className="row-between">
-      <div><h2>GitLab 标签</h2><p>为已登记仓库补齐接单和执行器标签。已有标签的颜色保持原样。</p></div>
+      <div><h2>{platformName} 标签</h2><p>为已登记仓库补齐接单和执行器标签。已有标签的颜色保持原样。</p></div>
       <button type="button" onClick={sync} disabled={busy}>{busy ? "正在补齐…" : "检查并补齐"}</button>
     </div>
     <ErrorBox error={error} retry={refresh} />
     {!report && !error && <p>正在检查仓库标签…</p>}
     {report?.repositories.map((repo) => <div className="project-label-repo" key={repo.projectId}>
       <strong>{repo.repositoryId}</strong>
-      {repo.error ? <span role="alert">同步失败：{repo.error}</span> : <span>{repo.labels.some((label) => label.archived) ? "存在已归档标签，请在 GitLab 取消归档" : repo.labels.some((label) => !label.exists) ? "存在待补齐标签" : "标签已就绪"}</span>}
+      {repo.error ? <span role="alert">同步失败：{repo.error}</span> : <span>{repo.labels.some((label) => label.archived) ? `存在已归档标签，请在 ${platformName} 取消归档` : repo.labels.some((label) => !label.exists) ? "存在待补齐标签" : "标签已就绪"}</span>}
       <div className="project-label-list">{repo.labels.map((label) => <span className={label.exists && !label.archived ? "" : "missing"} key={label.name}>
         <i style={{ background: label.existingColor || label.color }} />{label.name}{label.archived ? " · 已归档" : !label.exists && " · 待创建"}
       </span>)}</div>

@@ -6,7 +6,7 @@ export const stages: Record<string, string> = {
   preparing: "准备工作区",
   developing: "开发中",
   verifying: "验证中",
-  publishing: "发布 MR",
+  publishing: "发布变更",
   reviewing: "审查中",
   waiting_approval: "等待批准",
   waiting_manual_merge: "等待人工合并",
@@ -18,6 +18,9 @@ export const stages: Record<string, string> = {
   blocked: "需要处理",
   cancelled: "已取消",
 };
+export function stageLabel(stage: string, provider?: Task["project"]["provider"]): string {
+  return stage === "publishing" ? (provider === "github" ? "发布 PR" : "发布 MR") : stages[stage] || stage;
+}
 export const date = (value: string) =>
   value
     ? new Date(value).toLocaleString("zh-CN", {
@@ -32,7 +35,7 @@ export function Status({ task }: { task: Task }) {
     task.paused && !["completed", "cancelled"].includes(task.stage);
   return (
     <span className={`status ${paused ? "paused" : task.stage}`}>
-      {paused ? "已暂停" : stages[task.stage] || task.stage}
+      {paused ? "已暂停" : stageLabel(task.stage, task.project.provider)}
     </span>
   );
 }

@@ -8,19 +8,21 @@ const (
 	MetaModeImported = "imported"
 )
 
-// Connection is the persisted metadata for a saved GitLab credential. The token
+// Connection is the persisted metadata for a hosting connection. The token
 // itself is sealed outside this record and is never part of a Project, Task,
 // log, event or Temporal history.
 type Connection struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	GitLabURL     string    `json:"gitlabUrl"`
-	Username      string    `json:"username"`
-	Version       int       `json:"version"`
-	HasMergeToken bool      `json:"hasMergeToken"`
-	Fingerprint   string    `json:"fingerprint"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	Provider             Provider  `json:"provider,omitempty"`
+	GitHubInstallationID int64     `json:"githubInstallationId,omitempty"`
+	ID                   string    `json:"id"`
+	Name                 string    `json:"name"`
+	GitLabURL            string    `json:"gitlabUrl"`
+	Username             string    `json:"username"`
+	Version              int       `json:"version"`
+	HasMergeToken        bool      `json:"hasMergeToken"`
+	Fingerprint          string    `json:"fingerprint"`
+	CreatedAt            time.Time `json:"createdAt"`
+	UpdatedAt            time.Time `json:"updatedAt"`
 }
 
 // ManagedMeta reports whether the Meta-Repo is created and owned by SwarmJet.

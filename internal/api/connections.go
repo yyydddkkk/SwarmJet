@@ -198,6 +198,12 @@ func (a *server) connection(w http.ResponseWriter, r *http.Request, id string, t
 		}
 		respond(w, http.StatusOK, c)
 	case http.MethodPut:
+		if a.conns != nil {
+			if current, err := a.conns.Connection(r.Context(), id); err == nil && current.HostingProvider() == domain.ProviderGitHub {
+				problem(w, http.StatusBadRequest, "GitHub App 连接由安装管理，请重新选择安装。")
+				return
+			}
+		}
 		var req connectionRequest
 		if !decode(w, r, &req) {
 			return
@@ -369,6 +375,10 @@ func (a *server) connectionRepositories(w http.ResponseWriter, r *http.Request, 
 		failure(w, err)
 		return
 	}
+	if c.HostingProvider() == domain.ProviderGitHub {
+		a.githubConnectionRepositories(w, r, c)
+		return
+	}
 	token, err := a.connectionToken(id, false)
 	if err != nil {
 		problem(w, http.StatusServiceUnavailable, err.Error())
@@ -394,6 +404,10 @@ func (a *server) connectionBranches(w http.ResponseWriter, r *http.Request, id s
 	c, err := a.conns.Connection(r.Context(), id)
 	if err != nil {
 		failure(w, err)
+		return
+	}
+	if c.HostingProvider() == domain.ProviderGitHub {
+		a.githubConnectionBranches(w, r, c, projectID)
 		return
 	}
 	token, err := a.connectionToken(id, false)

@@ -128,6 +128,9 @@ export function ProjectEditor({
   );
   const existing = p.version > 0;
   const managed = p.metaMode === "managed";
+  const github = p.provider === "github";
+  const platformName = github ? "GitHub" : "GitLab";
+  const changeName = github ? "PR" : "MR";
   useEffect(() => {
     if (managed) return;
     api<Connection[] | null>("/connections")
@@ -384,7 +387,7 @@ export function ProjectEditor({
   const connectionReady = !!(
     p.name.trim() &&
     p.metaRef.trim() &&
-    p.gitlabUrl.trim() &&
+    (github ? p.connectionId : p.gitlabUrl.trim()) &&
     (managed || p.metaUrl.trim())
   );
   const readiness = [
@@ -472,7 +475,7 @@ export function ProjectEditor({
           {p.enabled ? "已启用" : "草稿 · 未启用"}
         </span>
       </header>
-      {existing && p.enabled && <ProjectLabels projectId={p.id} />}
+      {existing && p.enabled && <ProjectLabels projectId={p.id} provider={p.provider} />}
       <form
         noValidate
         onSubmit={(e) => {
@@ -550,7 +553,7 @@ export function ProjectEditor({
                           onChange={(e) => selectConnection(e.target.value)}
                         >
                           <option value="">部署环境变量</option>
-                          {connections.map((connection) => (
+                          {connections.filter(connection => connection.provider !== "github").map((connection) => (
                             <option key={connection.id} value={connection.id}>
                               {connection.name} · {connection.gitlabUrl}
                             </option>
@@ -649,7 +652,7 @@ export function ProjectEditor({
                     连接与凭据设置<span>通常无需修改</span>
                   </summary>
                   <div className="form-grid">
-                    <Field
+                    {github ? <Field label="GitHub 连接"><input value={p.connectionId || ""} readOnly /></Field> : <Field
                       label="GitLab 地址"
                       hint="从 HTTP 地址自动识别；SSH 地址或子路径部署可在此指定。"
                     >
@@ -660,7 +663,7 @@ export function ProjectEditor({
                           changeSource("gitlabUrl", e.target.value)
                         }
                       />
-                    </Field>
+                    </Field>}
                     <Field label="项目标识" hint="系统自动生成，用于内部关联。">
                       <input value={p.id} readOnly disabled={existing} />
                     </Field>
@@ -691,7 +694,7 @@ export function ProjectEditor({
                   <h2>仓库与目标分支</h2>
                   <p>
                     {repositories.length
-                      ? `${repositories.length} 个仓库。通常只需确认 MR 合并到哪里。`
+                      ? `${repositories.length} 个仓库。通常只需确认 ${changeName} 合并到哪里。`
                       : "读取清单后，仓库 ID、地址、路径和依赖会自动填入。"}
                   </p>
                 </div>
@@ -814,7 +817,7 @@ export function ProjectEditor({
                               <summary>仓库信息与高级设置</summary>
                               <div className="repository-facts">
                                 <span>
-                                  GitLab ID
+                                  {platformName} ID
                                   <strong>{r.projectId || "尚未识别"}</strong>
                                 </span>
                                 <span>
@@ -867,7 +870,7 @@ export function ProjectEditor({
                                       }
                                     />
                                   </Field>
-                                  <Field label={`仓库 ${i + 1} GitLab ID`}>
+                                  <Field label={`仓库 ${i + 1} ${platformName} ID`}>
                                     <input
                                       type="number"
                                       min={1}
@@ -947,6 +950,7 @@ export function ProjectEditor({
                     <input
                       type="checkbox"
                       checked={manual}
+                      disabled={github}
                       onChange={(e) => setManual(e.target.checked)}
                     />
                     允许手动编辑仓库信息
@@ -977,7 +981,7 @@ export function ProjectEditor({
                     ＋ 添加仓库
                   </button>}
                 </details>
-                {existing && <AddRepository project={p} onApplied={(updated) => { setP(updated); onSaved(updated); }} />}
+                {existing && !github && <AddRepository project={p} onApplied={(updated) => { setP(updated); onSaved(updated); }} />}
               </div>
             </section>
             <section className="panel setup-section" id="execution">
@@ -1104,14 +1108,14 @@ export function ProjectEditor({
               </div>
               <div className="panel-padding">
                 <Field label="验收策略">
-                  <select value={strategy} onChange={(e) => { setP((old) => ({...old, acceptanceStrategy:e.target.value as Project["acceptanceStrategy"], requireCI:e.target.value === "gitlab_ci"})); }}>
+                  <select value={strategy} onChange={(e) => { setP((old) => ({...old, acceptanceStrategy:e.target.value as Project["acceptanceStrategy"], requireCI:e.target.value === "gitlab_ci" || e.target.value === "platform_ci"})); }}>
                     <option value="none">关闭额外验收（默认）</option>
                     <option value="repository">根据仓库约定验收</option>
-                    <option value="gitlab_ci">使用 GitLab CI</option>
+                    {github ? <option value="platform_ci">目标分支必需检查</option> : <option value="gitlab_ci">使用 GitLab CI</option> }
                     <option value="custom">自定义验收（高级）</option>
                   </select>
                 </Field>
-                <p className="notice">{strategy === "none" ? `开发 Agent 自行运行测试并留下日志；平台跳过额外验收，${independentReview ? "仍执行独立审查与 GitLab 合并检查" : "继续执行 GitLab 合并检查"}。` : strategy === "repository" ? "Agent 从仓库说明、脚本和 CI 提出针对本次改动的检查，平台执行并记录结果；缺少工具或检查时保留 MR，交由人工处理，不自动合并。" : strategy === "gitlab_ci" ? "先创建 MR，再等待每个变更仓库当前提交的 CI。旧提交成功、跳过或不存在的流水线不算通过。" : "明确指定验收命令，或通过 Compose 启动多个服务后执行检查。"}</p>
+                <p className="notice">{strategy === "platform_ci" ? "先发布 PR，再验证当前提交满足目标分支的必需检查；没有必需检查时不会判为通过。" : strategy === "none" ? `开发 Agent 自行运行测试并留下日志；平台跳过额外验收，${independentReview ? "仍执行独立审查与平台合并检查" : "继续执行平台合并检查"}。` : strategy === "repository" ? `Agent 从仓库说明、脚本和 CI 提出针对本次改动的检查，平台执行并记录结果；缺少工具或检查时保留 ${changeName}，交由人工处理，不自动合并。` : strategy === "gitlab_ci" ? "先创建 MR，再等待每个变更仓库当前提交的 CI。旧提交成功、跳过或不存在的流水线不算通过。" : "明确指定验收命令，或通过 Compose 启动多个服务后执行检查。"}</p>
                 {strategy === "repository" && <Field label="验收镜像（可选）" hint="默认使用开发 Agent 镜像；镜像需要包含项目工具链。"><input value={p.integration.image || ""} placeholder={p.development.image} onChange={(e) => set("integration", {...p.integration, image:e.target.value})} /></Field>}
                 {strategy === "custom" && <>
                   <Field label="自定义验收方式"><select value={p.integration.mode || "compose"} onChange={(e) => set("integration", {...p.integration, mode:e.target.value as "compose" | "commands"})}><option value="commands">隔离容器命令</option><option value="compose">Compose 联调</option></select></Field>
@@ -1268,9 +1272,9 @@ export function ProjectEditor({
                       checked={p.requireCI}
                       onChange={(e) => set("requireCI", e.target.checked)}
                     />
-                    要求 GitLab 当前提交的 CI 通过
+                    要求 {platformName} 当前提交的 CI 通过
                   </label>
-                  <p className="muted">GitLab 合并检查仍会执行；独立审查与额外验收按项目配置运行。</p>
+                  <p className="muted">{platformName} 合并检查仍会执行；独立审查与额外验收按项目配置运行。</p>
                 </details>
               </div>
             </section>
@@ -1324,6 +1328,7 @@ export function ProjectEditor({
             </div>
           </div>
           <div className="panel-padding">
+            {github && <Field label="GitHub 合并方式"><select value={p.mergeMethod || "merge"} onChange={e => set("mergeMethod", e.target.value as Project["mergeMethod"])}><option value="merge">Merge commit</option><option value="squash">Squash</option><option value="rebase">Rebase</option></select></Field>}
             <div className="wizard-toggle">
               <label>
                 <input
@@ -1334,15 +1339,15 @@ export function ProjectEditor({
                 <span>
                   <strong>自动合并</strong>
                   <small>
-                    此设置是新任务默认值，任务详情可在合并前单独调整。关闭后系统仍会开发和创建 MR，但不会发起合并；需要在
-                    GitLab 人工合并全部 MR 后该轮任务完成，来源 Issue 保持打开。
+                    此设置是新任务默认值，任务详情可在合并前单独调整。关闭后系统仍会开发和创建 {changeName}，但不会发起合并；需要在
+                    {platformName} 人工合并全部 {changeName} 后该轮任务完成，来源 Issue 保持打开。
                   </small>
                 </span>
               </label>
               <p className="wizard-hint">
                 {(p.autoMerge ?? true)
-                  ? `${strategy === "none" ? "" : "已启用的额外验收、"}${independentReview ? "独立审查、" : ""}已启用的 GitLab CI 要求和目标分支检查通过后自动合并；冲突会交给开发 Agent 返工。`
-                  : "当前为人工合并；所有 MR 合并后该轮任务完成，来源 Issue 保持打开。"}
+                  ? `${strategy === "none" ? "" : "已启用的额外验收、"}${independentReview ? "独立审查、" : ""}已启用的 ${platformName} CI 要求和目标分支检查通过后自动合并；冲突会交给开发 Agent 返工。`
+                  : `当前为人工合并；所有 ${changeName} 合并后该轮任务完成，来源 Issue 保持打开。`}
               </p>
             </div>
           </div>

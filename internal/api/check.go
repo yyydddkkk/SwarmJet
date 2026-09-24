@@ -14,7 +14,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"swarmjet/internal/domain"
-	"swarmjet/internal/gitlab"
 	"swarmjet/internal/managedmeta"
 )
 
@@ -37,11 +36,10 @@ func (a *server) check(w http.ResponseWriter, r *http.Request, p domain.Project)
 	} else {
 		appendCheck("configuration", nil, "configuration valid")
 	}
-	token, err := a.projectCredential(p)
+	client, err := a.hostClient(p)
 	if err != nil {
-		appendCheck("credential", errors.New("GitLab credential unavailable"), "")
+		appendCheck("credential", errors.New("hosting credential unavailable"), "")
 	} else {
-		client := gitlab.New(p.GitLabURL, token)
 		for _, repo := range p.Repositories {
 			_, err := client.GetBranch(r.Context(), repo.ProjectID, repo.TargetBranch)
 			if err != nil {
@@ -53,7 +51,12 @@ func (a *server) check(w http.ResponseWriter, r *http.Request, p domain.Project)
 		if p.ManagedMeta() {
 			appendCheck("meta", a.checkManagedMeta(p), "Managed Meta-Repo manifest and compose file match registered configuration")
 		} else {
-			appendCheck("meta", checkMeta(r.Context(), p, token), "Meta manifest and compose file match registered configuration")
+			token, err := a.projectCredential(p)
+			if err != nil {
+				appendCheck("meta", err, "")
+			} else {
+				appendCheck("meta", checkMeta(r.Context(), p, token), "Meta manifest and compose file match registered configuration")
+			}
 		}
 	}
 	all := true
@@ -104,7 +107,7 @@ func (a *server) checkManagedMeta(p domain.Project) error {
 			return fmt.Errorf("managed Meta manifest mismatch for repository %s", repo.ID)
 		}
 	}
-	if p.AcceptanceStrategy == "none" || p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" || p.Integration.Mode == "commands" {
+	if p.AcceptanceStrategy == "none" || p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" || p.AcceptanceStrategy == "platform_ci" || p.Integration.Mode == "commands" {
 		return nil
 	}
 	compose, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p.Integration.ComposeFile)))
@@ -225,7 +228,7 @@ func checkMeta(ctx context.Context, p domain.Project, token string) error {
 			return fmt.Errorf("Meta manifest mismatch for repository %s", repo.ID)
 		}
 	}
-	if p.AcceptanceStrategy == "none" || p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" || p.Integration.Mode == "commands" {
+	if p.AcceptanceStrategy == "none" || p.AcceptanceStrategy == "repository" || p.AcceptanceStrategy == "gitlab_ci" || p.AcceptanceStrategy == "platform_ci" || p.Integration.Mode == "commands" {
 		return nil
 	}
 	compose, err := get(p.Integration.ComposeFile)

@@ -16,6 +16,7 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/execution"
+	"swarmjet/internal/forge"
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/labels"
 	"swarmjet/internal/managedmeta"
@@ -29,6 +30,7 @@ type IntegrationRunner interface {
 	Stop(context.Context, domain.Workspace, domain.IntegrationConfig) error
 }
 type Activities struct {
+	ForgeClient                func(domain.Project, bool) (forge.Client, error)
 	resolvedIntegrationNetwork map[string]string
 	NetworkEnv                 func(context.Context, domain.NetworkVersion) (map[string]string, error)
 	Store                      *store.Store
@@ -58,7 +60,10 @@ func (a *Activities) credentialFor(p domain.Project, merge bool) (string, error)
 	return a.Credential(name)
 }
 
-func (a *Activities) client(p domain.Project, merge bool) (*gitlab.Client, error) {
+func (a *Activities) client(p domain.Project, merge bool) (forge.Client, error) {
+	if a.ForgeClient != nil {
+		return a.ForgeClient(p, merge)
+	}
 	name := p.CredentialReference()
 	if merge {
 		name = p.MergeCredentialReference()
@@ -90,7 +95,12 @@ func (a *Activities) gitEnv(t domain.Task) (map[string]string, error) {
 	if e != nil {
 		return nil, temporal.NewNonRetryableApplicationError("credential unavailable: "+t.Project.CredentialReference(), "configuration", e)
 	}
-	env := map[string]string{"GITLAB_TOKEN": token, "GIT_TERMINAL_PROMPT": "0"}
+	env := map[string]string{"GIT_TERMINAL_PROMPT": "0"}
+	if t.Project.HostingProvider() == domain.ProviderGitHub {
+		env["GITHUB_TOKEN"] = token
+	} else {
+		env["GITLAB_TOKEN"] = token
+	}
 	// The execution host decides its own credential-helper path. Only the local
 	// host uses the control plane's path; a remote node keeps its own.
 	if t.NodeID == "" {
@@ -152,6 +162,11 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			return out, err
 		}
 		if !allowed {
+			if t.Project.HostingProvider() == domain.ProviderGitHub {
+				if err := a.cancelQueuedGitHub(ctx, &t); err != nil {
+					return out, err
+				}
+			}
 			disabled := false
 			t.AutoMergeOverride = &disabled
 			t.Stage = "waiting_manual_merge"
@@ -214,7 +229,21 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		out.Task = t
 		return out, nil
 	}
+	if in.Phase == "pause_queue" {
+		if t.Project.HostingProvider() == domain.ProviderGitHub {
+			if err := a.cancelQueuedGitHub(ctx, &t); err != nil {
+				return out, err
+			}
+		}
+		out.Task = t
+		return out, nil
+	}
 	if in.Phase == "stop" || in.Phase == "stopping" {
+		if t.Project.HostingProvider() == domain.ProviderGitHub {
+			if err := a.cancelQueuedGitHub(ctx, &t); err != nil {
+				return out, err
+			}
+		}
 		n, e := a.node(ctx, t)
 		if e != nil {
 			return out, e
@@ -251,7 +280,7 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			key := fmt.Sprintf("%d/%d", d.ProjectID, d.IID)
 			upstreamID := t.DependencyTasks[key]
 			if upstreamID == "" && t.Round > 0 {
-				upstream, err := a.Store.LatestTaskForIssue(ctx, t.Project.GitLabURL, domain.Issue{ProjectID: d.ProjectID, IID: d.IID})
+				upstream, err := a.Store.LatestTaskForIssue(ctx, t.Project.HostingURL(), domain.Issue{Provider: t.Project.HostingProvider(), ProjectID: d.ProjectID, IID: d.IID})
 				if err != nil && !errors.Is(err, store.ErrNotFound) {
 					return out, err
 				}
@@ -387,6 +416,9 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			if !changed {
 				break
 			}
+		}
+		if in.Phase == "publishing" && t.Project.HostingProvider() == domain.ProviderGitHub {
+			return a.publishGitHub(ctx, in, t, c)
 		}
 		ex, e := a.execute(ctx, in, t)
 		if e != nil {
@@ -677,6 +709,9 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			}
 		}
 	case "merging", "partial_merge":
+		if t.Project.HostingProvider() == domain.ProviderGitHub {
+			return a.mergeGitHub(ctx, t, c)
+		}
 		// Reconcile completed remote merges before retrying any agent action.
 		for i, r := range t.Workspace.Revisions {
 			if !r.Changed {
@@ -826,6 +861,9 @@ func requiresApproval(t domain.Task) bool {
 	return false
 }
 func mergeLock(t domain.Task, r domain.Revision) string {
+	if t.Project.HostingProvider() == domain.ProviderGitHub {
+		return fmt.Sprintf("merge:github:%d:%s", r.ProjectID, r.TargetBranch)
+	}
 	return fmt.Sprintf("merge:%s:%d:%s", domain.GitLabIdentity(t.Project.GitLabURL), r.ProjectID, r.TargetBranch)
 }
 func (a *Activities) taskAutoMergeAllowed(ctx context.Context, t domain.Task) (bool, error) {
@@ -841,7 +879,7 @@ func (a *Activities) taskAutoMergeAllowed(ctx context.Context, t domain.Task) (b
 	}
 	return latest == nil || *latest, nil
 }
-func (a *Activities) gates(ctx context.Context, c *gitlab.Client, t *domain.Task) (bool, string, error) {
+func (a *Activities) gates(ctx context.Context, c forge.Client, t *domain.Task) (bool, string, error) {
 	if !t.AutoMergeEnabled() {
 		return false, "此任务已关闭自动合并", nil
 	}
@@ -911,13 +949,42 @@ func (a *Activities) gates(ctx context.Context, c *gitlab.Client, t *domain.Task
 		if mr.HasConflicts {
 			return false, "STALE: merge conflict", nil
 		}
-		if (t.Project.RequireCI || t.Project.AcceptanceStrategy == "gitlab_ci") && mr.HeadPipeline != nil && (mr.HeadPipeline.Status == "failed" || mr.HeadPipeline.Status == "canceled") {
+		if t.Project.HostingProvider() == domain.ProviderGitHub {
+			client, err := githubClient(c)
+			if err != nil {
+				return false, "", err
+			}
+			checks, err := client.RequiredChecks(ctx, r.ProjectID, r.MRIID, r.HeadSHA)
+			if err != nil {
+				return false, "", err
+			}
+			if checks.RequiredCount == 0 {
+				if t.Project.RequireCI || t.Project.AcceptanceStrategy == "platform_ci" {
+					return false, "目标分支没有配置必需检查，无法满足 CI 要求", nil
+				}
+				if !checks.MergeQueue && mr.DetailedMergeStatus != "mergeable" {
+					return false, "等待 GitHub PR 合并检查：" + mr.DetailedMergeStatus, nil
+				}
+				continue
+			}
+			if checks.Failed {
+				return false, "STALE: " + checks.Reason, nil
+			}
+			if !checks.Ready {
+				return false, "等待 GitHub 必需检查：" + checks.Reason, nil
+			}
+			if !checks.MergeQueue && mr.DetailedMergeStatus != "mergeable" {
+				return false, "等待 GitHub PR 合并检查：" + mr.DetailedMergeStatus, nil
+			}
+			continue
+		}
+		if (t.Project.RequireCI || t.Project.AcceptanceStrategy == "gitlab_ci" || t.Project.AcceptanceStrategy == "platform_ci") && mr.HeadPipeline != nil && (mr.HeadPipeline.Status == "failed" || mr.HeadPipeline.Status == "canceled") {
 			return false, "STALE: required CI failed; inspect the pipeline and repair", nil
 		}
 		if mr.DetailedMergeStatus != "mergeable" && mr.DetailedMergeStatus != "ci_still_running" && mr.DetailedMergeStatus != "checking" && mr.DetailedMergeStatus != "unchecked" {
 			return false, "GitLab merge condition: " + mr.DetailedMergeStatus, nil
 		}
-		ok, e := c.RequiredCIPassed(ctx, r.ProjectID, r.MRIID, r.HeadSHA, t.Project.RequireCI || t.Project.AcceptanceStrategy == "gitlab_ci")
+		ok, e := c.RequiredCIPassed(ctx, r.ProjectID, r.MRIID, r.HeadSHA, t.Project.RequireCI || t.Project.AcceptanceStrategy == "gitlab_ci" || t.Project.AcceptanceStrategy == "platform_ci")
 		if e != nil {
 			return false, "", e
 		}
@@ -1018,7 +1085,7 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 		}
 	}
 	// Review has no merge credential. Only the approved merge phase receives it.
-	if role == "dev" || role == "merge" {
+	if (role == "dev" || role == "merge") && t.Project.HostingProvider() == domain.ProviderGitLab {
 		token, e := a.credentialFor(t.Project, role == "merge")
 		if e != nil {
 			return domain.Execution{}, e
@@ -1188,6 +1255,7 @@ Task context:
 }
 
 const gitLabOutputLanguage = `Write GitLab MR titles, descriptions, and comments in natural Chinese by default, including review feedback. Write user-facing result fields (summary, assumptions, findings, needsHelp, and humanAcceptance) in Chinese so the platform's Issue comments also read naturally. Keep code identifiers, file paths, commands, API names, product names, and established technical terms in their original form where that reads better; do not translate them mechanically. Follow an explicit language requirement in the task or repository when present.`
+const gitHubOutputLanguage = `Write GitHub PR titles, descriptions, and comments in natural Chinese by default, including review feedback. Write user-facing result fields (summary, assumptions, findings, needsHelp, and humanAcceptance) in Chinese. Keep code identifiers, file paths, commands, API names, product names, and established technical terms in their original form where that reads better. Follow an explicit language requirement in the task or repository when present.`
 
 const humanAcceptanceShape = `{"prerequisites":["test environment, account or role, setup data"],"steps":[{"action":"specific user operation or command","expected":"observable expected result"}],"notes":["edge cases, unverified areas, risks and cleanup"]}`
 
@@ -1207,7 +1275,14 @@ func prompt(t domain.Task, phase string, merge *domain.Revision) string {
 	if t.Round > 0 {
 		base = `You are swarmjet's agent. Read applicable repository AGENTS.md and the Meta-Repo plan.md / architecture / integration instructions. Stay within this task's registered repositories and task branches. Preserve Git hooks. Record assumptions and continue despite ambiguous requirements; only return blocked when a concrete obstacle remains after reasonable attempts. Never include secrets in output. Never execute production deployment. This is one round of a long-lived source Issue. The Issue stays open after merge. Address the current Issue description and the TriggerText for this round; use PreviousTaskID only as prior-delivery context. All task MRs and commit messages must reference the source Issue WITHOUT closing keywords (Closes/Fixes/Resolves). GitLab merge checks remain mandatory. Independent review and platform verification apply only when enabled in the project.\n`
 	}
-	base += "\n" + gitLabOutputLanguage + "\n"
+	if t.Project.HostingProvider() == domain.ProviderGitHub {
+		base = strings.ReplaceAll(base, "GitLab merge checks remain mandatory", "GitHub branch rules remain mandatory")
+		base = strings.ReplaceAll(base, "task MRs", "task PRs")
+		base = strings.ReplaceAll(base, "All task MRs", "All task PRs")
+		base += "\n" + gitHubOutputLanguage + "\n"
+	} else {
+		base += "\n" + gitLabOutputLanguage + "\n"
+	}
 
 	config, _ := json.Marshal(t.Project)
 	base += "\nProject acceptance policy: " + string(config) + "\n"
@@ -1223,7 +1298,7 @@ func prompt(t domain.Task, phase string, merge *domain.Revision) string {
 	}
 	base += `
 For acceptanceStrategy=repository, statically read AGENTS.md, package scripts, CI and development docs and return acceptanceCommands:[{"name":"check name","path":"exact registered repository path","argv":["executable","argument"],"evidence":"repository file and rule explaining why this check covers the change"}]. The platform executes these commands; your claimed pass is not evidence. If no applicable checks can be identified return an empty list and explain what a human must verify. The verification image and toolchain are platform configuration, not something you may invent.
-For gitlab_ci, publish branches and MRs first, never use ci.skip; the platform waits for the exact commit CI. When independent review is enabled, reviewers assess the adequacy of the checks and the human checklist, including task coverage and missing/weak tests. Missing infrastructure is not a passing check; describe it explicitly. The platform must prohibit automatic merge when enabled checks are incomplete.
+For a platform CI strategy, commit changes first; the platform publishes branches and change requests and waits for checks on the exact commit. Never skip CI. When independent review is enabled, reviewers assess the adequacy of the checks and the human checklist, including task coverage and missing/weak tests. Missing infrastructure is not a passing check; describe it explicitly. The platform must prohibit automatic merge when enabled checks are incomplete.
 `
 	switch phase {
 	case "developing":
@@ -1232,9 +1307,9 @@ For gitlab_ci, publish branches and MRs first, never use ci.skip; the platform w
 		base += `Push each changed task branch and create or update one GitLab MR per source/target pair using glab. Use the provided exact target per repository. Include verification and assumptions in MR descriptions. Do not modify code or merge. Use changed/blocked outcome.\n`
 	case "reviewing":
 		if t.Project.AcceptanceStrategy == "none" {
-			base += `Independently review the entire repository change set and development test evidence. Extra platform acceptance is disabled for this project. Check task coverage, cross-repository contracts and tests; request changes if evidence is inadequate. Do not modify code, push, approve on GitLab or merge. Return approved, changes_requested with precise findings, or blocked. A no-change result must be independently justified.\n`
+			base += `Independently review the entire repository change set and development test evidence. Extra platform acceptance is disabled for this project. Check task coverage, cross-repository contracts and tests; request changes if evidence is inadequate. Do not modify code, push, approve on the hosting platform or merge. Return approved, changes_requested with precise findings, or blocked. A no-change result must be independently justified.\n`
 		} else {
-			base += `Independently review the entire repository change set and actual verification reports. Check task coverage, cross-repository contracts and tests. Do not modify code, push, approve on GitLab or merge. Return approved, changes_requested with precise findings, or blocked. A no-change result must be independently justified.\n`
+			base += `Independently review the entire repository change set and actual verification reports. Check task coverage, cross-repository contracts and tests. Do not modify code, push, approve on the hosting platform or merge. Return approved, changes_requested with precise findings, or blocked. A no-change result must be independently justified.\n`
 		}
 	case "merging", "partial_merge":
 		m, _ := json.Marshal(merge)
@@ -1247,7 +1322,7 @@ func (a *Activities) Sync(ctx context.Context, t domain.Task) error {
 	if e != nil {
 		return e
 	}
-	latest, e := a.Store.LatestTaskForIssue(ctx, t.Project.GitLabURL, t.Issue)
+	latest, e := a.Store.LatestTaskForIssue(ctx, t.Project.HostingURL(), t.Issue)
 	if e != nil {
 		return e
 	}
@@ -1301,7 +1376,7 @@ func EnvironmentCredential(name string) (string, error) {
 	return v, nil
 }
 
-func sameMR(m gitlab.MergeRequest, r domain.Revision) bool {
+func sameMR(m forge.MergeRequest, r domain.Revision) bool {
 	return m.SHA == r.HeadSHA && m.SourceBranch == r.Branch && m.TargetBranch == r.TargetBranch
 }
 func (a *Activities) renewMerge(ctx context.Context, t domain.Task) error {
@@ -1398,7 +1473,11 @@ func (a *Activities) workspaceManager(p domain.Project) (*workspace.Manager, err
 	for k, v := range a.Workspace.Env {
 		w.Env[k] = v
 	}
-	w.Env["GITLAB_TOKEN"] = token
+	if p.HostingProvider() == domain.ProviderGitHub {
+		w.Env["GITHUB_TOKEN"] = token
+	} else {
+		w.Env["GITLAB_TOKEN"] = token
+	}
 	w.Env["GIT_TERMINAL_PROMPT"] = "0"
 	if w.Env["GIT_ASKPASS"] == "" {
 		w.Env["GIT_ASKPASS"] = "/usr/local/bin/swarmjet-askpass"

@@ -113,3 +113,21 @@ func TestBackendRejectsUnsafeGitLabConfigurationBeforeLaunching(t *testing.T) {
 		})
 	}
 }
+
+func TestGitHubCredentialsNeverEnterContainer(t *testing.T) {
+	r, docker, req := setup(t)
+	req.Env["GITHUB_TOKEN"] = "ephemeral-installation-token"
+	req.Env["GH_TOKEN"] = "github-cli-token"
+	ex, err := r.Start(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range docker.containers[ex.ContainerID].Config.Env {
+		if strings.HasPrefix(entry, "GITHUB_") || strings.HasPrefix(entry, "GH_TOKEN=") {
+			t.Fatal("GitHub credential reached container")
+		}
+	}
+	if req.Env["GITHUB_TOKEN"] == "" {
+		t.Fatal("caller environment mutated")
+	}
+}

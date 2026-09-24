@@ -218,6 +218,17 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 			return persist()
 		}
 		if t.Paused {
+			if t.Project.HostingProvider() == domain.ProviderGitHub && (t.Stage == "merging" || t.Stage == "partial_merge") {
+				var paused StepResult
+				if err := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "pause_queue", Task: t}).Get(ctx, &paused); err != nil {
+					t.Paused = false
+					t.Stage = "blocked"
+					t.Message = "无法撤销 GitHub merge queue；请核实远端状态：" + err.Error()
+					previousPhase = "partial_merge"
+					continue
+				}
+				t = paused.Task
+			}
 			if err := persist(); err != nil {
 				return err
 			}
@@ -494,6 +505,12 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 			}
 			if result.Ready {
 				t.Stage = "finalizing"
+			} else if t.Project.HostingProvider() == domain.ProviderGitHub && strings.HasPrefix(t.Message, "等待 GitHub merge queue") {
+				t.Stage = "partial_merge"
+				if err := persist(); err != nil {
+					return err
+				}
+				waitTick(30 * time.Second)
 			} else {
 				t.Stage = "partial_merge"
 				if err := persist(); err != nil {

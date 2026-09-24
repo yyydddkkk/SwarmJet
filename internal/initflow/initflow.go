@@ -20,6 +20,7 @@ import (
 
 	"swarmjet/internal/domain"
 	"swarmjet/internal/execution"
+	"swarmjet/internal/forge"
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/managedmeta"
 	"swarmjet/internal/store"
@@ -57,6 +58,8 @@ type Manager struct {
 	Credential func(string) (string, error)
 	// Clients builds a GitLab client. Defaults to the project credential.
 	Clients func(domain.Project) (*gitlab.Client, error)
+	// ForgeClients builds the platform client used to connect managed repositories.
+	ForgeClients func(domain.Project) (forge.Client, error)
 	// Cloner materializes a pinned revision. Defaults to git.
 	Cloner Cloner
 	// Runner executes verification. Defaults to a bounded host process.
@@ -71,7 +74,7 @@ type Manager struct {
 	VerifyTimeout time.Duration
 	Poll          time.Duration
 	Logger        *slog.Logger
-	// CredentialFor resolves a project token together with its GitLab address
+	// CredentialFor resolves a project token together with its hosting connection
 	// binding. When nil, Credential is used without an address check.
 	CredentialFor func(domain.Project) (string, error)
 
@@ -136,6 +139,16 @@ func (m *Manager) executionOwner() string {
 		m.automationOwner = fmt.Sprintf("%s-%d-%x", host, os.Getpid(), random)
 	})
 	return m.automationOwner
+}
+
+func (m *Manager) forgeClient(project domain.Project) (forge.Client, error) {
+	if m.ForgeClients != nil {
+		return m.ForgeClients(project)
+	}
+	if project.HostingProvider() == domain.ProviderGitHub {
+		return nil, errors.New("GitHub App client is not configured")
+	}
+	return m.client(project)
 }
 
 func (m *Manager) client(project domain.Project) (*gitlab.Client, error) {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -17,6 +18,7 @@ import (
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 	"swarmjet/internal/domain"
+	"swarmjet/internal/forge"
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/imagebuild"
 	"swarmjet/internal/labels"
@@ -32,6 +34,7 @@ type InitReadiness interface {
 }
 
 type Service struct {
+	ForgeClient       func(domain.Project, bool) (forge.Client, error)
 	DataDir           string
 	Store             *store.Store
 	Temporal          client.Client
@@ -74,12 +77,11 @@ func (s *Service) reconcileLabels(ctx context.Context) error {
 		if !p.Enabled || p.ManagedMeta() && (s.Initializer == nil || !s.Initializer.ReadyForTasks(ctx, p.ID)) {
 			continue
 		}
-		token, err := s.projectCredential(p)
+		client, err := s.client(p)
 		if err != nil {
 			slog.Warn("GitLab label credential unavailable", "project", p.ID, "error", err)
 			continue
 		}
-		client := gitlab.New(p.GitLabURL, token)
 		for _, repo := range p.Repositories {
 			if _, err := labels.Ensure(ctx, client, repo.ProjectID, wanted); err != nil {
 				slog.Warn("GitLab label setup failed", "project", p.ID, "repo", repo.ID, "error", err)
@@ -94,6 +96,17 @@ func (s *Service) projectCredential(p domain.Project) (string, error) {
 		return s.ProjectCredential(p, false)
 	}
 	return s.ResolveCredential(p.CredentialReference())
+}
+
+func (s *Service) client(p domain.Project) (forge.Client, error) {
+	if s.ForgeClient != nil {
+		return s.ForgeClient(p, false)
+	}
+	token, err := s.projectCredential(p)
+	if err != nil {
+		return nil, err
+	}
+	return gitlab.New(p.GitLabURL, token), nil
 }
 
 func ID() string {
@@ -192,6 +205,40 @@ func (s *Service) Webhook(secret string) http.Handler {
 		w.WriteHeader(202)
 	})
 }
+
+// GitHubWebhook verifies the raw request body before waking the issue scanner.
+// The periodic scan remains the fallback when a deployment has no public ingress.
+func (s *Service) GitHubWebhook(secret string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if secret == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = mac.Write(body)
+		want := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+		got := r.Header.Get("X-Hub-Signature-256")
+		if !hmac.Equal([]byte(want), []byte(got)) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		select {
+		case s.Wake <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})
+}
 func (s *Service) Scan(ctx context.Context) error {
 	projects, e := s.Store.Projects(ctx)
 	if e != nil {
@@ -209,12 +256,11 @@ func (s *Service) Scan(ctx context.Context) error {
 			slog.Warn("managed project initialization not ready; skipping issue scan", "project", p.ID)
 			continue
 		}
-		token, e := s.projectCredential(p)
+		g, e := s.client(p)
 		if e != nil {
 			slog.Error("project credential unavailable", "project", p.ID)
 			continue
 		}
-		g := gitlab.New(p.GitLabURL, token)
 		for _, repo := range p.Repositories {
 			issues, e := g.ListEligibleIssues(ctx, repo.ProjectID)
 			if e != nil {
@@ -222,7 +268,7 @@ func (s *Service) Scan(ctx context.Context) error {
 				continue
 			}
 			for _, issue := range issues {
-				seen, e := s.Store.HasSource(ctx, p.GitLabURL, issue)
+				seen, e := s.Store.HasSource(ctx, p.HostingURL(), issue)
 				if e != nil {
 					return e
 				}
@@ -282,8 +328,8 @@ func runComment(body string) (string, bool) {
 	return strings.TrimSpace(rest), true
 }
 
-func (s *Service) scanFollowup(ctx context.Context, g *gitlab.Client, p domain.Project, issue domain.Issue, enabled []string) error {
-	first, err := s.Store.FirstTaskCreatedAt(ctx, p.GitLabURL, issue)
+func (s *Service) scanFollowup(ctx context.Context, g forge.Client, p domain.Project, issue domain.Issue, enabled []string) error {
+	first, err := s.Store.FirstTaskCreatedAt(ctx, p.HostingURL(), issue)
 	if err != nil {
 		return err
 	}
@@ -303,15 +349,15 @@ func (s *Service) scanFollowup(ctx context.Context, g *gitlab.Client, p domain.P
 		if !ok {
 			continue
 		}
-		if err := s.Store.RecordIssueRunCommand(ctx, p.GitLabURL, issue, note.ID, body, note.CreatedAt); err != nil {
+		if err := s.Store.RecordIssueRunCommand(ctx, p.HostingURL(), issue, note.ID, body, note.CreatedAt); err != nil {
 			return err
 		}
 	}
-	pending, err := s.Store.PendingIssueRunCommands(ctx, p.GitLabURL, issue)
+	pending, err := s.Store.PendingIssueRunCommands(ctx, p.HostingURL(), issue)
 	if err != nil || !pending {
 		return err
 	}
-	previous, err := s.Store.LatestTaskForIssue(ctx, p.GitLabURL, issue)
+	previous, err := s.Store.LatestTaskForIssue(ctx, p.HostingURL(), issue)
 	if err != nil || !domain.Terminal(previous.Stage) {
 		return err
 	}

@@ -779,6 +779,7 @@ func (m *Manager) Inspect(ctx context.Context, ws domain.Workspace, p domain.Pro
 			if supplied.RepositoryID == r.RepositoryID {
 				r.MRIID = supplied.MRIID
 				r.MRURL = supplied.MRURL
+				r.MergeQueueEntryID = supplied.MergeQueueEntryID
 				r.Merged = supplied.Merged
 				break
 			}
@@ -878,6 +879,7 @@ func (m *Manager) RefreshTargets(ctx context.Context, ws domain.Workspace, p dom
 			if supplied.RepositoryID == r.RepositoryID {
 				r.MRIID = supplied.MRIID
 				r.MRURL = supplied.MRURL
+				r.MergeQueueEntryID = supplied.MergeQueueEntryID
 				r.Merged = supplied.Merged
 				break
 			}
@@ -922,6 +924,7 @@ func (m *Manager) RefreshTargets(ctx context.Context, ws domain.Workspace, p dom
 			if supplied.RepositoryID == r.RepositoryID {
 				r.MRIID = supplied.MRIID
 				r.MRURL = supplied.MRURL
+				r.MergeQueueEntryID = supplied.MergeQueueEntryID
 				r.Merged = supplied.Merged
 				break
 			}

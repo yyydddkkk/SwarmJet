@@ -173,6 +173,7 @@ func TestInspectKeepsPublishedMetadataAndEmptyCommits(t *testing.T) {
 		t.Fatal(e)
 	}
 	ws.Revisions[0].MRIID = 42
+	ws.Revisions[0].MergeQueueEntryID = "queue-entry-42"
 	ws.Revisions[0].MRURL = "https://git.invalid/mr/42"
 	ws.Revisions[0].Merged = true
 	got, e := m.Inspect(context.Background(), ws, p)
@@ -180,7 +181,7 @@ func TestInspectKeepsPublishedMetadataAndEmptyCommits(t *testing.T) {
 		t.Fatal(e)
 	}
 	r := got.Revisions[0]
-	if r.Changed || r.MRIID != 42 || r.MRURL != ws.Revisions[0].MRURL || !r.Merged {
+	if r.MergeQueueEntryID != "queue-entry-42" || r.Changed || r.MRIID != 42 || r.MRURL != ws.Revisions[0].MRURL || !r.Merged {
 		t.Fatalf("incorrect inspection %#v", r)
 	}
 }
@@ -410,6 +411,7 @@ func TestMergedRepositoryRemainsFrozenAcrossRework(t *testing.T) {
 	}
 	ws.Revisions[0].Merged = true
 	ws.Revisions[0].MRIID = 3
+	ws.Revisions[0].MergeQueueEntryID = "queue-entry-3"
 	initial := ws.Revisions[0].BaseSHA
 	remote := p.Repositories[0].URL
 	os.WriteFile(filepath.Join(remote, "upstream"), []byte("merged target moved"), 0600)
@@ -419,7 +421,7 @@ func TestMergedRepositoryRemainsFrozenAcrossRework(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if got.Revisions[0].BaseSHA != initial || !got.Revisions[0].Merged || got.Revisions[0].MRIID != 3 {
+	if got.Revisions[0].MergeQueueEntryID != "queue-entry-3" || got.Revisions[0].BaseSHA != initial || !got.Revisions[0].Merged || got.Revisions[0].MRIID != 3 {
 		t.Fatal("merged revision baseline or metadata changed")
 	}
 	gitTest(t, m, filepath.Join(ws.Root, "a"), "commit", "--allow-empty", "-m", "unauthorized merged repo edit")

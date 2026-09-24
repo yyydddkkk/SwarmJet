@@ -1,12 +1,12 @@
 # SwarmJet
 
-可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab 与 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）、Claude Code 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务创建后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，可选启动独立审查 Agent，再合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录及人工操作。
+可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab、GitHub.com 与 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）、Claude Code 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务创建后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，可选启动独立审查 Agent，再合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录及人工操作。
 
 ## 架构
 
 ```mermaid
 flowchart LR
-  GitLab[GitLab Issue / MR] --> Ingress[Webhook + 轮询]
+  Host[GitLab / GitHub Issue、MR / PR] --> Ingress[Webhook + 轮询]
   Console[Web 控制台] --> API[Go 管理 API]
   Ingress --> Outbox[PostgreSQL 任务与命令]
   API --> Outbox
@@ -16,12 +16,12 @@ flowchart LR
   Activity --> Workspace[meta + 任务私有 Git 副本]
   Activity --> Agents[可选 CLI 开发 / 审查 / 合并]
   Activity --> Tests[隔离 Compose 联调]
-  Agents --> GitLab
+  Activity --> Host
   Activity --> Reports[报告与执行记录]
   Reports --> Console
 ```
 
-Temporal 是运行流程的事实源；业务 PostgreSQL 保存配置、查询投影、操作记录和审计。GitLab 是分支、MR、CI 和合并结果的事实源。控制台操作先写持久化命令，再交给 Workflow，重复命令按 ID 去重。
+Temporal 是运行流程的事实源；业务 PostgreSQL 保存配置、查询投影、操作记录和审计。项目所选的托管平台是分支、MR/PR、检查和合并结果的事实源。控制台操作先写持久化命令，再交给 Workflow，重复命令按 ID 去重。
 
 ## 工作流程
 
@@ -38,17 +38,17 @@ Temporal 是运行流程的事实源；业务 PostgreSQL 保存配置、查询�
 
 ## 项目接入
 
-普通用户不需要理解 Meta-Repo。新建项目时填写 GitLab 地址和 Access Token，验证后搜索并选择子仓库、确认目标分支，随后在页面内嵌终端完成 `opencode auth login` 并选择模型做一次实际调用验证。系统据此创建受管的内部 Meta-Repo，运行初始化 Agent 分析项目，并在独立副本中执行验证。GitLab 连接加密保存（`SWARMJET_MASTER_KEY`）并可跨项目复用；Token 不回显，也不写入日志、URL、任务快照或 Temporal 历史。模型和验收未就绪时项目保持草稿，不接单；初始化未通过验证时也不会自动启用。
+普通用户不需要理解 Meta-Repo。新建 GitLab 项目时填写地址和 Access Token；新建 GitHub.com 项目时选择已配置的 GitHub App 安装。验证连接后搜索并选择仓库、确认目标分支，随后在页面内嵌终端完成 `opencode auth login` 并选择模型做一次实际调用验证。系统据此创建受管的内部 Meta-Repo，运行初始化 Agent 分析项目，并在独立副本中执行验证。GitLab 连接加密保存（`SWARMJET_MASTER_KEY`）并可跨项目复用；GitHub 连接仅保存安装 ID，短期令牌按需签发。凭证不回显，也不写入日志、URL、任务快照或 Temporal 历史。模型和验收未就绪时项目保持草稿，不接单；初始化未通过验证时也不会自动启用。
 
 控制台的“执行器环境”提供五种 Agent 的适配列表，管理员统一勾选启用，默认全部未勾选；项目选择一个已启用的默认 Agent。CLI 必须安装在配置终端与任务所用的镜像中，勾选启用不会自动安装软件。可通过独立的“镜像管理”页面查看仓库版本、分发或回退节点镜像，并选择 Agent、设置构建参数，由持久化 BuildKit 构建并发布到 Distribution；在“系统设置 → 开发者选项”启用后，同页还可构建、发布和管理平台程序镜像。也可继续通过 `AGENT_CLIS=opencode,codex` 等构建参数按需打包，详见 [部署说明](deploy/README.md)。终端配置保存在持久化 Home 中。
 
 Issue 继续用 `autonomous` 接单，可添加一个 `agent:opencode`、`agent:codex`、`agent:dst`、`agent:agy` 或 `agent:claude` 标签，统一指定开发、审查、发布与合并执行器。不加标签沿用项目默认；多个标签、未知或未启用的 Agent 会明确拒绝接单，修正后轮询重试。任务接单后执行器固定，已有任务不会因标签或启用列表变化而切换。
 
-项目启用后，标签管理会在登记的 GitLab 仓库中补齐 `autonomous` 和平台已启用 Agent 对应的 `agent:*` 标签；项目设置页可查看各仓库状态并手动重试。已有同名标签的颜色和描述不会被修改，已归档标签会提示到 GitLab 取消归档，停用 Agent 的旧标签不会自动删除。任务阶段和 `needs-clarification` 标签首次使用时按统一配色创建。后台在配置变化后及定期重试失败的标签同步，标签同步失败不会阻断 Issue 扫描。
+项目启用后，标签管理会在登记的仓库中补齐 `autonomous` 和平台已启用 Agent 对应的 `agent:*` 标签；项目设置页可查看各仓库状态并手动重试。已有同名标签的颜色和描述不会被修改，停用 Agent 的旧标签不会自动删除。任务阶段和 `needs-clarification` 标签首次使用时按统一配色创建。后台在配置变化后及定期重试失败的标签同步，标签同步失败不会阻断 Issue 扫描。
 
 任务不指定模型，使用 CLI 保存的默认配置。首次执行时复制一份任务级配置快照，开发与审查各自获得私有副本和独立会话；合并恢复审查会话。后续终端配置修改影响之后首次启动的新任务，不影响已有任务的角色配置。临时会话切换或终端 `export` 不保证持久化；API key 应配置到部署环境。旧任务仍按旧快照运行。Meta 静态初始化仍使用受限的 OpenCode，创建受管项目的镜像需保留 OpenCode。
 
-自动合并是项目级开关，新项目默认开启。关闭时系统仍会开发、验证、创建 MR 和审查，待全部 MR 在 GitLab 合并后完成该轮任务。所有新任务的来源 Issue 都保持打开；`no-auto-close` 对新任务无需再设置。只有 `/swarmjet run` 评论会启动后续轮次，普通复核回复不会触发开发。
+自动合并是项目级开关，新项目默认开启。关闭时系统仍会开发、验证、创建 MR/PR 和审查，待全部变更请求在托管平台合并后完成该轮任务。所有新任务的来源 Issue 都保持打开；`no-auto-close` 对新任务无需再设置。只有 `/swarmjet run` 评论会启动后续轮次，普通复核回复不会触发开发。
 
 “导入已有 Meta-Repo”仍是高级入口。此时填写 Meta-Repo URL/ref 并读取清单，仓库列表与 Meta-Repo 的 `.meta.yaml`、`.meta.yml` 或 `.meta` 校验一致：
 

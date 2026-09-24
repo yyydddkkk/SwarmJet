@@ -128,6 +128,14 @@ Antigravity 的系统钥匙串 OAuth 不能通过复制 Home 在隔离任务间�
 
 管理终端不保存录屏、输入内容或 shell 历史，只记录打开/关闭操作。登录配置检测与模型清单不代表模型额度或实际请求权限已经通过验证。
 
+## GitHub.com App 接入
+
+在 GitHub 创建一个安装型 App，授予仓库权限：Contents（读写）、Issues（读写）、Pull requests（读写）、Checks（只读）、Commit statuses（只读）、Administration（只读）和 Metadata（只读）。Administration 只读用于读取[传统分支保护的必需检查](https://docs.github.com/en/rest/branches/branch-protection#get-status-checks-protection)；rulesets 通过[分支规则接口](https://docs.github.com/en/rest/repos/rules#get-rules-for-a-branch)读取。把 App 安装到要由同一 SwarmJet 项目管理的仓库；一个项目只使用一个安装。GitHub 项目目前只支持受管 Meta-Repo，暂不支持远程 Meta-Repo 发布及任务后增删仓库。
+
+将 App 私钥 PEM 放在 `DATA_DIR` 下，例如 `${DATA_DIR}/github-app-key.pem`，权限设为 `0600`。在 `deploy/.env` 设置 `GITHUB_APP_ID`、`GITHUB_APP_PRIVATE_KEY_FILE`（容器内相同的绝对路径）以及可选的 `GITHUB_WEBHOOK_SECRET`，然后重启 API 与 Worker。控制台新建项目时选择 GitHub 安装和已授权仓库；平台只保存安装 ID，不保存安装令牌。安装令牌按项目仓库范围签发并在需要时更新；Agent Runner 不接收 GitHub 写入凭证。
+
+若有可从 GitHub 访问的 HTTPS 入口，将 App webhook 指向 `/api/webhooks/github`，配置同一个密钥，订阅 Issues、Issue comment、Pull request、Check run、Status 和 Merge group 事件。Webhook 仅唤醒扫描，120 秒轮询会补漏；没有公网入口也可接单。开启 CI 要求时，目标分支必须配置必需检查。自动合并的 `merge`、`squash`、`rebase` 方式由项目选择；启用 merge queue 的仓库使用队列策略决定最终提交方式，平台持续等待 PR 实际合并。
+
 ## GitLab 连接与初始化
 
 保存用户在 Web 输入的 GitLab Token 需要 `SWARMJET_MASTER_KEY`。生成一次并长期保持不变：

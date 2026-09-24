@@ -39,11 +39,11 @@ func (m *Manager) ask(ctx context.Context, init domain.Initialization, project d
 // connect verifies the connection, pins every repository revision and creates
 // the managed Meta-Repo with its initial commit.
 func (m *Manager) connect(ctx context.Context, init domain.Initialization, project domain.Project) (domain.Initialization, error) {
-	client, err := m.client(project)
+	client, err := m.forgeClient(project)
 	if err != nil {
 		init.Status = domain.InitBlocked
 		init.Error = err.Error()
-		init.Message = "无法读取 GitLab 连接：" + err.Error()
+		init.Message = "无法读取代码托管连接：" + err.Error()
 		return m.save(ctx, init, project)
 	}
 	if m.Managed == nil {
@@ -229,10 +229,17 @@ func (m *Manager) gitEnv(project domain.Project) []string {
 			if askpass == "" {
 				askpass = "/usr/local/bin/swarmjet-askpass"
 			}
-			env = append(env, "GITLAB_TOKEN="+token, "GIT_ASKPASS="+askpass)
+			key := "GITLAB_TOKEN"
+			if project.HostingProvider() == domain.ProviderGitHub {
+				key = "GITHUB_TOKEN"
+			}
+			env = append(env, key+"="+token, "GIT_ASKPASS="+askpass)
 		}
 	}
 	for k, v := range m.AnalysisEnv {
+		if hostingCredential(k) {
+			continue
+		}
 		env = append(env, k+"="+v)
 	}
 	return env

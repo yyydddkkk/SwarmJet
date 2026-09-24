@@ -3,7 +3,7 @@ import { api } from "./api";
 import type { Task, TaskPage, Project } from "./types";
 import { nextAction, type TaskView } from "./task-presentation";
 import { Icon } from "./ConsoleIcon";
-import { stages, date, Status } from "./TaskStatus";
+import { stages, stageLabel, date, Status } from "./TaskStatus";
 import { Empty, ErrorBox, Field, Modal } from "./ui";
 
 const go = (path: string) => { location.hash = path; };
@@ -242,7 +242,7 @@ export default function Tasks({ projectId }: { projectId: string }) {
                       <small className="task-latest">
                         {t.message ||
                           nextAction(t) ||
-                          stages[t.stage] ||
+                          stageLabel(t.stage, t.project.provider) ||
                           t.stage}
                       </small>
                       <small className="task-reference">
@@ -307,6 +307,8 @@ function CreateTask({
 }) {
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const [selectedProject, setSelectedProject] = useState("");
+  const github = projects.find(project => project.id === selectedProject)?.provider === "github";
   return (
     <Modal title="创建任务" close={close}>
       <p className="muted">从带有 autonomous 标签的已打开 Issue 创建任务。</p>
@@ -333,7 +335,7 @@ function CreateTask({
       >
         <ErrorBox error={error} />
         <Field label="项目">
-          <select name="projectId" required defaultValue="">
+          <select name="projectId" required value={selectedProject} onChange={e => setSelectedProject(e.target.value)}>
             <option value="" disabled>
               选择已启用项目
             </option>
@@ -347,10 +349,10 @@ function CreateTask({
           </select>
         </Field>
         <div className="form-grid">
-          <Field label="Issue 所属 GitLab 项目 ID">
+          <Field label={github ? "Issue 所属 GitHub 仓库 ID" : "Issue 所属 GitLab 项目 ID"}>
             <input name="issueProjectId" type="number" min="1" required />
           </Field>
-          <Field label="Issue IID">
+          <Field label={github ? "Issue 编号" : "Issue IID"}>
             <input name="issueIid" type="number" min="1" required />
           </Field>
         </div>

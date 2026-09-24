@@ -53,6 +53,8 @@ type IntegrationConfig struct {
 	StartupTimeoutSeconds int                 `json:"startupTimeoutSeconds"`
 }
 type Project struct {
+	Provider           Provider      `json:"provider,omitempty"`
+	MergeMethod        string        `json:"mergeMethod,omitempty"`
 	Nodes              NodeSelection `json:"nodes,omitempty"`
 	AcceptanceStrategy string        `json:"acceptanceStrategy,omitempty"`
 	// Empty reviewMode retains independent review for legacy projects.
@@ -66,7 +68,7 @@ type Project struct {
 	GitLabURL          string `json:"gitlabUrl"`
 	CredentialRef      string `json:"credentialRef"`
 	MergeCredentialRef string `json:"mergeCredentialRef"`
-	// ConnectionID references a saved GitLab connection. Its token is stored
+	// ConnectionID references a saved hosting connection. Its token is stored
 	// encrypted outside the project snapshot; only the reference is persisted.
 	ConnectionID string `json:"connectionId,omitempty"`
 	// MetaMode is "managed" for a system-created Meta-Repo, "imported" (or empty
@@ -88,10 +90,12 @@ type Project struct {
 func (p Project) IndependentReview() bool { return p.ReviewMode != "none" }
 
 type IssueRef struct {
-	ProjectID int64 `json:"projectId"`
-	IID       int64 `json:"iid"`
+	Provider  Provider `json:"provider,omitempty"`
+	ProjectID int64    `json:"projectId"`
+	IID       int64    `json:"iid"`
 }
 type Issue struct {
+	Provider    Provider `json:"provider,omitempty"`
 	ProjectID   int64    `json:"projectId"`
 	IID         int64    `json:"iid"`
 	Title       string   `json:"title"`
@@ -101,20 +105,22 @@ type Issue struct {
 	Labels      []string `json:"labels"`
 }
 type Revision struct {
-	RepositoryID string   `json:"repositoryId"`
-	ProjectID    int64    `json:"projectId"`
-	Path         string   `json:"path"`
-	BaseSHA      string   `json:"baseSha"`
-	InitialSHA   string   `json:"initialSha"`
-	HeadSHA      string   `json:"headSha"`
-	TargetBranch string   `json:"targetBranch"`
-	Branch       string   `json:"branch"`
-	Changed      bool     `json:"changed"`
-	Sensitive    bool     `json:"sensitive"`
-	Files        []string `json:"files"`
-	MRIID        int64    `json:"mrIid"`
-	MRURL        string   `json:"mrUrl"`
-	Merged       bool     `json:"merged"`
+	// MergeQueueEntryID records a GitHub queue entry until the PR actually merges.
+	MergeQueueEntryID string   `json:"mergeQueueEntryId,omitempty"`
+	RepositoryID      string   `json:"repositoryId"`
+	ProjectID         int64    `json:"projectId"`
+	Path              string   `json:"path"`
+	BaseSHA           string   `json:"baseSha"`
+	InitialSHA        string   `json:"initialSha"`
+	HeadSHA           string   `json:"headSha"`
+	TargetBranch      string   `json:"targetBranch"`
+	Branch            string   `json:"branch"`
+	Changed           bool     `json:"changed"`
+	Sensitive         bool     `json:"sensitive"`
+	Files             []string `json:"files"`
+	MRIID             int64    `json:"mrIid"`
+	MRURL             string   `json:"mrUrl"`
+	Merged            bool     `json:"merged"`
 }
 type Workspace struct {
 	TaskID    string     `json:"taskId"`

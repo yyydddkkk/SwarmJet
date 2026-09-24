@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const dstGitLabConfigDir = "/run/swarmjet-gitlab"
@@ -64,6 +65,11 @@ func prepareEnvironment(dir string, requested map[string]string) (map[string]str
 	env := maps.Clone(requested)
 	if env == nil {
 		env = map[string]string{}
+	}
+	for key := range env {
+		if strings.HasPrefix(key, "GITHUB_") || key == "GH_TOKEN" || key == "GH_ENTERPRISE_TOKEN" {
+			delete(env, key)
+		}
 	}
 	if env["GITLAB_URI"] == "" {
 		return env, nil

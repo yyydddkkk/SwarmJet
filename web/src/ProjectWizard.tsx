@@ -14,14 +14,14 @@ import type {
 import "./wizard.css";
 
 const stepList = [
-  { key: "connection", label: "连接 GitLab" },
+  { key: "connection", label: "连接代码平台" },
   { key: "repositories", label: "选择子仓库" },
   { key: "confirm", label: "确认项目" },
   { key: "opencode", label: "配置 OpenCode" },
   { key: "initialize", label: "自动初始化" },
 ];
 
-type RepositoryResponse = {
+type RepositoryResponse = Partial<ConnectionRepository> & {
   id: number;
   name: string;
   path_with_namespace: string;
@@ -103,6 +103,23 @@ export default function ProjectWizard({
   const [defaultImage, setDefaultImage] = useState("swarmjet-agent:local");
   const [connections, setConnections] = useState<Connection[]>([]);
   const [connectionId, setConnectionId] = useState("");
+  const [provider, setProvider] = useState<"gitlab" | "github">(initialProject?.provider || "gitlab");
+  const [installations, setInstallations] = useState<{id:number;account:{login:string};suspended_at?:string|null}[]>([]);
+  const [installationId, setInstallationId] = useState("");
+  const [loadingInstallations, setLoadingInstallations] = useState(false);
+  const [mergeMethod, setMergeMethod] = useState<"merge" | "squash" | "rebase">("merge");
+  const [acceptanceStrategy, setAcceptanceStrategy] = useState<"none" | "platform_ci">("none");
+  const platformName = provider === "github" ? "GitHub" : "GitLab";
+  const changeName = provider === "github" ? "PR" : "MR";
+  async function loadInstallations() {
+    setLoadingInstallations(true); setError("");
+    try {
+      const result = await api<typeof installations>("/github/installations");
+      setInstallations(result || []);
+      setInstallationId(String((result || []).find(item => !item.suspended_at)?.id || ""));
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoadingInstallations(false); }
+  }
   const [gitlabUrl, setGitlabUrl] = useState("");
   const [token, setToken] = useState("");
   const [mergeToken, setMergeToken] = useState("");
@@ -189,10 +206,10 @@ export default function ProjectWizard({
         const repositories = (result.projects || []).map((repo): ConnectionRepository => ({
           id: repo.id,
           name: repo.name,
-          pathWithNamespace: repo.path_with_namespace,
-          defaultBranch: repo.default_branch || "",
-          httpUrlToRepo: repo.http_url_to_repo,
-          webUrl: repo.web_url,
+          pathWithNamespace: repo.pathWithNamespace || repo.path_with_namespace,
+          defaultBranch: repo.defaultBranch || repo.default_branch || "",
+          httpUrlToRepo: repo.httpUrlToRepo || repo.http_url_to_repo,
+          webUrl: repo.webUrl || repo.web_url,
           archived: repo.archived,
           description: repo.description || "",
         }));
@@ -215,6 +232,7 @@ export default function ProjectWizard({
     setBranchErrors({});
     setLoadingBranches({});
     setManualTargets({});
+    setProvider(connection.provider || "gitlab");
     setConnectionId(connection.id);
     setGitlabUrl(connection.gitlabUrl);
     setVerifyResult({
@@ -234,6 +252,12 @@ export default function ProjectWizard({
     setError("");
     setVerifyResult(null);
     try {
+      if (provider === "github") {
+        const saved = await api<Connection>(`/github/installations/${encodeURIComponent(installationId)}/connections`, "POST", {});
+        setConnections(old => [...old.filter(item => item.id !== saved.id), saved]);
+        await useConnection(saved);
+        return;
+      }
       const verified = await api<VerifyResult>(
         "/connections/verify",
         "POST",
@@ -345,9 +369,11 @@ export default function ProjectWizard({
       metaMode: "managed",
       connectionId,
       autoMerge,
-      acceptanceStrategy: "none",
+      provider,
+      mergeMethod: provider === "github" ? mergeMethod : undefined,
+      acceptanceStrategy,
       reviewMode: "none",
-      gitlabUrl: connection?.gitlabUrl || gitlabUrl,
+      gitlabUrl: provider === "github" ? "" : connection?.gitlabUrl || gitlabUrl,
       credentialRef: "",
       mergeCredentialRef: "",
       repositories: buildRepositories(),
@@ -356,7 +382,7 @@ export default function ProjectWizard({
       review: {...agent(model, defaultImage),adapter:defaultAgent},
       integration: { composeFile: "", checks: [], startupTimeoutSeconds: 180 },
       maxReworks: 3,
-      requireCI: false,
+      requireCI: acceptanceStrategy === "platform_ci",
     };
   }
 
@@ -557,12 +583,12 @@ export default function ProjectWizard({
           <div className="eyebrow">{initialProject ? "PROJECT INITIALIZATION" : "NEW PROJECT"}</div>
           <h1>{initialProject ? initialProject.name + " · 初始化" : "连接仓库，配置 OpenCode，自动初始化"}</h1>
           <p>
-            {initialProject ? "离开页面不会中断初始化；可随时从项目列表或编辑页返回，查看进度并继续处理。" : "只需填写 GitLab 地址与 Access Token；系统会读取真实仓库信息并托管 Meta-Repo。"}
+            {initialProject ? "离开页面不会中断初始化；可随时从项目列表或编辑页返回，查看进度并继续处理。" : "连接 GitLab 或 GitHub App；系统会读取已授权的仓库并托管 Meta-Repo。"}
           </p>
         </div>
         <span className="status paused">{initialProject ? "进度已保存" : "未保存"}</span>
       </header>
-      {!initialProject && (
+      {!initialProject && provider !== "github" && (
         <div className="notice" role="note">
           团队已有 Meta-Repo？ <a href="#/projects/new/import">导入已有 Meta-Repo</a>
         </div>
@@ -587,8 +613,8 @@ export default function ProjectWizard({
         <section className="panel setup-section" id="connection">
           <div className="setup-section-head">
             <div>
-              <h2>连接 GitLab</h2>
-              <p>Token 只在服务端加密保存，不会回显或写入日志。</p>
+              <h2>连接代码平台</h2>
+              <p>{provider === "github" ? "选择此部署已安装的 GitHub App，按需访问授权仓库。" : "Token 只在服务端加密保存，不会回显或写入日志。"}</p>
             </div>
             <span className="setup-label">必填</span>
           </div>
@@ -601,8 +627,7 @@ export default function ProjectWizard({
                     <div>
                       <strong>{item.name}</strong>
                       <small>
-                        {item.gitlabUrl} · {item.username}
-                        {item.hasMergeToken ? " · 独立合并 Token" : " · 单 Token"}
+                        {item.provider === "github" ? `GitHub · 安装 ${item.githubInstallationId}` : `${item.gitlabUrl} · ${item.username}${item.hasMergeToken ? " · 独立合并 Token" : " · 单 Token"}`}
                       </small>
                     </div>
                     <button
@@ -616,7 +641,21 @@ export default function ProjectWizard({
                 ))}
               </div>
             )}
-            <div className="form-grid">
+            <Field label="代码平台">
+              <select value={provider} onChange={e => { const value = e.target.value as "gitlab" | "github"; setProvider(value); setConnectionId(""); setVerifyResult(null); setToken(""); setMergeToken(""); if (value === "github") void loadInstallations(); }}>
+                <option value="gitlab">GitLab</option><option value="github">GitHub</option>
+              </select>
+            </Field>
+            {provider === "github" ? <>
+              <Field label="GitHub App 安装">
+                <select value={installationId} onChange={e => setInstallationId(e.target.value)} disabled={loadingInstallations}>
+                  <option value="">选择安装</option>
+                  {installations.filter(item => !item.suspended_at).map(item => <option key={item.id} value={item.id}>{item.account.login} · {item.id}</option>)}
+                </select>
+              </Field>
+              <button type="button" className="button" disabled={loadingInstallations} onClick={() => void loadInstallations()}>{loadingInstallations ? "读取安装…" : "刷新安装"}</button>
+              {!loadingInstallations && installations.length === 0 && <p className="muted">请先为此部署配置 GitHub App，并安装到目标账号或组织。</p>}
+            </> : <><div className="form-grid">
               <Field label="GitLab 地址">
                 <input
                   value={gitlabUrl}
@@ -656,17 +695,19 @@ export default function ProjectWizard({
                 />
               </Field>
             </details>
+            </>}
             {verifyResult && (
               <div className="notice" role="status">
-                连接已验证：{verifyResult.username}（指纹{" "}
-                {verifyResult.fingerprint}）
+                {provider === "github"
+                  ? `GitHub App 已连接：${verifyResult.username}（安装 ${connection?.githubInstallationId || installationId}）`
+                  : <>连接已验证：{verifyResult.username}（指纹 {verifyResult.fingerprint}）</>}
               </div>
             )}
             <div className="actions wizard-actions">
               <button
                 type="button"
                 className="primary"
-                disabled={verifying || !gitlabUrl.trim() || !token.trim()}
+                disabled={verifying || (provider === "github" ? !installationId : !gitlabUrl.trim() || !token.trim())}
                 onClick={() => void verifyAndSave()}
               >
                 {verifying ? "正在验证…" : "验证并继续"}
@@ -681,7 +722,7 @@ export default function ProjectWizard({
           <div className="setup-section-head">
             <div>
               <h2>选择需要一起开发的子仓库</h2>
-              <p>来自 GitLab 的真实项目 ID、地址和默认分支，可搜索和翻页。</p>
+              <p>来自 {platformName} 的真实项目 ID、地址和默认分支，可搜索和翻页。</p>
             </div>
             <span className="setup-label">
               {selected.length > 0 ? "已选 " + selected.length + " 个" : "必选"}
@@ -706,7 +747,7 @@ export default function ProjectWizard({
             {repos.length === 0 && !loadingRepos && (
               <div className="repository-empty">
                 <strong>没有匹配的仓库</strong>
-                <p>请调整搜索词，或确认 Token 的仓库访问权限。</p>
+                <p>{provider === "github" ? "请调整搜索词，或检查 GitHub App 安装是否已授权目标仓库。" : "请调整搜索词，或确认 Token 的仓库访问权限。"}</p>
               </div>
             )}
             <ul className="wizard-repo-list">
@@ -722,6 +763,7 @@ export default function ProjectWizard({
                         type="checkbox"
                         aria-label={"选择仓库 " + repo.pathWithNamespace}
                         checked={checked}
+                        disabled={provider === "github" && repo.archived}
                         onChange={() => toggleRepo(repo)}
                       />
                       <span className="wizard-repo-info">
@@ -786,9 +828,9 @@ export default function ProjectWizard({
                         />
                       )}
                       <small>将作为 {layout.paths[repo.id]} 的工作目录</small>
-                      {loadingBranches[repo.id] && <small role="status">正在读取 GitLab 分支…</small>}
+                      {loadingBranches[repo.id] && <small role="status">正在读取 {platformName} 分支…</small>}
                       {branchOptions[repo.id] !== undefined && !loadingBranches[repo.id] && (
-                        <small role="status">已读取 {branchOptions[repo.id].length} 个 GitLab 分支</small>
+                        <small role="status">已读取 {branchOptions[repo.id].length} 个 {platformName} 分支</small>
                       )}
                       {branchErrors[repo.id] && (
                         <div className="wizard-branch-error" role="alert">
@@ -831,7 +873,7 @@ export default function ProjectWizard({
           <div className="setup-section-head">
             <div>
               <h2>确认项目与合并策略</h2>
-              <p>系统会自动创建并托管 Meta-Repo，不会在 GitLab 新建远程项目。</p>
+              <p>系统会自动创建并托管 Meta-Repo，不会在 {platformName} 新建远程项目。</p>
             </div>
             <span className="setup-label">必填</span>
           </div>
@@ -854,6 +896,10 @@ export default function ProjectWizard({
                 />
               </Field>
             </div>
+            {provider === "github" && <div className="form-grid">
+              <Field label="GitHub 合并方式"><select value={mergeMethod} onChange={e => setMergeMethod(e.target.value as typeof mergeMethod)}><option value="merge">Merge commit</option><option value="squash">Squash</option><option value="rebase">Rebase</option></select></Field>
+              <Field label="验收策略"><select value={acceptanceStrategy} onChange={e => setAcceptanceStrategy(e.target.value as typeof acceptanceStrategy)}><option value="none">关闭额外验收</option><option value="platform_ci">目标分支必需检查</option></select></Field>
+            </div>}
             <div className="wizard-toggle">
               <label>
                 <input
@@ -864,15 +910,15 @@ export default function ProjectWizard({
                 <span>
                   <strong>自动合并</strong>
                   <small>
-                    默认开启。关闭时系统仍会开发、验证、创建 MR 和审查，待你在
-                    GitLab 合并所有 MR 后完成该轮任务。来源 Issue 保持打开。
+                    默认开启。关闭时系统仍会开发、验证、创建 {changeName} 和审查，待你在
+                    {platformName} 合并所有 {changeName} 后完成该轮任务。来源 Issue 保持打开。
                   </small>
                 </span>
               </label>
               <p className="wizard-hint">
                 {autoMerge
                   ? "必需验收、独立审查、当前提交 CI 和目标分支检查通过后自动合并；冲突会交给开发 Agent 返工。"
-                  : "当前为人工合并；所有 MR 合并后该轮任务完成，来源 Issue 保持打开。"}
+                  : `当前为人工合并；所有 ${changeName} 合并后该轮任务完成，来源 Issue 保持打开。`}
               </p>
             </div>
             <div className="wizard-summary">
@@ -1129,7 +1175,7 @@ export default function ProjectWizard({
                     </button>
                   </div>
                 )}
-                {init.status === "ready" && <MetaPublication projectId={projectId} init={init} onChange={setInit} />}
+                {init.status === "ready" && provider !== "github" && <MetaPublication projectId={projectId} init={init} onChange={setInit} />}
                 <div className="actions wizard-actions">
                   {(init.status === "running" ||
                     init.status === "pending") && (

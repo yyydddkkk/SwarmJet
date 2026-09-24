@@ -16,7 +16,7 @@ func (s *Store) SaveConnection(ctx context.Context, c domain.Connection, secret 
 	if err := domain.ValidateConnection(c); err != nil {
 		return c, err
 	}
-	if secret == "" {
+	if secret == "" && c.HostingProvider() != domain.ProviderGitHub {
 		return c, errors.New("encrypted connection secret is required")
 	}
 	tx, err := s.Pool.Begin(ctx)

@@ -581,3 +581,17 @@ for (const width of [390, 1440]) {
     });
   });
 }
+
+test("GitHub tasks use repository IDs, PR links and GitHub manual merge guidance", async ({ page }) => {
+  const githubTask: Task = {...structuredClone(task),project:{...structuredClone(project),provider:"github"},stage:"waiting_manual_merge"};
+  await mock(page,true,[githubTask]);
+  await page.goto("/#/tasks");
+  await page.getByRole("button",{name:"创建任务",exact:true}).click();
+  await page.getByRole("dialog").getByLabel("项目",{exact:true}).selectOption("platform");
+  await expect(page.getByLabel("Issue 所属 GitHub 仓库 ID")).toBeVisible();
+  await expect(page.getByLabel("Issue 编号",{exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"取消",exact:true}).click();
+  await page.goto("/#/tasks/task-001");
+  await expect(page.getByText("请在 GitHub 合并下方 PR，系统确认全部合并后会完成任务。")).toBeVisible();
+  await expect(page.getByRole("link",{name:/PR #/})).toBeVisible();
+});

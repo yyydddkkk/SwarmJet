@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"swarmjet/internal/forge"
 	"swarmjet/internal/gitlab"
 )
 
@@ -50,7 +51,7 @@ func System(stage string, clarification bool) []gitlab.ProjectLabel {
 	return wanted
 }
 
-func Plan(ctx context.Context, client *gitlab.Client, projectID int64, wanted []gitlab.ProjectLabel) ([]Status, error) {
+func Plan(ctx context.Context, client forge.Client, projectID int64, wanted []gitlab.ProjectLabel) ([]Status, error) {
 	if len(wanted) == 0 {
 		return []Status{}, nil
 	}
@@ -75,7 +76,7 @@ func Plan(ctx context.Context, client *gitlab.Client, projectID int64, wanted []
 }
 
 // Ensure only creates absent labels. It never changes or removes a user's labels.
-func Ensure(ctx context.Context, client *gitlab.Client, projectID int64, wanted []gitlab.ProjectLabel) ([]Status, error) {
+func Ensure(ctx context.Context, client forge.Client, projectID int64, wanted []gitlab.ProjectLabel) ([]Status, error) {
 	status, err := Plan(ctx, client, projectID, wanted)
 	if err != nil {
 		return nil, err

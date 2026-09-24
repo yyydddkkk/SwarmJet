@@ -5,11 +5,21 @@ import (
 	"net/http"
 	"strconv"
 
+	"swarmjet/internal/domain"
 	"swarmjet/internal/repochange"
 	"swarmjet/internal/store"
 )
 
 func (a *server) repositoryChanges(w http.ResponseWriter, r *http.Request, id string, tail []string) {
+	project, err := a.s.Project(r.Context(), id)
+	if err != nil {
+		failure(w, err)
+		return
+	}
+	if project.HostingProvider() == domain.ProviderGitHub {
+		problem(w, http.StatusBadRequest, "GitHub 项目暂不支持任务后仓库变更")
+		return
+	}
 	manager := a.cfg.RepositoryChanges
 	if manager == nil {
 		problem(w, http.StatusServiceUnavailable, "仓库变更服务未启用")

@@ -120,6 +120,7 @@ var nodeTimeouts = map[string]time.Duration{
 	"releaseWorkspace":    5 * time.Minute,
 	"prepareWorkspace":    30 * time.Minute,
 	"refreshTargets":      30 * time.Minute,
+	"pushWorkspace":       30 * time.Minute,
 	"cleanup":             30 * time.Minute,
 	"retire":              30 * time.Minute,
 	"integrationStart":    30 * time.Minute,
@@ -352,6 +353,9 @@ func (n *RemoteNode) RefreshTargets(ctx context.Context, ws domain.Workspace, p 
 	var out domain.Workspace
 	e := n.call(ctx, "refreshTargets", workspaceParams{Project: p, Workspace: ws, Env: env}, &out)
 	return out, e
+}
+func (n *RemoteNode) PushWorkspace(ctx context.Context, ws domain.Workspace, p domain.Project, env map[string]string) error {
+	return n.call(ctx, "pushWorkspace", workspaceParams{Project: p, Workspace: ws, Env: env}, nil)
 }
 func (n *RemoteNode) ReleaseWorkspace(ctx context.Context, ws domain.Workspace) error {
 	return n.call(ctx, "releaseWorkspace", workspaceParams{Workspace: ws}, nil)

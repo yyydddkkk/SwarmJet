@@ -33,6 +33,9 @@ func (m *Manager) QueuePublication(ctx context.Context, id string, req PublishRe
 	if err != nil {
 		return init, err
 	}
+	if p.HostingProvider() == domain.ProviderGitHub {
+		return init, errors.New("GitHub 暂不支持发布远程 Meta-Repo")
+	}
 	if !p.ManagedMeta() || init.Status != domain.InitReady || init.MetaSHA == "" {
 		return init, errors.New("请先完成本地 Meta 仓库初始化")
 	}
@@ -110,6 +113,9 @@ func (m *Manager) publishMeta(parent context.Context, init domain.Initialization
 		init.Publication = &pub
 		// Save failures separately; the local initialization remains complete.
 		return m.save(parent, init, p)
+	}
+	if p.HostingProvider() == domain.ProviderGitHub {
+		return fail("GitHub 暂不支持发布远程 Meta-Repo")
 	}
 	if p.GitLabURL != pub.GitLabURL || p.CredentialReference() != pub.CredentialRef || p.MetaRef != pub.Ref {
 		return fail("发布期间项目连接或分支已变更，请恢复原设置后重试")

@@ -378,3 +378,54 @@ test("wizard terminal opens in a floating window and releases the session on clo
   await expect(page.getByRole("button", { name: "检查并继续" })).toBeVisible();
   await expect(page.locator(".xterm")).toHaveCount(0);
 });
+
+test("GitHub installation creates a managed project with platform checks", async ({ page }) => {
+  const state = await setupWizard(page);
+  await page.route("**/api/github/installations", route => route.fulfill({json:[{id:42,account:{login:"team"}},{id:43,account:{login:"suspended"},suspended_at:"2026-01-01"}]}));
+  await page.route("**/api/github/installations/42/connections", route => route.fulfill({json:{id:"gh1",provider:"github",githubInstallationId:42,name:"team",username:"team",gitlabUrl:"",version:1}}));
+  await page.route("**/api/connections/gh1/repositories?*", route => route.fulfill({json:{projects:[{id:501,name:"Core",pathWithNamespace:"team/core",defaultBranch:"main",httpUrlToRepo:"https://github.com/team/core.git",webUrl:"https://github.com/team/core",archived:false}],page:1,hasNext:false}}));
+  await page.route("**/api/connections/gh1/repositories/501/branches", route => route.fulfill({json:["main","develop"]}));
+  await page.goto("/#/projects/new");
+  await page.getByLabel("代码平台",{exact:true}).selectOption("github");
+  await expect(page.getByLabel("GitHub App 安装")).toHaveValue("42");
+  await expect(page.getByLabel("GitHub App 安装")).not.toContainText("suspended");
+  await expect(page.getByLabel("Access Token",{exact:true})).toHaveCount(0);
+  await page.getByRole("button",{name:"验证并继续"}).click();
+  await page.getByLabel("选择仓库 team/core",{exact:true}).check();
+  await expect(page.getByLabel("Core 的目标分支")).toHaveValue("main");
+  await page.getByRole("button",{name:"下一步",exact:true}).click();
+  await page.getByLabel("GitHub 合并方式").selectOption("squash");
+  await page.getByLabel("验收策略",{exact:true}).selectOption("platform_ci");
+  await page.getByRole("button",{name:"下一步：配置 OpenCode"}).click();
+  await page.getByRole("button",{name:"检查并继续"}).click();
+  await page.getByLabel("项目默认 Agent",{exact:true}).selectOption("opencode");
+  await page.getByRole("button",{name:"验证模型"}).click();
+  await expect(page.getByText("模型验证通过")).toBeVisible();
+  await page.getByRole("button",{name:"创建项目并开始初始化"}).click();
+  await expect(page.getByRole("heading",{name:"需要补充信息"})).toBeVisible();
+  expect(state.saves[0]).toMatchObject({provider:"github",connectionId:"gh1",metaMode:"managed",gitlabUrl:"",mergeMethod:"squash",acceptanceStrategy:"platform_ci",requireCI:true});
+  expect(state.saves[0].repositories?.[0]).toMatchObject({projectId:501,url:"https://github.com/team/core.git",targetBranch:"main"});
+  await page.getByLabel("请提供本地联调方式。").fill("go test ./...");
+  await page.getByRole("button",{name:"提交并继续"}).click();
+  await expect(page.getByText("初始化完成",{exact:false})).toBeVisible();
+  await expect(page.getByRole("button",{name:"发布到 GitLab",exact:true})).toHaveCount(0);
+});
+
+test("GitHub repository picker blocks archived repositories and explains App authorization", async ({ page }) => {
+  await setupWizard(page);
+  await page.route("**/api/github/installations", route => route.fulfill({json:[{id:42,account:{login:"team"}}]}));
+  await page.route("**/api/github/installations/42/connections", route => route.fulfill({json:{id:"gh1",provider:"github",githubInstallationId:42,name:"team",username:"team",gitlabUrl:"",version:1}}));
+  await page.route("**/api/connections/gh1/repositories?*", route => route.fulfill({json:{projects:new URL(route.request().url()).searchParams.get("search") ? [] : [{id:501,name:"Archived",path_with_namespace:"team/archived",default_branch:"main",http_url_to_repo:"https://github.com/team/archived.git",web_url:"https://github.com/team/archived",archived:true}],page:1,hasNext:false}}));
+  await page.goto("/#/projects/new");
+  await page.getByLabel("代码平台",{exact:true}).selectOption("github");
+  await expect(page.getByLabel("GitHub App 安装")).toHaveValue("42");
+  await page.getByRole("button",{name:"验证并继续"}).click();
+  await expect(page.getByLabel("选择仓库 team/archived",{exact:true})).toBeDisabled();
+  await expect(page.getByRole("button",{name:"下一步",exact:true})).toBeDisabled();
+  await page.getByPlaceholder("搜索仓库名称或路径").fill("missing");
+  await page.getByRole("button",{name:"搜索",exact:true}).click();
+  await expect(page.getByText("请调整搜索词，或检查 GitHub App 安装是否已授权目标仓库。")).toBeVisible();
+  await page.getByRole("button",{name:/01.*连接代码平台/}).click();
+  await expect(page.getByText("GitHub App 已连接：team（安装 42）")).toBeVisible();
+  await expect(page.getByText(/连接已验证：.*指纹/)).toHaveCount(0);
+});

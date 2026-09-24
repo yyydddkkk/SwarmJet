@@ -19,7 +19,12 @@ func AnalyzeAtNode(ctx context.Context, data string, backend execution.AgentBack
 	}
 	m := local
 	if m == nil {
-		m = &Manager{DataDir: data, Agents: backend, CredentialFor: func(domain.Project) (string, error) { return p.Env["GITLAB_TOKEN"], nil }, AnalysisEnv: map[string]string{}}
+		m = &Manager{DataDir: data, Agents: backend, CredentialFor: func(domain.Project) (string, error) {
+			if p.Project.HostingProvider() == domain.ProviderGitHub {
+				return p.Env["GITHUB_TOKEN"], nil
+			}
+			return p.Env["GITLAB_TOKEN"], nil
+		}, AnalysisEnv: map[string]string{}}
 		for k, v := range p.Env {
 			if strings.HasSuffix(strings.ToUpper(k), "_PROXY") {
 				m.AnalysisEnv[k] = v
@@ -44,6 +49,9 @@ func AnalyzeAtNode(ctx context.Context, data string, backend execution.AgentBack
 	}
 	vars := map[string]string{}
 	for k, v := range m.AnalysisEnv {
+		if hostingCredential(k) {
+			continue
+		}
 		vars[k] = v
 	}
 	ex, e := backend.Start(ctx, domain.AgentRequest{ExecutionID: p.Initialization.ExecutionID, TaskID: p.Project.ID, Role: "init", Workspace: root, GeneratedDir: generated, Prompt: initialPrompt(p.Project, p.Initialization), SessionID: p.Initialization.SessionID, Config: cfg, Env: vars})
@@ -71,4 +79,10 @@ func validateGeneratedFiles(files map[string]string) error {
 		return fmt.Errorf("生成文件超过传输限额")
 	}
 	return nil
+}
+
+// Hosting credentials are available only to Git preparation, never to analysis agents.
+func hostingCredential(key string) bool {
+	key = strings.ToUpper(key)
+	return strings.HasPrefix(key, "GITLAB_") || strings.HasPrefix(key, "GITHUB_") || key == "GH_TOKEN" || key == "GH_ENTERPRISE_TOKEN" || key == "GIT_ASKPASS"
 }

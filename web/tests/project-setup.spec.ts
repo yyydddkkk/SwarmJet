@@ -612,3 +612,17 @@ test("custom command acceptance preserves argv without requiring Compose", async
   await expect.poll(() => state.saves.length).toBe(1);
   expect(state.saves[0].integration.commands?.[0]).toMatchObject({ path: "libs/core", argv: ["node", "-e", "console.log(123)"] });
 });
+
+test("GitHub editor uses installation connection and GitHub label management", async ({ page }) => {
+  await setupAPI(page, {...configuredProject(),provider:"github",metaMode:"managed",connectionId:"gh1",gitlabUrl:"",enabled:true,acceptanceStrategy:"platform_ci",mergeMethod:"squash"});
+  await page.goto("/#/projects/custom-project");
+  const labels = page.getByRole("region",{name:"GitHub 标签管理"});
+  await expect(labels.getByRole("heading",{name:"GitHub 标签",exact:true})).toBeVisible();
+  await labels.getByRole("button",{name:"检查并补齐"}).click();
+  await expect(labels.getByText("标签已就绪")).toHaveCount(2);
+  await page.getByText("连接与凭据设置",{exact:false}).click();
+  await expect(page.getByLabel("GitHub 连接",{exact:true})).toHaveValue("gh1");
+  await expect(page.getByLabel("GitLab 地址",{exact:true})).toHaveCount(0);
+  await expect(page.getByLabel("验收策略",{exact:true})).toHaveValue("platform_ci");
+  await expect(page.getByLabel("GitHub 合并方式")).toHaveValue("squash");
+});

@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -19,6 +21,36 @@ import (
 	"swarmjet/internal/imagebuild"
 	"swarmjet/internal/store"
 )
+
+func TestGitHubWebhookValidatesBodySignature(t *testing.T) {
+	service := &Service{Wake: make(chan struct{}, 1)}
+	body := []byte(`{"action":"opened"}`)
+	mac := hmac.New(sha256.New, []byte("secret"))
+	_, _ = mac.Write(body)
+	signature := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	for _, tc := range []struct {
+		name, sig string
+		body      []byte
+		want      int
+	}{
+		{"valid", signature, body, http.StatusAccepted},
+		{"tampered", signature, []byte(`{"action":"closed"}`), http.StatusUnauthorized},
+		{"missing", "", body, http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/webhooks/github", strings.NewReader(string(tc.body)))
+			req.Header.Set("X-Hub-Signature-256", tc.sig)
+			response := httptest.NewRecorder()
+			service.GitHubWebhook("secret").ServeHTTP(response, req)
+			if response.Code != tc.want {
+				t.Fatalf("status = %d, want %d", response.Code, tc.want)
+			}
+		})
+	}
+	if len(service.Wake) != 1 {
+		t.Fatal("only the valid delivery should wake the scanner")
+	}
+}
 
 func TestWebhookAuthenticationMethodAndBodyLimit(t *testing.T) {
 	for _, test := range []struct {

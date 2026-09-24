@@ -21,6 +21,8 @@ export interface Check {
   required: boolean;
 }
 export interface Connection {
+  provider?: "gitlab" | "github";
+  githubInstallationId?: number;
   id: string;
   name: string;
   gitlabUrl: string;
@@ -93,8 +95,10 @@ export interface Initialization {
   agentStopped?: boolean;
 }
 export interface Project {
+  provider?: "gitlab" | "github";
+  mergeMethod?: "merge" | "squash" | "rebase";
   nodes?: {mode:string;ids?:string[]};
-  acceptanceStrategy?: "none" | "repository" | "gitlab_ci" | "custom";
+  acceptanceStrategy?: "none" | "repository" | "gitlab_ci" | "platform_ci" | "custom";
   reviewMode?: "none" | "independent";
   id: string;
   name: string;
