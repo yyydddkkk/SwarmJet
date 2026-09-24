@@ -57,6 +57,15 @@ export default function NodeSettings() {
   >([]);
   const [nodes, setNodes] = useState<NodeView[]>([]),
     [registryImages, setRegistryImages] = useState<RegistryImage[]>([]),
+    [platformImages, setPlatformImages] = useState<RegistryImage[]>([]),
+    [platformError, setPlatformError] = useState(""),
+    [platformImage, setPlatformImage] = useState(""),
+    [advertiseUrl, setAdvertiseUrl] = useState(""),
+    [controlPlaneUrl, setControlPlaneUrl] = useState(""),
+    [nodeDataDir, setNodeDataDir] = useState(""),
+    [nodePort, setNodePort] = useState(8092),
+    [nodeCapacity, setNodeCapacity] = useState(2),
+    [bundleNotice, setBundleNotice] = useState(""),
     [registryError, setRegistryError] = useState(""),
     [loadingImages, setLoadingImages] = useState(false),
     [manualImage, setManualImage] = useState(false),
@@ -69,6 +78,17 @@ export default function NodeSettings() {
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
   const load = () => api<NodeView[]>("/nodes").then(setNodes);
+  const resolvedNodeDataDir = nodeDataDir || `/srv/swarmjet/nodes/${newID || "node-1"}`;
+  async function loadPlatformImages() {
+    try {
+      const result = await api<{ images: RegistryImage[] }>("/registry/platform-images");
+      setPlatformImages(result.images);
+      setPlatformError("");
+      if (!platformImage && result.images.length) setPlatformImage(result.images[0].reference);
+    } catch (e) {
+      setPlatformError((e as Error).message);
+    }
+  }
   async function loadRegistryImages() {
     setLoadingImages(true);
     setRegistryError("");
@@ -84,6 +104,7 @@ export default function NodeSettings() {
   useEffect(() => {
     load().catch((e) => setError(e.message));
     void loadRegistryImages();
+    void loadPlatformImages();
     const t = setInterval(() => load().catch((e) => setError(e.message)), 5000);
     return () => clearInterval(t);
   }, []);
@@ -161,9 +182,9 @@ export default function NodeSettings() {
       <details className="panel">
         <summary>添加节点</summary>
         <div className="panel-body">
+          {bundleNotice && <p role="status">{bundleNotice}</p>}
           <p>
-            在目标机器使用独立 DATA_DIR 和 Compose 项目部署
-            Node，启动后自动注册。新节点默认不接收任务。
+            下载部署包，在目标服务器检查环境并运行安装脚本。安装包包含节点注册凭据和仓库只读凭据，请作为私密文件保存。新节点默认不接收任务。
           </p>
           <Field label="节点 ID">
             <input
@@ -174,6 +195,68 @@ export default function NodeSettings() {
               }}
             />
           </Field>
+          <Field label="程序镜像版本">
+            <select value={platformImage} onChange={(e) => setPlatformImage(e.target.value)}>
+              <option value="">选择已发布的程序镜像</option>
+              {platformImages.map((image) => (
+                <option key={image.digest} value={image.reference}>{image.tags.join("、") || image.digest.slice(0, 19)} · {image.digest.slice(0, 19)}…</option>
+              ))}
+            </select>
+          </Field>
+          <button type="button" onClick={() => void loadPlatformImages()}>刷新程序镜像版本</button>
+          {platformError && <p role="alert">{platformError}</p>}
+          {!platformError && platformImages.length === 0 && <p>仓库中尚无程序镜像。请按部署文档发布；本机原生开发使用 <code>python3 deploy/publish_platform.py --dev --build --tag 版本号</code>。</p>}
+          <Field label="Node 内网访问地址" hint="控制面访问 Node 的地址，例如 http://10.0.0.21:8092。">
+            <input value={advertiseUrl} onChange={(e) => setAdvertiseUrl(e.target.value)} placeholder="http://10.0.0.21:8092" />
+          </Field>
+          <Field label="控制面内网地址" hint="目标服务器访问控制面 API 的地址。不能填通过 SSH 隧道访问页面时的 localhost。">
+            <input value={controlPlaneUrl} onChange={(e) => setControlPlaneUrl(e.target.value)} placeholder="http://10.0.0.20:8180" />
+          </Field>
+          <Field label="Node 数据目录">
+            <input value={resolvedNodeDataDir} onChange={(e) => setNodeDataDir(e.target.value)} />
+          </Field>
+          <Field label="Node 端口">
+            <input type="number" min={1} max={65535} value={nodePort} onChange={(e) => setNodePort(Number(e.target.value))} />
+          </Field>
+          <Field label="并发任务容量">
+            <input type="number" min={1} max={128} value={nodeCapacity} onChange={(e) => setNodeCapacity(Number(e.target.value))} />
+          </Field>
+          <button
+            type="button"
+            disabled={busy || !newID || !platformImage || !advertiseUrl || !controlPlaneUrl}
+            onClick={async () => {
+              setBusy(true);
+              setError("");
+              setBundleNotice("");
+              try {
+                const response = await fetch(`/api/nodes/${encodeURIComponent(newID)}/deployment`, {
+                  method: "POST",
+                  credentials: "same-origin",
+                  headers: { "Content-Type": "application/json", "X-Requested-With": "swarmjet" },
+                  body: JSON.stringify({ image: platformImage, dataDir: resolvedNodeDataDir, advertiseUrl, controlPlaneUrl, capacity: nodeCapacity, port: nodePort, listenHost: "0.0.0.0" }),
+                });
+                if (!response.ok) {
+                  const result = await response.json().catch(() => ({}));
+                  throw new Error(result.error || `部署包生成失败 (${response.status})`);
+                }
+                const url = URL.createObjectURL(await response.blob());
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `swarmjet-node-${newID}.tar.gz`;
+                link.click();
+                setTimeout(() => URL.revokeObjectURL(url), 60_000);
+                setBundleNotice("部署包已下载。请将其安全传到目标服务器，先运行 --check，再执行安装。");
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >下载 Node 部署包</button>
+          <p>下载会为新节点创建注册凭据；已注册的节点 ID 不能在此重复使用。Node 端口仅应向控制面开放。</p>
+          <pre>{`mkdir -m 700 swarmjet-node-${newID || "节点ID"}\ntar -xzf swarmjet-node-${newID || "节点ID"}.tar.gz -C swarmjet-node-${newID || "节点ID"}\ncd swarmjet-node-${newID || "节点ID"}\npython3 install_node.py --check\nsudo python3 install_node.py`}</pre>
+          <details>
+            <summary>手动部署凭据</summary>
           <button
             disabled={!newID}
             onClick={async () => {
@@ -201,6 +284,7 @@ export default function NodeSettings() {
             部署变量：NODE_ID、NODE_SECRET、NODE_DATA_DIR、NODE_ADVERTISE_URL、CONTROL_PLANE_URL。使用
             deploy/compose.node.yaml 启动。
           </p>
+          </details>
         </div>
       </details>
       <section className="panel">

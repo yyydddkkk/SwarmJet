@@ -42,3 +42,7 @@
 .image-distribute .environment-check { margin:10px 0; }
 .image-distribute small { color:var(--muted); }
 .image-head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.platform-image-management { display: grid; gap: 18px; }
+.platform-build-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; padding: 18px 24px 24px; }
+.platform-build-controls > label, .platform-build-controls > .field { flex: 1; min-width: min(100%, 260px); }
+.platform-image-management .image-build-main > code { display: block; overflow-wrap: anywhere; margin-top: 8px; }

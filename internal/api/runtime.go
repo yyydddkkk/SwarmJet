@@ -20,6 +20,21 @@ func (a *server) runtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	imageRoute := path == "/images" || strings.HasPrefix(path, "/images/")
+	if path == "/images/platform" || strings.HasPrefix(path, "/images/platform/") {
+		options, err := a.loadDeveloperOptions(r)
+		if err != nil {
+			failure(w, err)
+			return
+		}
+		if !options.PlatformImages {
+			problem(w, 403, "请先在开发者选项启用平台镜像管理")
+			return
+		}
+		if a.cfg.BuilderURL == "" {
+			problem(w, 503, "请先启用独立构建服务")
+			return
+		}
+	}
 	if imageRoute && a.cfg.RequireNode && a.cfg.BuilderURL == "" {
 		problem(w, 503, "镜像管理目前仅支持单机执行环境，多执行节点请通过部署分发镜像。")
 		return

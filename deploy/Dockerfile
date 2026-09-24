@@ -17,7 +17,7 @@ RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 COPY image_assets.go ./
-COPY deploy/Dockerfile.agent ./deploy/Dockerfile.agent
+COPY deploy/Dockerfile.agent deploy/install_node.py deploy/compose.node.yaml ./deploy/
 COPY scripts/install-agent-clis.sh scripts/askpass.sh ./scripts/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/swarmjet ./cmd/swarmjet
 
@@ -45,6 +45,12 @@ COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
 COPY --from=build /out/swarmjet /usr/local/bin/swarmjet
 COPY --from=web /src/web/dist /app/web/dist
+COPY go.mod go.sum image_assets.go .dockerignore /opt/swarmjet-platform-source/
+COPY cmd/ /opt/swarmjet-platform-source/cmd/
+COPY internal/ /opt/swarmjet-platform-source/internal/
+COPY web/ /opt/swarmjet-platform-source/web/
+COPY deploy/Dockerfile deploy/Dockerfile.agent deploy/install_node.py deploy/compose.node.yaml /opt/swarmjet-platform-source/deploy/
+COPY scripts/install-agent-clis.sh scripts/askpass.sh /opt/swarmjet-platform-source/scripts/
 COPY scripts/askpass.sh /usr/local/bin/swarmjet-askpass
 RUN chmod 0755 /usr/local/bin/swarmjet-askpass \
  && docker --version && docker compose version

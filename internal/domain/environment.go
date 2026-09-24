@@ -107,6 +107,7 @@ type ReadyImage struct {
 	Error        string   `json:"error,omitempty"`
 }
 type NodeReadiness struct {
+	PlatformImage string         `json:"platformImage,omitempty"`
 	Images        []ReadyImage   `json:"images,omitempty"`
 	DockerNetwork string         `json:"dockerNetwork,omitempty"`
 	ConfigVersion int            `json:"configVersion"`

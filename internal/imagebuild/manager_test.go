@@ -131,6 +131,49 @@ func TestBuildSnapshotLogsAndExplicitActivation(t *testing.T) {
 	}
 }
 
+func TestPlatformBuildPublishesDigestWithoutChangingAgentRecipe(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	if err := os.MkdirAll(filepath.Join(source, "deploy"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "deploy/Dockerfile"), []byte("FROM scratch\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := New(filepath.Join(root, "data"), func(_ context.Context, args []string, out io.Writer) error {
+		if args[0] != "build" || !strings.Contains(strings.Join(args, " "), "deploy/Dockerfile") || args[len(args)-1] != source {
+			t.Errorf("unexpected platform build command: %v", args)
+		}
+		for i, arg := range args {
+			if arg == "--metadata-file" && i+1 < len(args) {
+				return os.WriteFile(args[i+1], []byte(`{"containerimage.digest":"`+digestA+`"}`), 0600)
+			}
+		}
+		return errors.New("missing metadata path")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.ResolvePlatform = func(context.Context, string) (Prepared, string, error) {
+		return Prepared{}, "registry.test/swarmjet/platform", nil
+	}
+	before := m.Snapshot().Config
+	if _, err := m.BuildPlatform("bad/tag", source); err == nil {
+		t.Fatal("unsafe tag accepted")
+	}
+	build, err := m.BuildPlatform("dev-1", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := awaitBuild(t, m, build.ID)
+	if finished.Status != "succeeded" || finished.Source != "platform" || finished.Reference != "registry.test/swarmjet/platform@"+digestA {
+		t.Fatal(finished)
+	}
+	if !reflect.DeepEqual(m.Snapshot().Config, before) {
+		t.Fatal("platform build changed Agent recipe")
+	}
+}
+
 func TestFailedCancelledAndInterruptedBuildsKeepActiveImage(t *testing.T) {
 	for _, mode := range []string{"failed", "cancelled", "interrupted"} {
 		t.Run(mode, func(t *testing.T) {

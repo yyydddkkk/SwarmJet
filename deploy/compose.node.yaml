@@ -6,7 +6,7 @@
 #   docker compose -f compose.node.yaml up -d
 #
 # NODE_ADVERTISE_URL must be reachable from the control plane. Use TLS in
-# production and keep the shared NODE_SECRET identical on both sides.
+# production and use the per-node NODE_SECRET from Node management.
 name: ${COMPOSE_PROJECT_NAME:-swarmjet}-node
 services:
   node:
@@ -24,6 +24,7 @@ services:
       NODE_ADVERTISE_URL: ${NODE_ADVERTISE_URL:?Set the URL the control plane uses to reach this node}
       CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:?Set the control-plane API base URL}
       NODE_CAPACITY: ${NODE_CAPACITY:-2}
+      PLATFORM_IMAGE: ${IMAGE:-swarmjet:local}
       NODE_LISTEN_ADDRESS: :8092
       META_COMMAND: ${META_COMMAND:-meta}
       GITLAB_TOKEN: ${GITLAB_TOKEN:-}

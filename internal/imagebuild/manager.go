@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -52,8 +54,9 @@ type State struct {
 }
 
 type Manager struct {
-	Resolve   func(context.Context, *Config) (Prepared, error)
-	SaveState func(State) error
+	Resolve         func(context.Context, *Config) (Prepared, error)
+	ResolvePlatform func(context.Context, string) (Prepared, string, error)
+	SaveState       func(State) error
 
 	mu      sync.Mutex
 	dir     string
@@ -61,6 +64,58 @@ type Manager struct {
 	state   State
 	cancel  context.CancelFunc
 	running string
+}
+
+var platformTag = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
+
+// BuildPlatform uses the same serialized BuildKit queue and durable history as
+// Agent images, while leaving the Agent build recipe untouched.
+func (m *Manager) BuildPlatform(tag, sourceDir string) (Build, error) {
+	if !platformTag.MatchString(tag) {
+		return Build{}, errors.New("平台镜像版本标签无效")
+	}
+	if m.ResolvePlatform == nil || sourceDir == "" {
+		return Build{}, errors.New("平台镜像构建服务未配置")
+	}
+	sourceDir, err := filepath.Abs(sourceDir)
+	if err != nil {
+		return Build{}, err
+	}
+	if _, err = os.Stat(filepath.Join(sourceDir, "deploy/Dockerfile")); err != nil {
+		return Build{}, errors.New("平台源码或 Dockerfile 不可用")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.running != "" {
+		return Build{}, errors.New("已有镜像正在构建，请等待完成或取消")
+	}
+	resolveCtx, stop := context.WithTimeout(context.Background(), 45*time.Second)
+	prepared, repository, err := m.ResolvePlatform(resolveCtx, tag)
+	stop()
+	if err != nil {
+		return Build{}, err
+	}
+	if err = ValidateReference(repository); err != nil {
+		return Build{}, err
+	}
+	id, err := newID()
+	if err != nil {
+		return Build{}, err
+	}
+	buildDir := filepath.Join(m.dir, "builds", id)
+	if err = os.MkdirAll(buildDir, 0700); err != nil {
+		return Build{}, err
+	}
+	b := Build{ID: id, Tag: repository + ":" + tag, Status: "building", Source: "platform", Config: Config{Repository: repository, Platform: "linux/" + runtime.GOARCH}, CreatedAt: time.Now().UTC()}
+	m.state.Builds = append([]Build{b}, m.state.Builds...)
+	if err = m.save(); err != nil {
+		m.state.Builds = m.state.Builds[1:]
+		return Build{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	m.cancel, m.running = cancel, id
+	go m.build(context.WithValue(ctx, preparedKey{}, prepared), cancel, b, sourceDir)
+	return b, nil
 }
 
 func root(dataDir string) string { return filepath.Join(dataDir, "image-manager") }
@@ -305,14 +360,24 @@ func (m *Manager) build(ctx context.Context, cancel context.CancelFunc, b Build,
 	path := filepath.Join(m.dir, "builds", b.ID, "build.log")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err == nil {
-		args := []string{"build", "--progress=plain", "--file", filepath.Join(dir, "deploy/Dockerfile.agent"), "--tag", b.Tag, "--label", "swarmjet.image-build=" + b.ID, "--label", "swarmjet.agent-clis=" + strings.Join(b.Config.Agents, ",")}
+		dockerfile := "deploy/Dockerfile.agent"
+		if b.Source == "platform" {
+			dockerfile = "deploy/Dockerfile"
+		}
+		args := []string{"build", "--progress=plain", "--file", filepath.Join(dir, dockerfile), "--tag", b.Tag, "--label", "swarmjet.image-build=" + b.ID}
+		if b.Source != "platform" {
+			args = append(args, "--label", "swarmjet.agent-clis="+strings.Join(b.Config.Agents, ","))
+		}
 		if b.Config.Repository != "" {
 			args = append(args, "--metadata-file", filepath.Join(m.dir, "builds", b.ID, "metadata.json"))
 		}
 		if b.Config.Platform != "" {
 			args = append(args, "--platform", b.Config.Platform)
 		}
-		values := b.Config.args()
+		values := map[string]string{}
+		if b.Source != "platform" {
+			values = b.Config.args()
+		}
 		keys := []string{}
 		for key := range values {
 			keys = append(keys, key)

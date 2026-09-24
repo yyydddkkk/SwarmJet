@@ -34,6 +34,63 @@ func (s *server) images(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/images")
 	fail := func(err error) { writeJSON(w, 400, map[string]string{"error": err.Error()}) }
 	switch {
+	case path == "/platform" && r.Method == http.MethodGet:
+		snapshot := s.imageManager.Snapshot()
+		builds := []imagebuild.Build{}
+		for _, build := range snapshot.Builds {
+			if build.Source == "platform" {
+				builds = append(builds, build)
+			}
+		}
+		writeJSON(w, 200, map[string]any{"builds": builds, "available": s.imageManager.ResolvePlatform != nil && s.cfg.PlatformSourceDir != ""})
+	case path == "/platform/builds" && r.Method == http.MethodPost:
+		var req struct {
+			Tag string `json:"tag"`
+		}
+		if !decodeImageRequest(w, r, &req) {
+			return
+		}
+		build, err := s.imageManager.BuildPlatform(req.Tag, s.cfg.PlatformSourceDir)
+		if err != nil {
+			fail(err)
+			return
+		}
+		writeJSON(w, 202, build)
+	case strings.HasPrefix(path, "/platform/builds/"):
+		parts := strings.Split(strings.TrimPrefix(path, "/platform/builds/"), "/")
+		if len(parts) != 2 {
+			writeJSON(w, 404, map[string]string{"error": "构建记录不存在"})
+			return
+		}
+		id, action := parts[0], parts[1]
+		found := false
+		for _, build := range s.imageManager.Snapshot().Builds {
+			if build.ID == id && build.Source == "platform" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			writeJSON(w, 404, map[string]string{"error": "构建记录不存在"})
+			return
+		}
+		switch {
+		case action == "log" && r.Method == http.MethodGet:
+			log, err := s.imageManager.Logs(id)
+			if err != nil {
+				fail(err)
+				return
+			}
+			writeJSON(w, 200, map[string]string{"log": log})
+		case action == "cancel" && r.Method == http.MethodPost:
+			if err := s.imageManager.Cancel(id); err != nil {
+				fail(err)
+				return
+			}
+			writeJSON(w, 202, map[string]bool{"ok": true})
+		default:
+			writeJSON(w, 405, map[string]string{"error": "不支持此请求方法"})
+		}
 	case path == "" && r.Method == "GET":
 		active, err := imagebuild.ReadActive(s.cfg.DataDir)
 		if err != nil {

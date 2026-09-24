@@ -50,13 +50,23 @@ const running = (b: Build) =>
   b.status === "building" || b.status === "cancelling";
 
 export default function ImageSettings() {
-	const [tab, setTab] = useState<"images" | "build">("build");
+  const requestedPlatform = new URLSearchParams(location.hash.split("?")[1]).get("tab") === "platform";
+  const [tab, setTab] = useState<"images" | "build" | "platform">(requestedPlatform ? "platform" : "build");
+  const [platformManagement, setPlatformManagement] = useState(false);
   const [targets, setTargets] = useState<string[]>([]);
   const [nodes, setNodes] = useState<NodeView[]>([]);
   const reloadNodes = useCallback(() => api<NodeView[]>("/nodes").then(setNodes), []);
   useEffect(() => {
     void reloadNodes().catch(() => {});
   }, [reloadNodes]);
+  useEffect(() => {
+    api<{ platformImages: boolean }>("/system/developer-options")
+      .then((options) => {
+        setPlatformManagement(options.platformImages);
+        if (!options.platformImages && requestedPlatform) setTab("images");
+      })
+      .catch(() => { if (requestedPlatform) setTab("images"); });
+  }, []);
   const [view, setView] = useState<View | null>(null);
   const [config, setConfig] = useState<ImageConfig | null>(null);
   const [extraPackages, setExtraPackages] = useState("");
@@ -80,7 +90,7 @@ export default function ImageSettings() {
       .then((result) => {
         setConfig(result.scope === "registry" ? { ...result.config, repository: "" } : result.config);
         setExtraPackages(result.config.extraPackages.join(" "));
-        if (result.scope === "registry") setTab("images");
+        if (result.scope === "registry" && !requestedPlatform) setTab("images");
       })
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
@@ -89,6 +99,7 @@ export default function ImageSettings() {
   }, [refresh]);
 
   const building = view?.builds.some(running) || false;
+  const agentBuilds = view?.builds.filter((build) => build.source !== "platform") || [];
   useEffect(() => {
     if (!building) return;
     const controller = new AbortController();
@@ -155,7 +166,7 @@ export default function ImageSettings() {
       <div className="page-head">
         <div>
           <h1>镜像管理</h1>
-          <p>查看仓库版本、分发到 Node，并构建包含 Agent CLI 的 Runner 镜像。</p>
+          <p>管理 Agent 与平台程序镜像的仓库版本，并将 Agent 镜像分发到 Node。</p>
         </div>
         <div className="image-head-actions">
           <a className="button" href="#/settings/registry">仓库设置</a>
@@ -165,8 +176,10 @@ export default function ImageSettings() {
       <div className="image-tabs" role="tablist" aria-label="镜像管理视图">
         <button role="tab" aria-selected={tab === "images"} onClick={() => setTab("images")}>仓库镜像</button>
         <button role="tab" aria-selected={tab === "build"} onClick={() => setTab("build")}>镜像构建</button>
+        {platformManagement && <button role="tab" aria-selected={tab === "platform"} onClick={() => setTab("platform")}>平台镜像</button>}
       </div>
-      {tab === "images" && <RegistryInventory builds={view?.builds || []} nodes={nodes} reloadNodes={reloadNodes} onBuild={() => setTab("build")} />}
+      {tab === "images" && <RegistryInventory builds={agentBuilds} nodes={nodes} reloadNodes={reloadNodes} onBuild={() => setTab("build")} />}
+      {tab === "platform" && platformManagement && <PlatformInventory />}
       {error && (
         <div className="error" role="alert">
           {error}
@@ -420,12 +433,12 @@ export default function ImageSettings() {
                 刷新记录
               </button>
             </div>
-            {view.builds.length === 0 && (
+            {agentBuilds.length === 0 && (
               <p className="image-empty">
                 还没有镜像记录。选择 Agent 后开始构建，或添加已有镜像。
               </p>
             )}
-            {view.builds.map((build) => (
+            {agentBuilds.map((build) => (
               <article
                 className="image-build-row"
                 key={build.id}
@@ -704,4 +717,104 @@ function RegistryInventory({ builds, nodes, reloadNodes, onBuild }: {
         {usage.length > 0 && <p className="confirm-dialog-warning">平台仍在使用：{usage.join("、")}。请先移除这些引用。</p>}
     </ConfirmDialog>}
   </section>;
+}
+
+type PlatformBuildView = { builds: Build[]; available: boolean };
+
+function PlatformInventory() {
+  const [list, setList] = useState<RegistryList | null>(null);
+  const [buildView, setBuildView] = useState<PlatformBuildView | null>(null);
+  const [tag, setTag] = useState("");
+  const [logID, setLogID] = useState("");
+  const [log, setLog] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<RegistryImage | null>(null);
+  const [usage, setUsage] = useState<string[]>([]);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const refresh = useCallback(async () => {
+    const results = await Promise.allSettled([
+      api<RegistryList>("/registry/platform-images"),
+      api<PlatformBuildView>("/runtime/images/platform"),
+    ]);
+    if (results[0].status === "fulfilled") setList(results[0].value);
+    if (results[1].status === "fulfilled") setBuildView(results[1].value);
+    const failures = results.flatMap((result) => result.status === "rejected" ? [(result.reason as Error).message] : []);
+    if (failures.length) throw new Error(failures.join("；"));
+  }, []);
+  useEffect(() => { void refresh().catch((cause) => setError((cause as Error).message)); }, [refresh]);
+  const active = buildView?.builds.some(running) || false;
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => { void refresh().catch((cause) => setError((cause as Error).message)); }, 1500);
+    return () => clearInterval(timer);
+  }, [active, refresh]);
+  useEffect(() => {
+    if (!logID) return;
+    const load = () => api<{ log: string }>(`/runtime/images/platform/builds/${encodeURIComponent(logID)}/log`)
+      .then((result) => setLog(result.log)).catch((cause) => setError((cause as Error).message));
+    void load();
+    if (!active) return;
+    const timer = setInterval(() => void load(), 1500);
+    return () => clearInterval(timer);
+  }, [logID, active]);
+  async function run(name: string, work: () => Promise<void>) {
+    setBusy(name); setError(""); setNotice("");
+    try { await work(); } catch (cause) { setError((cause as Error).message); }
+    finally { setBusy(""); }
+  }
+  return <div className="platform-image-management">
+    <section className="panel image-recipe" aria-label="构建平台程序镜像">
+      <div className="panel-head"><div><h2>构建并发布平台程序镜像</h2><p>使用当前构建服务中的平台源码，发布到内置仓库的 <code>swarmjet/platform</code>。</p></div></div>
+      <div className="panel-padding platform-build-controls">
+        <Field label="新版本标签" hint="已有标签不能覆盖；例如 dev-20260924-2。">
+          <input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="dev-20260924-2" />
+        </Field>
+        <button className="primary" disabled={!!busy || !tag.trim() || !buildView?.available || active} onClick={() => void run("build", async () => {
+          const build = await api<Build>("/runtime/images/platform/builds", "POST", { tag: tag.trim() });
+          setLogID(build.id); setLog(""); setTag("");
+          await refresh();
+          setNotice("已开始构建并发布。完成后可在下方选择镜像摘要。 ");
+        })}>构建并发布</button>
+        {buildView && !buildView.available && <p className="image-help">构建服务尚未配置平台源码；请检查构建服务部署。</p>}
+      </div>
+    </section>
+    <section className="panel image-inventory" aria-label="平台镜像版本">
+      <div className="panel-head"><div><h2>平台镜像版本</h2><p>{list?.repository || "内置仓库的 swarmjet/platform 路径"}</p></div><button disabled={!!busy} onClick={() => void run("refresh", refresh)}>刷新清单</button></div>
+      {error && <p className="error" role="alert">{error}</p>}
+      {notice && <p className="notice" role="status">{notice}</p>}
+      {!list && !error && <p className="image-empty">正在读取平台镜像…</p>}
+      {list?.images.length === 0 && <p className="image-empty">仓库中还没有平台镜像版本。</p>}
+      {list?.images.map((image) => <article className="image-build-row" key={image.digest} aria-label={`平台镜像 ${image.digest}`}>
+        <div className="image-build-main">
+          <div className="image-tags">{image.tags.map((value) => <span key={value}>{value}</span>)}</div>
+          <code>{image.reference}</code>
+          <p>固定摘要可用于新 Node 的部署包；已运行的 Node 不会自动升级。</p>
+        </div>
+        <div className="image-actions">
+          <button disabled={!!busy} onClick={() => void run("copy", async () => { await navigator.clipboard.writeText(image.reference); setNotice("镜像摘要已复制。"); })}>复制摘要</button>
+          <button disabled={!!busy} onClick={() => void run("usage", async () => {
+            const result = await api<{ references: string[] }>(`/registry/platform-images/${encodeURIComponent(image.digest)}/usage`);
+            setUsage(result.references); setDeleteTarget(image);
+          })}>删除版本</button>
+        </div>
+      </article>)}
+    </section>
+    <section className="panel image-inventory" aria-label="平台镜像构建记录">
+      <div className="panel-head"><div><h2>构建记录</h2><p>构建状态与发布结果保存在平台数据库。</p></div></div>
+      {buildView?.builds.length === 0 && <p className="image-empty">暂无平台镜像构建记录。</p>}
+      {buildView?.builds.map((build) => <article className="image-build-row" key={build.id}>
+        <div className="image-build-main"><strong>{build.tag}</strong><p>{statuses[build.status] || build.status} · {new Date(build.createdAt).toLocaleString()}</p>{build.reference && <code>{build.reference}</code>}{build.error && <p className="image-build-error">{build.error}</p>}</div>
+        <div className="image-actions"><button onClick={() => setLogID(logID === build.id ? "" : build.id)}>{logID === build.id ? "关闭日志" : "查看日志"}</button>{running(build) && <button disabled={!!busy} onClick={() => void run("cancel", async () => { await api(`/runtime/images/platform/builds/${encodeURIComponent(build.id)}/cancel`, "POST"); await refresh(); })}>取消构建</button>}</div>
+      </article>)}
+      {logID && <div className="image-log" aria-label="平台镜像构建日志"><pre tabIndex={0}>{log || "等待构建输出…"}</pre></div>}
+    </section>
+    {deleteTarget && <ConfirmDialog title="确认删除平台镜像版本" confirmLabel="确认删除" danger busy={!!busy} disabled={usage.length > 0} error={error} onCancel={() => setDeleteTarget(null)} onConfirm={() => void run("delete", async () => {
+      await api(`/registry/platform-images/${encodeURIComponent(deleteTarget.digest)}`, "DELETE", { expectedTags: deleteTarget.tags });
+      setDeleteTarget(null); await refresh(); setNotice("平台镜像版本已从仓库删除。");
+    })}>
+      <p>将删除摘要 <code>{deleteTarget.digest}</code> 及其标签：{deleteTarget.tags.join("、")}。已下载但尚未安装的部署包可能引用该摘要。</p>
+      {usage.length > 0 && <p className="confirm-dialog-warning">仍在使用：{usage.join("、")}。请先更新引用。</p>}
+    </ConfirmDialog>}
+  </div>;
 }

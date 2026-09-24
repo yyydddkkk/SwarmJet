@@ -6,6 +6,7 @@ x-app-environment: &app-environment
   RUNTIME_ADMIN_SECRET: ${RUNTIME_ADMIN_SECRET:-}
   NODE_SECRET: ${NODE_SECRET:-}
   EXECUTION_MODE: ${EXECUTION_MODE:-local}
+  PLATFORM_IMAGE: ${IMAGE:-swarmjet:local}
   DATA_DIR: ${DATA_DIR:?Set DATA_DIR to an absolute host path}
   GITLAB_TOKEN: ${GITLAB_TOKEN:-}
   GITLAB_MERGE_TOKEN: ${GITLAB_MERGE_TOKEN:-}

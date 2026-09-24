@@ -131,6 +131,30 @@ test("network editor creates versioned profile without placing password in the l
   await discard.getByRole("button", { name: "放弃修改" }).click();
   await expect(savedEditor).not.toBeVisible();
 });
+
+test("node deployment bundle uses a published platform image and private LAN addresses", async ({ page }) => {
+  await mock(page);
+  const platformRef = "10.0.0.20:5443/swarmjet/platform@sha256:" + "c".repeat(64);
+  await page.route("**/api/registry/platform-images", (route) => route.fulfill({ json: {
+    images: [{ digest: "sha256:" + "c".repeat(64), reference: platformRef, tags: ["v1.2.3"] }],
+  } }));
+  let request: any;
+  await page.route("**/api/nodes/remote1/deployment", (route) => {
+    request = route.request().postDataJSON();
+    expect(route.request().headers()["x-requested-with"]).toBe("swarmjet");
+    return route.fulfill({ status: 200, contentType: "application/gzip", body: Buffer.from("bundle") });
+  });
+  await page.goto("/#/nodes");
+  await page.getByText("添加节点", { exact: true }).click();
+  await page.getByLabel("节点 ID").fill("remote1");
+  await page.getByLabel("Node 内网访问地址").fill("http://10.0.0.21:8092");
+  await page.getByLabel("控制面内网地址").fill("http://10.0.0.20:8180");
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "下载 Node 部署包" }).click();
+  expect((await download).suggestedFilename()).toBe("swarmjet-node-remote1.tar.gz");
+  expect(request).toMatchObject({ image: platformRef, advertiseUrl: "http://10.0.0.21:8092", controlPlaneUrl: "http://10.0.0.20:8180" });
+  await expect(page.getByRole("status")).toContainText("部署包已下载");
+});
 test("Mihomo management opens above the overview with versions shown first", async ({ page }) => {
   await mock(page);
   await page.goto("/#/networks");

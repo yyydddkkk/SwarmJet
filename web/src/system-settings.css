@@ -42,6 +42,9 @@
 .system-registry > .button { margin-bottom: 25px; }
 .system-settings .network-settings { max-width: none; }
 .system-settings .network-settings > .page-head { margin-top: 3px; }
+.system-developer .panel-body { padding: 20px 24px 24px; }
+.system-developer .environment-check { font-weight: 650; }
+.system-developer .panel-body > p:not(.notice) { max-width: 70ch; color: var(--muted); font-size: 13px; line-height: 1.7; }
 @media (max-width: 760px) {
   .system-tabs { gap: 16px; overflow-x: auto; }
   .system-tabs a { white-space: nowrap; }

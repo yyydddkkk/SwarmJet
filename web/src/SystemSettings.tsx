@@ -33,7 +33,7 @@ const statusLabel: Record<Check["status"], string> = {
 };
 
 export default function SystemSettings({ section }: { section: string }) {
-  const current = section === "network" || section === "registry" ? section : "overview";
+  const current = section === "network" || section === "registry" || section === "developer" ? section : "overview";
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [registry, setRegistry] = useState<Registry | null>(null);
   const [proxy, setProxy] = useState<Proxy | null>(null);
@@ -93,6 +93,7 @@ export default function SystemSettings({ section }: { section: string }) {
         <a href="#/settings" aria-current={current === "overview" ? "page" : undefined}>概览与服务地址</a>
         <a href="#/settings/network" aria-current={current === "network" ? "page" : undefined}>网络与代理</a>
         <a href="#/settings/registry" aria-current={current === "registry" ? "page" : undefined}>镜像仓库</a>
+        <a href="#/settings/developer" aria-current={current === "developer" ? "page" : undefined}>开发者选项</a>
       </nav>
       {current === "network" && <NetworkSettings embedded />}
       {current === "registry" && <div className="system-registry">
@@ -103,6 +104,7 @@ export default function SystemSettings({ section }: { section: string }) {
         <RegistrySettings expanded />
         <a className="button" href="#/images">查看仓库镜像与构建</a>
       </div>}
+      {current === "developer" && <DeveloperSettings />}
       {current === "overview" && <>
         <ErrorBox error={[loadError, checkError].filter(Boolean).join(" ")} retry={() => { void load(); void runChecks(); }} />
         <div className="system-context">
@@ -145,6 +147,43 @@ export default function SystemSettings({ section }: { section: string }) {
       </>}
     </div>
   );
+}
+
+function DeveloperSettings() {
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    api<{ platformImages: boolean }>("/system/developer-options")
+      .then((options) => setEnabled(options.platformImages))
+      .catch((cause) => setError((cause as Error).message))
+      .finally(() => setLoading(false));
+  }, []);
+  return <section className="panel system-developer" aria-labelledby="developer-heading">
+    <div className="panel-head"><div><h2 id="developer-heading">开发者选项</h2><p>控制平台程序镜像的维护入口。</p></div></div>
+    <div className="panel-body">
+      <ErrorBox error={error} />
+      {notice && <p role="status" className="notice">{notice}</p>}
+      <label className="environment-check">
+        <input type="checkbox" checked={enabled} disabled={loading || saving} onChange={async (event) => {
+          const next = event.target.checked;
+          setEnabled(next);
+          setSaving(true); setError(""); setNotice("");
+          try {
+            const saved = await api<{ platformImages: boolean }>("/system/developer-options", "PUT", { platformImages: next });
+            setEnabled(saved.platformImages);
+            setNotice(saved.platformImages ? "已显示平台镜像管理入口。" : "已隐藏平台镜像管理入口。");
+          } catch (cause) { setEnabled(!next); setError((cause as Error).message); }
+          finally { setSaving(false); }
+        }} />
+        管理平台程序镜像
+      </label>
+      <p>启用后，“镜像管理”会显示平台镜像版本及维护操作。Agent 镜像与平台程序镜像分别保存在仓库的独立路径。</p>
+      {enabled && <a className="button" href="#/images?tab=platform">打开平台镜像管理</a>}
+    </div>
+  </section>;
 }
 
 function AddressRow({ label, value, source, note, href }: { label: string; value?: string; source: string; note: string; href?: string }) {

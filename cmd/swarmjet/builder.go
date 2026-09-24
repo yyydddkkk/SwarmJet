@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"swarmjet/internal/buildproxy"
+	"swarmjet/internal/domain"
 	"swarmjet/internal/imagebuild"
 	"swarmjet/internal/networkconfig"
+	"swarmjet/internal/registrycatalog"
 	"swarmjet/internal/registryconfig"
 	"swarmjet/internal/runtimeadmin"
 	"swarmjet/internal/secretbox"
@@ -74,13 +77,41 @@ func runBuilder(ctx context.Context, s *store.Store, box *secretbox.Box) error {
 			}
 			return imagebuild.Prepared{Env: vars, Registry: access}, e
 		}
+		m.ResolvePlatform = func(cctx context.Context, tag string) (imagebuild.Prepared, string, error) {
+			reg, access, err := registryconfig.Load(cctx, s, box, true)
+			if err != nil || reg.Mode != "builtin" {
+				return imagebuild.Prepared{}, "", fmt.Errorf("请先启用内置镜像仓库")
+			}
+			reg.Repository = "swarmjet/platform"
+			images, err := registrycatalog.New(reg, access).List(cctx)
+			if err != nil {
+				return imagebuild.Prepared{}, "", fmt.Errorf("无法读取平台镜像版本，请检查仓库连接")
+			}
+			for _, image := range images {
+				for _, existing := range image.Tags {
+					if existing == tag {
+						return imagebuild.Prepared{}, "", fmt.Errorf("该平台镜像版本标签已存在，请使用新标签")
+					}
+				}
+			}
+			ref, err := s.ResolveNetwork(cctx, domain.NetworkChoice{Mode: "default"})
+			if err != nil {
+				return imagebuild.Prepared{}, "", err
+			}
+			vars, err := networkconfig.Resolve(cctx, s, box, ref)
+			if err != nil {
+				return imagebuild.Prepared{}, "", err
+			}
+			proxy.Use(vars)
+			return imagebuild.Prepared{Env: vars, Registry: access}, reg.Address + "/swarmjet/platform", nil
+		}
 		return nil
 	}
 	secret := required("RUNTIME_ADMIN_SECRET")
 	if len(secret) < 32 {
 		return fmt.Errorf("RUNTIME_ADMIN_SECRET too short")
 	}
-	handler := runtimeadmin.New(runtimeadmin.Config{DataDir: data, Secret: secret, ImageRunner: imagebuild.RemoteRunner(required("BUILDKIT_HOST")), ConfigureImages: configure, ImagesOnly: true})
+	handler := runtimeadmin.New(runtimeadmin.Config{DataDir: data, Secret: secret, ImageRunner: imagebuild.RemoteRunner(required("BUILDKIT_HOST")), ConfigureImages: configure, ImagesOnly: true, PlatformSourceDir: os.Getenv("SWARMJET_PLATFORM_SOURCE_DIR")})
 	srv := &http.Server{Addr: env("BUILDER_LISTEN_ADDRESS", ":8093"), Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	healthCtx, stopHealth := context.WithCancel(ctx)
 	healthDone := make(chan struct{})

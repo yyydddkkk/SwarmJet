@@ -71,6 +71,46 @@ test("image recipe saves, builds without switching, then explicitly activates", 
   await expect(page.getByRole("checkbox", { name: "Codex", exact: true })).toBeChecked();
 });
 
+test("developer option opens platform image versions and starts a platform build", async ({ page }) => {
+  await imagesAPI(page);
+  let enabled = false;
+  let requestedTag = "";
+  const platformDigest = "sha256:" + "c".repeat(64);
+  const platformRef = `10.0.0.20:5443/swarmjet/platform@${platformDigest}`;
+  const builds: any[] = [];
+  await page.route("**/api/system/developer-options", (route) => {
+    if (route.request().method() === "PUT") {
+      expect(route.request().headers()["x-requested-with"]).toBe("swarmjet");
+      enabled = route.request().postDataJSON().platformImages;
+    }
+    return route.fulfill({ json: { platformImages: enabled } });
+  });
+  await page.route("**/api/registry/platform-images", (route) => route.fulfill({ json: {
+    repository: "10.0.0.20:5443/swarmjet/platform",
+    images: [{ digest: platformDigest, reference: platformRef, tags: ["dev-20260924-1"] }],
+  } }));
+  await page.route("**/api/runtime/images/platform", (route) => route.fulfill({ json: { available: true, builds } }));
+  await page.route("**/api/runtime/images/platform/builds", (route) => {
+    requestedTag = route.request().postDataJSON().tag;
+    builds.unshift({ id: "platform-build-1", tag: `10.0.0.20:5443/swarmjet/platform:${requestedTag}`, status: "building", source: "platform", createdAt: "2026-09-24T08:00:00Z" });
+    return route.fulfill({ status: 202, json: builds[0] });
+  });
+  await page.route(`**/api/registry/platform-images/${encodeURIComponent(platformDigest)}/usage`, (route) => route.fulfill({ json: { references: ["节点 remote1"] } }));
+  await page.goto("/#/settings/developer");
+  await page.getByRole("checkbox", { name: "管理平台程序镜像" }).check();
+  await page.getByRole("link", { name: "打开平台镜像管理" }).click();
+  await expect(page.getByRole("tab", { name: "平台镜像" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("region", { name: "平台镜像版本" })).toContainText("dev-20260924-1");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByLabel("新版本标签").fill("dev-20260924-2");
+  await page.getByRole("button", { name: "构建并发布", exact: true }).click();
+  expect(requestedTag).toBe("dev-20260924-2");
+  await expect(page.getByRole("region", { name: "平台镜像构建记录" })).toContainText("dev-20260924-2");
+  await page.getByRole("region", { name: "平台镜像版本" }).getByRole("button", { name: "删除版本" }).click();
+  await expect(page.getByRole("dialog", { name: "确认删除平台镜像版本" }).getByRole("button", { name: "确认删除" })).toBeDisabled();
+});
+
 test("failed and cancelled builds preserve the current image", async ({ page }) => {
   const backend = await imagesAPI(page);
   await page.goto("/#/images");

@@ -33,6 +33,7 @@ type Config struct {
 	DockerNetwork          string
 	Revision               string
 	ImageRunner            imagebuild.Runner
+	PlatformSourceDir      string
 	DataDir, Image, Secret string
 	Env                    map[string]string
 	DockerCommand          DockerRunner

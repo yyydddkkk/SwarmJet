@@ -2,6 +2,8 @@
 
 Distribution 保存镜像内容，通过 Registry API 提供上传和拉取。平台构建服务负责发布；执行节点仅拉取镜像。
 
+Agent 镜像位于配置的 `swarmjet/agent` 仓库路径。启用“系统设置 → 开发者选项”后，“镜像管理 → 平台镜像”可用独立 BuildKit 从平台源码构建并发布程序镜像到 `swarmjet/platform`；两类镜像各有版本清单。平台镜像以摘要供新 Node 部署，发布新版本不会自动升级运行中的程序容器。
+
 本机开发和单机安装都使用同一份 `deploy/compose.registry.yaml`：Distribution 保存镜像，Nginx 网关提供 HTTPS 和读写分离认证。首次启动自动检测本机局域网 IPv4（也可指定固定地址），生成只属于这次安装的 CA、服务器证书及 `builder`/`reader` 独立随机密码，保存在 `DATA_DIR/registry-config`，并在本机 Docker 与 BuildKit 中安装信任配置。网关绑定该局域网地址的 5443 端口；其他局域网节点使用相同地址，需把生成的 `ca.crt` 安装到各节点 Docker 的 `/etc/docker/certs.d/<地址>:5443/ca.crt`。请给部署机器固定 DHCP 地址，避免 IP 变化使证书和已发布镜像引用失效。仓库数据保存在 Docker 卷中；镜像管理页默认使用它，也可选择自定义 HTTPS 仓库。密码由管理员点击“查看已保存密码”后才返回页面。
 
 ## 仓库部署

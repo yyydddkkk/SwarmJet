@@ -237,7 +237,12 @@ func environment() (map[string]string, error) {
 	setDefault(env, "TEMPORAL_ADDRESS", "temporal:7233")
 	setDefault(env, "DEV_WEB_PORT", "5273")
 	env["PUBLIC_ORIGIN"] = "http://localhost:" + env["DEV_WEB_PORT"]
-	env["LISTEN_ADDRESS"] = "127.0.0.1:" + value(env, "DEV_API_PORT", "8180")
+	apiHost := value(env, "DEV_API_HOST", "127.0.0.1")
+	apiIP := net.ParseIP(apiHost)
+	if apiIP == nil || apiIP.To4() == nil || !(apiIP.IsPrivate() || apiIP.IsLoopback()) {
+		return nil, errors.New("DEV_API_HOST 必须是本机回环或内网 IPv4 地址")
+	}
+	env["LISTEN_ADDRESS"] = net.JoinHostPort(apiHost, value(env, "DEV_API_PORT", "8180"))
 	env["SWARMJET_HOST_LISTEN_ADDRESS"] = env["LISTEN_ADDRESS"]
 	env["DEV_API_URL"] = "http://" + env["LISTEN_ADDRESS"]
 	env["RUNTIME_ADMIN_LISTEN"] = "127.0.0.1:" + value(env, "DEV_RUNTIME_PORT", "8191")
@@ -255,6 +260,7 @@ func environment() (map[string]string, error) {
 	env["DEV_BUILDKIT_DIR"] = file("buildkit")
 	env["DEV_BUILDKIT_GID"] = strconv.Itoa(os.Getgid())
 	env["BUILDKIT_HOST"] = "unix://" + file("buildkit/buildkitd.sock")
+	env["SWARMJET_PLATFORM_SOURCE_DIR"] = root
 	if env["MIHOMO_ENABLED"] == "1" {
 		secret, err := persistentSecret(file("mihomo-secret"))
 		if err != nil {

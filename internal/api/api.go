@@ -37,6 +37,8 @@ type Config struct {
 	Username, Password, AllowedOrigin, StaticDir, DataDir string
 	DefaultAgentImage                                     string
 	BuilderURL                                            string
+	RegistryCAFile                                        string
+	PlatformImage                                         string
 	RuntimeURL, RuntimeSecret                             string
 	NodeSecret                                            string
 	RequireNode                                           bool
@@ -182,6 +184,10 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		problem(w, 401, "authentication required")
 		return
 	}
+	if r.URL.Path == "/api/system/developer-options" {
+		a.developerOptions(w, r)
+		return
+	}
 	if r.URL.Path == "/api/system" || r.URL.Path == "/api/system/checks" {
 		a.system(w, r)
 		return
@@ -196,6 +202,10 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/registry/images" || strings.HasPrefix(r.URL.Path, "/api/registry/images/") {
 		a.registryImages(w, r)
+		return
+	}
+	if r.URL.Path == "/api/registry/platform-images" || strings.HasPrefix(r.URL.Path, "/api/registry/platform-images/") {
+		a.platformImages(w, r)
 		return
 	}
 	if r.URL.Path == "/api/networks" || r.URL.Path == "/api/networks/default" {

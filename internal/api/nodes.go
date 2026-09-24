@@ -140,6 +140,8 @@ func (a *server) manageNode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		respond(w, 201, map[string]string{"nodeId": id, "secret": token})
+	case action == "deployment" && r.Method == http.MethodPost:
+		a.nodeDeployment(w, r, id)
 	case action == "credential" && r.Method == "DELETE":
 		sealed, _, e := a.s.NodeCredential(r.Context(), id)
 		if e != nil {
