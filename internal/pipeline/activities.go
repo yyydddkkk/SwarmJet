@@ -1180,9 +1180,14 @@ func resultRecoveryPrompt(t domain.Task, phase string, merge *domain.Revision, f
 
 For developing or publishing, include humanAcceptance with prerequisites, concrete steps and expected results, and notes. For acceptanceStrategy=repository, statically identify acceptanceCommands from applicable repository files; the platform executes them and does not trust claims of passing checks. Use the allowed outcome for the role and phase: dev developing=changed/no_change/blocked; dev publishing=changed/blocked; review=approved/changes_requested/blocked; merge=merged/blocked. For publishing or merging, inspect GitLab state without mutation before reporting success.
 
+` + gitLabOutputLanguage + `
+
 Task context:
 ` + string(context)
 }
+
+const gitLabOutputLanguage = `Write GitLab MR titles, descriptions, and comments in natural Chinese by default, including review feedback. Write user-facing result fields (summary, assumptions, findings, needsHelp, and humanAcceptance) in Chinese so the platform's Issue comments also read naturally. Keep code identifiers, file paths, commands, API names, product names, and established technical terms in their original form where that reads better; do not translate them mechanically. Follow an explicit language requirement in the task or repository when present.`
+
 func prompt(t domain.Task, phase string, merge *domain.Revision) string {
 	b, _ := json.MarshalIndent(struct {
 		Issue                domain.Issue
@@ -1199,6 +1204,7 @@ func prompt(t domain.Task, phase string, merge *domain.Revision) string {
 	if t.Round > 0 {
 		base = `You are swarmjet's agent. Read applicable repository AGENTS.md and the Meta-Repo plan.md / architecture / integration instructions. Stay within this task's registered repositories and task branches. Preserve Git hooks. Record assumptions and continue despite ambiguous requirements; only return blocked when a concrete obstacle remains after reasonable attempts. Never include secrets in output. Never execute production deployment. This is one round of a long-lived source Issue. The Issue stays open after merge. Address the current Issue description and the TriggerText for this round; use PreviousTaskID only as prior-delivery context. All task MRs and commit messages must reference the source Issue WITHOUT closing keywords (Closes/Fixes/Resolves). GitLab merge checks remain mandatory. Independent review and platform verification apply only when enabled in the project.\n`
 	}
+	base += "\n" + gitLabOutputLanguage + "\n"
 
 	config, _ := json.Marshal(t.Project)
 	base += "\nProject acceptance policy: " + string(config) + "\n"

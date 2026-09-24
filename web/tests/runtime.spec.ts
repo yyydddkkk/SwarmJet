@@ -52,11 +52,9 @@ async function runtimeAPI(page: Page) {
   return {modelCalls:() => modelCalls,calls};
 }
 
-test("runtime status and model catalog are explicit, searchable and copyable", async ({
+test("runtime status does not expose the OpenCode model catalog", async ({
   page,
-  context,
 }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const {modelCalls} = await runtimeAPI(page);
   let connections = 0;
   await page.routeWebSocket("**/api/runtime/terminal?node=*", () => {
@@ -74,22 +72,14 @@ test("runtime status and model catalog are explicit, searchable and copyable", a
     page.getByRole("region", { name: "Codex 环境状态" }),
   ).toContainText("agent:codex");
   expect(connections).toBe(0);
-  expect(modelCalls()).toBe(0);
-  await page.getByRole("button", { name: "刷新模型列表", exact: true }).click();
-  await expect(page.getByText("模型清单不会验证账号余额。")).toBeVisible();
-  await page.getByLabel("搜索模型标识").fill("review");
-  await expect(
-    page.getByRole("button", { name: "复制模型 example/fast" }),
-  ).toHaveCount(0);
-  await page.getByRole("button", { name: "复制模型 example/review" }).click();
-  await expect
-    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toBe("example/review");
+  await expect(page.getByRole("heading", {name:"模型标识"})).toHaveCount(0);
+  await expect(page.getByRole("button", {name:"刷新模型列表"})).toHaveCount(0);
   await page.getByText("环境详情", { exact: true }).click();
   await expect(
     page.getByText("swarmjet-agent:local", { exact: true }),
   ).toBeVisible();
   expect(connections).toBe(0);
+  expect(modelCalls()).toBe(0);
 });
 
 test("terminal sends input without automatic Enter, fits narrow screens and clears on disconnect", async ({
@@ -313,8 +303,7 @@ test("Runner test and status follow the selected Node", async ({page}) => {
   await expect(page.getByLabel("选择 Node")).toHaveValue("node-b");
   await expect(page.getByText("registry.test/runner@sha256:bbb")).toBeVisible();
   await expect.poll(() => calls.includes("/api/runtime/status?node=node-b")).toBe(true);
-  await page.getByRole("button",{name:"刷新模型列表"}).click();
-  expect(calls).toContain("/api/runtime/models?node=node-b");
+  expect(calls.some((call) => call.startsWith("/api/runtime/models?"))).toBe(false);
 });
 
 test("minimizing terminal preserves connection and closing it disconnects", async ({page}) => {

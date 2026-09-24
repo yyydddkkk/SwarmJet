@@ -26,12 +26,6 @@ type RuntimeStatus = {
   };
   message?: string;
 };
-type ModelEntry = string | { id: string; name?: string; provider?: string };
-type RuntimeModels = {
-  models: ModelEntry[] | null;
-  providers: string[] | null;
-  warnings: string[] | null;
-};
 type ConnectionState = "disconnected" | "connecting" | "connected";
 type TerminalSession = {
   socket: WebSocket;
@@ -44,21 +38,13 @@ type TerminalSession = {
 const commands = [
   { command: "opencode auth login", label: "登录 OpenCode" },
   { command: "opencode auth list", label: "查看 OpenCode 登录配置" },
-  { command: "opencode models", label: "查看模型" },
+  { command: "opencode models", label: "查看 OpenCode 模型" },
   { command: "codex login --device-auth", label: "登录 Codex" },
   { command: "codex login status", label: "查看 Codex 登录状态" },
   {command:"dst",label:"配置 DeepSeek Harness TUI"},
   {command:"agy",label:"配置 Antigravity"},
   {command:"claude",label:"配置 Claude Code"},
 ];
-
-function modelID(model: ModelEntry): string {
-  if (typeof model === "string") return model;
-  if (!model?.id) return "";
-  return model.provider && !model.id.includes("/")
-    ? `${model.provider}/${model.id}`
-    : model.id;
-}
 
 const requestedNode=()=>new URLSearchParams(location.hash.split('?')[1]||'').get('node')||'';
 const nodePath=(path:string,nodeID:string)=>`${path}?node=${encodeURIComponent(nodeID)}`;
@@ -75,16 +61,12 @@ export default function RuntimeSettings() {
   const [expandedAgents, setExpandedAgents] = useState<string[]>([]);
   const [agentsNotice,setAgentsNotice] = useState("");
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
-  const [models, setModels] = useState<RuntimeModels | null>(null);
   const [loading, setLoading] = useState(false);
-  const [modelsLoading, setModelsLoading] = useState(false);
   const [statusError, setStatusError] = useState("");
-  const [modelsError, setModelsError] = useState("");
   const [terminalError, setTerminalError] = useState("");
   const [connection, setConnection] = useState<ConnectionState>("disconnected");
   const [terminalNotice, setTerminalNotice] = useState("");
   const [selection, setSelection] = useState(false);
-  const [search, setSearch] = useState("");
   const [copyNotice, setCopyNotice] = useState("");
   const host = useRef<HTMLDivElement>(null);
   const session = useRef<TerminalSession | null>(null);
@@ -114,27 +96,6 @@ export default function RuntimeSettings() {
       if (!controller.signal.aborted) setLoading(false);
     }
   }, [nodeID]);
-  const refreshModels = useCallback(async () => {
-    const controller = new AbortController();
-    requests.current.add(controller);
-    setModelsLoading(true);
-    setModelsError("");
-    try {
-      const result = await api<RuntimeModels>(
-        nodePath("/runtime/models",nodeID),
-        "GET",
-        undefined,
-        controller.signal,
-      );
-      if (!controller.signal.aborted) setModels(result);
-    } catch (error) {
-      if (!controller.signal.aborted) setModelsError((error as Error).message);
-    } finally {
-      requests.current.delete(controller);
-      if (!controller.signal.aborted) setModelsLoading(false);
-    }
-  }, [nodeID]);
-
   useEffect(() => {
     const controller = new AbortController();
     api<NodeView[]>("/nodes", "GET", undefined, controller.signal)
@@ -353,13 +314,6 @@ export default function RuntimeSettings() {
     noticeTimer.current = setTimeout(() => setCopyNotice(""), 4000);
   }
 
-  const allModels = [
-    ...new Set((models?.models || []).map(modelID).filter(Boolean)),
-  ];
-  const filteredModels = allModels.filter((model) =>
-    model.toLowerCase().includes(search.toLowerCase()),
-  );
-  const providers = models?.providers || status?.opencode?.providers || [];
   const node = nodes.find((item) => item.node.id === nodeID);
 
   return (
@@ -573,88 +527,6 @@ export default function RuntimeSettings() {
       </section>
       </TerminalWindow>
 
-      <section
-        className="panel runtime-models-panel"
-        aria-labelledby="runtime-models-title"
-      >
-        <div className="panel-head">
-          <div>
-            <h2 id="runtime-models-title">
-              模型标识 <span className="count">{allModels.length}</span>
-            </h2>
-            <p>登录后刷新列表，复制标识到项目的模型配置。</p>
-          </div>
-          <button
-            onClick={() => void refreshModels()}
-            disabled={modelsLoading || !status?.available}
-          >
-            {modelsLoading ? "正在读取…" : "刷新模型列表"}
-          </button>
-        </div>
-        {modelsError && (
-          <div className="error runtime-inline-error" role="alert">
-            {modelsError}
-          </div>
-        )}
-        {(models?.warnings || []).map((warning, index) => (
-          <p className="runtime-message" key={index}>
-            {warning}
-          </p>
-        ))}
-        <div className="runtime-model-toolbar">
-          <div className="runtime-providers">
-            <span>服务商</span>
-            {providers.length ? (
-              providers.map((provider) => (
-                <span className="tag" key={provider}>
-                  {provider}
-                </span>
-              ))
-            ) : (
-              <span className="muted">尚未读取</span>
-            )}
-          </div>
-          <label className="runtime-search">
-            <span className="runtime-visually-hidden">搜索模型标识</span>
-            <input
-              placeholder="搜索 provider/model…"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
-        </div>
-        {filteredModels.length ? (
-          <ul className="runtime-model-list">
-            {filteredModels.map((id) => (
-              <li key={id}>
-                <code>{id}</code>
-                <button
-                  aria-label={`复制模型 ${id}`}
-                  onClick={() => void copy(id, `已复制模型标识 ${id}`)}
-                >
-                  复制
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="runtime-model-empty">
-            {modelsLoading
-              ? "正在读取模型列表…"
-              : !models
-                ? "模型列表尚未读取。完成登录后点击“刷新模型列表”。"
-                : search
-                  ? "没有匹配的模型标识。"
-                  : "未发现可用模型标识，请在配置终端中检查登录和服务商配置。"}
-          </div>
-        )}
-        <p className="runtime-model-help">
-          检测到配置或模型名称，不代表凭据仍有效、账号有余额或当前请求可用。
-        </p>
-      </section>
-      <div className="runtime-copy-notice" role="status" aria-live="polite">
-        {copyNotice}
-      </div>
       <details className="runtime-advanced">
         <summary>环境详情</summary>
         <dl>
