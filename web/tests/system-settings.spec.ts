@@ -34,6 +34,8 @@ test("system settings shows effective addresses and connection results", async (
   await expect(page.getByText("registry.example:5443")).toBeVisible();
   await expect(page.getByText("http://proxy.example:17890")).toBeVisible();
   await expect(page.getByText("最近 30 秒有 1/1 个节点上报心跳")).toBeVisible();
+  const addressStarts = await page.locator(".system-address-value").evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().left));
+  expect(Math.max(...addressStarts) - Math.min(...addressStarts)).toBeLessThan(1);
   await page.screenshot({ path: "test-results/system-settings-desktop.png", fullPage: true });
   await page.getByRole("button", { name: "重新检查" }).click();
   await expect.poll(() => checks).toBeGreaterThan(1);

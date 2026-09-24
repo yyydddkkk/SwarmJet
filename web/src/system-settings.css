@@ -11,7 +11,7 @@
 .system-settings .panel-head h2 { margin: 0; }
 .system-settings .panel-head p { margin: 4px 0 0; }
 .system-settings .panel-head small { color: var(--muted); white-space: nowrap; }
-.system-address-row { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(220px, 1.4fr) auto; align-items: center; gap: 22px; padding: 17px 23px; border-top: 1px solid var(--line); }
+.system-address-row { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(220px, 1.4fr) 76px; align-items: center; gap: 22px; padding: 17px 23px; border-top: 1px solid var(--line); }
 .system-address-row:first-child { border-top: 0; }
 .system-address-row strong, .system-address-row small, .system-address-value code { display: block; }
 .system-address-row strong { font-size: 13px; }
