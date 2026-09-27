@@ -5,9 +5,12 @@ CREATE TABLE IF NOT EXISTS tasks(id text PRIMARY KEY, project_id text NOT NULL R
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_issue ON tasks(source) WHERE NOT terminal;
 CREATE TABLE IF NOT EXISTS commands(id text PRIMARY KEY, task_id text NOT NULL REFERENCES tasks(id), body jsonb NOT NULL, delivered boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS pending_commands ON commands(created_at) WHERE NOT delivered;
+ALTER TABLE commands ADD COLUMN IF NOT EXISTS published_at timestamptz;
+CREATE INDEX IF NOT EXISTS unpublished_commands ON commands(published_at,created_at) WHERE NOT delivered;
 CREATE TABLE IF NOT EXISTS webhook_inbox (id bigserial PRIMARY KEY, provider text NOT NULL, delivery_id text NOT NULL, event_type text NOT NULL DEFAULT '', payload bytea NOT NULL, received_at timestamptz NOT NULL DEFAULT now(), attempts integer NOT NULL DEFAULT 0, next_attempt_at timestamptz NOT NULL DEFAULT now(), lease_until timestamptz, processed_at timestamptz, UNIQUE(provider,delivery_id));
 CREATE INDEX IF NOT EXISTS pending_webhook_inbox ON webhook_inbox(next_attempt_at,id) WHERE processed_at IS NULL;
 CREATE INDEX IF NOT EXISTS processed_webhook_inbox ON webhook_inbox(processed_at) WHERE processed_at IS NOT NULL;
+CREATE TABLE IF NOT EXISTS webhook_receipts(provider text NOT NULL, delivery_id text NOT NULL, content_hash bytea NOT NULL, processed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(provider,delivery_id));
 CREATE TABLE IF NOT EXISTS events(id bigserial PRIMARY KEY, task_id text NOT NULL, kind text NOT NULL, message text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS task_events ON events(task_id,id);
 CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY, expires_at timestamptz NOT NULL);

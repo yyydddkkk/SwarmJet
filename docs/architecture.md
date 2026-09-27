@@ -20,7 +20,11 @@ Activity 通过 `internal/execution.AgentBackend` 调用 Agent 的启动、观�
 
 执行后端负责在执行主机上创建启动所需的文件。GitLab CLI 配置、镜像内凭证助手路径由本机后端准备，Activity 只选择当前阶段允许使用的凭证和 GitLab 地址。请求环境含凭证且不参与普通 JSON 序列化；未来远程协议必须单独设计认证及凭证传递，不能直接序列化 `AgentRequest` 后发送，也不能将凭证写入 Temporal 历史。
 
-当前已实现「控制面集中 + 多执行节点、准入后任务固定归属」：`swarmjet node` 在独立 `DATA_DIR` 与 Docker 上提供服务，控制面的 `execution.Pool` 通过带时间戳与 HMAC 的 HTTP 协议调用节点。Webhook 验证后先写 PostgreSQL inbox 再应答，后台按仓库扫描，周期全量扫描负责对账。接单无容量时 Task 保持 `queued`、`admissionStatus=waiting` 且没有 start 命令；准入事务分配 Node 后才启动 Workflow。节点归属写入 `tasks.node_id` 后不再更改；工作区、Agent、联调、报告读取和任务级退役都按该归属路由。节点失联时任务 blocked 并保留现场，不自动漂移。本机开发仍使用空 `NodeID` 走进程内管理器。
+当前已实现「控制面集中 + 多执行节点、准入后任务固定归属」：`swarmjet node` 在独立 `DATA_DIR` 与 Docker 上提供服务，控制面的 `execution.Pool` 通过带时间戳与 HMAC 的 HTTP 协议调用节点。Webhook 经 RabbitMQ 持久 quorum 队列缓冲，只有发布确认且成功路由后 API 才应答；PostgreSQL 保存 delivery 收据、Task 唯一性与准入状态。消费者手动 ACK，按仓库合并扫描，周期全量扫描负责对账。接单无容量时事件保留待重试，Task 保持 `queued`、`admissionStatus=waiting` 且没有 start 命令；准入事务分配 Node 后才启动 Workflow。节点归属写入 `tasks.node_id` 后不再更改；工作区、Agent、联调、报告读取和任务级退役都按该归属路由。节点失联时任务 blocked 并保留现场，不自动漂移。本机开发仍使用空 `NodeID` 走进程内管理器。
+
+RabbitMQ 承接 webhook 和命令投递，不是业务状态来源。Webhook 使用平台 delivery ID；PostgreSQL 的 `(provider, delivery ID)` 收据防止发布确认丢失后重投造成重复接单。同一 ID 携带不同内容应进入死信并告警。命令意图与 Task 变更仍在一个 PostgreSQL 事务中；投递器确认发布后记录发送状态，消费者调用 Temporal 成功后才把命令标记为 delivered。命令 ID、固定 Workflow ID 与 Workflow 内去重共同处理重复投递和确认丢失。RabbitMQ 消息可能至少一次到达，因此所有业务操作都依赖稳定 ID 幂等。
+
+Webhook、命令与死信分别使用持久化 RabbitMQ 4.3 quorum 队列。主队列配置 `reject-publish` 与条数/字节上限，拒绝发布时 API 返回 503，由平台重试；限额存在并发发布在途消息带来的少量超限可能。重试采用延迟重投；可靠死信转移须启用 quorum queue 的 at-least-once dead-letter 策略。周期对账与消息消费者共用仓库租约。切换期间旧 PostgreSQL inbox 保留并排空，不能删除未处理记录。单节点 RabbitMQ 只验证持久卷与进程重启恢复；生产可用性要求三节点 quorum 集群。
 
 接入自动接管前仍需处理：
 

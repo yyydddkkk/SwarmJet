@@ -10,6 +10,7 @@ flowchart TB
         ingress["Issue 与评论扫描 / Webhook 唤醒扫描"]
         outbox["持久化任务与命令 / Outbox 投递"]
         db[("PostgreSQL：业务配置、任务投影、命令、审计、节点")]
+        rabbit[("RabbitMQ 4.3：webhook / command quorum queues + DLQ")]
         temporal["Temporal Server：持久化流程调度"]
         temporalDb[("同一 PostgreSQL 实例：Temporal 独立数据库")]
         temporalUi["Temporal UI"]
@@ -42,12 +43,16 @@ flowchart TB
 
     user --> web
     web --> api
-    gitlab -->|"Webhook"| ingress
+    gitlab -->|"Webhook"| api
+    api -->|"持久发布确认后应答"| rabbit
+    rabbit -->|"手动 ACK；仓库扫描与准入"| ingress
     ingress -->|"轮询 Issue 与 /swarmjet run 评论"| gitlab
     api --> outbox
     ingress --> outbox
     api <--> db
     outbox <--> db
+    outbox -->|"发布确认"| rabbit
+    rabbit -->|"命令消费者；Temporal 调用成功后 ACK"| outbox
     outbox -->|"启动 Workflow / 发送命令信号"| temporal
     temporal <--> temporalDb
     temporalUi --> temporal
@@ -97,5 +102,5 @@ flowchart TB
     class user,gitlab,models external
     class web,api,ingress,outbox,temporal,temporalUi,workflow,activities,routing,maintenance,initflow,runtimeAdmin control
     class localNode,localAgents,localTests,setupContainers,remoteNode,remoteAgents,remoteTests execution
-    class db,temporalDb,localData,controlData,remoteData storage
+    class db,rabbit,temporalDb,localData,controlData,remoteData storage
 ```

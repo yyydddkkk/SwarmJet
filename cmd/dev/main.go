@@ -235,6 +235,14 @@ func environment() (map[string]string, error) {
 	setDefault(env, "DATA_DIR", filepath.Join(root, "data"))
 	setDefault(env, "TEMPORAL_NAMESPACE", "swarmjet")
 	setDefault(env, "TEMPORAL_ADDRESS", "temporal:7233")
+	if env["RABBITMQ_PASSWORD"] == "" {
+		secret, err := persistentSecret(file("rabbitmq-password"))
+		if err != nil {
+			return nil, err
+		}
+		env["RABBITMQ_PASSWORD"] = secret
+	}
+	setDefault(env, "RABBITMQ_URL", "amqp://swarmjet:"+url.QueryEscape(env["RABBITMQ_PASSWORD"])+"@rabbitmq:5672/")
 	setDefault(env, "DEV_WEB_PORT", "5273")
 	env["PUBLIC_ORIGIN"] = "http://localhost:" + env["DEV_WEB_PORT"]
 	apiHost := value(env, "DEV_API_HOST", "127.0.0.1")
@@ -416,6 +424,16 @@ func resolveDependencies(env map[string]string) error {
 			return err
 		}
 		env["TEMPORAL_ADDRESS"] = net.JoinHostPort(ip, "7233")
+	}
+	if rabbit, err := url.Parse(env["RABBITMQ_URL"]); err != nil {
+		return err
+	} else if rabbit.Hostname() == "rabbitmq" {
+		ip, err := serviceIP(env, "rabbitmq")
+		if err != nil {
+			return err
+		}
+		rabbit.Host = net.JoinHostPort(ip, "5672")
+		env["RABBITMQ_URL"] = rabbit.String()
 	}
 	return nil
 }
@@ -613,6 +631,9 @@ func supervise() error {
 		return err
 	}
 	if err := os.Setenv("PATH", env["PATH"]); err != nil {
+		return err
+	}
+	if _, err := compose(env, "up", "-d", "--wait", "rabbitmq"); err != nil {
 		return err
 	}
 	if err := resolveDependencies(env); err != nil {

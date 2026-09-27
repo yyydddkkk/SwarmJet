@@ -216,3 +216,23 @@ func TestKubernetesWorkflowCancelStopsRunnerBeforeTerminalState(t *testing.T) {
 		t.Fatalf("cancelled before stop or failed: stopped=%v stage=%s err=%v", stopped, final.Stage, err)
 	}
 }
+
+func TestKubernetesWorkflowIgnoresDuplicateCommandID(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.SetTestTimeout(10 * time.Second)
+	var final domain.Task
+	env.RegisterActivityWithOptions(func(_ context.Context, task domain.Task) error { final = task; return nil }, activity.RegisterOptions{Name: "SaveTask"})
+	env.RegisterActivityWithOptions(func(ctx context.Context, task domain.Task) (domain.Task, error) { <-ctx.Done(); return task, ctx.Err() }, activity.RegisterOptions{Name: "RunKubernetesTask"})
+	env.RegisterActivityWithOptions(func(context.Context, string) error { return nil }, activity.RegisterOptions{Name: "StopKubernetesTask"})
+	env.RegisterDelayedCallback(func() {
+		note := domain.Command{ID: "note-1", Kind: "note", Text: "once"}
+		env.SignalWorkflow(SignalName, note)
+		env.SignalWorkflow(SignalName, note)
+		env.SignalWorkflow(SignalName, domain.Command{ID: "cancel-1", Kind: "cancel"})
+	}, time.Millisecond)
+	env.ExecuteWorkflow(KubernetesTask, domain.Task{ID: "task", AdmissionBackend: "kubernetes", Stage: "queued"})
+	if err := env.GetWorkflowError(); err != nil || final.Stage != "cancelled" || len(final.Notes) != 1 || final.Notes[0] != "once" {
+		t.Fatalf("duplicate note applied: notes=%v stage=%s err=%v", final.Notes, final.Stage, err)
+	}
+}

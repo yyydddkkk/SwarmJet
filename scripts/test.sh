@@ -20,7 +20,7 @@ if [[ ${VALIDATE_DEPLOY:-0} == 1 ]]; then
     if [[ $mode == build ]]; then manifests+=(-f deploy/compose.build.yaml); fi
     if [[ $mode == builder ]]; then manifests+=(-f deploy/compose.builder.yaml -f deploy/compose.registry.yaml); fi
     env DATABASE_URL='postgres://swarmjet:validation-only@postgres:5432/swarmjet?sslmode=disable' \
-      POSTGRES_PASSWORD=validation-only ADMIN_PASSWORD=validation-only-password \
+      POSTGRES_PASSWORD=validation-only RABBITMQ_PASSWORD=validation-only-rabbitmq ADMIN_PASSWORD=validation-only-password \
       RUNTIME_ADMIN_SECRET=validation-only-secret SWARMJET_MASTER_KEY=validation-only-master \
       REGISTRY_BIND_HOST=10.0.0.20 REGISTRY_PORT=5443 REGISTRY_TLS_DIR=/tmp/swarmjet-registry/tls \
       REGISTRY_AUTH_FILE=/tmp/swarmjet-registry/htpasswd REGISTRY_HTTP_SECRET=validation-only-secret \

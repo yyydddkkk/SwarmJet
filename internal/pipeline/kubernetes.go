@@ -50,10 +50,17 @@ func KubernetesTask(ctx workflow.Context, task domain.Task) error {
 	_ = workflow.SetQueryHandler(ctx, "state", func() (domain.Task, error) { return task, nil })
 	var cancelRun workflow.CancelFunc
 	cancelled, retry := false, false
+	seen := map[string]bool{}
 	workflow.Go(ctx, func(ctx workflow.Context) {
 		for {
 			var command domain.Command
 			commands.Receive(ctx, &command)
+			if command.ID != "" {
+				if seen[command.ID] {
+					continue
+				}
+				seen[command.ID] = true
+			}
 			switch command.Kind {
 			case "cancel":
 				cancelled = true

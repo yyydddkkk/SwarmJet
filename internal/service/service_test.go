@@ -1,13 +1,16 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +42,8 @@ func TestWorkflowRouteSeparatesKubernetesWorker(t *testing.T) {
 }
 
 func TestGitHubWebhookValidatesBodySignature(t *testing.T) {
-	service := &Service{Store: scanTestStore(t), Wake: make(chan struct{}, 1)}
+	publisher := &testWebhookPublisher{}
+	service := &Service{WebhookPublisher: publisher}
 	body := []byte(`{"action":"opened"}`)
 	mac := hmac.New(sha256.New, []byte("secret"))
 	_, _ = mac.Write(body)
@@ -56,6 +60,7 @@ func TestGitHubWebhookValidatesBodySignature(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/webhooks/github", strings.NewReader(string(tc.body)))
 			req.Header.Set("X-Hub-Signature-256", tc.sig)
+			req.Header.Set("X-GitHub-Delivery", "delivery-1")
 			response := httptest.NewRecorder()
 			service.GitHubWebhook("secret").ServeHTTP(response, req)
 			if response.Code != tc.want {
@@ -63,8 +68,47 @@ func TestGitHubWebhookValidatesBodySignature(t *testing.T) {
 			}
 		})
 	}
-	if len(service.Wake) != 1 {
-		t.Fatal("only the valid delivery should wake the scanner")
+	if publisher.count != 1 {
+		t.Fatal("only the valid delivery should be published")
+	}
+}
+
+func TestGitLabWebhookValidatesSigningToken(t *testing.T) {
+	key := []byte("gitlab-test-signing-key")
+	token := "whsec_" + base64.StdEncoding.EncodeToString(key)
+	publisher := &testWebhookPublisher{}
+	svc := &Service{WebhookPublisher: publisher, GitLabSigningToken: token}
+	body := []byte(`{"object_kind":"issue"}`)
+	id := "signed-delivery"
+	stamp := fmt.Sprint(time.Now().Unix())
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte(id + "." + stamp + "."))
+	_, _ = mac.Write(body)
+	signature := "v1," + base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	for _, tc := range []struct {
+		name, signature, stamp string
+		body                   []byte
+		want                   int
+	}{
+		{"valid", signature, stamp, body, http.StatusAccepted},
+		{"tampered", signature, stamp, []byte(`{"object_kind":"note"}`), http.StatusUnauthorized},
+		{"stale", signature, fmt.Sprint(time.Now().Add(-time.Hour).Unix()), body, http.StatusUnauthorized},
+		{"missing", "", stamp, body, http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", bytes.NewReader(tc.body))
+			req.Header.Set("webhook-id", id)
+			req.Header.Set("webhook-timestamp", tc.stamp)
+			req.Header.Set("webhook-signature", tc.signature)
+			response := httptest.NewRecorder()
+			svc.Webhook("").ServeHTTP(response, req)
+			if response.Code != tc.want {
+				t.Fatalf("status=%d want=%d", response.Code, tc.want)
+			}
+		})
+	}
+	if publisher.count != 1 {
+		t.Fatalf("published %d signed deliveries", publisher.count)
 	}
 }
 
@@ -82,130 +126,171 @@ func TestWebhookAuthenticationMethodAndBodyLimit(t *testing.T) {
 		{"oversized", "shared-secret", "shared-secret", "POST", (1 << 20) + 1, http.StatusRequestEntityTooLarge},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			service := &Service{Wake: make(chan struct{}, 1)}
-			service.Store = scanTestStore(t)
+			publisher := &testWebhookPublisher{}
+			service := &Service{WebhookPublisher: publisher}
 			request := httptest.NewRequest(test.method, "/webhooks/gitlab", strings.NewReader(strings.Repeat("x", test.size)))
 			request.Header.Set("X-Gitlab-Token", test.token)
+			request.Header.Set("webhook-id", "delivery-1")
 			response := httptest.NewRecorder()
 			service.Webhook(test.secret).ServeHTTP(response, request)
 			if response.Code != test.status {
 				t.Fatalf("status=%d want=%d body=%s", response.Code, test.status, response.Body.String())
 			}
-			wantWake := 0
+			wantPublish := 0
 			if test.status == http.StatusAccepted {
-				wantWake = 1
+				wantPublish = 1
 			}
-			if len(service.Wake) != wantWake {
-				t.Fatalf("wake signalled before validation: %d", len(service.Wake))
+			if publisher.count != wantPublish {
+				t.Fatalf("published before validation: %d", publisher.count)
 			}
 		})
 	}
 }
-func TestWebhookCoalescesConcurrentNotificationsWithoutBlocking(t *testing.T) {
-	service := &Service{Store: scanTestStore(t), Wake: make(chan struct{}, 1)}
-	server := httptest.NewServer(service.Webhook("token"))
-	defer server.Close()
-	client := &http.Client{Timeout: 3 * time.Second}
-	var workers sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			req, err := http.NewRequest("POST", server.URL, strings.NewReader(`{"object_kind":"issue"}`))
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			req.Header.Set("X-Gitlab-Token", "token")
-			resp, err := client.Do(req)
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			defer resp.Body.Close()
-			io.Copy(io.Discard, resp.Body)
-			if resp.StatusCode != http.StatusAccepted {
-				t.Errorf("status %d", resp.StatusCode)
-			}
-		}()
-	}
-	workers.Wait()
-	if len(service.Wake) != 1 {
-		t.Fatalf("expected one coalesced notification, got %d", len(service.Wake))
-	}
-	<-service.Wake
-	req := httptest.NewRequest("POST", "/webhooks/gitlab", nil)
-	req.Header.Set("X-Gitlab-Token", "token")
-	response := httptest.NewRecorder()
-	service.Webhook("token").ServeHTTP(response, req)
-	if response.Code != http.StatusAccepted || len(service.Wake) != 1 {
-		t.Fatal("next event did not wake after queue drained")
-	}
-}
-func TestWebhookNilWakeDoesNotBlock(t *testing.T) {
-	service := &Service{Store: scanTestStore(t)}
-	request := httptest.NewRequest("POST", "/webhooks/gitlab", nil)
-	request.Header.Set("X-Gitlab-Token", "token")
-	response := httptest.NewRecorder()
-	service.Webhook("token").ServeHTTP(response, request)
-	if response.Code != http.StatusAccepted {
-		t.Fatalf("status=%d", response.Code)
-	}
+
+type testWebhookPublisher struct {
+	mu       sync.Mutex
+	count    int
+	messages [][]byte
+	err      error
 }
 
-func TestWebhookPersistsBeforeAckAndDeduplicates(t *testing.T) {
-	s := scanTestStore(t)
-	svc := &Service{Store: s, Wake: make(chan struct{}, 1)}
-	for i := 0; i < 2; i++ {
+func (p *testWebhookPublisher) Publish(_ context.Context, queue string, body []byte, id string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if queue == "" || id == "" {
+		return errors.New("missing queue or ID")
+	}
+	if p.err != nil {
+		return p.err
+	}
+	p.count++
+	p.messages = append(p.messages, append([]byte(nil), body...))
+	return nil
+}
+func TestWebhookRequiresStableDeliveryIDAndBrokerConfirmation(t *testing.T) {
+	publisher := &testWebhookPublisher{}
+	svc := &Service{WebhookPublisher: publisher}
+	send := func(id string) int {
 		req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", strings.NewReader(`{"object_kind":"issue"}`))
 		req.Header.Set("X-Gitlab-Token", "secret")
-		req.Header.Set("webhook-id", "same-delivery")
+		if id != "" {
+			req.Header.Set("webhook-id", id)
+		}
 		response := httptest.NewRecorder()
 		svc.Webhook("secret").ServeHTTP(response, req)
-		if response.Code != http.StatusAccepted {
-			t.Fatalf("ACK %d: %s", response.Code, response.Body.String())
-		}
+		return response.Code
 	}
-	var count int
-	if err := s.Pool.QueryRow(context.Background(), "SELECT count(*) FROM webhook_inbox WHERE provider='gitlab'").Scan(&count); err != nil || count != 1 {
-		t.Fatalf("inbox rows=%d err=%v", count, err)
+	if got := send(""); got != http.StatusBadRequest {
+		t.Fatalf("missing ID status=%d", got)
+	}
+	publisher.err = errors.New("broker unavailable")
+	if got := send("delivery-1"); got != http.StatusServiceUnavailable {
+		t.Fatalf("publish failure status=%d", got)
+	}
+	publisher.err = nil
+	if got := send("delivery-1"); got != http.StatusAccepted {
+		t.Fatalf("confirmed status=%d", got)
+	}
+	if publisher.count != 1 {
+		t.Fatalf("published %d", publisher.count)
+	}
+	var message WebhookMessage
+	if err := json.Unmarshal(publisher.messages[0], &message); err != nil {
+		t.Fatal(err)
+	}
+	if message.Provider != "gitlab" || message.DeliveryID != "delivery-1" || string(message.Payload) != `{"object_kind":"issue"}` {
+		t.Fatalf("message=%+v", message)
 	}
 }
 
-func TestWebhookDoesNotAckDatabaseFailure(t *testing.T) {
+func TestWebhookReceiptDeduplicatesAndRejectsContentConflict(t *testing.T) {
 	s := scanTestStore(t)
-	s.Pool.Close()
-	svc := &Service{Store: s, Wake: make(chan struct{}, 1)}
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", strings.NewReader(`{}`))
-	req.Header.Set("X-Gitlab-Token", "secret")
-	response := httptest.NewRecorder()
-	svc.Webhook("secret").ServeHTTP(response, req)
-	if response.Code != http.StatusServiceUnavailable || len(svc.Wake) != 0 {
-		t.Fatalf("status=%d wake=%d", response.Code, len(svc.Wake))
-	}
-}
-
-func TestWebhookBackpressureKeepsDuplicateAck(t *testing.T) {
-	s := scanTestStore(t)
+	svc := &Service{Store: s}
 	ctx := context.Background()
-	_, err := s.Pool.Exec(ctx, `INSERT INTO webhook_inbox(provider,delivery_id,payload)
-		SELECT 'gitlab', 'delivery-'||n, '{}'::bytea FROM generate_series(1,$1) n`, store.WebhookInboxLimit)
+	message := WebhookMessage{Provider: "gitlab", DeliveryID: "same-id", EventType: "Issue Hook", Payload: []byte(`{"project":{"id":7}}`)}
+	body, err := json.Marshal(message)
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := &Service{Store: s, Wake: make(chan struct{}, 1)}
-	for _, tc := range []struct {
-		id   string
-		want int
-	}{{"new", http.StatusServiceUnavailable}, {"delivery-1", http.StatusAccepted}} {
-		req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", strings.NewReader(`{}`))
-		req.Header.Set("X-Gitlab-Token", "secret")
-		req.Header.Set("webhook-id", tc.id)
-		response := httptest.NewRecorder()
-		svc.Webhook("secret").ServeHTTP(response, req)
-		if response.Code != tc.want {
-			t.Fatalf("delivery %s: status=%d want=%d", tc.id, response.Code, tc.want)
+	for i := 0; i < 2; i++ {
+		if err := svc.ProcessWebhookDelivery(ctx, body); err != nil {
+			t.Fatal(err)
 		}
+	}
+	var count int
+	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("receipts=%d err=%v", count, err)
+	}
+	message.Payload = []byte(`{"project":{"id":8}}`)
+	body, _ = json.Marshal(message)
+	if err := svc.ProcessWebhookDelivery(ctx, body); !errors.Is(err, store.ErrWebhookConflict) {
+		t.Fatalf("content conflict=%v", err)
+	}
+}
+
+func TestWebhookReceiptWaitsForSuccessfulScan(t *testing.T) {
+	s := scanTestStore(t)
+	ctx := context.Background()
+	var fail atomic.Bool
+	fail.Store(true)
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail.Load() {
+			http.Error(w, "unavailable", 503)
+			return
+		}
+		_, _ = io.WriteString(w, `[]`)
+	}))
+	defer remote.Close()
+	if _, err := s.SaveProject(ctx, scanProject(remote.URL)); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }}
+	body, _ := json.Marshal(WebhookMessage{Provider: "gitlab", DeliveryID: "retry-id", Payload: []byte(`{"project":{"id":7}}`)})
+	if err := svc.ProcessWebhookDelivery(ctx, body); err == nil {
+		t.Fatal("expected scan failure")
+	}
+	var count int
+	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("premature receipt=%d err=%v", count, err)
+	}
+	fail.Store(false)
+	if err := svc.ProcessWebhookDelivery(ctx, body); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("receipt=%d err=%v", count, err)
+	}
+}
+
+func TestWebhookBatchScansRepositoryOnce(t *testing.T) {
+	s := scanTestStore(t)
+	ctx := context.Background()
+	var scans atomic.Int32
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scans.Add(1)
+		_, _ = io.WriteString(w, `[]`)
+	}))
+	defer remote.Close()
+	if _, err := s.SaveProject(ctx, scanProject(remote.URL)); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }}
+	var bodies [][]byte
+	for _, id := range []string{"one", "two", "three"} {
+		body, _ := json.Marshal(WebhookMessage{Provider: "gitlab", DeliveryID: id, Payload: []byte(`{"project":{"id":7}}`)})
+		bodies = append(bodies, body)
+	}
+	for _, err := range svc.ProcessWebhookDeliveries(ctx, bodies) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if scans.Load() != 1 {
+		t.Fatalf("scans=%d", scans.Load())
+	}
+	var receipts int
+	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&receipts); err != nil || receipts != 3 {
+		t.Fatalf("receipts=%d err=%v", receipts, err)
 	}
 }
 
@@ -282,6 +367,39 @@ func TestIssueBurstStopsAtAdmissionBoundAndRetainsInbox(t *testing.T) {
 	stats, err := s.OperationsSnapshot(ctx)
 	if err != nil || stats.InboxPending != 1 || stats.RunnerSlotsReserved != 0 {
 		t.Fatalf("operations=%+v err=%v", stats, err)
+	}
+}
+
+func TestQueuedWebhookKeepsDeliveryWhenAdmissionIsFull(t *testing.T) {
+	s := scanTestStore(t)
+	ctx := context.Background()
+	issues := make([]map[string]any, 105)
+	for i := range issues {
+		issues[i] = map[string]any{"project_id": 7, "iid": i + 1, "title": "burst", "state": "opened", "labels": []string{"autonomous"}}
+	}
+	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			_ = json.NewEncoder(w).Encode(issues[100:])
+			return
+		}
+		_ = json.NewEncoder(w).Encode(issues[:100])
+	}))
+	defer gitlab.Close()
+	if _, err := s.SaveProject(ctx, scanProject(gitlab.URL)); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{Store: s, RequireNode: true, ResolveCredential: func(string) (string, error) { return "token", nil }}
+	body, _ := json.Marshal(WebhookMessage{Provider: "gitlab", DeliveryID: "queue-admission", EventType: "Issue Hook", Payload: []byte(`{"project":{"id":7}}`)})
+	if err := svc.ProcessWebhookDelivery(ctx, body); !errors.Is(err, store.ErrAdmissionQueueFull) {
+		t.Fatalf("admission error=%v", err)
+	}
+	page, err := s.TaskPage(ctx, store.TaskPageOptions{View: "waiting"})
+	if err != nil || page.Counts.Waiting != 100 {
+		t.Fatalf("waiting=%d err=%v", page.Counts.Waiting, err)
+	}
+	var receipts int
+	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&receipts); err != nil || receipts != 0 {
+		t.Fatalf("premature receipts=%d err=%v", receipts, err)
 	}
 }
 

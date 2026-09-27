@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/intake"
 	"swarmjet/internal/labels"
+	"swarmjet/internal/mq"
 	"swarmjet/internal/pipeline"
 	"swarmjet/internal/store"
 )
@@ -37,10 +39,15 @@ type InitReadiness interface {
 }
 
 type Service struct {
-	ForgeClient                   func(domain.Project, bool) (forge.Client, error)
-	DataDir                       string
-	Store                         *store.Store
+	ForgeClient      func(domain.Project, bool) (forge.Client, error)
+	DataDir          string
+	Store            *store.Store
+	WebhookPublisher interface {
+		Publish(context.Context, string, []byte, string) error
+	}
+	GitLabSigningToken            string
 	Temporal                      client.Client
+	CommandPublisher              CommandPublisher
 	ResolveCredential             func(string) (string, error)
 	ProjectCredential             func(domain.Project, bool) (string, error)
 	Initializer                   InitReadiness
@@ -173,7 +180,13 @@ func (s *Service) runOutbox(ctx context.Context) {
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	for {
-		if err := s.Deliver(ctx); err != nil && ctx.Err() == nil {
+		var err error
+		if s.CommandPublisher != nil {
+			err = s.PublishCommands(ctx, s.CommandPublisher)
+		} else {
+			err = s.Deliver(ctx)
+		}
+		if err != nil && ctx.Err() == nil {
 			slog.Error("outbox delivery", "error", err)
 		}
 		select {
@@ -321,27 +334,55 @@ func (s *Service) Webhook(secret string) http.Handler {
 			w.WriteHeader(405)
 			return
 		}
-		want := sha256.Sum256([]byte(secret))
-		got := sha256.Sum256([]byte(r.Header.Get("X-Gitlab-Token")))
-		if secret == "" || subtle.ConstantTimeCompare(want[:], got[:]) != 1 {
-			http.Error(w, "unauthorized", 401)
-			return
-		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		body, e := io.ReadAll(r.Body)
 		if e != nil {
 			http.Error(w, "payload too large", 413)
 			return
 		}
+		if s.GitLabSigningToken != "" && r.Header.Get("webhook-signature") != "" {
+			if !verifyGitLabSignature(s.GitLabSigningToken, r.Header, body) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		} else {
+			want := sha256.Sum256([]byte(secret))
+			got := sha256.Sum256([]byte(r.Header.Get("X-Gitlab-Token")))
+			if secret == "" || subtle.ConstantTimeCompare(want[:], got[:]) != 1 {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		if !s.acceptWebhook(w, r, "gitlab", deliveryID(r.Header.Get("webhook-id"), r.Header.Get("Idempotency-Key")), r.Header.Get("X-Gitlab-Event"), body) {
 			return
 		}
-		select {
-		case s.Wake <- struct{}{}:
-		default:
-		}
 		w.WriteHeader(202)
 	})
+}
+
+func verifyGitLabSignature(token string, header http.Header, body []byte) bool {
+	if !strings.HasPrefix(token, "whsec_") {
+		return false
+	}
+	key, err := base64.StdEncoding.Strict().DecodeString(strings.TrimPrefix(token, "whsec_"))
+	if err != nil || len(key) == 0 {
+		return false
+	}
+	id, stamp := header.Get("webhook-id"), header.Get("webhook-timestamp")
+	when, err := strconv.ParseInt(stamp, 10, 64)
+	if id == "" || err != nil || time.Since(time.Unix(when, 0)) > 10*time.Minute || time.Until(time.Unix(when, 0)) > 10*time.Minute {
+		return false
+	}
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte(id + "." + stamp + "."))
+	_, _ = mac.Write(body)
+	want := "v1," + base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	for _, candidate := range strings.Fields(header.Get("webhook-signature")) {
+		if hmac.Equal([]byte(want), []byte(candidate)) {
+			return true
+		}
+	}
+	return false
 }
 
 // GitHubWebhook verifies the raw request body before waking the issue scanner.
@@ -373,44 +414,43 @@ func (s *Service) GitHubWebhook(secret string) http.Handler {
 		if !s.acceptWebhook(w, r, "github", deliveryID(r.Header.Get("X-GitHub-Delivery")), r.Header.Get("X-GitHub-Event"), body) {
 			return
 		}
-		select {
-		case s.Wake <- struct{}{}:
-		default:
-		}
 		w.WriteHeader(http.StatusAccepted)
 	})
 }
 
 func deliveryID(candidates ...string) string {
 	for _, candidate := range candidates {
-		if candidate != "" && len(candidate) <= 200 {
+		if candidate != "" && len(candidate) <= 200 && strings.TrimSpace(candidate) == candidate {
 			return candidate
 		}
 	}
-	// Missing platform IDs must not collapse distinct deliveries by body hash.
-	var random [16]byte
-	if _, err := io.ReadFull(rand.Reader, random[:]); err != nil {
-		return ""
-	}
-	return hex.EncodeToString(random[:])
+	return ""
 }
 
 func (s *Service) acceptWebhook(w http.ResponseWriter, r *http.Request, provider, id, eventType string, body []byte) bool {
-	if id == "" || s.Store == nil {
-		http.Error(w, "webhook inbox unavailable", http.StatusServiceUnavailable)
+	if id == "" {
+		http.Error(w, "missing delivery ID", http.StatusBadRequest)
+		return false
+	}
+	if s.WebhookPublisher == nil {
+		http.Error(w, "webhook queue unavailable", http.StatusServiceUnavailable)
 		return false
 	}
 	if len(eventType) > 200 {
-		eventType = eventType[:200]
-	}
-	err := s.Store.EnqueueWebhook(r.Context(), provider, id, eventType, body)
-	if errors.Is(err, store.ErrWebhookInboxFull) {
-		http.Error(w, "webhook inbox full", http.StatusServiceUnavailable)
+		http.Error(w, "event type too long", http.StatusBadRequest)
 		return false
 	}
+	message, err := json.Marshal(WebhookMessage{Provider: provider, DeliveryID: id, EventType: eventType, Payload: body})
 	if err != nil {
-		slog.Error("webhook inbox insert", "provider", provider, "error", err)
-		http.Error(w, "webhook inbox unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "invalid webhook", http.StatusBadRequest)
+		return false
+	}
+	publishCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	err = s.WebhookPublisher.Publish(publishCtx, mq.WebhookQueue, message, provider+":"+id)
+	if err != nil {
+		slog.Error("webhook publish", "provider", provider, "error", err)
+		http.Error(w, "webhook queue unavailable", http.StatusServiceUnavailable)
 		return false
 	}
 	return true
@@ -465,53 +505,58 @@ func (s *Service) scan(ctx context.Context, provider domain.Provider, repoID int
 			if repoID > 0 && repo.ProjectID != repoID {
 				continue
 			}
-			issues, e := g.ListEligibleIssues(ctx, repo.ProjectID)
-			if e != nil {
-				slog.Error("issue scan", "project", p.ID, "repo", repo.ID, "error", e)
-				scanErrors = append(scanErrors, fmt.Errorf("project %s repo %s issue scan: %w", p.ID, repo.ID, e))
-				continue
-			}
-			for _, issue := range issues {
-				seen, e := s.Store.HasSource(ctx, p.HostingURL(), issue)
+			scanErr := s.Store.WithRepositoryScanLock(ctx, string(p.HostingProvider()), repo.ProjectID, func() error {
+				issues, e := g.ListEligibleIssues(ctx, repo.ProjectID)
 				if e != nil {
-					return e
+					slog.Error("issue scan", "project", p.ID, "repo", repo.ID, "error", e)
+					return fmt.Errorf("project %s repo %s issue scan: %w", p.ID, repo.ID, e)
 				}
-				if seen {
-					if err := s.scanFollowup(ctx, g, p, issue, enabled); err != nil {
-						slog.Warn("issue follow-up scan", "project", p.ID, "issue", issue.IID, "error", err)
-						scanErrors = append(scanErrors, fmt.Errorf("project %s issue %d follow-up: %w", p.ID, issue.IID, err))
-					}
-					continue
-				}
-				legacy := false
-				for _, l := range issue.Labels {
-					if l == "ai:working" || l == "ai:mr-opened" || l == "ai:needs-human" {
-						legacy = true
-					}
-				}
-				if legacy {
-					continue
-				}
-				_, e = intake.Schedule(ctx, s.Store, p, issue, enabled, s.intakeOptions(p.ID, false))
-				if e != nil {
-					if errors.Is(e, store.ErrNoNode) {
-						// Distributed mode: leave the issue unclaimed until a node has capacity.
-						slog.Warn("no execution node available; task deferred", "project", p.ID, "issue", issue.IID)
-						continue
-					}
-					if errors.Is(e, store.ErrConflict) {
-						continue
-					}
-					var agentError *intake.AgentSelectionError
-					if !errors.As(e, &agentError) {
+				for _, issue := range issues {
+					seen, e := s.Store.HasSource(ctx, p.HostingURL(), issue)
+					if e != nil {
 						return e
 					}
-					slog.Warn("issue agent rejected", "project", p.ID, "issue", issue.IID, "error", e)
-					if err := g.UpsertProgress(ctx, issue, "dispatch", "无法接单："+e.Error()+"。修正标签或启用配置后将自动重试。"); err != nil {
-						slog.Warn("dispatch feedback failed", "error", err)
+					if seen {
+						if err := s.scanFollowup(ctx, g, p, issue, enabled); err != nil {
+							slog.Warn("issue follow-up scan", "project", p.ID, "issue", issue.IID, "error", err)
+							scanErrors = append(scanErrors, fmt.Errorf("project %s issue %d follow-up: %w", p.ID, issue.IID, err))
+						}
+						continue
 					}
-					continue
+					legacy := false
+					for _, l := range issue.Labels {
+						if l == "ai:working" || l == "ai:mr-opened" || l == "ai:needs-human" {
+							legacy = true
+						}
+					}
+					if legacy {
+						continue
+					}
+					_, e = intake.Schedule(ctx, s.Store, p, issue, enabled, s.intakeOptions(p.ID, false))
+					if e != nil {
+						if errors.Is(e, store.ErrNoNode) {
+							// Distributed mode: leave the issue unclaimed until a node has capacity.
+							slog.Warn("no execution node available; task deferred", "project", p.ID, "issue", issue.IID)
+							continue
+						}
+						if errors.Is(e, store.ErrConflict) {
+							continue
+						}
+						var agentError *intake.AgentSelectionError
+						if !errors.As(e, &agentError) {
+							return e
+						}
+						slog.Warn("issue agent rejected", "project", p.ID, "issue", issue.IID, "error", e)
+						if err := g.UpsertProgress(ctx, issue, "dispatch", "无法接单："+e.Error()+"。修正标签或启用配置后将自动重试。"); err != nil {
+							slog.Warn("dispatch feedback failed", "error", err)
+						}
+						continue
+					}
 				}
+				return nil
+			})
+			if scanErr != nil {
+				scanErrors = append(scanErrors, scanErr)
 			}
 		}
 	}

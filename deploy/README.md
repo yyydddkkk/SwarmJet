@@ -162,7 +162,21 @@ services:
 
 随后在 `.env` 的 `AGENT_ENV_ALLOWLIST` 中追加 `CUSTOM_MODEL_KEY`，将 `INTEGRATION_ENV_ALLOWLIST` 设为 `INTEGRATION_TEST_TOKEN`。GitLab 项目使用额外 credential reference 时，需要在 API 和 Worker 两个服务都显式传入该变量；不要将数据库或管理员密码加入 agent / integration allowlist。
 
-Worker 执行保留期清理：`FAILED_KEEP_DAYS=7` 用于已取消任务的现场，`REPORT_KEEP_DAYS=30` 用于已完成任务。运行中、暂停中和 blocked 任务不会因这些配置自动清除，任务记录与审计信息仍在 PostgreSQL。设置 `GITLAB_WEBHOOK_SECRET` 后可接收 `/api/webhooks/gitlab`；GitLab webhook 配置使用相同的 secret token，并开启 Issue 与 Note 事件。Webhook 只唤醒扫描，120 秒轮询会补漏。后续轮次只接受 Issue 中以 `/swarmjet run` 开头的新公开评论。
+Worker 执行保留期清理：`FAILED_KEEP_DAYS=7` 用于已取消任务的现场，`REPORT_KEEP_DAYS=30` 用于已完成任务。运行中、暂停中和 blocked 任务不会因这些配置自动清除，任务记录与审计信息仍在 PostgreSQL。GitLab 19.1+ 新 webhook 推荐设置 `GITLAB_WEBHOOK_SIGNING_TOKEN`（`whsec_...`），并在 GitLab 使用相同的 signing token；接收端验证 HMAC 与 10 分钟时间窗。旧 secret token 使用 `GITLAB_WEBHOOK_SECRET` 和 `X-Gitlab-Token`，两者可在迁移期并存。开启 Issue 与 Note 事件。认证通过后，API 将原始事件按平台 delivery ID 持久发布到 RabbitMQ；只有 Broker 确认且消息成功路由后才返回 202。缺少稳定 delivery ID 返回 400；Broker 不可用、确认超时、无法路由或队列达到容量限制时返回 503，GitLab 侧应保留重试。消费者按仓库合并扫描，周期 120 秒扫描负责补漏。后续轮次只接受 Issue 中以 `/swarmjet run` 开头的新公开评论。
+
+## RabbitMQ 消息与运维
+
+Compose 使用 RabbitMQ 4.3 单节点 quorum queue 和持久化数据卷，分别缓冲 webhook、命令和死信。此配置适用于开发与单机部署，覆盖容器/Broker 重启后的持久恢复，不提供节点故障高可用。生产部署应使用三台独立故障域中的 RabbitMQ 节点，为 webhook、command 与 DLQ 建立三副本 quorum queues，并配置 TLS、认证、受限网络访问及节点磁盘告警。单节点 Compose 不构成生产 HA。
+
+新安装由 `install.py` 生成独立 `RABBITMQ_PASSWORD`；旧安装执行 `update.sh` 时会为缺少该键的 `.env` 追加随机密码。已有外部集群可向应用提供 `RABBITMQ_URL`，地址应指向可切换节点的 TLS 入口；当前 Compose 仍会启动本地 Broker，生产三节点集群需在独立部署中管理。检查积压可在单节点运行 `docker compose exec rabbitmq rabbitmqctl list_queues name messages_ready messages_unacknowledged message_bytes consumers`；死信重放前先停止或隔离相关消费者，核对消息 ID 与 PostgreSQL 收据，再按原 ID 重新发布并等待确认。实际验证数据与未通过的验收项见 [RabbitMQ 接入验证](../docs/rabbitmq-validation.md)。
+
+生产集群先按 [RabbitMQ 集群指南](https://www.rabbitmq.com/docs/clustering) 建立三台独立持久磁盘节点，共享集群 cookie，并在应用首次声明队列前确认三个节点在线；默认 quorum 初始成员数为三。把应用 `RABBITMQ_URL` 指向带 TLS 的集群入口，限制 vhost/user 权限。若从单节点队列迁移，先备份并排空或逐条确认迁移中的消息，随后用 `rabbitmq-queues grow <node> all --queue-pattern 'swarmjet.*'` 为新节点增加成员，逐队列核对成员数、leader 和积压，再切换发布与消费。新增集群节点不会自动成为既有 quorum queue 的成员；官方 [成员管理说明](https://www.rabbitmq.com/docs/quorum-queues#managing-members)列出扩容命令和多数派要求。生产切换前演练断开一个节点后的发布确认、消费和恢复。
+
+主队列配置 `reject-publish` 与消息条数、字节上限；队列满时发布被拒绝，API 返回 503。并发在途发布可能使 quorum queue 限额少量超出，限额不是精确的瞬时硬上限。发布端使用 publisher confirms 和 mandatory 路由检查；消费者手动 ACK、有限 prefetch。失败消息按延迟策略重试，超过策略或出现相同 delivery ID 不同内容时转入死信。可靠死信转移依赖 quorum queue 的 at-least-once dead-lettering 配置；死信和源队列都要纳入容量与磁盘监控。
+
+Webhook 的 PostgreSQL `(provider, delivery ID)` 收据用于确认丢失后的去重；不同内容复用同一 ID 应告警并进入死信。命令的数据库发送意图与任务变更保持同一事务；命令只有在 Temporal 调用成功后才标记 delivered。消费者 ACK、RabbitMQ 发布确认都不等于业务操作只执行一次，处理依赖稳定 ID、唯一约束及 Workflow 去重。周期对账和队列消费者共用仓库租约；接单容量不足时消息延迟重试，不应删除或 ACK 掉待准入事件。切换期间旧 PostgreSQL inbox 需排空，不能清除未处理记录。
+
+监控 RabbitMQ ready/unacked 数量、队列字节与磁盘空间、发布确认延迟/拒绝、消费者数量、重试和死信速率，并分别告警；与 `/api/operations` 的 Task 准入 waiting 数及全局 1000、每项目 100 的准入上限分开观察。RabbitMQ 数据目录属于备份对象。配置 RabbitMQ definitions 备份并定期做恢复演练；单独保护 PostgreSQL、`DATA_DIR`、RabbitMQ 持久卷与 `.env` 中的 Broker 凭据。不要在未核实原因、delivery ID 和对应 PostgreSQL 收据前直接重放死信。确认可以重放后，通过受控操作将原消息重新发布到主交换机并等待发布确认，保留原稳定 ID，依靠幂等处理消除重复。隔离环境万条 webhook 排空与单节点重启结果见验证记录；真实平台重试、可接单万条事件和三节点故障切换仍需验收。
 
 ## 分布式执行节点
 
@@ -220,11 +234,11 @@ docker compose exec -T api swarmjet doctor
 docker compose exec -T postgres pg_dumpall -U swarmjet > backup.sql
 ```
 
-备份 PostgreSQL 与 `DATA_DIR`；后者包含任务工作区、受管 Meta-Repo、初始化副本、Git 对象、执行日志和 Agent 会话与配置快照。备份中可能有私有源代码和认证会话，按凭证数据管理。单独备份 `SWARMJET_MASTER_KEY`：没有它，数据库中保存的连接 Token 无法恢复。恢复时保留 `DATA_DIR` 的绝对路径，并恢复相同 Temporal namespace。旧版本 `state.json` 只能通过 `swarmjet legacy-inventory <file>` 生成人工接管清单；不要直接启用旧 Issue 的 `autonomous` 标签造成重复任务。
+备份 PostgreSQL、`DATA_DIR` 与 RabbitMQ 持久卷；后者包含尚未消费的消息。另行备份 RabbitMQ definitions（交换机、队列、绑定与策略）、`.env` 中的 Broker 凭据和 `SWARMJET_MASTER_KEY`。恢复前停止生产者和消费者，恢复 Broker 数据与 definitions 后再启动应用，避免未确认消息与数据库收据处于不一致状态。`DATA_DIR` 包含任务工作区、受管 Meta-Repo、初始化副本、Git 对象、执行日志和 Agent 会话与配置快照。备份中可能有私有源代码和认证会话，按凭证数据管理。没有主密钥，数据库中保存的连接 Token 无法恢复。恢复时保留 `DATA_DIR` 的绝对路径，并恢复相同 Temporal namespace。旧版本 `state.json` 只能通过 `swarmjet legacy-inventory <file>` 生成人工接管清单；不要直接启用旧 Issue 的 `autonomous` 标签造成重复任务。
 
 在仓库根目录执行 `VALIDATE_DEPLOY=1 scripts/test.sh`：Go race tests、React build、发布镜像与源码构建两种 Compose 配置验证。有 `TEST_DATABASE_URL` 时运行独立临时 schema 的 PostgreSQL 集成测试；`RUN_BROWSER_TESTS=1` 额外运行浏览器测试。测试脚本要求本地安装 Go 和 Node.js。可用 `SWARMJET_TEMPORAL_ADDRESS` 与 `SWARMJET_TEMPORAL_NAMESPACE` 指向独立测试 Temporal，运行持久化/Worker 重启测试；该测试使用专属 task queue，不需要模型 key。原生工具链下还可用 `SWARMJET_DOCKER_SMOKE=1` 和 `SWARMJET_META_BIN` 启用实际 Docker / Meta 检查。
 
-版本依据：[Temporal Server release](https://github.com/temporalio/temporal/releases/tag/v1.32.0)、[生产 PostgreSQL 示例](https://github.com/temporalio/samples-server/blob/main/compose/docker-compose-postgres.yml)、[UI Server release](https://github.com/temporalio/ui-server/releases/tag/v2.54.1)、[Meta release](https://github.com/gitkb/meta/releases/tag/v0.2.22)。
+版本依据：[RabbitMQ 4.3 quorum queues](https://www.rabbitmq.com/docs/quorum-queues)、[RabbitMQ 发布确认](https://www.rabbitmq.com/docs/confirms)、[RabbitMQ 消费确认](https://www.rabbitmq.com/docs/confirms#acknowledgement-modes)、[Temporal Server release](https://github.com/temporalio/temporal/releases/tag/v1.32.0)、[生产 PostgreSQL 示例](https://github.com/temporalio/samples-server/blob/main/compose/docker-compose-postgres.yml)、[UI Server release](https://github.com/temporalio/ui-server/releases/tag/v2.54.1)、[Meta release](https://github.com/gitkb/meta/releases/tag/v0.2.22)。
 
 ## 从原目录布局切换
 

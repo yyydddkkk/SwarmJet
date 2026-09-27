@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -36,6 +37,7 @@ import (
 	"swarmjet/internal/k8srunner"
 	"swarmjet/internal/maintenance"
 	"swarmjet/internal/managedmeta"
+	"swarmjet/internal/mq"
 	"swarmjet/internal/networkconfig"
 	"swarmjet/internal/nodeenvironment"
 	"swarmjet/internal/pipeline"
@@ -444,6 +446,8 @@ func run() error {
 		}
 	}
 	if mode == "serve" {
+		broker := mq.New(required("RABBITMQ_URL"))
+		defer broker.Close()
 		adminUser := env("ADMIN_USERNAME", "admin")
 		password := required("ADMIN_PASSWORD")
 		if len(password) < 12 {
@@ -461,8 +465,29 @@ func run() error {
 		}
 		labelsWake := make(chan struct{}, 1)
 		handler := api.New(s, api.Config{GitHubApp: ghApp, Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, RepositoryChanges: repositoryChanges, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), BuilderURL: os.Getenv("BUILDER_ADMIN_URL"), RegistryCAFile: os.Getenv("REGISTRY_CA_FILE"), PlatformImage: os.Getenv("PLATFORM_IMAGE"), MihomoURL: os.Getenv("MIHOMO_ADMIN_URL"), MihomoSecret: os.Getenv("MIHOMO_ADMIN_SECRET"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}, LabelsWake: labelsWake, Artifacts: k8sArtifacts})
-		svc := &service.Service{DataDir: data, Store: s, Temporal: tc, ResolveCredential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", KubernetesPool: k8sValidation.Pool, KubernetesValidationProjectID: k8sValidation.ProjectID, KubernetesCapacity: k8sValidation.Capacity, RunnerResources: k8sValidation.Resources, RunnerImage: k8sValidation.Image, Wake: make(chan struct{}, 1), LabelsWake: labelsWake}
+		svc := &service.Service{DataDir: data, Store: s, Temporal: tc, WebhookPublisher: broker, GitLabSigningToken: os.Getenv("GITLAB_WEBHOOK_SIGNING_TOKEN"), CommandPublisher: broker, ResolveCredential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", KubernetesPool: k8sValidation.Pool, KubernetesValidationProjectID: k8sValidation.ProjectID, KubernetesCapacity: k8sValidation.Capacity, RunnerResources: k8sValidation.Resources, RunnerImage: k8sValidation.Image, Wake: make(chan struct{}, 1), LabelsWake: labelsWake}
 		go svc.Run(ctx)
+		go broker.ConsumeBatch(ctx, mq.WebhookQueue, func(ctx context.Context, bodies [][]byte) []error {
+			results := svc.ProcessWebhookDeliveries(ctx, bodies)
+			for i, err := range results {
+				if errors.Is(err, store.ErrWebhookConflict) || errors.Is(err, service.ErrInvalidWebhookDelivery) {
+					results[i] = mq.Permanent(err)
+				} else if errors.Is(err, store.ErrAdmissionQueueFull) {
+					results[i] = mq.Defer(err)
+				}
+			}
+			return results
+		})
+		go broker.Consume(ctx, mq.CommandQueue, func(ctx context.Context, body []byte) error {
+			err := svc.ConsumeCommand(ctx, body)
+			if errors.Is(err, service.ErrInvalidCommandDelivery) || errors.Is(err, store.ErrNotFound) {
+				return mq.Permanent(err)
+			}
+			if err != nil {
+				return mq.Defer(err)
+			}
+			return nil
+		})
 		go svc.SyncLabels(ctx)
 		a := &pipeline.Activities{Store: s, Credential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient}
 		go svc.Sync(ctx, a)

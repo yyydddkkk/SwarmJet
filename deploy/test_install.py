@@ -40,13 +40,24 @@ class InstallTests(unittest.TestCase):
             values = dict(line.split("=", 1) for line in original.decode().splitlines()
                           if line and not line.startswith("#"))
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            secrets = [values[key] for key in ("POSTGRES_PASSWORD", "ADMIN_PASSWORD",
+            secrets = [values[key] for key in ("POSTGRES_PASSWORD", "RABBITMQ_PASSWORD", "ADMIN_PASSWORD",
                                                "RUNTIME_ADMIN_SECRET", "SWARMJET_MASTER_KEY")]
-            self.assertEqual(len(set(secrets)), 4)
+            self.assertEqual(len(set(secrets)), 5)
             self.assertTrue(all(len(secret) >= 48 for secret in secrets))
             self.assertIn(values["POSTGRES_PASSWORD"], values["DATABASE_URL"])
             installer.initialize(path, HERE / ".env.example", "/different", "opencode")
             self.assertEqual(path.read_bytes(), original)
+
+    def test_existing_env_gets_broker_secret_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text("POSTGRES_PASSWORD=existing\n")
+            installer.initialize(path, HERE / ".env.example", "/srv/test", "opencode")
+            first = path.read_text()
+            self.assertEqual(first.count("RABBITMQ_PASSWORD="), 1)
+            self.assertIn("POSTGRES_PASSWORD=existing", first)
+            installer.initialize(path, HERE / ".env.example", "/srv/test", "opencode")
+            self.assertEqual(path.read_text(), first)
 
     def exercise(self, fail_build=False):
         with tempfile.TemporaryDirectory() as directory:
