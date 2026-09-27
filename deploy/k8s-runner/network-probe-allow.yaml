@@ -1,0 +1,19 @@
+# Temporary policy for the positive control. Delete after verification.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: network-probe-allow-server
+  namespace: swarmjet-runners
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: swarmjet-runner
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              probe: server
+      ports:
+        - protocol: TCP
+          port: 8080

@@ -268,6 +268,41 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 		}
 		t.TriggerText = strings.Join(parts, "\n\n")
 	}
+	if t.AdmissionBackend == "kubernetes" {
+		if t.ExecutionPool == "" || t.RunnerResources.CPUMilli <= 0 || t.RunnerResources.MemoryMi <= 0 || t.RunnerResources.StorageMi <= 0 || t.RunnerResources.TimeoutSeconds <= 0 || !domain.RepositoryDigest.MatchString(t.RunnerImage) {
+			return t, fmt.Errorf("kubernetes task requires a pool, positive resource snapshot, and runner image digest")
+		}
+		var global, project int
+		if e = tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE project_id=$1) FROM tasks WHERE stage='queued' AND body->>'admissionStatus'='waiting'`, t.Project.ID).Scan(&global, &project); e != nil {
+			return t, e
+		}
+		if global >= maxPendingTasks || project >= maxPendingTasksPerProject {
+			return t, ErrAdmissionQueueFull
+		}
+		t.NodeID = ""
+		t.AdmissionStatus = "waiting"
+		t.Message = "等待 Kubernetes 执行池容量"
+		b, marshalErr := json.Marshal(t)
+		if marshalErr != nil {
+			return t, marshalErr
+		}
+		if _, e = tx.Exec(ctx, `INSERT INTO tasks(id,project_id,source,stage,body) VALUES($1,$2,$3,$4,$5)`, t.ID, t.Project.ID, source, t.Stage, b); e != nil {
+			return t, mapErr(e)
+		}
+		resources, marshalErr := json.Marshal(t.RunnerResources)
+		if marshalErr != nil {
+			return t, marshalErr
+		}
+		if _, e = tx.Exec(ctx, `INSERT INTO kubernetes_admissions(task_id,pool,resources,state) VALUES($1,$2,$3::jsonb,'waiting')`, t.ID, t.ExecutionPool, resources); e != nil {
+			return t, e
+		}
+		if len(t.TriggerNoteIDs) > 0 {
+			if _, e = tx.Exec(ctx, `UPDATE issue_run_commands SET claimed_task_id=$2 WHERE source=$1 AND note_id=ANY($3) AND claimed_task_id IS NULL`, source, t.ID, t.TriggerNoteIDs); e != nil {
+				return t, e
+			}
+		}
+		return t, tx.Commit(ctx)
+	}
 	managed := false
 	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM node_configs)`).Scan(&managed); e != nil {
 		return t, e
@@ -284,7 +319,7 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 		return t, e
 	}
 	var olderPending bool
-	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE project_id=$1 AND stage='queued' AND node_id IS NULL AND NOT EXISTS(SELECT 1 FROM commands WHERE commands.task_id=tasks.id AND commands.id='start-'||tasks.id))`, t.Project.ID).Scan(&olderPending); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE project_id=$1 AND stage='queued' AND node_id IS NULL AND COALESCE(body->>'admissionBackend','') <> 'kubernetes' AND NOT EXISTS(SELECT 1 FROM commands WHERE commands.task_id=tasks.id AND commands.id='start-'||tasks.id))`, t.Project.ID).Scan(&olderPending); e != nil {
 		return t, e
 	}
 	if active < maxActiveTasksPerProject && started < maxStartedTasksPerProject && !olderPending {
@@ -365,7 +400,7 @@ func (s *Store) AdmitPendingTasks(ctx context.Context, limit int) (int, error) {
 	// Interleave projects while retaining FIFO within each project.
 	rows, err := tx.Query(ctx, `WITH waiting AS (
  SELECT t.body,t.project_id,t.updated_at,t.id,row_number() OVER(PARTITION BY t.project_id ORDER BY t.updated_at,t.id) AS project_rank
- FROM tasks t WHERE t.stage='queued' AND t.node_id IS NULL
+ FROM tasks t WHERE t.stage='queued' AND t.node_id IS NULL AND COALESCE(t.body->>'admissionBackend','') <> 'kubernetes'
  AND NOT EXISTS(SELECT 1 FROM commands c WHERE c.task_id=t.id AND c.id='start-'||t.id)
  ) SELECT t.body FROM waiting t
  LEFT JOIN (SELECT project_id,count(*) AS running FROM tasks WHERE `+activeProjectTask+` GROUP BY project_id) r ON r.project_id=t.project_id
@@ -474,6 +509,7 @@ func (s *Store) CancelPendingTask(ctx context.Context, taskID string) (bool, err
 		return false, tx.Commit(ctx)
 	}
 	t.Stage = "cancelled"
+	t.AdmissionStatus = "cancelled"
 	t.Message = "等待准入期间已取消"
 	t.UpdatedAt = time.Now().UTC()
 	updated, err := json.Marshal(t)
@@ -482,6 +518,15 @@ func (s *Store) CancelPendingTask(ctx context.Context, taskID string) (bool, err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE tasks SET stage='cancelled',terminal=true,body=$2,updated_at=now() WHERE id=$1`, taskID, updated); err != nil {
 		return false, err
+	}
+	if t.AdmissionBackend == "kubernetes" {
+		tag, updateErr := tx.Exec(ctx, `UPDATE kubernetes_admissions SET state='cancelled' WHERE task_id=$1 AND state='waiting'`, taskID)
+		if updateErr != nil {
+			return false, updateErr
+		}
+		if tag.RowsAffected() != 1 {
+			return false, ErrConflict
+		}
 	}
 	if _, err = tx.Exec(ctx, `UPDATE commands SET delivered=true WHERE task_id=$1 AND NOT delivered`, taskID); err != nil {
 		return false, err
@@ -556,7 +601,6 @@ func (s *Store) DelayGitLabSync(ctx context.Context, id string) error {
 }
 func (s *Store) SaveTask(ctx context.Context, t domain.Task) error {
 	t.UpdatedAt = time.Now().UTC()
-	b, _ := json.Marshal(t)
 	tx, e := s.Pool.Begin(ctx)
 	if e != nil {
 		return e
@@ -565,6 +609,27 @@ func (s *Store) SaveTask(ctx context.Context, t domain.Task) error {
 	if _, e = tx.Exec(ctx, imageGuardLock); e != nil {
 		return e
 	}
+	// Authority and resource snapshots are owned by Kubernetes admission and
+	// fencing transactions. A workflow with an older Task copy must not roll
+	// these fields back when it saves a later business stage.
+	if t.AdmissionBackend == "kubernetes" {
+		var currentBody []byte
+		if e = tx.QueryRow(ctx, `SELECT body FROM tasks WHERE id=$1 FOR UPDATE`, t.ID).Scan(&currentBody); e != nil {
+			return mapErr(e)
+		}
+		var current domain.Task
+		if e = json.Unmarshal(currentBody, &current); e != nil {
+			return e
+		}
+		t.ExecutionPool = current.ExecutionPool
+		t.RunnerResources = current.RunnerResources
+		t.RunnerImage = current.RunnerImage
+		t.ExecutionID = current.ExecutionID
+		t.AuthorityVersion = current.AuthorityVersion
+		t.AdmissionStatus = current.AdmissionStatus
+		t.Executions = current.Executions
+	}
+	b, _ := json.Marshal(t)
 	tag, e := tx.Exec(ctx, "UPDATE tasks SET stage=$2,terminal=$3,body=$4,updated_at=now() WHERE id=$1", t.ID, t.Stage, domain.Terminal(t.Stage), b)
 	if e == nil && tag.RowsAffected() == 0 {
 		return ErrNotFound

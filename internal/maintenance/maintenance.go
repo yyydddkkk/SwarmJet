@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"swarmjet/internal/agent"
+	"swarmjet/internal/artifacts"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/execution"
 	"swarmjet/internal/store"
@@ -22,6 +23,14 @@ import (
 )
 
 type DockerExecutor func(context.Context, []string) ([]byte, error)
+type KubernetesRetirer interface {
+	Cancel(context.Context, string, int64) error
+	DeletePVC(context.Context, string) error
+}
+type ArtifactRetirer interface {
+	artifacts.Store
+	DeleteTask(context.Context, string) error
+}
 type Manager struct {
 	Store                  *store.Store
 	Workspace              *workspace.Manager
@@ -30,6 +39,8 @@ type Manager struct {
 	DataDir                string
 	FailedDays, ReportDays int
 	Docker                 DockerExecutor
+	Kubernetes             KubernetesRetirer
+	KubernetesArtifacts    ArtifactRetirer
 	// Event permits a recording sink in isolated filesystem tests.
 	Event func(context.Context, string, string, string) error
 }
@@ -287,6 +298,9 @@ func (m *Manager) cleanup(ctx context.Context, t domain.Task) error {
 	if t.Paused || (t.Stage != "completed" && t.Stage != "cancelled") {
 		return errors.New("active or paused task cannot be retired")
 	}
+	if t.AdmissionBackend == "kubernetes" {
+		return m.cleanupKubernetes(ctx, t)
+	}
 	// Assigned tasks own their local artifacts on an execution node; the control
 	// plane cannot delete them directly and must ask the owning node.
 	if t.NodeID != "" {
@@ -308,4 +322,46 @@ func (m *Manager) cleanup(ctx context.Context, t domain.Task) error {
 		ws = m.Workspace
 	}
 	return execution.RetireTask(ctx, execution.RetireConfig{DataDir: m.DataDir, Executions: execs, Workspace: ws, Docker: m.Docker}, t)
+}
+
+func (m *Manager) cleanupKubernetes(ctx context.Context, t domain.Task) error {
+	if m.Kubernetes == nil || m.KubernetesArtifacts == nil || m.Store == nil {
+		return errors.New("Kubernetes retention backends are unavailable")
+	}
+	reports := 0
+	for _, ex := range t.Executions {
+		for _, saved := range ex.Artifacts {
+			if saved.TaskID != t.ID || saved.ExecutionID != ex.ID {
+				return errors.New("artifact identity differs from task")
+			}
+			ref := artifacts.Ref{TaskID: saved.TaskID, ExecutionID: saved.ExecutionID, Kind: artifacts.Kind(saved.Kind), Name: saved.Name, SHA256: saved.SHA256, Size: saved.Size}
+			if _, err := m.KubernetesArtifacts.Read(ctx, ref); err != nil {
+				return fmt.Errorf("report must remain available before workspace cleanup: %w", err)
+			}
+			if saved.Kind == string(artifacts.Report) {
+				reports++
+			}
+		}
+	}
+	if t.Stage == "completed" && reports == 0 {
+		return errors.New("completed Kubernetes task has no saved report")
+	}
+	if t.ExecutionID != "" {
+		ex, err := m.Store.KubernetesExecution(ctx, t.ExecutionID)
+		if err != nil {
+			return err
+		}
+		if ex.State != "completed" && ex.State != "stopped" && ex.State != "cancelled" {
+			return errors.New("Runner has not stopped")
+		}
+		if ex.AuthorityVersion > 0 {
+			if err := m.Kubernetes.Cancel(ctx, ex.ExecutionID, ex.AuthorityVersion); err != nil {
+				return err
+			}
+		}
+	}
+	if err := m.Kubernetes.DeletePVC(ctx, t.ID); err != nil {
+		return err
+	}
+	return m.KubernetesArtifacts.DeleteTask(ctx, t.ID)
 }

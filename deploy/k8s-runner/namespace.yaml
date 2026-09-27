@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: swarmjet-runners
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: swarmjet-runner
+  namespace: swarmjet-runners
+automountServiceAccountToken: false
+---
+# The trusted control plane uses this identity; Runner Pods never receive it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: swarmjet-job-controller
+  namespace: swarmjet-runners
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: swarmjet-job-controller
+  namespace: swarmjet-runners
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create, get, list, watch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: swarmjet-job-controller
+  namespace: swarmjet-runners
+subjects:
+  - kind: ServiceAccount
+    name: swarmjet-job-controller
+    namespace: swarmjet-runners
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: swarmjet-job-controller
+---
+# This policy requires a NetworkPolicy enforcing CNI. Verify deny with an
+# actual network probe before using the namespace for untrusted code.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: swarmjet-runner-deny-all
+  namespace: swarmjet-runners
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: swarmjet-runner
+  policyTypes: [Ingress, Egress]

@@ -37,17 +37,32 @@ type InitReadiness interface {
 }
 
 type Service struct {
-	ForgeClient       func(domain.Project, bool) (forge.Client, error)
-	DataDir           string
-	Store             *store.Store
-	Temporal          client.Client
-	ResolveCredential func(string) (string, error)
-	ProjectCredential func(domain.Project, bool) (string, error)
-	Initializer       InitReadiness
-	RequireNode       bool
-	Wake              chan struct{}
-	LabelsWake        chan struct{}
-	scanMu            sync.Mutex
+	ForgeClient                   func(domain.Project, bool) (forge.Client, error)
+	DataDir                       string
+	Store                         *store.Store
+	Temporal                      client.Client
+	ResolveCredential             func(string) (string, error)
+	ProjectCredential             func(domain.Project, bool) (string, error)
+	Initializer                   InitReadiness
+	RequireNode                   bool
+	KubernetesPool                string
+	KubernetesValidationProjectID string
+	KubernetesCapacity            int
+	RunnerResources               domain.RunnerResources
+	RunnerImage                   string
+	Wake                          chan struct{}
+	LabelsWake                    chan struct{}
+	scanMu                        sync.Mutex
+}
+
+func (s *Service) intakeOptions(projectID string, claim bool) intake.Options {
+	options := intake.Options{DataDir: s.DataDir, RequireNode: s.RequireNode, ClaimRunCommands: claim}
+	if s.KubernetesPool != "" && projectID == s.KubernetesValidationProjectID {
+		options.KubernetesPool = s.KubernetesPool
+		options.RunnerResources = s.RunnerResources
+		options.RunnerImage = s.RunnerImage
+	}
+	return options
 }
 
 // SyncLabels reconciles selectable labels independently of issue scanning.
@@ -140,6 +155,11 @@ func (s *Service) runAdmission(ctx context.Context) {
 	for {
 		if _, err := s.Store.AdmitPendingTasks(ctx, 20); err != nil && ctx.Err() == nil {
 			slog.Error("task admission", "error", err)
+		}
+		if s.KubernetesPool != "" {
+			if _, err := s.Store.AdmitKubernetesTasks(ctx, s.KubernetesPool, s.KubernetesCapacity, 20); err != nil && ctx.Err() == nil {
+				slog.Error("Kubernetes task admission", "error", err)
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -261,7 +281,8 @@ func (s *Service) Deliver(ctx context.Context) error {
 			if e != nil {
 				return e
 			}
-			_, e = s.Temporal.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: t.ID, TaskQueue: pipeline.Queue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, pipeline.WorkflowName, t)
+			name, queue := workflowRoute(t)
+			_, e = s.Temporal.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: t.ID, TaskQueue: queue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, name, t)
 			var started *serviceerror.WorkflowExecutionAlreadyStarted
 			if e != nil && !errors.As(e, &started) {
 				lastErr = e
@@ -285,6 +306,13 @@ func (s *Service) Deliver(ctx context.Context) error {
 		}
 	}
 	return lastErr
+}
+
+func workflowRoute(t domain.Task) (name, queue string) {
+	if t.AdmissionBackend == "kubernetes" {
+		return pipeline.KubernetesWorkflowName, pipeline.KubernetesQueue
+	}
+	return pipeline.WorkflowName, pipeline.Queue
 }
 
 func (s *Service) Webhook(secret string) http.Handler {
@@ -464,7 +492,7 @@ func (s *Service) scan(ctx context.Context, provider domain.Provider, repoID int
 				if legacy {
 					continue
 				}
-				_, e = intake.Schedule(ctx, s.Store, p, issue, enabled, intake.Options{DataDir: s.DataDir, RequireNode: s.RequireNode})
+				_, e = intake.Schedule(ctx, s.Store, p, issue, enabled, s.intakeOptions(p.ID, false))
 				if e != nil {
 					if errors.Is(e, store.ErrNoNode) {
 						// Distributed mode: leave the issue unclaimed until a node has capacity.
@@ -532,7 +560,7 @@ func (s *Service) scanFollowup(ctx context.Context, g forge.Client, p domain.Pro
 	if err != nil || !domain.Terminal(previous.Stage) {
 		return err
 	}
-	_, err = intake.Schedule(ctx, s.Store, p, issue, enabled, intake.Options{DataDir: s.DataDir, RequireNode: s.RequireNode, ClaimRunCommands: true})
+	_, err = intake.Schedule(ctx, s.Store, p, issue, enabled, s.intakeOptions(p.ID, true))
 	if errors.Is(err, store.ErrNoNode) || errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 		return nil
 	}

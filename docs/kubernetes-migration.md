@@ -1,6 +1,22 @@
-# Kubernetes 接入前的执行架构准备
+# Kubernetes 执行架构迁移
 
-状态：迁移设计；不是已交付能力。决策见 [ADR 0001](adr/0001-kubernetes-execution-direction.md)。
+状态：离线纵向验证代码已接入，各接缝已分别验证；完整跨组件运行和企业任务迁移尚未完成。决策见 [ADR 0001](adr/0001-kubernetes-execution-direction.md)。
+
+当前可用范围、验证证据和剩余门槛见[接入阶段总结](kubernetes-status.md)。
+
+## 已实现的离线纵向验证（2026-09-27）
+
+- PostgreSQL 持久准入保存执行池、资源和镜像摘要快照；独立执行表保存稳定 execution ID、递增执行权版本和 Job 尝试身份。数据库测试覆盖并发准入、取消、撤权、接管和结果提交。
+- `KubernetesTaskV1` 使用独立 Temporal task queue，与旧 Workflow 的 Worker 隔离。当前只运行确定性离线 Runner：一项执行创建一个固定摘要的 Job，`backoffLimit: 0`，最小权限、资源限制、任务 PVC 和默认拒绝网络策略。Pod 完成后，控制面核对任务、执行权、Pod 身份与输出，再保存结果、日志、报告引用。控制台按 SHA-256 校验读取，保留期清理先核对报告。
+- [一次性 kind 实测](../deploy/k8s-runner/README.md)使用 Cilium：先确认 HTTP 探针可通，再确认 Runner 网络拒绝，最后确认定向放行可通。固定摘要 Job 成功运行，另一个 Pod 重新挂载 PVC 后读回同一结果。测试集群已删除。
+- 使用临时 DeepSeek 测试凭证，OpenCode `1.18.31` 在两个不同 Pod 上以同一 PVC 和精确 `--session` ID 续接；第二个 Pod 正确返回首轮会话的标记。临时 Kubernetes Secret、kind 集群和本机凭证文件均已删除；凭证所有者仍须在 DeepSeek 后台撤销该测试密钥。
+- [可信远端写入模块](../internal/platformwrite/reconciler.go)持久化固定 SHA 意图，持有执行权行锁期间执行 GitLab push、MR 和 merge；响应丢失时先查询远端事实。一次性本机 GitLab 实例实测三步成功及各自的响应丢失对账，实例已删除。离线 Runner 不获得 GitLab 写凭证。该模块尚未接入完整企业 Workflow。
+- [Kubernetes 联调执行包](../internal/k8sintegration/integration.go)以受限服务 Pod、检查 Job 和任务网络策略替代 Compose 执行资源。在一次性 kind+Cilium 集群中，单容器检查、多容器检查、预期失败与取消清理均通过；报告持久化失败时保留现场。它尚未接入项目配置和业务 Workflow。
+- 新 Workflow 在独立 Temporal namespace 经 Runner 故障、Worker 更换和历史回放验证；[历史样本](../internal/pipeline/testdata/kubernetes_v1_history.json)作为后续兼容检查语料。
+
+当前路径只在显式设置 `KUBERNETES_OFFLINE_VALIDATION=true` 时启用，默认企业任务仍使用旧 Node/本地执行路径。对象存储可使用 S3 兼容私有桶；本地 `FileStore` 仅用于隔离验证。
+
+**尚未达到企业主线切换门槛：**受管初始化、单容器和多容器联调接入业务 Workflow、跨节点存储与节点隔离、自动接管、完整 Workflow 的 GitLab 写入收拢、混合版本滚动升级均未完成。真实会话已在隔离 Pod 中验证，但尚未作为完整任务 Agent 流程交付。即使 Job 和 Pod 从 API 消失，也不能单独证明失联节点上的进程停止，因此当前中断后阻断自动重跑。公司快照任务和数据仍不迁入。
 
 ## 定位与版本边界
 

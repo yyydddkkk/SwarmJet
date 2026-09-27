@@ -156,16 +156,27 @@ type AgentResult struct {
 	Questions []string `json:"questions,omitempty"`
 }
 type Execution struct {
-	ID            string       `json:"id"`
-	SessionID     string       `json:"sessionId"`
-	ContainerID   string       `json:"containerId"`
-	Status        string       `json:"status"`
-	ExitCode      int          `json:"exitCode"`
-	LogPath       string       `json:"logPath"`
-	FailureReason string       `json:"failureReason,omitempty"`
-	FailureCode   string       `json:"failureCode,omitempty"`
-	ResultRepair  bool         `json:"resultRepair,omitempty"`
-	Result        *AgentResult `json:"result,omitempty"`
+	ID            string        `json:"id"`
+	SessionID     string        `json:"sessionId"`
+	ContainerID   string        `json:"containerId"`
+	Status        string        `json:"status"`
+	ExitCode      int           `json:"exitCode"`
+	LogPath       string        `json:"logPath"`
+	FailureReason string        `json:"failureReason,omitempty"`
+	FailureCode   string        `json:"failureCode,omitempty"`
+	ResultRepair  bool          `json:"resultRepair,omitempty"`
+	Result        *AgentResult  `json:"result,omitempty"`
+	Artifacts     []ArtifactRef `json:"artifacts,omitempty"`
+}
+
+// ArtifactRef locates verified output independently of a Runner Pod or PVC.
+type ArtifactRef struct {
+	TaskID      string `json:"taskId"`
+	ExecutionID string `json:"executionId"`
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	SHA256      string `json:"sha256"`
+	Size        int64  `json:"size"`
 }
 type AgentRequest struct {
 	ExecutionID string `json:"executionId"`
@@ -198,6 +209,11 @@ type Task struct {
 	Checkpoint           *WorkflowCheckpoint `json:"checkpoint,omitempty"`
 	ID                   string              `json:"id"`
 	NodeID               string              `json:"nodeId,omitempty"`
+	ExecutionPool        string              `json:"executionPool,omitempty"`
+	RunnerResources      RunnerResources     `json:"runnerResources,omitempty"`
+	RunnerImage          string              `json:"runnerImage,omitempty"`
+	ExecutionID          string              `json:"executionId,omitempty"`
+	AuthorityVersion     int64               `json:"authorityVersion,omitempty"`
 	AdmissionStatus      string              `json:"admissionStatus,omitempty"`
 	AdmissionBackend     string              `json:"admissionBackend,omitempty"`
 	Project              Project             `json:"project"`
@@ -218,6 +234,15 @@ type Task struct {
 	Paused            bool                 `json:"paused"`
 	CreatedAt         time.Time            `json:"createdAt"`
 	UpdatedAt         time.Time            `json:"updatedAt"`
+}
+
+// RunnerResources is frozen at task creation so later pool configuration
+// changes cannot silently alter an admitted execution.
+type RunnerResources struct {
+	CPUMilli       int `json:"cpuMilli"`
+	MemoryMi       int `json:"memoryMi"`
+	StorageMi      int `json:"storageMi"`
+	TimeoutSeconds int `json:"timeoutSeconds"`
 }
 
 func (t Task) AutoMergeEnabled() bool {

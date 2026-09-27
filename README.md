@@ -132,7 +132,7 @@ Worker 经 Docker socket 创建同宿主机的任务容器，`DATA_DIR` 必须�
 - 报告位于 `DATA_DIR/runs/<task>/`；监督记录与任务目录隔离。
 - 真实模型认证、GitLab 权限或测试夹具缺失会明确失败，不用模拟测试代替验收。
 
-接口见 [api/contract.md](api/contract.md)，内部约定见 [docs/architecture.md](docs/architecture.md)。Kubernetes 目标执行架构与迁移边界见 [接入准备](docs/kubernetes-migration.md)。
+接口见 [api/contract.md](api/contract.md)，内部约定见 [docs/architecture.md](docs/architecture.md)。Kubernetes 当前进度见 [接入阶段总结](docs/kubernetes-status.md)，目标执行架构与迁移边界见 [迁移设计](docs/kubernetes-migration.md)。
 
 已执行的检查及真实环境验收缺口见 [docs/validation.md](docs/validation.md)。
 

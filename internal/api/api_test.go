@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"swarmjet/internal/artifacts"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/store"
 )
@@ -163,6 +164,30 @@ func TestArtifactHTMLAttachment(t *testing.T) {
 	s.artifact(w, httptest.NewRequest("GET", "/api/tasks/task/artifacts?path=report.html", nil), "task")
 	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain") || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment") {
 		t.Fatal(w.Result())
+	}
+}
+
+func TestKubernetesArtifactSurvivesRunnerRemovalAndChecksDigest(t *testing.T) {
+	root := t.TempDir()
+	objects := artifacts.FileStore{Root: root}
+	ref, err := objects.Put(context.Background(), artifacts.Request{TaskID: "task", ExecutionID: "task-dev", Kind: artifacts.Report, Name: "report"}, strings.NewReader("offline report"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := domain.Task{ID: "task", AdmissionBackend: "kubernetes", Executions: map[string]domain.Execution{"dev": {ID: "task-dev", Artifacts: []domain.ArtifactRef{{TaskID: ref.TaskID, ExecutionID: ref.ExecutionID, Kind: string(ref.Kind), Name: ref.Name, SHA256: ref.SHA256, Size: ref.Size}}}}}
+	s := server{cfg: Config{Artifacts: objects}}
+	w := httptest.NewRecorder()
+	s.kubernetesArtifact(w, httptest.NewRequest("GET", "/api/tasks/task/artifacts?path=report", nil), task)
+	if w.Code != 200 || w.Body.String() != "offline report" {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if err := os.WriteFile(filepath.Join(root, "objects", "task", "task-dev", "report", "report"), []byte("tampered"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w = httptest.NewRecorder()
+	s.kubernetesArtifact(w, httptest.NewRequest("GET", "/api/tasks/task/artifacts?path=report", nil), task)
+	if w.Code != 404 {
+		t.Fatalf("tampered artifact accepted: %d", w.Code)
 	}
 }
 func TestStaticDoesNotFallbackAPI(t *testing.T) {

@@ -23,6 +23,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 	"swarmjet/internal/agent"
 	"swarmjet/internal/api"
+	"swarmjet/internal/artifacts"
 	"swarmjet/internal/credentials"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/execution"
@@ -32,6 +33,7 @@ import (
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/initflow"
 	"swarmjet/internal/integration"
+	"swarmjet/internal/k8srunner"
 	"swarmjet/internal/maintenance"
 	"swarmjet/internal/managedmeta"
 	"swarmjet/internal/networkconfig"
@@ -58,6 +60,63 @@ func required(k string) string {
 		os.Exit(2)
 	}
 	return v
+}
+
+type kubernetesValidationConfig struct {
+	Pool      string
+	ProjectID string
+	Image     string
+	Capacity  int
+	Resources domain.RunnerResources
+}
+
+func offlineKubernetesConfig() (kubernetesValidationConfig, error) {
+	pool := os.Getenv("KUBERNETES_EXECUTION_POOL")
+	if pool == "" {
+		return kubernetesValidationConfig{}, nil
+	}
+	if os.Getenv("KUBERNETES_OFFLINE_VALIDATION") != "true" {
+		return kubernetesValidationConfig{}, fmt.Errorf("KUBERNETES_EXECUTION_POOL requires KUBERNETES_OFFLINE_VALIDATION=true until repository Agent migration is complete")
+	}
+	projectID := os.Getenv("KUBERNETES_VALIDATION_PROJECT_ID")
+	if !domain.IDPattern.MatchString(projectID) {
+		return kubernetesValidationConfig{}, fmt.Errorf("KUBERNETES_VALIDATION_PROJECT_ID is required for an isolated fixture project")
+	}
+	image := os.Getenv("KUBERNETES_RUNNER_IMAGE")
+	if !domain.RepositoryDigest.MatchString(image) {
+		return kubernetesValidationConfig{}, fmt.Errorf("KUBERNETES_RUNNER_IMAGE must be pinned by sha256 digest")
+	}
+	value := func(name, fallback string) (int, error) {
+		n, err := strconv.Atoi(env(name, fallback))
+		if err != nil || n < 1 {
+			return 0, fmt.Errorf("%s must be positive", name)
+		}
+		return n, nil
+	}
+	capacity, err := value("KUBERNETES_POOL_CAPACITY", "2")
+	if err != nil {
+		return kubernetesValidationConfig{}, err
+	}
+	cpu, err := value("KUBERNETES_RUNNER_CPU_MILLI", "500")
+	if err != nil {
+		return kubernetesValidationConfig{}, err
+	}
+	memory, err := value("KUBERNETES_RUNNER_MEMORY_MI", "512")
+	if err != nil {
+		return kubernetesValidationConfig{}, err
+	}
+	storage, err := value("KUBERNETES_RUNNER_STORAGE_MI", "1024")
+	if err != nil {
+		return kubernetesValidationConfig{}, err
+	}
+	if storage < 64 || storage > 102400 {
+		return kubernetesValidationConfig{}, fmt.Errorf("KUBERNETES_RUNNER_STORAGE_MI must be 64..102400")
+	}
+	timeout, err := value("KUBERNETES_RUNNER_TIMEOUT_SECONDS", "900")
+	if err != nil {
+		return kubernetesValidationConfig{}, err
+	}
+	return kubernetesValidationConfig{Pool: pool, ProjectID: projectID, Image: image, Capacity: capacity, Resources: domain.RunnerResources{CPUMilli: cpu, MemoryMi: memory, StorageMi: storage, TimeoutSeconds: timeout}}, nil
 }
 func main() {
 	if err := run(); err != nil {
@@ -365,6 +424,25 @@ func run() error {
 	if e = os.MkdirAll(data, 0700); e != nil {
 		return e
 	}
+	k8sValidation, e := offlineKubernetesConfig()
+	if e != nil {
+		return e
+	}
+	var k8sArtifacts maintenance.ArtifactRetirer
+	if k8sValidation.Pool != "" {
+		if bucket := os.Getenv("KUBERNETES_ARTIFACT_BUCKET"); bucket != "" {
+			k8sArtifacts, e = artifacts.NewS3Store(ctx, artifacts.S3Config{Bucket: bucket, Region: env("KUBERNETES_ARTIFACT_REGION", "us-east-1"), Prefix: os.Getenv("KUBERNETES_ARTIFACT_PREFIX"), Endpoint: os.Getenv("KUBERNETES_ARTIFACT_ENDPOINT"), PathStyle: os.Getenv("KUBERNETES_ARTIFACT_PATH_STYLE") == "true", AccessKeyID: os.Getenv("KUBERNETES_ARTIFACT_ACCESS_KEY_ID"), SecretAccessKey: os.Getenv("KUBERNETES_ARTIFACT_SECRET_ACCESS_KEY"), SessionToken: os.Getenv("KUBERNETES_ARTIFACT_SESSION_TOKEN")})
+			if e != nil {
+				return e
+			}
+		} else {
+			root := os.Getenv("KUBERNETES_ARTIFACT_ROOT")
+			if root == "" {
+				return fmt.Errorf("KUBERNETES_ARTIFACT_BUCKET or KUBERNETES_ARTIFACT_ROOT is required for offline validation")
+			}
+			k8sArtifacts = artifacts.FileStore{Root: root}
+		}
+	}
 	if mode == "serve" {
 		adminUser := env("ADMIN_USERNAME", "admin")
 		password := required("ADMIN_PASSWORD")
@@ -382,8 +460,8 @@ func run() error {
 			return n.CancelTask(ctx, in.ProjectID)
 		}
 		labelsWake := make(chan struct{}, 1)
-		handler := api.New(s, api.Config{GitHubApp: ghApp, Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, RepositoryChanges: repositoryChanges, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), BuilderURL: os.Getenv("BUILDER_ADMIN_URL"), RegistryCAFile: os.Getenv("REGISTRY_CA_FILE"), PlatformImage: os.Getenv("PLATFORM_IMAGE"), MihomoURL: os.Getenv("MIHOMO_ADMIN_URL"), MihomoSecret: os.Getenv("MIHOMO_ADMIN_SECRET"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}, LabelsWake: labelsWake})
-		svc := &service.Service{DataDir: data, Store: s, Temporal: tc, ResolveCredential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Wake: make(chan struct{}, 1), LabelsWake: labelsWake}
+		handler := api.New(s, api.Config{GitHubApp: ghApp, Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, RepositoryChanges: repositoryChanges, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), BuilderURL: os.Getenv("BUILDER_ADMIN_URL"), RegistryCAFile: os.Getenv("REGISTRY_CA_FILE"), PlatformImage: os.Getenv("PLATFORM_IMAGE"), MihomoURL: os.Getenv("MIHOMO_ADMIN_URL"), MihomoSecret: os.Getenv("MIHOMO_ADMIN_SECRET"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}, LabelsWake: labelsWake, Artifacts: k8sArtifacts})
+		svc := &service.Service{DataDir: data, Store: s, Temporal: tc, ResolveCredential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", KubernetesPool: k8sValidation.Pool, KubernetesValidationProjectID: k8sValidation.ProjectID, KubernetesCapacity: k8sValidation.Capacity, RunnerResources: k8sValidation.Resources, RunnerImage: k8sValidation.Image, Wake: make(chan struct{}, 1), LabelsWake: labelsWake}
 		go svc.Run(ctx)
 		go svc.SyncLabels(ctx)
 		a := &pipeline.Activities{Store: s, Credential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient}
@@ -506,7 +584,21 @@ func run() error {
 	if failedDays < 1 || reportDays < 1 {
 		return fmt.Errorf("retention days must be positive")
 	}
+	var k8sController *k8srunner.Controller
+	if k8sValidation.Pool != "" {
+		fence := func(ctx context.Context, executionID string, generation int64) (bool, error) {
+			return s.CheckKubernetesAuthority(ctx, executionID, generation, k8srunner.JobName(executionID, generation))
+		}
+		k8sController, e = k8srunner.NewInClusterController(env("KUBERNETES_RUNNER_NAMESPACE", "swarmjet-runners"), fence)
+		if e != nil {
+			return e
+		}
+	}
 	cleaner := &maintenance.Manager{Store: s, Workspace: wm, Agents: localAgents, Nodes: nodes, DataDir: data, FailedDays: failedDays, ReportDays: reportDays}
+	if k8sController != nil {
+		cleaner.Kubernetes = k8sController
+		cleaner.KubernetesArtifacts = k8sArtifacts
+	}
 	go cleaner.Run(ctx)
 	w := worker.New(tc, pipeline.Queue, worker.Options{MaxConcurrentActivityExecutionSize: n*8 + 8, WorkerStopTimeout: 30 * time.Second})
 	w.RegisterWorkflowWithOptions(pipeline.WorkTask, workflow.RegisterOptions{Name: pipeline.WorkflowName})
@@ -516,6 +608,18 @@ func run() error {
 		return e
 	}
 	defer w.Stop()
+	if k8sValidation.Pool != "" {
+		kw := worker.New(tc, pipeline.KubernetesQueue, worker.Options{MaxConcurrentActivityExecutionSize: k8sValidation.Capacity*4 + 4, WorkerStopTimeout: 30 * time.Second})
+		ka := &pipeline.KubernetesActivities{Store: s, Runner: k8sController, Artifacts: k8sArtifacts}
+		kw.RegisterWorkflowWithOptions(pipeline.KubernetesTask, workflow.RegisterOptions{Name: pipeline.KubernetesWorkflowName})
+		kw.RegisterActivityWithOptions(a.SaveTask, activity.RegisterOptions{Name: "SaveTask"})
+		kw.RegisterActivityWithOptions(ka.RunKubernetesTask, activity.RegisterOptions{Name: "RunKubernetesTask"})
+		kw.RegisterActivityWithOptions(ka.StopKubernetesTask, activity.RegisterOptions{Name: "StopKubernetesTask"})
+		if e = kw.Start(); e != nil {
+			return e
+		}
+		defer kw.Stop()
+	}
 	<-ctx.Done()
 	return nil
 }

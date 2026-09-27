@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"swarmjet/internal/artifacts"
 	"swarmjet/internal/credentials"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/execution"
@@ -48,6 +49,7 @@ type Config struct {
 	NodeSecret                                            string
 	RequireNode                                           bool
 	Nodes                                                 execution.NodeResolver
+	Artifacts                                             artifacts.Store
 	LabelsWake                                            chan struct{}
 	SecureCookies                                         bool
 	ResolveCredential                                     func(string) (string, error)
@@ -1069,6 +1071,12 @@ func safeArtifact(dataDir, taskID, relative string) (string, error) {
 	return resolved, nil
 }
 func (a *server) artifact(w http.ResponseWriter, r *http.Request, id string) {
+	if a.s != nil {
+		if t, e := a.s.Task(r.Context(), id); e == nil && t.AdmissionBackend == "kubernetes" {
+			a.kubernetesArtifact(w, r, t)
+			return
+		}
+	}
 	if a.s != nil && a.cfg.Nodes != nil {
 		if t, e := a.s.Task(r.Context(), id); e == nil && t.NodeID != "" {
 			n, e := a.cfg.Nodes.Node(r.Context(), t.NodeID)
@@ -1117,6 +1125,36 @@ func (a *server) artifact(w http.ResponseWriter, r *http.Request, id string) {
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(path)))
 	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), f)
+}
+
+func (a *server) kubernetesArtifact(w http.ResponseWriter, r *http.Request, task domain.Task) {
+	if a.cfg.Artifacts == nil {
+		problem(w, 503, "artifact store unavailable")
+		return
+	}
+	name, kind := r.URL.Query().Get("path"), r.URL.Query().Get("kind")
+	if kind == "" {
+		kind = string(artifacts.Report)
+	}
+	for _, ex := range task.Executions {
+		for _, candidate := range ex.Artifacts {
+			if candidate.TaskID != task.ID || candidate.ExecutionID != ex.ID || candidate.Name != name || candidate.Kind != kind {
+				continue
+			}
+			ref := artifacts.Ref{TaskID: candidate.TaskID, ExecutionID: candidate.ExecutionID, Kind: artifacts.Kind(candidate.Kind), Name: candidate.Name, SHA256: candidate.SHA256, Size: candidate.Size}
+			body, err := a.cfg.Artifacts.Read(r.Context(), ref)
+			if err != nil {
+				problem(w, 404, "artifact not found")
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(name)))
+			http.ServeContent(w, r, filepath.Base(name), time.Time{}, bytes.NewReader(body))
+			return
+		}
+	}
+	problem(w, 404, "artifact not found")
 }
 func (a *server) static(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "HEAD" {

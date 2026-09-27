@@ -21,6 +21,40 @@ CREATE TABLE IF NOT EXISTS nodes(id text PRIMARY KEY, address text NOT NULL, cap
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS node_id text;
 CREATE INDEX IF NOT EXISTS tasks_by_node ON tasks(node_id) WHERE NOT terminal;
 
+-- Kubernetes admission and fencing are authoritative here, not in Pod status
+-- or the JSON task projection. Rows are retained after completion for audit.
+CREATE TABLE IF NOT EXISTS kubernetes_admissions (
+ task_id text PRIMARY KEY REFERENCES tasks(id), pool text NOT NULL,
+ resources jsonb NOT NULL, state text NOT NULL CHECK (state IN ('waiting','admitted','cancelled')),
+ created_at timestamptz NOT NULL DEFAULT now(), admitted_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS kubernetes_admissions_queue ON kubernetes_admissions(pool,created_at,task_id) WHERE state='waiting';
+CREATE TABLE IF NOT EXISTS kubernetes_executions (
+ execution_id text PRIMARY KEY, task_id text NOT NULL REFERENCES tasks(id), role text NOT NULL,
+ authority_version bigint NOT NULL DEFAULT 0,
+ state text NOT NULL CHECK (state IN ('pending','active','revoked','stopped','completed','cancelled')),
+ attempt_id text NOT NULL DEFAULT '', checkpoint_valid boolean NOT NULL DEFAULT false,
+ job_creation text NOT NULL DEFAULT 'none' CHECK (job_creation IN ('none','creating','created')),
+ created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE kubernetes_executions ADD COLUMN IF NOT EXISTS job_creation text NOT NULL DEFAULT 'none';
+CREATE INDEX IF NOT EXISTS kubernetes_executions_task ON kubernetes_executions(task_id,created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_kubernetes_execution ON kubernetes_executions(task_id) WHERE state IN ('pending','active','revoked','stopped');
+
+-- One immutable intent precedes each trusted external mutation. A lost response
+-- leaves the intent pending so recovery can read remote state before retrying.
+CREATE TABLE IF NOT EXISTS kubernetes_write_intents (
+ id text PRIMARY KEY, task_id text NOT NULL REFERENCES tasks(id),
+ execution_id text NOT NULL REFERENCES kubernetes_executions(execution_id),
+ authority_version bigint NOT NULL, kind text NOT NULL CHECK (kind IN ('push','mr','merge')),
+ repository_id text NOT NULL, project_id bigint NOT NULL,
+ source_branch text NOT NULL, target_branch text NOT NULL, head_sha text NOT NULL,
+ state text NOT NULL CHECK (state IN ('pending','confirmed')) DEFAULT 'pending',
+ remote_id bigint NOT NULL DEFAULT 0, created_at timestamptz NOT NULL DEFAULT now(),
+ confirmed_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS kubernetes_write_intents_pending ON kubernetes_write_intents(task_id,created_at) WHERE state='pending';
+
 CREATE TABLE IF NOT EXISTS platform_settings(name text PRIMARY KEY, body jsonb NOT NULL);
 
 -- Managed execution environment configuration. Credentials are encrypted separately.

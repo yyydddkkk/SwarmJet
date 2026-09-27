@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"swarmjet/internal/domain"
@@ -28,6 +29,10 @@ type Scheduler interface {
 	CreateTaskScheduled(context.Context, domain.Task, bool) (domain.Task, error)
 }
 
+type KubernetesScheduler interface {
+	CreateKubernetesTask(context.Context, domain.Task, string, domain.RunnerResources) (domain.Task, error)
+}
+
 type Options struct {
 	DataDir      string
 	RequireNode  bool
@@ -35,6 +40,9 @@ type Options struct {
 	// ClaimRunCommands distinguishes a new round from a first Task. A non-nil
 	// TriggerNoteIDs asks the store to claim commands atomically with scheduling.
 	ClaimRunCommands bool
+	KubernetesPool   string
+	RunnerResources  domain.RunnerResources
+	RunnerImage      string
 }
 
 type AgentSelectionError struct{ Err error }
@@ -49,7 +57,7 @@ func Schedule(ctx context.Context, scheduler Scheduler, p domain.Project, issue 
 	if err != nil {
 		return domain.Task{}, &AgentSelectionError{Err: err}
 	}
-	if !options.RequireNode && project.Nodes.Mode == "" {
+	if options.KubernetesPool == "" && !options.RequireNode && project.Nodes.Mode == "" {
 		project, err = imagebuild.ApplyToProject(options.DataDir, project)
 		if err != nil {
 			return domain.Task{}, err
@@ -68,6 +76,14 @@ func Schedule(ctx context.Context, scheduler Scheduler, p domain.Project, issue 
 	}
 	if options.ClaimRunCommands {
 		t.TriggerNoteIDs = []int64{}
+	}
+	if options.KubernetesPool != "" {
+		kubernetes, ok := scheduler.(KubernetesScheduler)
+		if !ok {
+			return domain.Task{}, fmt.Errorf("scheduler does not support Kubernetes admission")
+		}
+		t.RunnerImage = options.RunnerImage
+		return kubernetes.CreateKubernetesTask(ctx, t, options.KubernetesPool, options.RunnerResources)
 	}
 	return scheduler.CreateTaskScheduled(ctx, t, options.RequireNode)
 }

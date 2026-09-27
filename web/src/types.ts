@@ -181,6 +181,15 @@ export interface Execution {
   exitCode: number;
   logPath: string;
   result?: AgentResult | null;
+  artifacts?: ArtifactRef[];
+}
+export interface ArtifactRef {
+  taskId: string;
+  executionId: string;
+  kind: "result" | "log" | "report";
+  name: string;
+  sha256: string;
+  size: number;
 }
 export interface Task {
   round?: number;
@@ -190,7 +199,9 @@ export interface Task {
   dependencyTasks?: Record<string, string>;
   id: string;
   admissionStatus?: "waiting" | "assigned";
-  admissionBackend?: "local" | "node";
+  admissionBackend?: "local" | "node" | "kubernetes";
+  executionPool?: string;
+  authorityVersion?: number;
   project: Project;
   autoMergeOverride?: boolean | null;
   issue: Issue;

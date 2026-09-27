@@ -34,9 +34,12 @@ export async function api<T>(
   if (response.status === 204) return undefined as T;
   return response.json();
 }
-export async function getLog(taskID: string, executionID: string, signal?: AbortSignal) {
+export async function getLog(taskID: string, executionID: string, signal?: AbortSignal, artifactName?: string) {
+  const artifactQuery = artifactName
+    ? `path=${encodeURIComponent(artifactName)}&kind=log`
+    : `path=${encodeURIComponent(`executions/${executionID}/output.jsonl`)}`;
   const response = await fetch(
-    `/api/tasks/${encodeURIComponent(taskID)}/artifacts?path=${encodeURIComponent(`executions/${executionID}/output.jsonl`)}`,
+    `/api/tasks/${encodeURIComponent(taskID)}/artifacts?${artifactQuery}`,
     { credentials: "same-origin", signal },
   );
   if (!response.ok) {

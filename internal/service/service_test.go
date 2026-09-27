@@ -21,8 +21,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/imagebuild"
+	"swarmjet/internal/pipeline"
 	"swarmjet/internal/store"
 )
+
+func TestWorkflowRouteSeparatesKubernetesWorker(t *testing.T) {
+	for _, tc := range []struct{ backend, name, queue string }{
+		{"local", pipeline.WorkflowName, pipeline.Queue},
+		{"node", pipeline.WorkflowName, pipeline.Queue},
+		{"kubernetes", pipeline.KubernetesWorkflowName, pipeline.KubernetesQueue},
+	} {
+		name, queue := workflowRoute(domain.Task{AdmissionBackend: tc.backend})
+		if name != tc.name || queue != tc.queue {
+			t.Fatalf("%s routed to %s/%s", tc.backend, name, queue)
+		}
+	}
+}
 
 func TestGitHubWebhookValidatesBodySignature(t *testing.T) {
 	service := &Service{Store: scanTestStore(t), Wake: make(chan struct{}, 1)}

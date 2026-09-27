@@ -97,7 +97,8 @@ export default function TaskDetail({ id }: { id: string }) {
   async function showLog(name: string, execution: Execution) {
     setLogBusy(execution.id);
     try {
-      setLog({ name, body: await getLog(id, execution.id) });
+      const logArtifact = execution.artifacts?.find((ref) => ref.kind === "log");
+      setLog({ name, body: await getLog(id, execution.id, undefined, logArtifact?.name) });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -368,6 +369,17 @@ export default function TaskDetail({ id }: { id: string }) {
                           </p>
                         ))}
                       </>
+                    )}
+                    {e.artifacts?.some((ref) => ref.kind === "report") && (
+                      <ul className="text-list">
+                        {e.artifacts.filter((ref) => ref.kind === "report").map((ref) => (
+                          <li key={`${ref.executionId}-${ref.name}`}>
+                            <a href={`/api/tasks/${encodeURIComponent(task.id)}/artifacts?path=${encodeURIComponent(ref.name)}&kind=report`}>
+                              下载报告：{ref.name}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </article>
                 ))

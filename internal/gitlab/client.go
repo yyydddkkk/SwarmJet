@@ -248,6 +248,21 @@ func (c *Client) FindMR(ctx context.Context, repoID int64, source, target string
 	}
 	return nil, nil
 }
+
+// FindMRAnyState reconciles a create response that was lost even when the MR
+// has since been merged or closed. The caller must still verify its fixed SHA.
+func (c *Client) FindMRAnyState(ctx context.Context, repoID int64, source, target string) (*MergeRequest, error) {
+	rows, err := paginate[MergeRequest](ctx, c, project(repoID)+"/merge_requests", url.Values{"state": {"all"}, "source_branch": {source}, "target_branch": {target}})
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		if r.SourceBranch == source && r.TargetBranch == target {
+			return &r, nil
+		}
+	}
+	return nil, nil
+}
 func (c *Client) RequiredCIPassed(ctx context.Context, repoID, mr int64, expectedSHA string, requireCI bool) (bool, error) {
 	m, err := c.GetMR(ctx, repoID, mr)
 	if err != nil {

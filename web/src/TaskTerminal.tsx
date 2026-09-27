@@ -102,7 +102,8 @@ export function TaskTerminal({ task }: { task: Task }) {
       controller = new AbortController();
       setLoading(true);
       try {
-        const next = await getLog(task.id, execution.id, controller.signal);
+        const logArtifact = execution.artifacts?.find((ref) => ref.kind === "log");
+        const next = await getLog(task.id, execution.id, controller.signal, logArtifact?.name);
         if (stopped) return;
         setBody(next);
         setWaiting(false);
