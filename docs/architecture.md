@@ -27,7 +27,7 @@ Activity 通过 `internal/execution.AgentBackend` 调用 Agent 的启动、观�
 - 节点失联后的工作区/会话恢复与执行权校验，防止旧节点恢复后重复推送或合并；目前只支持等待原节点恢复或转人工。
 - 报告集中存储；API 目前按节点代理读取，历史报告依赖节点在线。
 - 每节点 runtime-admin 模型登录终端的控制台路由与凭证分发。
-Kubernetes 后端应通过 Kubernetes API 管理 Pod/Job 和存储，由 Kubernetes 调度资源；Temporal 继续管理业务流程。本地开发保留本机进程加 Docker 的运行方式。
+上述内容描述当前固定 Node 实现。Kubernetes 目标架构将重建执行归属、Runner 现场与恢复语义，由 Kubernetes 调度物理资源，Temporal 继续管理业务流程；不要求新的执行环境直接满足当前 `execution.Node` 的宿主路径契约，也不预设永久维护两套完整执行架构。迁移边界见 [ADR 0001](adr/0001-kubernetes-execution-direction.md) 和[接入准备](kubernetes-migration.md)。
 
 ## 项目接入、连接与初始化
 

@@ -1,5 +1,7 @@
 # 分布式执行节点
 
+本文记录当前 Docker/远程 Node 实现；Kubernetes 目标执行模型和旧任务兼容策略见 [接入准备](kubernetes-migration.md)。
+
 ## 目标与边界
 
 控制面集中部署：控制台 API、Temporal、PostgreSQL 保留在一处，负责项目配置、任务状态、流程编排和 GitLab 交互。Node（执行节点）承载真正的资源消耗：任务工作区、Runner、Compose 联调环境、报告以及任务级清理。
