@@ -20,7 +20,7 @@ Activity 通过 `internal/execution.AgentBackend` 调用 Agent 的启动、观�
 
 执行后端负责在执行主机上创建启动所需的文件。GitLab CLI 配置、镜像内凭证助手路径由本机后端准备，Activity 只选择当前阶段允许使用的凭证和 GitLab 地址。请求环境含凭证且不参与普通 JSON 序列化；未来远程协议必须单独设计认证及凭证传递，不能直接序列化 `AgentRequest` 后发送，也不能将凭证写入 Temporal 历史。
 
-当前已实现「控制面集中 + 多执行节点、任务固定归属」：`swarmjet node` 在独立 `DATA_DIR` 与 Docker 上提供服务，控制面的 `execution.Pool` 通过带时间戳与 HMAC 的 HTTP 协议调用节点。任务在 `CreateTaskScheduled` 中按在线状态与容量分配一次并写入 `tasks.node_id`；工作区、Agent、联调、报告读取和任务级退役都按该归属路由。节点失联时任务 blocked 并保留现场，不自动漂移。本机开发仍使用空 `NodeID` 走进程内管理器。
+当前已实现「控制面集中 + 多执行节点、准入后任务固定归属」：`swarmjet node` 在独立 `DATA_DIR` 与 Docker 上提供服务，控制面的 `execution.Pool` 通过带时间戳与 HMAC 的 HTTP 协议调用节点。Webhook 验证后先写 PostgreSQL inbox 再应答，后台按仓库扫描，周期全量扫描负责对账。接单无容量时 Task 保持 `queued`、`admissionStatus=waiting` 且没有 start 命令；准入事务分配 Node 后才启动 Workflow。节点归属写入 `tasks.node_id` 后不再更改；工作区、Agent、联调、报告读取和任务级退役都按该归属路由。节点失联时任务 blocked 并保留现场，不自动漂移。本机开发仍使用空 `NodeID` 走进程内管理器。
 
 接入自动接管前仍需处理：
 

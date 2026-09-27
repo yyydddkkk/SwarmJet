@@ -187,6 +187,7 @@ async function mock(page: Page, loggedIn = true, taskList: Task[] = [task]) {
       const counts = {
         all: scoped.length,
         active: scoped.filter((t) => taskView(t) === "active").length,
+        waiting: scoped.filter((t) => taskView(t) === "waiting").length,
         attention: scoped.filter((t) => taskView(t) === "attention").length,
         ended: scoped.filter((t) => taskView(t) === "ended").length,
         completed: scoped.filter((t) => t.stage === "completed").length,
@@ -203,6 +204,24 @@ async function mock(page: Page, loggedIn = true, taskList: Task[] = [task]) {
   });
   return { commands, getSaved: () => saved };
 }
+test("waiting admission is visible and separate from active work", async ({ page }) => {
+  const waiting: Task = {
+    ...task,
+    id: "task-waiting",
+    stage: "queued",
+    admissionStatus: "waiting",
+    message: "等待可用执行节点",
+    issue: { ...task.issue, iid: 43, title: "等待节点的任务" },
+    executions: {},
+  };
+  await mock(page, true, [task, waiting]);
+  await page.goto("/#/tasks");
+  await expect(page.getByText("1 项等待准入")).toBeVisible();
+  await page.getByRole("button", { name: "等待准入 1" }).click();
+  await expect(page.getByRole("link", { name: "等待节点的任务", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: task.issue.title, exact: true })).toHaveCount(0);
+  await expect(page.getByRole("row", { name: /等待节点的任务/ })).toContainText("等待可用执行节点");
+});
 test("task center pages through more than fifty results", async ({ page }) => {
   const many = Array.from({ length: 55 }, (_, index): Task => ({
     ...task,

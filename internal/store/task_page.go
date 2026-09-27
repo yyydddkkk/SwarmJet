@@ -23,6 +23,7 @@ type TaskPageOptions struct {
 type TaskCounts struct {
 	All       int `json:"all"`
 	Active    int `json:"active"`
+	Waiting   int `json:"waiting"`
 	Attention int `json:"attention"`
 	Ended     int `json:"ended"`
 	Completed int `json:"completed"`
@@ -41,6 +42,7 @@ type taskCursor struct {
 }
 
 const attentionCondition = `(NOT terminal AND (COALESCE((body->>'paused')::boolean,false) OR stage IN ('blocked','waiting_approval','waiting_manual_merge','partial_merge')))`
+const admissionWaitingCondition = `(stage='queued' AND body->>'admissionStatus'='waiting')`
 
 func (s *Store) TaskPage(ctx context.Context, options TaskPageOptions) (TaskPage, error) {
 	page := TaskPage{Items: []domain.Task{}}
@@ -62,7 +64,7 @@ func (s *Store) TaskPage(ctx context.Context, options TaskPageOptions) (TaskPage
 	if !cursor.UpdatedAt.IsZero() {
 		cursorTime = cursor.UpdatedAt
 	}
-	const base = ` FROM tasks WHERE ($1='' OR project_id=$1) AND ($2='' OR stage=$2) AND ($3='' OR id ILIKE '%'||$3||'%' OR body->'issue'->>'title' ILIKE '%'||$3||'%' OR body->'issue'->>'iid' ILIKE '%'||$3||'%' OR body->'project'->>'name' ILIKE '%'||$3||'%') AND ($4='all' OR $4='' OR ($4='ended' AND terminal) OR ($4='attention' AND ` + attentionCondition + `) OR ($4='active' AND NOT terminal AND NOT ` + attentionCondition + `))`
+	const base = ` FROM tasks WHERE ($1='' OR project_id=$1) AND ($2='' OR stage=$2) AND ($3='' OR id ILIKE '%'||$3||'%' OR body->'issue'->>'title' ILIKE '%'||$3||'%' OR body->'issue'->>'iid' ILIKE '%'||$3||'%' OR body->'project'->>'name' ILIKE '%'||$3||'%') AND ($4='all' OR $4='' OR ($4='ended' AND terminal) OR ($4='waiting' AND ` + admissionWaitingCondition + `) OR ($4='attention' AND ` + attentionCondition + `) OR ($4='active' AND NOT terminal AND NOT ` + attentionCondition + ` AND NOT ` + admissionWaitingCondition + `))`
 	args := []any{options.ProjectID, options.Stage, search, options.View}
 	rows, err := s.Pool.Query(ctx, `SELECT body,updated_at,id`+base+` AND ($5::timestamptz IS NULL OR (updated_at,id)<($5,$6)) ORDER BY updated_at DESC,id DESC LIMIT $7`, append(args, cursorTime, cursor.ID, options.Limit+1)...)
 	if err != nil {
@@ -100,7 +102,7 @@ func (s *Store) TaskPage(ctx context.Context, options TaskPageOptions) (TaskPage
 	if err = s.Pool.QueryRow(ctx, `SELECT count(*)`+base, args...).Scan(&page.Total); err != nil {
 		return page, err
 	}
-	if err = s.Pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE NOT terminal AND NOT `+attentionCondition+`),count(*) FILTER(WHERE `+attentionCondition+`),count(*) FILTER(WHERE terminal),count(*) FILTER(WHERE stage='completed') FROM tasks WHERE ($1='' OR project_id=$1)`, options.ProjectID).Scan(&page.Counts.All, &page.Counts.Active, &page.Counts.Attention, &page.Counts.Ended, &page.Counts.Completed); err != nil {
+	if err = s.Pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE NOT terminal AND NOT `+attentionCondition+` AND NOT `+admissionWaitingCondition+`),count(*) FILTER(WHERE `+admissionWaitingCondition+`),count(*) FILTER(WHERE `+attentionCondition+`),count(*) FILTER(WHERE terminal),count(*) FILTER(WHERE stage='completed') FROM tasks WHERE ($1='' OR project_id=$1)`, options.ProjectID).Scan(&page.Counts.All, &page.Counts.Active, &page.Counts.Waiting, &page.Counts.Attention, &page.Counts.Ended, &page.Counts.Completed); err != nil {
 		return page, err
 	}
 	return page, nil

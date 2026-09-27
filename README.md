@@ -1,15 +1,16 @@
 # SwarmJet
 
-可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab、GitHub.com 与 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）、Claude Code 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务创建后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，可选启动独立审查 Agent，再合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录及人工操作。
+可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab、GitHub.com 与 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）、Claude Code 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务准入后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，可选启动独立审查 Agent，再合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录及人工操作。
 
 ## 架构
 
 ```mermaid
 flowchart LR
-  Host[GitLab / GitHub Issue、MR / PR] --> Ingress[Webhook + 轮询]
+  Host[GitLab / GitHub Issue、MR / PR] --> Ingress[Webhook inbox + 周期对账]
   Console[Web 控制台] --> API[Go 管理 API]
-  Ingress --> Outbox[PostgreSQL 任务与命令]
-  API --> Outbox
+  Ingress --> Admission[PostgreSQL 准入队列]
+  API --> Admission
+  Admission --> Outbox[PostgreSQL 命令 outbox]
   Outbox --> Temporal[Temporal Server]
   Temporal <--> Workflow[Go Workflow Worker]
   Temporal --> Activity[Go Activity Worker]

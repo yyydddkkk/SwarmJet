@@ -2,6 +2,15 @@
 
 本文件记录当前工作树实际执行的检查。模拟测试不代表真实外部服务通过；未执行的项目单独列出。
 
+## 2026-09-27：接入与准入第一阶段
+
+- 临时 PostgreSQL 上运行 `TEST_DATABASE_URL=... go test -race ./internal/store ./internal/service ./internal/api`，覆盖 webhook 先持久化再 ACK、重复投递、失败重试、仓库定向扫描、等待准入、原子分配与取消。API 集成测试夹具补齐它声明使用的 Meta Compose 文件，并按 start 先于 note 投递的规则更新断言。
+- `go test ./cmd/... ./internal/...`、`npm run build` 和 `npm test` 通过；浏览器测试共 72 项，新增等待准入列表及运行统计显示检查。
+- 假 GitLab 一次返回 105 个可接 Issue 的突发测试验证：分布式且无 Node 时只持久化项目上限 100 个等待 Task，没有占用 Runner 槽；超出部分使 inbox 保留重试，不启动 Workflow。
+- 容量与命令复核补测：Node 容量为 1 时，工作区准备、Runner 与验证共用同一执行槽；待准入 Task 的 note 进入启动快照，取消前后提交的 note 保持可见，不留下无法投递的命令。
+- 这一阶段的数值是安全上限：inbox 待处理 1000、待准入全局 1000/每项目 100、活动任务每项目 4、已启动且未结束 Workflow 每项目 16。真实 GitLab/GitHub 的突发吞吐和外部 429 行为仍需部署环境压测后确定目标。
+- 当前对账扫描仍会为已有 Issue 读取评论；大量等待 Task 会增加代码平台请求。需用真实项目语料测量扫描时长与 API 429，再决定评论定向对账或扫描节流。
+
 ## 已通过
 
 - Go：`go test ./...` 全部通过，包含新增的 `secretbox`、`managedmeta`、`initflow`、连接 API、模型验证与自动合并 workflow 测试。

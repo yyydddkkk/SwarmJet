@@ -7,12 +7,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,7 +25,7 @@ import (
 )
 
 func TestGitHubWebhookValidatesBodySignature(t *testing.T) {
-	service := &Service{Wake: make(chan struct{}, 1)}
+	service := &Service{Store: scanTestStore(t), Wake: make(chan struct{}, 1)}
 	body := []byte(`{"action":"opened"}`)
 	mac := hmac.New(sha256.New, []byte("secret"))
 	_, _ = mac.Write(body)
@@ -67,6 +69,7 @@ func TestWebhookAuthenticationMethodAndBodyLimit(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			service := &Service{Wake: make(chan struct{}, 1)}
+			service.Store = scanTestStore(t)
 			request := httptest.NewRequest(test.method, "/webhooks/gitlab", strings.NewReader(strings.Repeat("x", test.size)))
 			request.Header.Set("X-Gitlab-Token", test.token)
 			response := httptest.NewRecorder()
@@ -85,7 +88,7 @@ func TestWebhookAuthenticationMethodAndBodyLimit(t *testing.T) {
 	}
 }
 func TestWebhookCoalescesConcurrentNotificationsWithoutBlocking(t *testing.T) {
-	service := &Service{Wake: make(chan struct{}, 1)}
+	service := &Service{Store: scanTestStore(t), Wake: make(chan struct{}, 1)}
 	server := httptest.NewServer(service.Webhook("token"))
 	defer server.Close()
 	client := &http.Client{Timeout: 3 * time.Second}
@@ -126,13 +129,201 @@ func TestWebhookCoalescesConcurrentNotificationsWithoutBlocking(t *testing.T) {
 	}
 }
 func TestWebhookNilWakeDoesNotBlock(t *testing.T) {
-	service := &Service{}
+	service := &Service{Store: scanTestStore(t)}
 	request := httptest.NewRequest("POST", "/webhooks/gitlab", nil)
 	request.Header.Set("X-Gitlab-Token", "token")
 	response := httptest.NewRecorder()
 	service.Webhook("token").ServeHTTP(response, request)
 	if response.Code != http.StatusAccepted {
 		t.Fatalf("status=%d", response.Code)
+	}
+}
+
+func TestWebhookPersistsBeforeAckAndDeduplicates(t *testing.T) {
+	s := scanTestStore(t)
+	svc := &Service{Store: s, Wake: make(chan struct{}, 1)}
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", strings.NewReader(`{"object_kind":"issue"}`))
+		req.Header.Set("X-Gitlab-Token", "secret")
+		req.Header.Set("webhook-id", "same-delivery")
+		response := httptest.NewRecorder()
+		svc.Webhook("secret").ServeHTTP(response, req)
+		if response.Code != http.StatusAccepted {
+			t.Fatalf("ACK %d: %s", response.Code, response.Body.String())
+		}
+	}
+	var count int
+	if err := s.Pool.QueryRow(context.Background(), "SELECT count(*) FROM webhook_inbox WHERE provider='gitlab'").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("inbox rows=%d err=%v", count, err)
+	}
+}
+
+func TestWebhookDoesNotAckDatabaseFailure(t *testing.T) {
+	s := scanTestStore(t)
+	s.Pool.Close()
+	svc := &Service{Store: s, Wake: make(chan struct{}, 1)}
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", strings.NewReader(`{}`))
+	req.Header.Set("X-Gitlab-Token", "secret")
+	response := httptest.NewRecorder()
+	svc.Webhook("secret").ServeHTTP(response, req)
+	if response.Code != http.StatusServiceUnavailable || len(svc.Wake) != 0 {
+		t.Fatalf("status=%d wake=%d", response.Code, len(svc.Wake))
+	}
+}
+
+func TestWebhookBackpressureKeepsDuplicateAck(t *testing.T) {
+	s := scanTestStore(t)
+	ctx := context.Background()
+	_, err := s.Pool.Exec(ctx, `INSERT INTO webhook_inbox(provider,delivery_id,payload)
+		SELECT 'gitlab', 'delivery-'||n, '{}'::bytea FROM generate_series(1,$1) n`, store.WebhookInboxLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{Store: s, Wake: make(chan struct{}, 1)}
+	for _, tc := range []struct {
+		id   string
+		want int
+	}{{"new", http.StatusServiceUnavailable}, {"delivery-1", http.StatusAccepted}} {
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", strings.NewReader(`{}`))
+		req.Header.Set("X-Gitlab-Token", "secret")
+		req.Header.Set("webhook-id", tc.id)
+		response := httptest.NewRecorder()
+		svc.Webhook("secret").ServeHTTP(response, req)
+		if response.Code != tc.want {
+			t.Fatalf("delivery %s: status=%d want=%d", tc.id, response.Code, tc.want)
+		}
+	}
+}
+
+func TestInboxRetainsDeliveryAfterScanFailure(t *testing.T) {
+	s := scanTestStore(t)
+	ctx := context.Background()
+	var fail atomic.Bool
+	fail.Store(true)
+	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail.Load() {
+			http.Error(w, "unavailable", 503)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `[]`)
+	}))
+	defer gitlab.Close()
+	if _, err := s.SaveProject(ctx, scanProject(gitlab.URL)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnqueueWebhook(ctx, "gitlab", "retry-me", "Issue Hook", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }}
+	if err := svc.ProcessInbox(ctx); err == nil {
+		t.Fatal("expected scan failure")
+	}
+	var processed bool
+	var attempts int
+	if err := s.Pool.QueryRow(ctx, "SELECT processed_at IS NOT NULL, attempts FROM webhook_inbox WHERE delivery_id='retry-me'").Scan(&processed, &attempts); err != nil || processed || attempts != 1 {
+		t.Fatalf("processed=%v attempts=%d err=%v", processed, attempts, err)
+	}
+	fail.Store(false)
+	if _, err := s.Pool.Exec(ctx, "UPDATE webhook_inbox SET next_attempt_at=now() WHERE delivery_id='retry-me'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ProcessInbox(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Pool.QueryRow(ctx, "SELECT processed_at IS NOT NULL, attempts FROM webhook_inbox WHERE delivery_id='retry-me'").Scan(&processed, &attempts); err != nil || !processed || attempts != 2 {
+		t.Fatalf("retried processed=%v attempts=%d err=%v", processed, attempts, err)
+	}
+}
+
+func TestIssueBurstStopsAtAdmissionBoundAndRetainsInbox(t *testing.T) {
+	s := scanTestStore(t)
+	ctx := context.Background()
+	issues := make([]map[string]any, 105)
+	for i := range issues {
+		issues[i] = map[string]any{"project_id": 7, "iid": i + 1, "title": "burst", "state": "opened", "labels": []string{"autonomous"}}
+	}
+	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			_ = json.NewEncoder(w).Encode(issues[100:])
+			return
+		}
+		_ = json.NewEncoder(w).Encode(issues[:100])
+	}))
+	defer gitlab.Close()
+	if _, err := s.SaveProject(ctx, scanProject(gitlab.URL)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnqueueWebhook(ctx, "gitlab", "burst", "Issue Hook", []byte(`{"project":{"id":7}}`)); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{Store: s, RequireNode: true, ResolveCredential: func(string) (string, error) { return "token", nil }}
+	if err := svc.ProcessInbox(ctx); !errors.Is(err, store.ErrAdmissionQueueFull) {
+		t.Fatalf("burst should reach the configured queue bound: %v", err)
+	}
+	page, err := s.TaskPage(ctx, store.TaskPageOptions{View: "waiting"})
+	if err != nil || page.Counts.Waiting != 100 || page.Total != 100 {
+		t.Fatalf("waiting tasks=%d total=%d err=%v", page.Counts.Waiting, page.Total, err)
+	}
+	stats, err := s.OperationsSnapshot(ctx)
+	if err != nil || stats.InboxPending != 1 || stats.RunnerSlotsReserved != 0 {
+		t.Fatalf("operations=%+v err=%v", stats, err)
+	}
+}
+
+func TestInboxScansAndRetriesRepositoriesIndependently(t *testing.T) {
+	s := scanTestStore(t)
+	ctx := context.Background()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, `[]`) }))
+	defer good.Close()
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "unavailable", 503) }))
+	defer bad.Close()
+	goodProject := scanProject(good.URL)
+	goodProject.ID = "good"
+	badProject := scanProject(bad.URL)
+	badProject.ID = "bad"
+	badProject.Repositories[0].ProjectID = 8
+	for _, p := range []domain.Project{goodProject, badProject} {
+		if _, err := s.SaveProject(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, event := range []struct{ id, body string }{{"good-delivery", `{"project":{"id":7}}`}, {"bad-delivery", `{"project_id":8}`}} {
+		if err := s.EnqueueWebhook(ctx, "gitlab", event.id, "Issue Hook", []byte(event.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := &Service{Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }}
+	if err := svc.ProcessInbox(ctx); err == nil {
+		t.Fatal("expected bad repository scan failure")
+	}
+	for _, tc := range []struct {
+		id        string
+		processed bool
+	}{{"good-delivery", true}, {"bad-delivery", false}} {
+		var processed bool
+		if err := s.Pool.QueryRow(ctx, "SELECT processed_at IS NOT NULL FROM webhook_inbox WHERE delivery_id=$1", tc.id).Scan(&processed); err != nil || processed != tc.processed {
+			t.Fatalf("delivery %s processed=%v err=%v", tc.id, processed, err)
+		}
+	}
+}
+
+func TestWebhookRepositoryExtraction(t *testing.T) {
+	for _, tc := range []struct {
+		provider, payload string
+		wantProvider      domain.Provider
+		wantID            int64
+	}{
+		{"gitlab", `{"project":{"id":7}}`, domain.ProviderGitLab, 7},
+		{"gitlab", `{"project_id":8}`, domain.ProviderGitLab, 8},
+		{"github", `{"repository":{"id":9}}`, domain.ProviderGitHub, 9},
+		{"github", `{"project":{"id":7}}`, "", 0},
+		{"gitlab", `{}`, "", 0},
+	} {
+		provider, id := webhookRepository(tc.provider, []byte(tc.payload))
+		if provider != tc.wantProvider || id != tc.wantID {
+			t.Fatalf("%s %s: got %s/%d", tc.provider, tc.payload, provider, id)
+		}
 	}
 }
 func scanTestStore(t *testing.T) *store.Store {
@@ -249,23 +440,26 @@ func TestScanUsesDistributedSchedulingPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := &Service{Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }, RequireNode: true}
-	// Distributed mode with no registered node must not create a local task.
+	// Distributed mode records demand without starting a local workflow.
 	if err := svc.Scan(ctx); err != nil {
 		t.Fatal(err)
 	}
 	tasks, err := s.Tasks(ctx)
-	if err != nil || len(tasks) != 0 {
-		t.Fatalf("distributed scan created %d tasks: %v", len(tasks), err)
+	if err != nil || len(tasks) != 1 || tasks[0].AdmissionStatus != "waiting" || tasks[0].NodeID != "" {
+		t.Fatalf("distributed scan did not queue demand: %+v %v", tasks, err)
 	}
-	// Once a node is online the same scan pins the task to it.
+	if pending, err := s.Pending(ctx); err != nil || len(pending) != 0 {
+		t.Fatalf("unassigned task has a start command: %+v %v", pending, err)
+	}
+	// Once a node is online admission pins the existing task to it.
 	if err := s.HeartbeatNode(ctx, domain.Node{ID: "node-1", Address: "http://node-1:8092", Capacity: 2}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Scan(ctx); err != nil {
+	if admitted, err := s.AdmitPendingTasks(ctx, 20); err != nil || admitted != 1 {
 		t.Fatal(err)
 	}
 	tasks, err = s.Tasks(ctx)
-	if err != nil || len(tasks) != 1 || tasks[0].NodeID != "node-1" {
+	if err != nil || len(tasks) != 1 || tasks[0].NodeID != "node-1" || tasks[0].AdmissionStatus != "assigned" {
 		t.Fatalf("tasks=%+v err=%v", tasks, err)
 	}
 }

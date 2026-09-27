@@ -313,6 +313,12 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			t.Message = fmt.Sprintf("等待依赖 %d#%d", d.ProjectID, d.IID)
 		}
 	case "preparing":
+		resourceCtx, release, e := a.resourceSlot(ctx, in.ExecutionID, t.NodeID)
+		if e != nil {
+			return out, e
+		}
+		defer release()
+		ctx = resourceCtx
 		for _, r := range t.Project.Repositories {
 			if _, e = c.EnsureTarget(ctx, r); e != nil {
 				return out, e
@@ -657,47 +663,26 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		// Auto-merge is off. Required verification must still be current for the
 		// reviewed revision set, then the task waits until every changed MR is
 		// actually merged before the workflow closes the source issue.
-		if t.ReviewDigest == "" || t.ReviewDigest != domain.Digest(t.Workspace.Revisions) {
+		evidence := mergeEvidence{client: c, task: &t}
+		if !evidence.reviewCurrent() {
 			t.Message = "审查摘要已变化，需要重新验证"
 			out.Task = t
 			out.Rework = true
 			return out, nil
 		}
-		if t.Project.AcceptanceStrategy != "none" {
-			required := 0
-			for _, v := range t.Verification {
-				if !v.Required {
-					continue
-				}
-				required++
-				if !t.AcceptanceIncomplete && (!v.Passed || v.RevisionDigest != t.ReviewDigest) {
-					t.Message = "必需验收未通过或已过期，需要重新验证"
-					out.Task = t
-					out.Rework = true
-					return out, nil
-				}
-			}
-			if required == 0 && !t.AcceptanceIncomplete {
-				return out, temporal.NewNonRetryableApplicationError("no required verification executed", "verification", nil)
-			}
+		current, missing := evidence.manualVerificationCurrent()
+		if !current {
+			t.Message = "必需验收未通过或已过期，需要重新验证"
+			out.Task = t
+			out.Rework = true
+			return out, nil
 		}
-		allMerged := true
-		for i, r := range t.Workspace.Revisions {
-			if !r.Changed {
-				continue
-			}
-			mr, e := c.GetMR(ctx, r.ProjectID, r.MRIID)
-			if e != nil {
-				return out, e
-			}
-			if !sameMR(mr, r) {
-				return out, temporal.NewNonRetryableApplicationError("MR identity changed after review", "stale_review", nil)
-			}
-			if mr.State == "merged" {
-				t.Workspace.Revisions[i].Merged = true
-				continue
-			}
-			allMerged = false
+		if missing {
+			return out, temporal.NewNonRetryableApplicationError("no required verification executed", "verification", nil)
+		}
+		allMerged, e := evidence.reconcileMergedRevisions(ctx)
+		if e != nil {
+			return out, e
 		}
 		if allMerged {
 			out.Ready = true
@@ -713,20 +698,8 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			return a.mergeGitHub(ctx, t, c)
 		}
 		// Reconcile completed remote merges before retrying any agent action.
-		for i, r := range t.Workspace.Revisions {
-			if !r.Changed {
-				continue
-			}
-			mr, e := c.GetMR(ctx, r.ProjectID, r.MRIID)
-			if e != nil {
-				return out, e
-			}
-			if !sameMR(mr, r) {
-				return out, temporal.NewNonRetryableApplicationError("MR identity changed after review", "stale_review", nil)
-			}
-			if mr.State == "merged" {
-				t.Workspace.Revisions[i].Merged = true
-			}
+		if _, e := (mergeEvidence{client: c, task: &t}).reconcileMergedRevisions(ctx); e != nil {
+			return out, e
 		}
 		ok, reason, e := a.gates(ctx, c, &t)
 		if e != nil {
@@ -769,11 +742,11 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 				if ex.Status != "succeeded" {
 					return StepResult{Task: t}, agentExecutionError(ex, mi.ExecutionID)
 				}
-				mr, e := c.GetMR(ctx, r.ProjectID, r.MRIID)
+				mr, same, e := (mergeEvidence{client: c, task: &t}).reviewedMR(ctx, r)
 				if e != nil {
 					return out, e
 				}
-				if !sameMR(mr, r) {
+				if !same {
 					return out, temporal.NewNonRetryableApplicationError("merged MR differs from reviewed revision", "stale_review", nil)
 				}
 				if mr.State != "merged" {
@@ -807,11 +780,11 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 			if !r.Changed {
 				continue
 			}
-			mr, e := c.GetMR(ctx, r.ProjectID, r.MRIID)
+			mr, same, e := (mergeEvidence{client: c, task: &t}).reviewedMR(ctx, r)
 			if e != nil {
 				return out, e
 			}
-			if !sameMR(mr, r) || mr.State != "merged" {
+			if !same || mr.State != "merged" {
 				return out, fmt.Errorf("cannot close Issue before MR %s merged", r.MRURL)
 			}
 		}
@@ -880,119 +853,7 @@ func (a *Activities) taskAutoMergeAllowed(ctx context.Context, t domain.Task) (b
 	return latest == nil || *latest, nil
 }
 func (a *Activities) gates(ctx context.Context, c forge.Client, t *domain.Task) (bool, string, error) {
-	if !t.AutoMergeEnabled() {
-		return false, "此任务已关闭自动合并", nil
-	}
-	if t.AcceptanceIncomplete {
-		return false, "验收不完整，只能人工处理，禁止自动合并", nil
-	}
-
-	if t.Issue.ProjectID > 0 && t.Issue.IID > 0 {
-		fresh, e := c.GetIssue(ctx, t.Issue.ProjectID, t.Issue.IID)
-		if e != nil {
-			return false, "", e
-		}
-		t.Issue = fresh
-	}
-	if t.ReviewDigest == "" || t.ReviewDigest != domain.Digest(t.Workspace.Revisions) {
-		return false, "STALE: review digest no longer matches", nil
-	}
-	if t.Round == 0 && requiresApproval(*t) && t.ApprovalDigest != t.ReviewDigest {
-		return false, "manual approval required", nil
-	}
-	if t.Project.AcceptanceStrategy != "none" {
-		required := 0
-		for _, v := range t.Verification {
-			if v.Required {
-				required++
-			}
-			if v.Required && (!v.Passed || v.RevisionDigest != t.ReviewDigest) {
-				return false, "verification not passed for reviewed revisions", nil
-			}
-		}
-		if required == 0 {
-			return false, "required verification is missing", nil
-		}
-	}
-	for i, r := range t.Workspace.Revisions {
-		if !r.Changed {
-			continue
-		}
-		mr, e := c.GetMR(ctx, r.ProjectID, r.MRIID)
-		if e != nil {
-			return false, "", e
-		}
-		if !sameMR(mr, r) {
-			return false, "STALE: MR changed after review", nil
-		}
-		if mr.State == "merged" {
-			t.Workspace.Revisions[i].Merged = true
-			continue
-		}
-		closes, e := c.ClosingIssues(ctx, r.ProjectID, r.MRIID)
-		if e != nil {
-			return false, "", e
-		}
-		if len(closes) > 0 {
-			return false, "STALE: remove closing issue references from MR and commits; the workflow closes issues after the full set", nil
-		}
-		if mr.SHA != r.HeadSHA || mr.TargetBranch != r.TargetBranch || mr.SourceBranch != r.Branch {
-			return false, "STALE: MR changed after review", nil
-		}
-		target, e := c.GetBranch(ctx, r.ProjectID, r.TargetBranch)
-		if e != nil {
-			return false, "", e
-		}
-		if target.Commit.ID != r.BaseSHA {
-			return false, "STALE: target branch advanced; development must synchronize and reverify", nil
-		}
-		if mr.HasConflicts {
-			return false, "STALE: merge conflict", nil
-		}
-		if t.Project.HostingProvider() == domain.ProviderGitHub {
-			client, err := githubClient(c)
-			if err != nil {
-				return false, "", err
-			}
-			checks, err := client.RequiredChecks(ctx, r.ProjectID, r.MRIID, r.HeadSHA)
-			if err != nil {
-				return false, "", err
-			}
-			if checks.RequiredCount == 0 {
-				if t.Project.RequireCI || t.Project.AcceptanceStrategy == "platform_ci" {
-					return false, "目标分支没有配置必需检查，无法满足 CI 要求", nil
-				}
-				if !checks.MergeQueue && mr.DetailedMergeStatus != "mergeable" {
-					return false, "等待 GitHub PR 合并检查：" + mr.DetailedMergeStatus, nil
-				}
-				continue
-			}
-			if checks.Failed {
-				return false, "STALE: " + checks.Reason, nil
-			}
-			if !checks.Ready {
-				return false, "等待 GitHub 必需检查：" + checks.Reason, nil
-			}
-			if !checks.MergeQueue && mr.DetailedMergeStatus != "mergeable" {
-				return false, "等待 GitHub PR 合并检查：" + mr.DetailedMergeStatus, nil
-			}
-			continue
-		}
-		if (t.Project.RequireCI || t.Project.AcceptanceStrategy == "gitlab_ci" || t.Project.AcceptanceStrategy == "platform_ci") && mr.HeadPipeline != nil && (mr.HeadPipeline.Status == "failed" || mr.HeadPipeline.Status == "canceled") {
-			return false, "STALE: required CI failed; inspect the pipeline and repair", nil
-		}
-		if mr.DetailedMergeStatus != "mergeable" && mr.DetailedMergeStatus != "ci_still_running" && mr.DetailedMergeStatus != "checking" && mr.DetailedMergeStatus != "unchecked" {
-			return false, "GitLab merge condition: " + mr.DetailedMergeStatus, nil
-		}
-		ok, e := c.RequiredCIPassed(ctx, r.ProjectID, r.MRIID, r.HeadSHA, t.Project.RequireCI || t.Project.AcceptanceStrategy == "gitlab_ci" || t.Project.AcceptanceStrategy == "platform_ci")
-		if e != nil {
-			return false, "", e
-		}
-		if !ok || mr.DetailedMergeStatus != "mergeable" {
-			return false, "等待 GitLab CI 或合并检查", nil
-		}
-	}
-	return true, "", nil
+	return (mergeEvidence{client: c, task: t}).automaticGate(ctx)
 }
 func (a *Activities) execute(ctx context.Context, in StepInput, t domain.Task) (domain.Execution, error) {
 	return withResultRecovery(ctx, in, t, roleFor(in.Phase), func(ctx context.Context, in StepInput, t domain.Task, repair bool) (domain.Execution, error) {
@@ -1113,16 +974,9 @@ func (a *Activities) runAgent(ctx context.Context, in StepInput, t domain.Task, 
 	}
 	// Durable execution IDs adopt an already-running container after Activity retries.
 	slot := ""
-	limit := a.Concurrency
-	if t.NodeConfigVersion > 0 {
-		cfg, e := a.Store.NodeConfig(ctx, t.NodeID)
-		if e != nil {
-			return domain.Execution{}, e
-		}
-		limit = cfg.Capacity
-	}
-	if limit < 1 {
-		limit = 2
+	limit, e := a.slotLimit(ctx, t.NodeID)
+	if e != nil {
+		return domain.Execution{}, e
 	}
 	for slot == "" {
 		if role == "merge" {
@@ -1376,9 +1230,6 @@ func EnvironmentCredential(name string) (string, error) {
 	return v, nil
 }
 
-func sameMR(m forge.MergeRequest, r domain.Revision) bool {
-	return m.SHA == r.HeadSHA && m.SourceBranch == r.Branch && m.TargetBranch == r.TargetBranch
-}
 func (a *Activities) renewMerge(ctx context.Context, t domain.Task) error {
 	for _, r := range t.Workspace.Revisions {
 		if !r.Changed {
@@ -1396,9 +1247,9 @@ func (a *Activities) renewMerge(ctx context.Context, t domain.Task) error {
 }
 
 func (a *Activities) resourceSlot(ctx context.Context, owner string, nodeID string) (context.Context, func(), error) {
-	limit := a.Concurrency
-	if limit < 1 {
-		limit = 2
+	limit, err := a.slotLimit(ctx, nodeID)
+	if err != nil {
+		return ctx, nil, err
 	}
 	name := ""
 	for name == "" {
@@ -1447,6 +1298,28 @@ func (a *Activities) resourceSlot(ctx context.Context, owner string, nodeID stri
 		defer c()
 		_ = a.Store.ReleaseLeases(cleanup, owner)
 	}, nil
+}
+
+func (a *Activities) slotLimit(ctx context.Context, nodeID string) (int, error) {
+	limit := a.Concurrency
+	if nodeID != "" {
+		cfg, err := a.Store.NodeConfig(ctx, nodeID)
+		if err == nil {
+			limit = cfg.Capacity
+		} else if errors.Is(err, store.ErrNotFound) {
+			node, err := a.Store.Node(ctx, nodeID)
+			if err != nil {
+				return 0, err
+			}
+			limit = node.Capacity
+		} else {
+			return 0, err
+		}
+	}
+	if limit < 1 {
+		limit = 2
+	}
+	return limit, nil
 }
 
 // syncManagedMeta exports the control-plane owned managed Meta-Repo and

@@ -298,6 +298,10 @@ func TestLoginPostgres(t *testing.T) {
 			_, _ = w.Write([]byte("projects:\n  service: " + remote.URL + "/group/service.git\n"))
 			return
 		}
+		if strings.Contains(r.URL.Path, "/repository/files/compose.yml/raw") {
+			_, _ = w.Write([]byte("services:\n  test: {image: alpine}\n"))
+			return
+		}
 		w.WriteHeader(404)
 	}))
 	defer remote.Close()
@@ -425,8 +429,12 @@ func TestLoginPostgres(t *testing.T) {
 		t.Fatal(note.Code, note.Body)
 	}
 	pending, err := isolated.Pending(context.Background())
-	if err != nil || len(pending) != 2 {
-		t.Fatal("missing task/command outbox", len(pending), err)
+	if err != nil || len(pending) != 1 || pending[0].Command.Kind != "start" {
+		t.Fatal("start command must be delivered before task notes", pending, err)
+	}
+	var commands int
+	if err := isolated.Pool.QueryRow(context.Background(), "SELECT count(*) FROM commands WHERE task_id=$1", task.ID).Scan(&commands); err != nil || commands != 2 {
+		t.Fatal("task note was not stored while start is pending", commands, err)
 	}
 	task.Stage = "waiting_approval"
 	task.Workspace.Revisions = []domain.Revision{{RepositoryID: "service", BaseSHA: "a", HeadSHA: "b", TargetBranch: "main", Changed: true}}

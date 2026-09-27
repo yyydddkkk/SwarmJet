@@ -55,7 +55,7 @@ export default function Tasks({ projectId }: { projectId: string }) {
     }, 5000);
     return () => clearInterval(timer);
   }, [refresh]);
-  const counts = page?.counts || { all: 0, active: 0, attention: 0, ended: 0, completed: 0 };
+  const counts = page?.counts || { all: 0, active: 0, waiting: 0, attention: 0, ended: 0, completed: 0 };
   const rows = tasks;
   const resetPage = () => { setCursor(""); setHistory([]); };
   const projectOptions = Array.from(
@@ -78,6 +78,10 @@ export default function Tasks({ projectId }: { projectId: string }) {
         <span>
           <i className="live-dot" />
           <strong>{loading ? "—" : counts.active}</strong> 项任务正在推进
+        </span>
+        <span>
+          <Icon name="clock" />
+          <strong>{loading ? "—" : counts.waiting}</strong> 项等待准入
         </span>
         <span>
           <Icon name="check" />
@@ -158,6 +162,7 @@ export default function Tasks({ projectId }: { projectId: string }) {
               [
                 ["all", "全部任务", counts.all],
                 ["active", "进行中", counts.active],
+                ["waiting", "等待准入", counts.waiting],
                 ["attention", "需要处理", counts.attention],
                 ["ended", "已结束", counts.ended],
               ] as const

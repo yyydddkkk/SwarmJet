@@ -29,6 +29,7 @@ import (
 	"swarmjet/internal/githubapp"
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/imagebuild"
+	"swarmjet/internal/intake"
 	"swarmjet/internal/labels"
 	"swarmjet/internal/repochange"
 	"swarmjet/internal/secretbox"
@@ -299,6 +300,22 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	case "/api/nodes":
 		a.nodes(w, r)
+		return
+	case "/api/operations":
+		if r.Method != http.MethodGet {
+			problem(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if a.s == nil {
+			problem(w, http.StatusServiceUnavailable, "operations unavailable")
+			return
+		}
+		snapshot, err := a.s.OperationsSnapshot(r.Context())
+		if err != nil {
+			failure(w, err)
+			return
+		}
+		respond(w, http.StatusOK, snapshot)
 		return
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/"), "/")
@@ -698,7 +715,7 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 			limit = value
 		}
 		view := query.Get("view")
-		if view != "" && view != "all" && view != "active" && view != "attention" && view != "ended" {
+		if view != "" && view != "all" && view != "active" && view != "waiting" && view != "attention" && view != "ended" {
 			problem(w, 400, "invalid task view")
 			return
 		}
@@ -749,7 +766,7 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 			problem(w, 400, "enabled registered issue project and valid dependencies required")
 			return
 		}
-		if p.ManagedMeta() && (a.cfg.Initializer == nil || !a.cfg.Initializer.ReadyForTasks(r.Context(), p.ID)) {
+		if !intake.ReadyForTasks(r.Context(), p, a.cfg.Initializer) {
 			problem(w, 409, "Meta 仓库尚未初始化完成，暂不能接单。")
 			return
 		}
@@ -776,35 +793,18 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 			failure(w, err)
 			return
 		}
-		p, err = domain.ResolveIssueAgent(p, issue, enabled)
-		if err != nil {
-			problem(w, 400, err.Error())
-			return
-		}
-		if !a.cfg.RequireNode && p.Nodes.Mode == "" {
-			p, err = imagebuild.ApplyToProject(a.cfg.DataDir, p)
-			if err != nil {
-				failure(w, err)
-				return
-			}
-		}
-		id, err := newID()
-		if err != nil {
-			failure(w, err)
-			return
-		}
-		now := time.Now().UTC()
-		t := domain.Task{ID: id, Project: p, Issue: issue, Dependencies: req.Dependencies, Stage: "queued", Executions: map[string]domain.Execution{}, Verification: []domain.Verification{}, Assumptions: []string{}, Notes: []string{}, CreatedAt: now, UpdatedAt: now}
 		pending, err := a.s.PendingIssueRunCommands(r.Context(), p.GitLabURL, issue)
 		if err != nil {
 			failure(w, err)
 			return
 		}
-		if pending {
-			t.TriggerNoteIDs = []int64{}
+		scheduled, err := intake.Schedule(r.Context(), a.s, p, issue, enabled, intake.Options{DataDir: a.cfg.DataDir, RequireNode: a.cfg.RequireNode, Dependencies: req.Dependencies, ClaimRunCommands: pending})
+		var agentError *intake.AgentSelectionError
+		if errors.As(err, &agentError) {
+			problem(w, 400, err.Error())
+			return
 		}
-		scheduled, err := a.s.CreateTaskScheduled(r.Context(), t, a.cfg.RequireNode)
-		if errors.Is(err, store.ErrNoNode) {
+		if errors.Is(err, store.ErrNoNode) || errors.Is(err, store.ErrAdmissionQueueFull) {
 			problem(w, 503, err.Error())
 			return
 		}
@@ -844,6 +844,17 @@ func (a *server) task(w http.ResponseWriter, r *http.Request, id string, tail []
 		if err = validateCommand(t, c); err != nil {
 			problem(w, 409, err.Error())
 			return
+		}
+		if c.Kind == "cancel" && t.AdmissionStatus == "waiting" {
+			cancelled, cancelErr := a.s.CancelPendingTask(r.Context(), id)
+			if cancelErr != nil {
+				failure(w, cancelErr)
+				return
+			}
+			if cancelled {
+				respond(w, 202, map[string]bool{"accepted": true})
+				return
+			}
 		}
 		if c.Kind == "set_auto_merge" {
 			err = a.s.EnqueueAutoMerge(r.Context(), id, c)

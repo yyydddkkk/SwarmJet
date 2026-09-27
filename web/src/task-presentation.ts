@@ -1,9 +1,10 @@
 import type { Task } from "./types";
 
-export type TaskView = "all" | "active" | "attention" | "ended";
+export type TaskView = "all" | "active" | "waiting" | "attention" | "ended";
 
 export function taskView(task: Task): Exclude<TaskView, "all"> {
   if (["completed", "cancelled"].includes(task.stage)) return "ended";
+  if (task.stage === "queued" && task.admissionStatus === "waiting") return "waiting";
   if (
     task.paused ||
     [
@@ -20,6 +21,7 @@ export function taskView(task: Task): Exclude<TaskView, "all"> {
 export function nextAction(task: Task): string {
   if (["completed", "cancelled"].includes(task.stage)) return task.stage === "completed" && task.round ? "已交付；Issue 保持打开，可复核或发起下一轮" : "查看交付记录";
   if (task.paused) return "任务已暂停，工作现场已保留。确认后可继续执行。";
+  if (task.stage === "queued" && task.admissionStatus === "waiting") return task.message || "需求已接收，等待可用的执行容量。";
   switch (task.stage) {
     case "waiting_approval":
       return "审查已完成，请核对变更并批准当前版本，或退回修改。";

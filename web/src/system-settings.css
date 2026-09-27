@@ -21,6 +21,7 @@
 .system-address-row a:hover { text-decoration: underline; }
 .system-address-foot { border-top: 1px solid var(--line); padding: 12px 23px; background: var(--paper); color: var(--muted); font-size: 12px; }
 .system-check-row { display: grid; grid-template-columns: 76px minmax(120px, .7fr) minmax(220px, 2fr); align-items: baseline; gap: 18px; padding: 16px 23px; border-top: 1px solid var(--line); font-size: 12px; }
+.system-operation-row { grid-template-columns: minmax(120px, .7fr) minmax(220px, 2fr); }
 .system-check-row:first-child { border-top: 0; }
 .system-check-row strong { font-size: 13px; }
 .system-check-row > span:last-child { color: var(--muted); overflow-wrap: anywhere; }

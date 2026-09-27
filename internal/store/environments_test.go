@@ -56,8 +56,9 @@ func TestManagedNodeSchedulingSnapshotsAndDrain(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = s.CreateTaskScheduled(ctx, testTask("managed-2", p, 2), true); !errors.Is(e, ErrNoNode) {
-		t.Fatalf("drained/other project node selected: %v", e)
+	waiting, e := s.CreateTaskScheduled(ctx, testTask("managed-2", p, 2), true)
+	if e != nil || waiting.NodeID != "" || waiting.AdmissionStatus != "waiting" {
+		t.Fatalf("drained/other project node selected: %+v %v", waiting, e)
 	}
 	cfg.Archived = true
 	if _, e = s.SaveNodeConfig(ctx, "a", cfg); e == nil {
@@ -72,8 +73,9 @@ func TestManagedNodeSchedulingSnapshotsAndDrain(t *testing.T) {
 		t.Fatal(e)
 	}
 	p.Nodes = domain.NodeSelection{Mode: "auto"}
-	if _, e = s.CreateTaskScheduled(ctx, testTask("managed-3", p, 3), true); !errors.Is(e, ErrNoNode) {
-		t.Fatalf("stale network readiness selected: %v", e)
+	waiting, e = s.CreateTaskScheduled(ctx, testTask("managed-3", p, 3), true)
+	if e != nil || waiting.NodeID != "" || waiting.AdmissionStatus != "waiting" {
+		t.Fatalf("stale network readiness selected: %+v %v", waiting, e)
 	}
 }
 func TestNetworkVersionConflictAndDirect(t *testing.T) {

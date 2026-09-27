@@ -219,7 +219,7 @@ func pickTaskNode(ctx context.Context, tx pgx.Tx, t *domain.Task) (string, bool,
 	rows, e := tx.Query(ctx, `SELECT n.id,n.readiness,c.body,COALESCE(r.running,0),n.capacity
  FROM nodes n LEFT JOIN node_configs c ON c.id=n.id
  LEFT JOIN (SELECT node_id,count(*) running FROM (
- SELECT node_id FROM tasks WHERE NOT terminal AND node_id IS NOT NULL
+ SELECT node_id FROM tasks WHERE `+activeNodeTask+`
  UNION ALL SELECT body->>'nodeId' FROM initializations WHERE status NOT IN ('ready','cancelled') AND COALESCE(body->>'nodeId','')<>''
  ) work GROUP BY node_id) r ON r.node_id=n.id
  WHERE NOT EXISTS(SELECT 1 FROM node_credentials nc WHERE nc.id=n.id AND nc.revoked) AND n.last_seen > now() - interval '30 seconds' ORDER BY COALESCE(r.running,0),n.id`)

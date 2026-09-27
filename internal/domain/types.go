@@ -198,6 +198,8 @@ type Task struct {
 	Checkpoint           *WorkflowCheckpoint `json:"checkpoint,omitempty"`
 	ID                   string              `json:"id"`
 	NodeID               string              `json:"nodeId,omitempty"`
+	AdmissionStatus      string              `json:"admissionStatus,omitempty"`
+	AdmissionBackend     string              `json:"admissionBackend,omitempty"`
 	Project              Project             `json:"project"`
 	// nil inherits the project's snapshot; an explicit value controls this task.
 	AutoMergeOverride *bool                `json:"autoMergeOverride,omitempty"`

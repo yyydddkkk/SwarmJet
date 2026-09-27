@@ -85,11 +85,11 @@ func (a *Activities) strategyVerification(ctx context.Context, c forge.Client, n
 				continue
 			}
 			changed = true
-			mr, e := c.GetMR(ctx, r.ProjectID, r.MRIID)
+			mr, same, e := (mergeEvidence{client: c, task: t}).reviewedMR(ctx, r)
 			if e != nil {
 				return false, false, e
 			}
-			if !sameMR(mr, r) {
+			if !same {
 				return false, false, errors.New("MR 提交已变化，不能使用旧提交 CI")
 			}
 			if mr.HeadPipeline == nil || mr.HeadPipeline.SHA != r.HeadSHA {
@@ -275,11 +275,11 @@ func publishIssueReviewGuide(ctx context.Context, c forge.Client, t domain.Task)
 		if !r.Changed || r.MRIID == 0 {
 			continue
 		}
-		mr, err := c.GetMR(ctx, r.ProjectID, r.MRIID)
+		mr, same, err := (mergeEvidence{client: c, task: &t}).reviewedMR(ctx, r)
 		if err != nil {
 			return err
 		}
-		if !sameMR(mr, r) {
+		if !same {
 			return errors.New("MR changed before review guide publication")
 		}
 		description := mr.Description
@@ -332,11 +332,11 @@ func refreshMRVerification(ctx context.Context, c forge.Client, t domain.Task) e
 		if !r.Changed || r.MRIID == 0 {
 			continue
 		}
-		mr, err := c.GetMR(ctx, r.ProjectID, r.MRIID)
+		mr, same, err := (mergeEvidence{client: c, task: &t}).reviewedMR(ctx, r)
 		if err != nil {
 			return err
 		}
-		if !sameMR(mr, r) {
+		if !same {
 			return errors.New("MR changed during verification")
 		}
 		body := mr.Description

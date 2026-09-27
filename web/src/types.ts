@@ -189,6 +189,8 @@ export interface Task {
   triggerText?: string;
   dependencyTasks?: Record<string, string>;
   id: string;
+  admissionStatus?: "waiting" | "assigned";
+  admissionBackend?: "local" | "node";
   project: Project;
   autoMergeOverride?: boolean | null;
   issue: Issue;
@@ -216,7 +218,7 @@ export interface TaskPage {
   items: Task[];
   nextCursor?: string;
   total: number;
-  counts: { all: number; active: number; attention: number; ended: number; completed: number };
+  counts: { all: number; active: number; waiting: number; attention: number; ended: number; completed: number };
 }
 export interface TaskEvent {
   id: number;

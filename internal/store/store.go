@@ -21,6 +21,19 @@ var schema string
 var ErrConflict = errors.New("conflict: stale version or active task already exists")
 var ErrNotFound = errors.New("not found")
 var ErrNoNode = errors.New("no execution node with spare capacity")
+var ErrAdmissionQueueFull = errors.New("task admission queue is full")
+
+// Pending Tasks are durable, but have no start command until a node is assigned.
+// Limits bound stored demand and the number of live workflows per project.
+const (
+	maxPendingTasks           = 1000
+	maxPendingTasksPerProject = 100
+	maxActiveTasksPerProject  = 4
+	maxStartedTasksPerProject = 16
+)
+
+const activeNodeTask = `NOT terminal AND node_id IS NOT NULL AND NOT COALESCE((body->>'paused')::boolean,false) AND stage NOT IN ('waiting_dependencies','waiting_approval','waiting_manual_merge','partial_merge','blocked')`
+const activeProjectTask = `NOT terminal AND NOT COALESCE((body->>'paused')::boolean,false) AND stage NOT IN ('waiting_dependencies','waiting_approval','waiting_manual_merge','partial_merge','blocked') AND (node_id IS NOT NULL OR EXISTS(SELECT 1 FROM commands c WHERE c.task_id=tasks.id AND c.id='start-'||tasks.id))`
 
 type Store struct{ Pool *pgxpool.Pool }
 
@@ -255,20 +268,56 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 		}
 		t.TriggerText = strings.Join(parts, "\n\n")
 	}
-	node, found, e := pickTaskNode(ctx, tx, &t)
-	if e != nil {
+	managed := false
+	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM node_configs)`).Scan(&managed); e != nil {
 		return t, e
 	}
-	if found {
-		t.NodeID = node
+	distributed := requireNode || managed || t.Project.Nodes.Mode == "selected"
+	admitted := false
+	if distributed {
+		t.AdmissionBackend = "node"
 	} else {
-		managed := false
-		if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM node_configs)`).Scan(&managed); e != nil {
+		t.AdmissionBackend = "local"
+	}
+	var active, started int
+	if e = tx.QueryRow(ctx, `SELECT count(*) FILTER(WHERE `+activeProjectTask+`),count(*) FILTER(WHERE NOT terminal AND EXISTS(SELECT 1 FROM commands c WHERE c.task_id=tasks.id AND c.id='start-'||tasks.id)) FROM tasks WHERE project_id=$1`, t.Project.ID).Scan(&active, &started); e != nil {
+		return t, e
+	}
+	var olderPending bool
+	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE project_id=$1 AND stage='queued' AND node_id IS NULL AND NOT EXISTS(SELECT 1 FROM commands WHERE commands.task_id=tasks.id AND commands.id='start-'||tasks.id))`, t.Project.ID).Scan(&olderPending); e != nil {
+		return t, e
+	}
+	if active < maxActiveTasksPerProject && started < maxStartedTasksPerProject && !olderPending {
+		var node string
+		if node, admitted, e = pickTaskNode(ctx, tx, &t); e != nil {
 			return t, e
 		}
-		if requireNode || managed || t.Project.Nodes.Mode == "selected" {
-			return t, fmt.Errorf("%w: %s", ErrNoNode, t.Message)
+		if admitted {
+			t.NodeID = node
+			t.AdmissionBackend = "node"
+		} else if !distributed {
+			admitted = true
+			t.Message = ""
 		}
+	}
+	if !admitted {
+		var global, project int
+		if e = tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE project_id=$1) FROM tasks WHERE stage='queued' AND node_id IS NULL AND NOT EXISTS(SELECT 1 FROM commands WHERE commands.task_id=tasks.id AND commands.id='start-'||tasks.id)`, t.Project.ID).Scan(&global, &project); e != nil {
+			return t, e
+		}
+		if global >= maxPendingTasks || project >= maxPendingTasksPerProject {
+			return t, ErrAdmissionQueueFull
+		}
+		t.AdmissionStatus = "waiting"
+		if started >= maxStartedTasksPerProject {
+			t.Message = "等待项目工作流容量"
+		} else if active >= maxActiveTasksPerProject {
+			t.Message = "等待项目并发容量"
+		} else if t.Message == "" {
+			t.Message = "等待可用执行节点"
+		}
+	} else {
+		t.AdmissionStatus = "assigned"
 	}
 	b, _ := json.Marshal(t)
 	var nodeID any
@@ -284,13 +333,160 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 			return t, e
 		}
 	}
-	c := domain.Command{ID: "start-" + t.ID, Kind: "start"}
-	cb, _ := json.Marshal(c)
-	_, e = tx.Exec(ctx, "INSERT INTO commands(id,task_id,body) VALUES($1,$2,$3)", c.ID, t.ID, cb)
-	if e != nil {
-		return t, e
+	if admitted {
+		c := domain.Command{ID: "start-" + t.ID, Kind: "start"}
+		cb, _ := json.Marshal(c)
+		_, e = tx.Exec(ctx, "INSERT INTO commands(id,task_id,body) VALUES($1,$2,$3)", c.ID, t.ID, cb)
+		if e != nil {
+			return t, e
+		}
 	}
 	return t, tx.Commit(ctx)
+}
+
+// AdmitPendingTasks assigns durable queued tasks and creates their start
+// commands in the same transaction. The global allocation lock also covers
+// task creation and node configuration changes.
+func (s *Store) AdmitPendingTasks(ctx context.Context, limit int) (int, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84261302)"); err != nil {
+		return 0, err
+	}
+	if _, err = tx.Exec(ctx, imageGuardLock); err != nil {
+		return 0, err
+	}
+	// Interleave projects while retaining FIFO within each project.
+	rows, err := tx.Query(ctx, `WITH waiting AS (
+ SELECT t.body,t.project_id,t.updated_at,t.id,row_number() OVER(PARTITION BY t.project_id ORDER BY t.updated_at,t.id) AS project_rank
+ FROM tasks t WHERE t.stage='queued' AND t.node_id IS NULL
+ AND NOT EXISTS(SELECT 1 FROM commands c WHERE c.task_id=t.id AND c.id='start-'||t.id)
+ ) SELECT t.body FROM waiting t
+ LEFT JOIN (SELECT project_id,count(*) AS running FROM tasks WHERE `+activeProjectTask+` GROUP BY project_id) r ON r.project_id=t.project_id
+ ORDER BY t.project_rank,COALESCE(r.running,0),t.updated_at,t.id LIMIT $1`, maxPendingTasks)
+	if err != nil {
+		return 0, err
+	}
+	queued := []domain.Task{}
+	for rows.Next() {
+		var body []byte
+		var t domain.Task
+		if err = rows.Scan(&body); err == nil {
+			err = json.Unmarshal(body, &t)
+		}
+		if err != nil {
+			break
+		}
+		queued = append(queued, t)
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	admitted := 0
+	for _, t := range queued {
+		if admitted >= limit {
+			break
+		}
+		var active, started int
+		if err = tx.QueryRow(ctx, `SELECT count(*) FILTER(WHERE `+activeProjectTask+`),count(*) FILTER(WHERE NOT terminal AND EXISTS(SELECT 1 FROM commands c WHERE c.task_id=tasks.id AND c.id='start-'||tasks.id)) FROM tasks WHERE project_id=$1`, t.Project.ID).Scan(&active, &started); err != nil {
+			return 0, err
+		}
+		if active >= maxActiveTasksPerProject || started >= maxStartedTasksPerProject {
+			continue
+		}
+		var node string
+		var found bool
+		if t.AdmissionBackend == "local" {
+			found = true
+		} else {
+			if node, found, err = pickTaskNode(ctx, tx, &t); err != nil {
+				return 0, err
+			}
+		}
+		if !found {
+			continue
+		}
+		t.NodeID = node
+		t.AdmissionStatus = "assigned"
+		if node == "" {
+			t.Message = "等待本地工作流启动"
+		} else {
+			t.Message = "已分配执行节点，等待启动"
+		}
+		t.UpdatedAt = time.Now().UTC()
+		body, marshalErr := json.Marshal(t)
+		if marshalErr != nil {
+			return 0, marshalErr
+		}
+		tag, updateErr := tx.Exec(ctx, `UPDATE tasks SET node_id=$2,body=$3,updated_at=now() WHERE id=$1 AND stage='queued' AND node_id IS NULL`, t.ID, node, body)
+		if updateErr != nil {
+			return 0, updateErr
+		}
+		if tag.RowsAffected() != 1 {
+			continue
+		}
+		command := domain.Command{ID: "start-" + t.ID, Kind: "start"}
+		cb, _ := json.Marshal(command)
+		if _, err = tx.Exec(ctx, `INSERT INTO commands(id,task_id,body) VALUES($1,$2,$3)`, command.ID, t.ID, cb); err != nil {
+			return 0, mapErr(err)
+		}
+		admitted++
+	}
+	return admitted, tx.Commit(ctx)
+}
+
+// CancelPendingTask completes a task that has not been assigned or started.
+// It serializes with admission so no start command can appear after cancel.
+func (s *Store) CancelPendingTask(ctx context.Context, taskID string) (bool, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(84261302)"); err != nil {
+		return false, err
+	}
+	var body []byte
+	var stage string
+	var nodeID *string
+	if err = tx.QueryRow(ctx, `SELECT body,stage,node_id FROM tasks WHERE id=$1 FOR UPDATE`, taskID).Scan(&body, &stage, &nodeID); err != nil {
+		return false, mapErr(err)
+	}
+	var t domain.Task
+	if err = json.Unmarshal(body, &t); err != nil {
+		return false, err
+	}
+	var hasStart bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM commands WHERE id=$1)`, "start-"+taskID).Scan(&hasStart); err != nil {
+		return false, err
+	}
+	if stage != "queued" || t.AdmissionStatus != "waiting" || nodeID != nil || hasStart {
+		return false, tx.Commit(ctx)
+	}
+	t.Stage = "cancelled"
+	t.Message = "等待准入期间已取消"
+	t.UpdatedAt = time.Now().UTC()
+	updated, err := json.Marshal(t)
+	if err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE tasks SET stage='cancelled',terminal=true,body=$2,updated_at=now() WHERE id=$1`, taskID, updated); err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE commands SET delivered=true WHERE task_id=$1 AND NOT delivered`, taskID); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
 }
 
 func (s *Store) Task(ctx context.Context, id string) (domain.Task, error) {
@@ -388,6 +584,12 @@ func (s *Store) Execution(ctx context.Context, taskID, role string, ex domain.Ex
 	return e
 }
 func (s *Store) Enqueue(ctx context.Context, taskID string, c domain.Command) error {
+	if c.Kind == "note" {
+		handled, err := s.enqueueStoredNote(ctx, taskID, c)
+		if handled || err != nil {
+			return err
+		}
+	}
 	b, _ := json.Marshal(c)
 	tag, e := s.Pool.Exec(ctx, "INSERT INTO commands(id,task_id,body) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", c.ID, taskID, b)
 	if e != nil {
@@ -477,7 +679,9 @@ type PendingCommand struct {
 }
 
 func (s *Store) Pending(ctx context.Context) ([]PendingCommand, error) {
-	rows, e := s.Pool.Query(ctx, "SELECT task_id,body FROM commands WHERE NOT delivered ORDER BY created_at LIMIT 100")
+	rows, e := s.Pool.Query(ctx, `SELECT c.task_id,c.body FROM commands c WHERE NOT c.delivered AND
+ (c.body->>'kind'='start' OR EXISTS(SELECT 1 FROM commands start_command WHERE start_command.id='start-'||c.task_id AND start_command.delivered))
+ ORDER BY c.created_at,c.id LIMIT 100`)
 	if e != nil {
 		return nil, e
 	}
@@ -625,7 +829,7 @@ func (s *Store) NodeStatuses(ctx context.Context) ([]domain.NodeStatus, error) {
 		FROM nodes n
 		LEFT JOIN (
 			SELECT node_id,count(*) AS running FROM (
- SELECT node_id FROM tasks WHERE NOT terminal AND node_id IS NOT NULL
+ SELECT node_id FROM tasks WHERE `+activeNodeTask+`
  UNION ALL SELECT body->>'nodeId' FROM initializations WHERE status NOT IN ('ready','cancelled') AND COALESCE(body->>'nodeId','')<>''
  ) work GROUP BY node_id
 		) r ON r.node_id = n.id

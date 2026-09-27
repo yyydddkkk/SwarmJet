@@ -35,7 +35,7 @@ export function Status({ task }: { task: Task }) {
     task.paused && !["completed", "cancelled"].includes(task.stage);
   return (
     <span className={`status ${paused ? "paused" : task.stage}`}>
-      {paused ? "已暂停" : stageLabel(task.stage, task.project.provider)}
+      {paused ? "已暂停" : task.stage === "queued" && task.admissionStatus === "waiting" ? "等待准入" : stageLabel(task.stage, task.project.provider)}
     </span>
   );
 }

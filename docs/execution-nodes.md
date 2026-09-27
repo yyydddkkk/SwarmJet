@@ -4,21 +4,23 @@
 
 控制面集中部署：控制台 API、Temporal、PostgreSQL 保留在一处，负责项目配置、任务状态、流程编排和 GitLab 交互。Node（执行节点）承载真正的资源消耗：任务工作区、Runner、Compose 联调环境、报告以及任务级清理。
 
-第一阶段只做「固定节点归属」，不做跨节点自动迁移：任务在创建时分配到某个在线且有余量的节点，之后该任务的准备、开发、验证、审查、合并、取消和清理都必须在同一节点完成。节点失联时保留归属与现场，任务进入 blocked 并给出明确提示，不会静默漂移到另一台机器重复执行。Kubernetes 后端不在本阶段实现，但流程层不再直接依赖 Docker。
+第一阶段只做「固定节点归属」，不做跨节点自动迁移：任务可能先等待准入；分配到某个在线且有余量的节点，之后该任务的准备、开发、验证、审查、合并、取消和清理都必须在同一节点完成。节点失联时保留归属与现场，任务进入 blocked 并给出明确提示，不会静默漂移到另一台机器重复执行。Kubernetes 后端不在本阶段实现，但流程层不再直接依赖 Docker。
 
 本机开发方式保持不变：未注册任何执行节点时任务不写 nodeId，控制面 Worker 直接使用进程内的 workspace / agent / integration 管理器，也就是原来的单机行为。
 
 ## 数据模型
 
-- `domain.Task.NodeID`：任务固定的执行节点；空值表示使用控制面本机后端。
+- `domain.Task.NodeID`：任务固定的执行节点；空值可能表示等待准入或使用控制面本机后端，需结合 `admissionStatus` 区分。
 - `nodes(id, address, capacity, version, last_seen)`：执行节点注册表。节点每 10 秒向控制面心跳一次。
 - 节点在线时间窗为 `domain.NodeOnlineAfter`（30 秒）。任务在 `tasks.node_id` 保存归属，供调度统计和保留期清理读取。
 
 ## 调度
 
-`Store.CreateTaskScheduled` 在事务内用 advisory lock 串行化分配：统计每个节点的非终态任务数，选择在线、running < capacity 且负载最低的节点（并列按 id 升序），一次写死。运行中的任务不会因为节点变忙而改派。
+`Store.CreateTaskScheduled` 在事务内用 advisory lock 串行化分配：统计每个节点正在推进的任务数，排除等待依赖、人工处理、blocked 和暂停的任务，选择在线、running < capacity 且负载最低的节点（并列按 id 升序），一次写死。运行中的任务不会因为节点变忙而改派。
 
-所有接单入口共用同一策略：控制台 `POST /api/tasks` 与自动扫描（Webhook 只是唤醒扫描，不单独创建任务）都调用 `CreateTaskScheduled` 并传入同一个 `RequireNode` 开关。`EXECUTION_MODE=local` 时没有可用节点就回退控制面本机；`distributed` 时控制台返回 503，自动扫描跳过该 Issue 并在下一轮重试，绝不会落到控制面本机。
+Node 容量还限制工作区准备、Agent Runner 与验证共用的执行槽；等待中的任务恢复时必须重新取得执行槽。保留在节点上的工作区仍消耗磁盘，磁盘配额与清理另行治理。
+
+所有接单入口共用同一策略：控制台 `POST /api/tasks` 与自动扫描都调用 `CreateTaskScheduled`。Webhook 先入持久 inbox，后台扫描接单，周期扫描补漏。`EXECUTION_MODE=local` 使用本机后端，`distributed` 只分配 Node；两种模式容量不足时都保留可见的等待 Task，准入前不启动 Workflow。待准入队列全局上限 1000、每项目 100；每项目最多 4 个活动任务、16 个已启动且未结束 Workflow。待准入队列满时拒绝新接单，inbox 记录仍待重试。
 
 ## 传输与凭证
 

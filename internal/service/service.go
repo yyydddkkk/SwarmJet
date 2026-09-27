@@ -7,11 +7,14 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"go.temporal.io/api/enums/v1"
@@ -20,7 +23,7 @@ import (
 	"swarmjet/internal/domain"
 	"swarmjet/internal/forge"
 	"swarmjet/internal/gitlab"
-	"swarmjet/internal/imagebuild"
+	"swarmjet/internal/intake"
 	"swarmjet/internal/labels"
 	"swarmjet/internal/pipeline"
 	"swarmjet/internal/store"
@@ -44,6 +47,7 @@ type Service struct {
 	RequireNode       bool
 	Wake              chan struct{}
 	LabelsWake        chan struct{}
+	scanMu            sync.Mutex
 }
 
 // SyncLabels reconciles selectable labels independently of issue scanning.
@@ -109,16 +113,10 @@ func (s *Service) client(p domain.Project) (forge.Client, error) {
 	return gitlab.New(p.GitLabURL, token), nil
 }
 
-func ID() string {
-	b := make([]byte, 16)
-	if _, e := rand.Read(b); e != nil {
-		panic(e)
-	}
-	return hex.EncodeToString(b)
-}
 func (s *Service) Run(ctx context.Context) {
-	fast := time.NewTicker(2 * time.Second)
-	defer fast.Stop()
+	go s.runOutbox(ctx)
+	go s.runInbox(ctx)
+	go s.runAdmission(ctx)
 	slow := time.NewTicker(120 * time.Second)
 	defer slow.Stop()
 	if e := s.Scan(ctx); e != nil {
@@ -128,20 +126,128 @@ func (s *Service) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.Wake:
-			if e := s.Scan(ctx); e != nil {
-				slog.Error("webhook scan", "error", e)
-			}
-		case <-fast.C:
-			if e := s.Deliver(ctx); e != nil {
-				slog.Error("outbox delivery", "error", e)
-			}
 		case <-slow.C:
 			if e := s.Scan(ctx); e != nil {
 				slog.Error("scan", "error", e)
 			}
 		}
 	}
+}
+
+func (s *Service) runAdmission(ctx context.Context) {
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	for {
+		if _, err := s.Store.AdmitPendingTasks(ctx, 20); err != nil && ctx.Err() == nil {
+			slog.Error("task admission", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+func (s *Service) runOutbox(ctx context.Context) {
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	for {
+		if err := s.Deliver(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("outbox delivery", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+func (s *Service) runInbox(ctx context.Context) {
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	prune := time.NewTicker(time.Hour)
+	defer prune.Stop()
+	for {
+		if err := s.ProcessInbox(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("webhook inbox processing", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.Wake:
+		case <-tick.C:
+		case <-prune.C:
+			if err := s.Store.PruneWebhookInbox(ctx); err != nil {
+				slog.Error("webhook inbox pruning", "error", err)
+			}
+		}
+	}
+}
+
+func (s *Service) ProcessInbox(ctx context.Context) error {
+	deliveries, err := s.Store.ClaimWebhookInbox(ctx, 100)
+	if err != nil || len(deliveries) == 0 {
+		return err
+	}
+	type target struct {
+		provider domain.Provider
+		repoID   int64
+	}
+	groups := map[target][]int64{}
+	for _, delivery := range deliveries {
+		provider, repoID := webhookRepository(delivery.Provider, delivery.Payload)
+		groups[target{provider, repoID}] = append(groups[target{provider, repoID}], delivery.ID)
+	}
+	var failures []error
+	for key, ids := range groups {
+		if key.repoID == 0 {
+			err = s.Scan(ctx)
+		} else {
+			err = s.ScanRepository(ctx, key.provider, key.repoID)
+		}
+		if err != nil {
+			failures = append(failures, err)
+			if retryErr := s.Store.RetryWebhookInbox(ctx, ids, 10*time.Second); retryErr != nil {
+				failures = append(failures, retryErr)
+			}
+			continue
+		}
+		if err = s.Store.CompleteWebhookInbox(ctx, ids); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func webhookRepository(provider string, payload []byte) (domain.Provider, int64) {
+	var event struct {
+		Project struct {
+			ID int64 `json:"id"`
+		} `json:"project"`
+		ProjectID  int64 `json:"project_id"`
+		Repository struct {
+			ID int64 `json:"id"`
+		} `json:"repository"`
+	}
+	if json.Unmarshal(payload, &event) != nil {
+		return "", 0
+	}
+	switch provider {
+	case "gitlab":
+		if event.Project.ID > 0 {
+			return domain.ProviderGitLab, event.Project.ID
+		}
+		if event.ProjectID > 0 {
+			return domain.ProviderGitLab, event.ProjectID
+		}
+	case "github":
+		if event.Repository.ID > 0 {
+			return domain.ProviderGitHub, event.Repository.ID
+		}
+	}
+	return "", 0
 }
 func (s *Service) Deliver(ctx context.Context) error {
 	pending, e := s.Store.Pending(ctx)
@@ -194,8 +300,12 @@ func (s *Service) Webhook(secret string) http.Handler {
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		if _, e := io.Copy(io.Discard, r.Body); e != nil {
+		body, e := io.ReadAll(r.Body)
+		if e != nil {
 			http.Error(w, "payload too large", 413)
+			return
+		}
+		if !s.acceptWebhook(w, r, "gitlab", deliveryID(r.Header.Get("webhook-id"), r.Header.Get("Idempotency-Key")), r.Header.Get("X-Gitlab-Event"), body) {
 			return
 		}
 		select {
@@ -232,6 +342,9 @@ func (s *Service) GitHubWebhook(secret string) http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		if !s.acceptWebhook(w, r, "github", deliveryID(r.Header.Get("X-GitHub-Delivery")), r.Header.Get("X-GitHub-Event"), body) {
+			return
+		}
 		select {
 		case s.Wake <- struct{}{}:
 		default:
@@ -239,7 +352,53 @@ func (s *Service) GitHubWebhook(secret string) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 	})
 }
+
+func deliveryID(candidates ...string) string {
+	for _, candidate := range candidates {
+		if candidate != "" && len(candidate) <= 200 {
+			return candidate
+		}
+	}
+	// Missing platform IDs must not collapse distinct deliveries by body hash.
+	var random [16]byte
+	if _, err := io.ReadFull(rand.Reader, random[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(random[:])
+}
+
+func (s *Service) acceptWebhook(w http.ResponseWriter, r *http.Request, provider, id, eventType string, body []byte) bool {
+	if id == "" || s.Store == nil {
+		http.Error(w, "webhook inbox unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	if len(eventType) > 200 {
+		eventType = eventType[:200]
+	}
+	err := s.Store.EnqueueWebhook(r.Context(), provider, id, eventType, body)
+	if errors.Is(err, store.ErrWebhookInboxFull) {
+		http.Error(w, "webhook inbox full", http.StatusServiceUnavailable)
+		return false
+	}
+	if err != nil {
+		slog.Error("webhook inbox insert", "provider", provider, "error", err)
+		http.Error(w, "webhook inbox unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
 func (s *Service) Scan(ctx context.Context) error {
+	return s.scan(ctx, "", 0)
+}
+
+func (s *Service) ScanRepository(ctx context.Context, provider domain.Provider, repoID int64) error {
+	return s.scan(ctx, provider, repoID)
+}
+
+func (s *Service) scan(ctx context.Context, provider domain.Provider, repoID int64) error {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+	var scanErrors []error
 	projects, e := s.Store.Projects(ctx)
 	if e != nil {
 		return e
@@ -249,22 +408,39 @@ func (s *Service) Scan(ctx context.Context) error {
 		return e
 	}
 	for _, p := range projects {
-		if !p.Enabled {
+		if !p.Enabled || provider != "" && p.HostingProvider() != provider {
 			continue
 		}
-		if p.ManagedMeta() && (s.Initializer == nil || !s.Initializer.ReadyForTasks(ctx, p.ID)) {
+		if repoID > 0 {
+			found := false
+			for _, repo := range p.Repositories {
+				if repo.ProjectID == repoID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+		if !intake.ReadyForTasks(ctx, p, s.Initializer) {
 			slog.Warn("managed project initialization not ready; skipping issue scan", "project", p.ID)
 			continue
 		}
 		g, e := s.client(p)
 		if e != nil {
 			slog.Error("project credential unavailable", "project", p.ID)
+			scanErrors = append(scanErrors, fmt.Errorf("project %s credential: %w", p.ID, e))
 			continue
 		}
 		for _, repo := range p.Repositories {
+			if repoID > 0 && repo.ProjectID != repoID {
+				continue
+			}
 			issues, e := g.ListEligibleIssues(ctx, repo.ProjectID)
 			if e != nil {
 				slog.Error("issue scan", "project", p.ID, "repo", repo.ID, "error", e)
+				scanErrors = append(scanErrors, fmt.Errorf("project %s repo %s issue scan: %w", p.ID, repo.ID, e))
 				continue
 			}
 			for _, issue := range issues {
@@ -275,6 +451,7 @@ func (s *Service) Scan(ctx context.Context) error {
 				if seen {
 					if err := s.scanFollowup(ctx, g, p, issue, enabled); err != nil {
 						slog.Warn("issue follow-up scan", "project", p.ID, "issue", issue.IID, "error", err)
+						scanErrors = append(scanErrors, fmt.Errorf("project %s issue %d follow-up: %w", p.ID, issue.IID, err))
 					}
 					continue
 				}
@@ -287,36 +464,30 @@ func (s *Service) Scan(ctx context.Context) error {
 				if legacy {
 					continue
 				}
-				taskProject, resolveErr := domain.ResolveIssueAgent(p, issue, enabled)
-				if resolveErr != nil {
-					slog.Warn("issue agent rejected", "project", p.ID, "issue", issue.IID, "error", resolveErr)
-					if err := g.UpsertProgress(ctx, issue, "dispatch", "无法接单："+resolveErr.Error()+"。修正标签或启用配置后将自动重试。"); err != nil {
-						slog.Warn("dispatch feedback failed", "error", err)
-					}
-					continue
-				}
-				if !s.RequireNode && taskProject.Nodes.Mode == "" {
-					taskProject, e = imagebuild.ApplyToProject(s.DataDir, taskProject)
-					if e != nil {
-						return e
-					}
-				}
-				now := time.Now().UTC()
-				t := domain.Task{ID: ID(), Project: taskProject, Issue: issue, Stage: "queued", Executions: map[string]domain.Execution{}, CreatedAt: now, UpdatedAt: now}
-				if _, e = s.Store.CreateTaskScheduled(ctx, t, s.RequireNode); e != nil {
+				_, e = intake.Schedule(ctx, s.Store, p, issue, enabled, intake.Options{DataDir: s.DataDir, RequireNode: s.RequireNode})
+				if e != nil {
 					if errors.Is(e, store.ErrNoNode) {
 						// Distributed mode: leave the issue unclaimed until a node has capacity.
 						slog.Warn("no execution node available; task deferred", "project", p.ID, "issue", issue.IID)
 						continue
 					}
-					if !errors.Is(e, store.ErrConflict) {
+					if errors.Is(e, store.ErrConflict) {
+						continue
+					}
+					var agentError *intake.AgentSelectionError
+					if !errors.As(e, &agentError) {
 						return e
 					}
+					slog.Warn("issue agent rejected", "project", p.ID, "issue", issue.IID, "error", e)
+					if err := g.UpsertProgress(ctx, issue, "dispatch", "无法接单："+e.Error()+"。修正标签或启用配置后将自动重试。"); err != nil {
+						slog.Warn("dispatch feedback failed", "error", err)
+					}
+					continue
 				}
 			}
 		}
 	}
-	return nil
+	return errors.Join(scanErrors...)
 }
 
 func runComment(body string) (string, bool) {
@@ -361,19 +532,7 @@ func (s *Service) scanFollowup(ctx context.Context, g forge.Client, p domain.Pro
 	if err != nil || !domain.Terminal(previous.Stage) {
 		return err
 	}
-	taskProject, err := domain.ResolveIssueAgent(p, issue, enabled)
-	if err != nil {
-		return err
-	}
-	if !s.RequireNode && taskProject.Nodes.Mode == "" {
-		taskProject, err = imagebuild.ApplyToProject(s.DataDir, taskProject)
-		if err != nil {
-			return err
-		}
-	}
-	now := time.Now().UTC()
-	t := domain.Task{ID: ID(), Project: taskProject, Issue: issue, Stage: "queued", Executions: map[string]domain.Execution{}, TriggerNoteIDs: []int64{}, CreatedAt: now, UpdatedAt: now}
-	_, err = s.Store.CreateTaskScheduled(ctx, t, s.RequireNode)
+	_, err = intake.Schedule(ctx, s.Store, p, issue, enabled, intake.Options{DataDir: s.DataDir, RequireNode: s.RequireNode, ClaimRunCommands: true})
 	if errors.Is(err, store.ErrNoNode) || errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 		return nil
 	}

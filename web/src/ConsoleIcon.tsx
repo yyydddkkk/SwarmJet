@@ -10,6 +10,7 @@ export function Icon({
     | "logout"
     | "plus"
     | "search"
+    | "clock"
     | "arrow"
     | "bolt"
     | "branch"
@@ -33,6 +34,7 @@ export function Icon({
     logout: "M9 4H5v16h4M9 12h12m-5-5 5 5-5 5",
     plus: "M12 5v14M5 12h14",
     search: "m16 16 5 5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
+    clock: "M12 7v5l3 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
     arrow: "M5 12h14m-6-6 6 6-6 6",
   };
   return (

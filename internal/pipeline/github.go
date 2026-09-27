@@ -156,7 +156,8 @@ func (a *Activities) mergeGitHub(ctx context.Context, t domain.Task, c forge.Cli
 	if err != nil {
 		return out, err
 	}
-	if t.ReviewDigest == "" || t.ReviewDigest != domain.Digest(t.Workspace.Revisions) {
+	evidence := mergeEvidence{client: c, task: &t}
+	if !evidence.reviewCurrent() {
 		out.Ready, out.Rework = false, true
 		t.Message = "STALE: reviewed revisions changed"
 		out.Task = t
@@ -167,11 +168,11 @@ func (a *Activities) mergeGitHub(ctx context.Context, t domain.Task, c forge.Cli
 			if r.RepositoryID != id || !r.Changed || r.Merged {
 				continue
 			}
-			pr, err := c.GetMR(ctx, r.ProjectID, r.MRIID)
+			pr, same, err := evidence.reviewedMR(ctx, r)
 			if err != nil {
 				return out, err
 			}
-			if !sameMR(pr, r) {
+			if !same {
 				out.Ready, out.Rework = false, true
 				t.Message = "STALE: PR changed after review"
 				out.Task = t
@@ -240,8 +241,8 @@ func (a *Activities) mergeGitHub(ctx context.Context, t domain.Task, c forge.Cli
 			if !result.Merged {
 				return out, errors.New("GitHub did not confirm PR merge")
 			}
-			merged, err := c.GetMR(ctx, r.ProjectID, r.MRIID)
-			if err != nil || !sameMR(merged, r) || merged.State != "merged" {
+			merged, same, err := evidence.reviewedMR(ctx, r)
+			if err != nil || !same || merged.State != "merged" {
 				return out, errors.New("GitHub merged PR identity could not be verified")
 			}
 			t.Workspace.Revisions[i].Merged = true

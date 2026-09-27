@@ -22,6 +22,11 @@ func TestTaskPageAndGitLabSyncReachBeyondRecentTwoHundred(t *testing.T) {
 		if err := s.CreateTask(ctx, task); err != nil {
 			t.Fatal(err)
 		}
+		// The paging fixture models historical work, outside admission limits.
+		task.Stage = "completed"
+		if err := s.SaveTask(ctx, task); err != nil {
+			t.Fatal(err)
+		}
 	}
 	page, err := s.TaskPage(ctx, TaskPageOptions{Limit: 50, View: "all"})
 	if err != nil || len(page.Items) != 50 || page.Total != 205 || page.Counts.All != 205 || page.NextCursor == "" {

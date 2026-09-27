@@ -19,6 +19,16 @@ type Registry = { mode?: string; address: string; repository: string };
 type Proxy = { enabled: boolean; running?: boolean; proxyUrl?: string };
 type Check = { id: string; status: "ok" | "warning" | "error" | "unavailable"; message: string };
 type CheckResult = { checks: Check[]; checkedAt: string };
+type Operations = {
+  inboxPending: number;
+  inboxRetrying: number;
+  inboxOldestWaitSeconds: number;
+  inboxProcessedLastHour: number;
+  inboxP95ProcessSeconds: number;
+  admissionWaiting: number;
+  runnerSlotsReserved: number;
+  measuredAt: string;
+};
 
 const labels: Record<string, string> = {
   registry: "镜像仓库",
@@ -38,6 +48,7 @@ export default function SystemSettings({ section }: { section: string }) {
   const [registry, setRegistry] = useState<Registry | null>(null);
   const [proxy, setProxy] = useState<Proxy | null>(null);
   const [nodes, setNodes] = useState<NodeView[]>([]);
+  const [operations, setOperations] = useState<Operations | null>(null);
   const [checks, setChecks] = useState<CheckResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
@@ -51,12 +62,14 @@ export default function SystemSettings({ section }: { section: string }) {
       api<Registry>("/registry"),
       api<Proxy>("/mihomo/status"),
       api<NodeView[]>("/nodes"),
+      api<Operations>("/operations"),
     ]);
     setDeployment(results[0].status === "fulfilled" ? results[0].value : null);
     setRegistry(results[1].status === "fulfilled" ? results[1].value : null);
     setProxy(results[2].status === "fulfilled" ? results[2].value : null);
     setNodes(results[3].status === "fulfilled" ? results[3].value || [] : []);
-    const names = ["部署状态", "仓库配置", "代理状态", "节点列表"];
+    setOperations(results[4].status === "fulfilled" ? results[4].value : null);
+    const names = ["部署状态", "仓库配置", "代理状态", "节点列表", "运行统计"];
     const failed = results.flatMap((result, index) => result.status === "rejected" ? [names[index]] : []);
     setLoadError(failed.length ? `无法读取${failed.join("、")}，请检查服务连接后重试。` : "");
     setLoading(false);
@@ -132,6 +145,16 @@ export default function SystemSettings({ section }: { section: string }) {
             </div>)}
             {!checks && <p className="system-check-empty">{checking ? "正在检查服务连接…" : "点击“重新检查”读取服务状态。"}</p>}
             {checks?.checks.length === 0 && <p className="system-check-empty">当前没有可显示的检查结果。</p>}
+          </div>
+        </section>
+        <section className="panel system-checks" aria-labelledby="system-operations-heading">
+          <div className="panel-head"><div><h2 id="system-operations-heading">接入与执行</h2><p>统计来自数据库；执行槽包含工作区准备、Runner 和验证。</p></div><small>{operations?.measuredAt ? `采样于 ${new Date(operations.measuredAt).toLocaleTimeString()}` : ""}</small></div>
+          <div className="system-check-list">
+            {operations ? <>
+              <div className="system-check-row system-operation-row"><strong>Webhook inbox</strong><span>待处理 {operations.inboxPending} · 已重试 {operations.inboxRetrying} · 最久等待 {Math.round(operations.inboxOldestWaitSeconds)} 秒</span></div>
+              <div className="system-check-row system-operation-row"><strong>事件处理</strong><span>近一小时完成 {operations.inboxProcessedLastHour} · 接收到完成 P95 {operations.inboxP95ProcessSeconds.toFixed(1)} 秒</span></div>
+              <div className="system-check-row system-operation-row"><strong>任务准入</strong><span>等待 {operations.admissionWaiting} · 执行槽已预约 {operations.runnerSlotsReserved}</span></div>
+            </> : <p className="system-check-empty">{loading ? "正在读取运行统计…" : "运行统计暂不可用。"}</p>}
           </div>
         </section>
         <section className="panel system-nodes" aria-labelledby="system-nodes-heading">

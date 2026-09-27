@@ -143,14 +143,14 @@ func TestCommandDeduplicationAndDelivery(t *testing.T) {
 		t.Fatal("conflicting id accepted", err)
 	}
 	pending, err := s.Pending(ctx)
-	if err != nil || len(pending) != 2 {
+	if err != nil || len(pending) != 1 || pending[0].Command.Kind != "start" {
 		t.Fatalf("%+v %v", pending, err)
 	}
-	if err = s.Delivered(ctx, c.ID); err != nil {
+	if err = s.Delivered(ctx, pending[0].Command.ID); err != nil {
 		t.Fatal(err)
 	}
 	pending, err = s.Pending(ctx)
-	if err != nil || len(pending) != 1 || pending[0].Command.Kind != "start" {
+	if err != nil || len(pending) != 1 || pending[0].Command.ID != c.ID {
 		t.Fatalf("%+v %v", pending, err)
 	}
 }
