@@ -17,7 +17,7 @@ async function mockDashboard(page: Page) {
   await page.route("**/api/**", route => {
     const url = new URL(route.request().url());
     const path = url.pathname;
-    if (path === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (path === "/api/projects") return route.fulfill({ json: [platform, commerce] });
     if (path === "/api/tasks") {
       const scoped = tasks.filter(task => !url.searchParams.get("project") || task.project.id === url.searchParams.get("project"));
@@ -45,7 +45,7 @@ test("new shell uses distinct sidebar icons and routes from workbench to control
   await expect(page.getByRole("heading", { name: "今天先处理这些" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "2 项需要决策" })).toBeVisible();
   const icons = await page.locator(".sidebar .nav-group nav a .ui-icon path").evaluateAll(paths => paths.map(path => path.getAttribute("d")));
-  expect(icons).toHaveLength(8);
+  expect(icons).toHaveLength(10);
   expect(new Set(icons).size).toBe(icons.length);
   await page.screenshot({ path: testInfo.outputPath("overview.png"), fullPage: true });
   await page.getByLabel("项目范围").selectOption("platform");

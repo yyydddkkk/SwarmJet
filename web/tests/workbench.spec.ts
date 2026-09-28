@@ -7,7 +7,7 @@ const mr = { projectId: "platform", repositoryId: "api", gitlabProjectId: 12, ii
 test("Issue workbench opens detail and starts a task", async ({ page }) => {
   await page.route("**/api/**", route => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (url.pathname === "/api/projects") return route.fulfill({ json: [project] });
     if (url.pathname === "/api/workbench/issues") { expect(url.searchParams.get("state")).toBe("opened"); return route.fulfill({ json: { items: [issue], nextCursor: "" } }); }
     if (url.pathname === "/api/workbench/issues/platform/api/42") return route.fulfill({ json: issue });
@@ -37,7 +37,7 @@ test("Issue detail renders uploaded images and shows the newest comment below th
   const imageRequests: string[] = [];
   await page.route("**/api/**", route => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (url.pathname === "/api/workbench/issues/platform/api/42") return route.fulfill({ json: withComments });
     if (url.pathname.startsWith(`/api/workbench/issues/platform/api/42/uploads/${secret}/`)) {
       imageRequests.push(url.pathname);
@@ -60,7 +60,7 @@ test("MR workbench shows paged diff and approval with current SHA", async ({ pag
   let approval: unknown;
   await page.route("**/api/**", route => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (url.pathname === "/api/projects") return route.fulfill({ json: [project] });
     if (url.pathname === "/api/workbench/merge-requests") { expect(url.searchParams.get("state")).toBe("opened"); return route.fulfill({ json: { items: [mr], nextCursor: "" } }); }
     if (url.pathname === "/api/workbench/merge-requests/platform/api/8") return route.fulfill({ json: mr });
@@ -78,7 +78,7 @@ test("MR workbench shows paged diff and approval with current SHA", async ({ pag
 test("MR workbench explains an empty open list and offers the full history", async ({ page }) => {
   await page.route("**/api/**", route => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (url.pathname === "/api/projects") return route.fulfill({ json: [project] });
     if (url.pathname === "/api/workbench/merge-requests") return route.fulfill({ json: { items: url.searchParams.get("state") === "all" ? [{ ...mr, state: "merged" }] : [], nextCursor: "" } });
     return route.fulfill({ json: [] });
@@ -93,7 +93,7 @@ test("Issue workbench stays usable on a narrow screen", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route("**/api/**", route => {
     const path = new URL(route.request().url()).pathname;
-    if (path === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (path === "/api/projects") return route.fulfill({ json: [project] });
     if (path === "/api/workbench/issues") return route.fulfill({ json: { items: [], nextCursor: "" } });
     return route.fulfill({ json: [] });
@@ -118,7 +118,7 @@ test("managed MR leads to task acceptance and whole-round merge", async ({ page 
   const task = { id: "task-8", project: { ...project, autoMerge: false, acceptanceStrategy: "none" }, issue: { projectId: 12, iid: 42, title: "修复权限检查", description: "需求说明", url: issue.webUrl, state: "opened", labels: ["autonomous"] }, stage: "waiting_manual_merge", message: "等待人工合并", humanAcceptance: { prerequisites: ["测试环境可访问"], steps: [{ action: "运行验收", expected: "通过" }], notes: ["记录测试结果"] }, workspace: { taskId: "task-8", root: "", metaSha: "", revisions: [{ repositoryId: "api", projectId: 12, path: "api", baseSha: "base", headSha: "abc123", targetBranch: "main", branch: "feature", changed: true, sensitive: false, files: [], mrIid: 8, mrUrl: mr.webUrl, merged: false }] }, executions: {}, verification: [], assumptions: [], notes: [], reworks: 0, reviewDigest: "review", approvalDigest: "", paused: false, createdAt: "2026-09-28T01:00:00Z", updatedAt: "2026-09-28T02:00:00Z" };
   await page.route("**/api/**", route => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (url.pathname === "/api/workbench/merge-requests/platform/api/8") return route.fulfill({ json: managed });
     if (url.pathname.endsWith("/diffs")) return route.fulfill({ json: { diffs: [], hasNext: false, incomplete: false, page: 1, version: {} } });
     if (url.pathname === "/api/tasks/task-8") return route.fulfill({ json: task });
@@ -146,7 +146,7 @@ test("managed MR leads to task acceptance and whole-round merge", async ({ page 
 test("workbench shows GitLab permission errors", async ({ page }) => {
   await page.route("**/api/**", route => {
     const path = new URL(route.request().url()).pathname;
-    if (path === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (path === "/api/projects") return route.fulfill({ json: [project] });
     if (path === "/api/workbench/issues") return route.fulfill({ status: 403, json: { error: "当前 GitLab 身份没有执行此操作的权限。" } });
     return route.fulfill({ json: [] });
@@ -160,7 +160,7 @@ test("Issue selectors show names and submit GitLab IDs", async ({ page }) => {
   const requests: string[] = [];
   await page.route("**/api/**", route => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (url.pathname === "/api/projects") return route.fulfill({ json: [project] });
     if (url.pathname === "/api/workbench/issues" && route.request().method() === "GET") return route.fulfill({ json: { items: [], nextCursor: "" } });
     if (url.pathname === "/api/workbench/issues/platform/api/options") {
@@ -198,7 +198,7 @@ test("MR edit preserves selected assignee when search returns other users", asyn
   const withAssignee = { ...mr, labels: ["backend"], assignees: [{ id: 77, name: "张明", username: "zhangming" }] };
   await page.route("**/api/**", route => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (url.pathname === "/api/workbench/merge-requests/platform/api/options") { optionRequests.push(url.searchParams.get("search") || ""); return route.fulfill({ json: { labels: [{ name: "backend" }], assignees: [{ id: 88, name: "李华", username: "lihua" }] } }); }
     if (url.pathname === "/api/workbench/merge-requests/platform/api/8" && route.request().method() === "PUT") { updated = route.request().postDataJSON(); return route.fulfill({ json: withAssignee }); }
     if (url.pathname === "/api/workbench/merge-requests/platform/api/8") return route.fulfill({ json: withAssignee });

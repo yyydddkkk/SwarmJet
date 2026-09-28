@@ -84,6 +84,9 @@ func TestObservabilityTaskFixture(t *testing.T) {
 	defer cancel()
 	var platformCalls atomic.Int32
 	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeScanLabelEvent(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/issues"):
@@ -101,6 +104,7 @@ func TestObservabilityTaskFixture(t *testing.T) {
 	if _, err := s.SaveProject(ctx, scanProject(gitlab.URL)); err != nil {
 		t.Fatal(err)
 	}
+	grantScanActor(t, s, scanProject(gitlab.URL))
 	metrics := observability.New()
 	previousProvider := otel.GetTracerProvider()
 	previousPropagator := otel.GetTextMapPropagator()

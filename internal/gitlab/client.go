@@ -29,6 +29,10 @@ type Client struct {
 
 type IssueNote = forge.IssueNote
 
+func (c *Client) ListIssueLabelEvents(ctx context.Context, issue domain.Issue) ([]forge.LabelEvent, error) {
+	return paginate[forge.LabelEvent](ctx, c, issuePath(issue)+"/resource_label_events", nil)
+}
+
 func (c *Client) ListIssueNotes(ctx context.Context, issue domain.Issue) ([]IssueNote, error) {
 	return paginate[IssueNote](ctx, c, issuePath(issue)+"/notes", url.Values{"sort": {"asc"}, "order_by": {"created_at"}})
 }

@@ -4,7 +4,7 @@ test("system settings shows effective addresses and connection results", async (
   let checks = 0;
   await page.route("**/api/**", (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (path === "/api/projects") return route.fulfill({ json: [] });
     if (path === "/api/system") return route.fulfill({ json: {
       executionMode: "distributed", publicOrigin: "https://console.example", hostListen: "10.0.0.20:8180",
@@ -51,7 +51,7 @@ test("system settings fit a narrow viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route("**/api/**", (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (path === "/api/projects") return route.fulfill({ json: [] });
     if (path === "/api/system") return route.fulfill({ json: { executionMode: "local", publicOrigin: "https://console.example", hostListen: "127.0.0.1:8180", secureCookies: true, builderEnabled: true, mihomoEnabled: false } });
     if (path === "/api/system/checks") return route.fulfill({ json: { checkedAt: "2026-09-24T08:00:00Z", checks: [] } });

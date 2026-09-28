@@ -18,7 +18,9 @@ sudo python3 deploy/install.py
 
 脚本自动生成权限为 `0600` 的 `deploy/.env`、独立的数据库和管理员密码、运行终端密钥及连接加密主密钥，还会生成 `deploy/.env.registry`、局域网 TLS 证书和独立随机的仓库推送/拉取密码，创建 `/srv/swarmjet/data`，构建镜像并通过 Compose 完成迁移、启动和健康检查。仓库证书会加入本机 Docker 信任目录，远程节点仍需安装生成的 CA。宿主机需要 Docker、Python 3、OpenSSL 和 `ip` 命令，不需要 Go、Node.js 或 Agent CLI。可用 `--data-dir /绝对路径` 修改首次部署的数据目录。脚本要求本机 Docker socket，支持 `deploy/compose.override.yaml`。
 
-控制台默认只监听服务器本机；镜像仓库网关监听安装时选定的局域网 IP。在自己的电脑执行 `ssh -N -L 8180:127.0.0.1:8180 用户名@服务器`，然后打开 `http://localhost:8180`。账号为 `admin`，密码在服务器 `deploy/.env` 的 `ADMIN_PASSWORD` 中。登录后在“Runner 环境”选择 Node、启用已安装的 Agent 并配置模型认证，再添加 GitLab 项目。仓库所用 IP 应通过 DHCP 保留或静态配置保持稳定。
+控制台默认只监听服务器本机；镜像仓库网关监听安装时选定的局域网 IP。在自己的电脑执行 `ssh -N -L 8180:127.0.0.1:8180 用户名@服务器`，然后打开 `http://localhost:8180`。应急管理员账号为 `admin`，密码在服务器 `deploy/.env` 的 `ADMIN_PASSWORD` 中。登录后在“Runner 环境”选择 Node、启用已安装的 Agent 并配置模型认证，再添加 GitLab 项目。仓库所用 IP 应通过 DHCP 保留或静态配置保持稳定。
+
+成员自助申请及密码重置需要在 `deploy/.env` 配置 `SMTP_ADDR`（`host:port`）、`SMTP_FROM`、可选的 `SMTP_USERNAME` 和 `SMTP_PASSWORD`。服务只接受支持 STARTTLS 且证书有效的 SMTP 服务器；邮件链接使用 `PUBLIC_ORIGIN`。缺少 SMTP 配置时，应急管理员仍可登录，申请和重置接口返回不可用。升级到多人权限版本会清除旧会话；已有项目和连接仍在，平台管理员需为项目指定负责人，并显式启用需要的 GitLab/GitHub 自动接单策略。
 
 初始化验证默认使用 `swarmjet-agent:local`。如果业务项目需要额外工具链或离线依赖，应准备相应镜像并修改 `INIT_VERIFY_IMAGE`；服务启动成功不代表项目验收已通过。
 

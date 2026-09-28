@@ -27,7 +27,7 @@ export async function api<T>(
     try {
       message = (await response.json()).error || message;
     } catch {}
-    if (response.status === 401 && path !== "/login" && path !== "/session")
+    if (response.status === 401 && !["/login", "/session", "/register", "/register/verify", "/password-resets", "/password-resets/confirm"].includes(path))
       window.dispatchEvent(new Event("session-expired"));
     throw new APIError(message, response.status);
   }

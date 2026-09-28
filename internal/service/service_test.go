@@ -373,6 +373,9 @@ func TestIssueBurstStopsAtAdmissionBoundAndRetainsInbox(t *testing.T) {
 		issues[i] = map[string]any{"project_id": 7, "iid": i + 1, "title": "burst", "state": "opened", "labels": []string{"autonomous"}}
 	}
 	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeScanLabelEvent(w, r) {
+			return
+		}
 		if r.URL.Query().Get("page") == "2" {
 			_ = json.NewEncoder(w).Encode(issues[100:])
 			return
@@ -383,6 +386,7 @@ func TestIssueBurstStopsAtAdmissionBoundAndRetainsInbox(t *testing.T) {
 	if _, err := s.SaveProject(ctx, scanProject(gitlab.URL)); err != nil {
 		t.Fatal(err)
 	}
+	grantScanActor(t, s, scanProject(gitlab.URL))
 	if err := s.EnqueueWebhook(ctx, "gitlab", "burst", "Issue Hook", []byte(`{"project":{"id":7}}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -408,6 +412,9 @@ func TestQueuedWebhookKeepsDeliveryWhenAdmissionIsFull(t *testing.T) {
 		issues[i] = map[string]any{"project_id": 7, "iid": i + 1, "title": "burst", "state": "opened", "labels": []string{"autonomous"}}
 	}
 	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeScanLabelEvent(w, r) {
+			return
+		}
 		if r.URL.Query().Get("page") == "2" {
 			_ = json.NewEncoder(w).Encode(issues[100:])
 			return
@@ -418,6 +425,7 @@ func TestQueuedWebhookKeepsDeliveryWhenAdmissionIsFull(t *testing.T) {
 	if _, err := s.SaveProject(ctx, scanProject(gitlab.URL)); err != nil {
 		t.Fatal(err)
 	}
+	grantScanActor(t, s, scanProject(gitlab.URL))
 	svc := &Service{Store: s, RequireNode: true, ResolveCredential: func(string) (string, error) { return "token", nil }}
 	body, _ := json.Marshal(WebhookMessage{Provider: "gitlab", DeliveryID: "queue-admission", EventType: "Issue Hook", Payload: []byte(`{"project":{"id":7}}`)})
 	if err := svc.ProcessWebhookDelivery(ctx, body); !errors.Is(err, store.ErrAdmissionQueueFull) {
@@ -533,7 +541,30 @@ func scanTestStore(t *testing.T) *store.Store {
 }
 
 func scanProject(gitlabURL string) domain.Project {
-	return domain.Project{ID: "scan", Name: "Scan", Enabled: true, MetaURL: gitlabURL + "/group/meta.git", MetaRef: "main", GitLabURL: gitlabURL, CredentialRef: "GITLAB_TOKEN", MergeCredentialRef: "GITLAB_MERGE_TOKEN", Repositories: []domain.Repository{{ID: "service", ProjectID: 7, URL: gitlabURL + "/group/service.git", Path: "service", TargetBranch: "main"}}, Development: domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "agent:test", TimeoutSeconds: 300}, Review: domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "agent:test", TimeoutSeconds: 300}, Integration: domain.IntegrationConfig{ComposeFile: "compose.yml", StartupTimeoutSeconds: 30, Checks: []domain.Check{{Name: "test", Service: "test", Command: []string{"true"}, Required: true}}}, MaxReworks: 3}
+	return domain.Project{ID: "scan", Name: "Scan", Enabled: true, GitLabTriggerMode: "operator", MetaURL: gitlabURL + "/group/meta.git", MetaRef: "main", GitLabURL: gitlabURL, CredentialRef: "GITLAB_TOKEN", MergeCredentialRef: "GITLAB_MERGE_TOKEN", Repositories: []domain.Repository{{ID: "service", ProjectID: 7, URL: gitlabURL + "/group/service.git", Path: "service", TargetBranch: "main"}}, Development: domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "agent:test", TimeoutSeconds: 300}, Review: domain.AgentConfig{Adapter: "opencode", Model: "provider/model", Image: "agent:test", TimeoutSeconds: 300}, Integration: domain.IntegrationConfig{ComposeFile: "compose.yml", StartupTimeoutSeconds: 30, Checks: []domain.Check{{Name: "test", Service: "test", Command: []string{"true"}, Required: true}}}, MaxReworks: 3}
+}
+
+func grantScanActor(t *testing.T, s *store.Store, p domain.Project) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO users(id,email,display_name,password_hash,status) VALUES('scan-actor','scan-actor@example.test','Scan Actor','hash','active') ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO project_grants(project_id,user_id,role) VALUES($1,'scan-actor','operator') ON CONFLICT DO NOTHING`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO external_identities(user_id,provider,instance,external_id,username) VALUES('scan-actor','gitlab',$1,'42','scan-actor') ON CONFLICT DO NOTHING`, domain.GitLabIdentity(p.GitLabURL)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeScanLabelEvent(w http.ResponseWriter, r *http.Request) bool {
+	if !strings.HasSuffix(r.URL.Path, "/resource_label_events") {
+		return false
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = io.WriteString(w, `[{"id":1,"action":"add","created_at":"2026-09-28T00:00:00Z","label":{"name":"autonomous"},"user":{"id":42}}]`)
+	return true
 }
 
 func TestReconcileLabelsTracksEnabledAgentsWithoutEditingExisting(t *testing.T) {
@@ -593,6 +624,9 @@ func TestScanUsesDistributedSchedulingPolicy(t *testing.T) {
 	s := scanTestStore(t)
 	ctx := context.Background()
 	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeScanLabelEvent(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]map[string]any{{"project_id": 7, "iid": 1, "title": "task", "state": "opened", "labels": []string{"autonomous"}, "web_url": "http://example/7/1"}})
 	}))
@@ -601,6 +635,7 @@ func TestScanUsesDistributedSchedulingPolicy(t *testing.T) {
 	if _, err := s.SaveProject(ctx, p); err != nil {
 		t.Fatal(err)
 	}
+	grantScanActor(t, s, p)
 	svc := &Service{Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }, RequireNode: true}
 	// Distributed mode records demand without starting a local workflow.
 	if err := svc.Scan(ctx); err != nil {
@@ -632,6 +667,9 @@ func TestScanRejectsAgentConflictWithoutClaimAndFreezesSelection(t *testing.T) {
 	labels := []string{"autonomous", "agent:codex", "agent:opencode"}
 	var mu sync.Mutex
 	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeScanLabelEvent(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/notes") {
 			w.Write([]byte(`[]`))
@@ -646,6 +684,7 @@ func TestScanRejectsAgentConflictWithoutClaimAndFreezesSelection(t *testing.T) {
 	if _, err := s.SaveProject(ctx, p); err != nil {
 		t.Fatal(err)
 	}
+	grantScanActor(t, s, p)
 	imageDir := t.TempDir()
 	digest := "sha256:" + strings.Repeat("a", 64)
 	images, err := imagebuild.New(imageDir, func(ctx context.Context, args []string, out io.Writer) error {

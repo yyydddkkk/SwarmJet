@@ -22,7 +22,7 @@ async function runtimeAPI(page: Page) {
       return route.fulfill({json:{agents,enabled}});
     }
     if (path === "/api/session")
-      return route.fulfill({ json: { username: "admin" } });
+      return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (path === "/api/nodes") return route.fulfill({json:[
       {node:{id:"node-a",readiness:{status:"ready"}},online:true,config:{name:"节点 A",image:"registry.test/runner@sha256:aaa"}},
       {node:{id:"node-b",readiness:{status:"ready"}},online:true,config:{name:"节点 B",image:"registry.test/runner@sha256:bbb"}},

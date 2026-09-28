@@ -130,11 +130,11 @@ async function mock(page: Page, loggedIn = true, taskList: Task[] = [task]) {
       route.fulfill({ status, json: data });
     if (path === "/api/session")
       return signedIn
-        ? json({ username: "admin" })
+        ? json({ username: "admin", platformAdmin: true })
         : json({ error: "unauthorized" }, 401);
     if (path === "/api/login") {
       signedIn = true;
-      return json({ username: "admin" });
+      return json({ username: "admin", platformAdmin: true });
     }
     if (path === "/api/logout") {
       signedIn = false;
@@ -242,7 +242,7 @@ test("login, task filtering, exact-digest approval errors, logs and logout", asy
 }) => {
   const state = await mock(page, false);
   await page.goto("/");
-  await page.getByLabel("用户名", { exact: true }).fill("admin");
+  await page.getByLabel("邮箱或应急管理员用户名", { exact: true }).fill("admin");
   await page.getByLabel("密码", { exact: true }).fill("password");
   await page.getByLabel("密码", { exact: true }).press("Enter");
   await page.getByRole("navigation", { name: "工作台导航" }).getByRole("link", { name: "任务", exact: true }).click();
@@ -268,7 +268,7 @@ test("login, task filtering, exact-digest approval errors, logs and logout", asy
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await page.getByRole("button", { name: "退出登录" }).click();
   await expect(
-    page.getByRole("heading", { name: "登录工作控制台" }),
+    page.getByRole("heading", { name: "登录工作空间" }),
   ).toBeVisible();
 });
 test("project form preserves repository target and argv while saving configuration", async ({

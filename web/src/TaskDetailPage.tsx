@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, getLog } from "./api";
-import type { Task, TaskEvent, Execution } from "./types";
+import type { Task, TaskEvent, Execution, Project } from "./types";
+import { canManageProject, canOperateProject } from "./permissions";
 import { taskView, nextAction, taskPhase } from "./task-presentation";
 import { TaskTerminal } from "./TaskTerminal";
 import { Icon } from "./ConsoleIcon";
@@ -8,8 +9,9 @@ import { stageLabel, date, Status } from "./TaskStatus";
 import { ConfirmDialog, Empty, ErrorBox, Field, Modal, Panel } from "./ui";
 import ManualMergePanel from "./ManualMergePanel";
 
-export default function TaskDetail({ id }: { id: string }) {
+export default function TaskDetail({ id, platformAdmin = false }: { id: string; platformAdmin?: boolean }) {
   const [task, setTask] = useState<Task | null>(null),
+    [role, setRole] = useState<Project["myRole"]>(),
     [events, setEvents] = useState<TaskEvent[]>([]),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -30,6 +32,7 @@ export default function TaskDetail({ id }: { id: string }) {
         ),
       ]);
       setTask(t);
+      api<Project[] | null>("/projects").then(projects => setRole(projects?.find(project => project.id === t.project.id)?.myRole)).catch(() => setRole(undefined));
       setEvents(e || []);
     } catch (e) {
       setError((e as Error).message);
@@ -114,6 +117,8 @@ export default function TaskDetail({ id }: { id: string }) {
       </>
     );
   const terminal = ["completed", "cancelled"].includes(task.stage);
+  const canOperate = canOperateProject(role, platformAdmin);
+  const canManage = canManageProject(role, platformAdmin);
   const autoMergeEnabled = task.autoMergeOverride ?? task.project.autoMerge ?? true;
   const mergeStarted = terminal || ["merging", "manual_merging", "partial_merge", "finalizing"].includes(task.stage) || (task.workspace?.revisions || []).some((r) => r.merged) || !!task.executions?.merge?.id;
   return (
@@ -133,7 +138,7 @@ export default function TaskDetail({ id }: { id: string }) {
           </p>
         </div>
         <div className="task-detail-actions">
-          <TaskTerminal task={task} />
+          {canOperate && <TaskTerminal task={task} />}
           {task.issue.url && (
             <a className="button" href={task.issue.url} target="_blank" rel="noreferrer">
               查看 Issue ↗
@@ -209,7 +214,7 @@ export default function TaskDetail({ id }: { id: string }) {
                   {task.reviewDigest || "尚无审查摘要"}
                 </code>
               </div>
-              <div className="actions">
+              {canManage && <div className="actions">
                 <button disabled={busy} onClick={() => setReject(true)}>
                   退回修改
                 </button>
@@ -220,10 +225,10 @@ export default function TaskDetail({ id }: { id: string }) {
                 >
                   {busy ? "正在提交…" : "批准此版本"}
                 </button>
-              </div>
+              </div>}
             </section>
           )}
-          {task.project.provider !== "github" && (["waiting_manual_merge", "manual_merging", "partial_merge"].includes(task.stage) || task.acceptanceIncomplete) && <ManualMergePanel task={task} refresh={refresh} />}
+          {canManage && task.project.provider !== "github" && (["waiting_manual_merge", "manual_merging", "partial_merge"].includes(task.stage) || task.acceptanceIncomplete) && <ManualMergePanel task={task} refresh={refresh} />}
           <div className="view-tabs detail-views" aria-label="任务详情视图">
             {[
               ["delivery", "交付结果"],
@@ -407,7 +412,7 @@ export default function TaskDetail({ id }: { id: string }) {
                   {note}
                 </div>
               ))}
-              <form
+              {canOperate && <form
                 className="panel-padding"
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -429,14 +434,14 @@ export default function TaskDetail({ id }: { id: string }) {
                 <button disabled={busy || !text.trim()} className="primary">
                   提交说明
                 </button>
-              </form>
+              </form>}
             </Panel>
           </div>
         </div>
         <aside className="context-column">
           <Panel title="任务操作">
             <div className="panel-padding">
-              <div className="task-merge-setting">
+              {canManage && <div className="task-merge-setting">
                 <div>
                   <strong>此任务自动合并</strong>
                   <small>{mergeStarted ? "合并流程已开始，开关已锁定。" : autoMergeEnabled ? `开启时，符合合并条件后自动合并 ${task.project.provider === "github" ? "PR" : "MR"}。` : task.project.provider === "github" ? "关闭后继续开发与发布，合并时等待你在 GitHub 操作。" : "关闭后继续开发与发布，合并前在任务页确认验收并提交整轮合并。"}</small>
@@ -450,8 +455,8 @@ export default function TaskDetail({ id }: { id: string }) {
                 >
                   {pendingAutoMerge !== null ? "切换中…" : autoMergeEnabled ? "已开启" : "已关闭"}
                 </button>
-              </div>
-              <div className="actions">
+              </div>}
+              {canOperate && <div className="actions">
                 {!terminal && (
                   <>
                     <button
@@ -479,7 +484,7 @@ export default function TaskDetail({ id }: { id: string }) {
                     </button>
                   </>
                 )}
-              </div>
+              </div>}
 
               <button
                 className="execution-shortcut"

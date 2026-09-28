@@ -14,7 +14,7 @@ async function imagesAPI(page: Page) {
   let launches = 0;
   await page.route("**/api/**", async (route) => {
     const req = route.request(), path = new URL(req.url()).pathname;
-    if (path === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (path === "/api/projects") return route.fulfill({ json: [] });
     if (path === "/api/runtime/images") return route.fulfill({ json: state });
     if (req.method() !== "GET") expect(req.headers()["x-requested-with"]).toBe("swarmjet");
@@ -216,7 +216,7 @@ test("registry inventory includes external images, distributes by digest, and pr
   let usage: string[] = [];
   await page.route("**/api/**", async (route) => {
     const req = route.request(), path = decodeURIComponent(new URL(req.url()).pathname);
-    if (path === "/api/session") return route.fulfill({ json: { username: "admin" } });
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (path === "/api/projects") return route.fulfill({ json: [] });
     if (path === "/api/nodes" && req.method() === "GET") return route.fulfill({ json: [node] });
     if (path === "/api/nodes/n1/config" && req.method() === "PUT") {

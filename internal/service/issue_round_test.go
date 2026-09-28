@@ -35,14 +35,17 @@ func TestFollowupCommandsQueueOnceAfterCurrentRound(t *testing.T) {
 	s := scanTestStore(t)
 	ctx := context.Background()
 	created := time.Now().UTC().Add(time.Minute)
-	note := map[string]any{"id": 81, "body": "/swarmjet run 修复复核反馈", "system": false, "created_at": created, "updated_at": created}
+	note := map[string]any{"id": 81, "body": "/swarmjet run 修复复核反馈", "system": false, "created_at": created, "updated_at": created, "author": map[string]any{"id": 42}}
 	extraNotes := []any{
-		map[string]any{"id": 85, "body": "/swarmjet run 增加回归检查", "created_at": created.Add(time.Millisecond), "updated_at": created.Add(time.Millisecond)},
+		map[string]any{"id": 85, "body": "/swarmjet run 增加回归检查", "created_at": created.Add(time.Millisecond), "updated_at": created.Add(time.Millisecond), "author": map[string]any{"id": 42}},
 		map[string]any{"id": 82, "body": "/swarmjet run 编辑后补上", "created_at": created, "updated_at": created.Add(time.Second)},
 		map[string]any{"id": 83, "body": "/swarmjet run 私密信息", "internal": true, "created_at": created, "updated_at": created},
 		map[string]any{"id": 84, "body": "/swarmjet run 系统信息", "system": true, "created_at": created, "updated_at": created},
 	}
 	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeScanLabelEvent(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v4/projects/7/issues/1/notes" {
 			_ = json.NewEncoder(w).Encode(append([]any{note}, extraNotes...))
@@ -56,6 +59,7 @@ func TestFollowupCommandsQueueOnceAfterCurrentRound(t *testing.T) {
 	if _, err := s.SaveProject(ctx, p); err != nil {
 		t.Fatal(err)
 	}
+	grantScanActor(t, s, p)
 	svc := &Service{Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }}
 	runConcurrent := func() {
 		var scans sync.WaitGroup

@@ -37,7 +37,7 @@ async function mock(page: Page) {
       u = new URL(r.url());
     const path = u.pathname;
     if (path === "/api/session")
-      return route.fulfill({ json: { username: "admin" } });
+      return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (path === "/api/projects") return route.fulfill({ json: [] });
     if (path === "/api/mihomo/status")
       return route.fulfill({

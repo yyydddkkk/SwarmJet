@@ -134,6 +134,20 @@ func (s *Store) Projects(ctx context.Context) ([]domain.Project, error) {
 	return out, rows.Err()
 }
 func (s *Store) SaveProject(ctx context.Context, p domain.Project) (domain.Project, error) {
+	return s.saveProject(ctx, p, "")
+}
+
+// SaveProjectWithOwner creates the project and its first direct owner in one
+// transaction, so a failed grant cannot leave a newly created private project
+// without its selected owner.
+func (s *Store) SaveProjectWithOwner(ctx context.Context, p domain.Project, ownerID string) (domain.Project, error) {
+	if ownerID == "" {
+		return p, ErrNotFound
+	}
+	return s.saveProject(ctx, p, ownerID)
+}
+
+func (s *Store) saveProject(ctx context.Context, p domain.Project, ownerID string) (domain.Project, error) {
 	if e := domain.ValidateProjectForSave(p); e != nil {
 		return p, e
 	}
@@ -204,6 +218,18 @@ func (s *Store) SaveProject(ctx context.Context, p domain.Project) (domain.Proje
 	}
 	if e != nil {
 		return p, mapErr(e)
+	}
+	if ownerID != "" {
+		if version != 0 {
+			return p, ErrConflict
+		}
+		var granted string
+		e = tx.QueryRow(ctx, `INSERT INTO project_grants(project_id,user_id,role)
+			SELECT $1,id,'owner' FROM users WHERE id=$2 AND status='active'
+			RETURNING user_id`, p.ID, ownerID).Scan(&granted)
+		if e != nil {
+			return p, mapErr(e)
+		}
 	}
 	return p, tx.Commit(ctx)
 }

@@ -31,7 +31,7 @@ const query = (view: string, projectId = "", limit = 4) => {
   return `/tasks?${params}`;
 };
 
-export function WorkbenchOverview({ projectId }: { projectId: string }) {
+export function WorkbenchOverview({ projectId, platformAdmin, canCreateIssue }: { projectId: string; platformAdmin: boolean; canCreateIssue: boolean }) {
   const [attention, setAttention] = useState<TaskPage | null>(null);
   const [active, setActive] = useState<TaskPage | null>(null);
   const [waiting, setWaiting] = useState<TaskPage | null>(null);
@@ -46,19 +46,18 @@ export function WorkbenchOverview({ projectId }: { projectId: string }) {
       api<TaskPage>(query("attention", projectId)),
       api<TaskPage>(query("active", projectId, 3)),
       api<TaskPage>(query("waiting", projectId, 2)),
-      api<Operations>("/operations"),
-      api<NodeView[]>("/nodes"),
+      ...(platformAdmin ? [api<Operations>("/operations"), api<NodeView[]>("/nodes")] : []),
     ]);
     if (request !== generation.current) return;
     if (results[0].status === "fulfilled") setAttention(results[0].value);
     if (results[1].status === "fulfilled") setActive(results[1].value);
     if (results[2].status === "fulfilled") setWaiting(results[2].value);
-    if (results[3].status === "fulfilled") setOperations(results[3].value);
-    if (results[4].status === "fulfilled") setNodes(results[4].value || []);
+    if (platformAdmin && results[3]?.status === "fulfilled") setOperations(results[3].value as Operations);
+    if (platformAdmin && results[4]?.status === "fulfilled") setNodes(results[4].value as NodeView[] || []);
     const failed = results.flatMap((result, index) => result.status === "rejected" ? [["待处理任务", "运行中任务", "排队任务", "接入统计", "Node 状态"][index]] : []);
     setError(failed.length ? `无法读取${failed.join("、")}，请重试。` : "");
     setLoading(false);
-  }, [projectId]);
+  }, [projectId, platformAdmin]);
   useEffect(() => {
     setAttention(null); setActive(null); setWaiting(null); setLoading(true);
     void load();
@@ -73,7 +72,7 @@ export function WorkbenchOverview({ projectId }: { projectId: string }) {
   const flow = [...(active?.items || []), ...(waiting?.items || [])].slice(0, 4);
   const offline = nodes?.filter(item => !item.online).length || 0;
   return <div className="dashboard-page">
-    <div className="page-head dashboard-head"><div><h1>今天先处理这些</h1><p>需要决策的任务排在前面，平台状态随时可见。</p></div><a className="button primary" href={workbenchLink("/issues", projectId)}>创建 Issue</a></div>
+    <div className="page-head dashboard-head"><div><h1>今天先处理这些</h1><p>需要决策的任务排在前面，了解项目当前进展。</p></div>{canCreateIssue && <a className="button primary" href={workbenchLink("/issues", projectId)}>创建 Issue</a>}</div>
     <ErrorBox error={error} retry={() => void load()} />
     <div className="dashboard-layout"><div className="dashboard-primary">
       <section className="dashboard-section" aria-labelledby="dashboard-attention"><div className="dashboard-section-head"><div><span className="dashboard-kicker">待我处理</span><h2 id="dashboard-attention">{attentionCount === undefined ? "需要决策的任务" : `${attentionCount} 项需要决策`}</h2></div><small>按最近更新排序</small></div>
@@ -81,7 +80,7 @@ export function WorkbenchOverview({ projectId }: { projectId: string }) {
         {attentionCount !== undefined && attentionCount > (attention?.items?.length || 0) && <a className="dashboard-more" href={workbenchLink("/tasks?view=attention", projectId)}>查看全部 {attentionCount} 项</a>}
       </section>
       <section className="dashboard-section" aria-labelledby="dashboard-flow"><div className="dashboard-section-head"><div><span className="dashboard-kicker">执行中</span><h2 id="dashboard-flow">任务流转</h2></div><a href={workbenchLink("/tasks", projectId)}>查看全部任务 <Icon name="arrow" /></a></div><div className="dashboard-flow-box"><div className="dashboard-flow-counts"><div><strong>{activeCount ?? "—"}</strong><span>运行中</span></div><div><strong>{waitingCount ?? "—"}</strong><span>等待准入</span></div><div><strong>{completedCount ?? "—"}</strong><span>累计完成</span></div></div><div className="dashboard-flow-rows">{flow.length ? flow.map(task => <a href={taskLink(task)} key={task.id}><Status task={task} /><span>{task.issue.title}</span><small>{task.project.name}</small></a>) : <div className="dashboard-flow-empty">{loading ? "正在读取任务…" : active && waiting ? "当前没有运行或等待准入的任务。" : "任务流转暂不可用。"}</div>}</div></div></section>
-    </div><aside className="dashboard-aside"><section className="dashboard-platform" aria-labelledby="dashboard-platform"><div className="dashboard-section-head"><div><span className="dashboard-kicker">平台状态</span><h2 id="dashboard-platform">接单与执行</h2></div>{offline > 0 && <i className="dashboard-warning-dot" aria-label="存在离线 Node" />}</div><div className="dashboard-platform-row"><span>待处理事件</span><strong>{operations?.inboxPending ?? "—"}</strong></div><div className="dashboard-platform-row"><span>等待准入</span><strong>{operations?.admissionWaiting ?? "—"}</strong></div><div className="dashboard-platform-row"><span>执行节点</span><strong>{nodes ? `${nodes.length - offline} / ${nodes.length} 在线` : "—"}</strong></div>{offline > 0 && <div className="dashboard-warning"><Icon name="alert" />{offline} 个 Node 心跳中断</div>}<a href="#/control">查看运行总览 <Icon name="arrow" /></a></section><section className="dashboard-context"><h2>从需求到交付</h2><p>Issue 发起任务，任务串起执行、审查与验收，MR 保留交付证据。</p><div><a href={workbenchLink("/issues", projectId)}>查看 Issue</a><a href={workbenchLink("/merge-requests", projectId)}>查看 MR</a></div></section></aside></div>
+    </div><aside className="dashboard-aside">{platformAdmin && <section className="dashboard-platform" aria-labelledby="dashboard-platform"><div className="dashboard-section-head"><div><span className="dashboard-kicker">平台状态</span><h2 id="dashboard-platform">接单与执行</h2></div>{offline > 0 && <i className="dashboard-warning-dot" aria-label="存在离线 Node" />}</div><div className="dashboard-platform-row"><span>待处理事件</span><strong>{operations?.inboxPending ?? "—"}</strong></div><div className="dashboard-platform-row"><span>等待准入</span><strong>{operations?.admissionWaiting ?? "—"}</strong></div><div className="dashboard-platform-row"><span>执行节点</span><strong>{nodes ? `${nodes.length - offline} / ${nodes.length} 在线` : "—"}</strong></div>{offline > 0 && <div className="dashboard-warning"><Icon name="alert" />{offline} 个 Node 心跳中断</div>}<a href="#/control">查看运行总览 <Icon name="arrow" /></a></section>}<section className="dashboard-context"><h2>从需求到交付</h2><p>Issue 发起任务，任务串起执行、审查与验收，MR 保留交付证据。</p><div><a href={workbenchLink("/issues", projectId)}>查看 Issue</a><a href={workbenchLink("/merge-requests", projectId)}>查看 MR</a></div></section></aside></div>
   </div>;
 }
 

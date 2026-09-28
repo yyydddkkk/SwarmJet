@@ -1,6 +1,12 @@
 # SwarmJet
 
-可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab、GitHub.com 与 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）、Claude Code 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务准入后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，可选启动独立审查 Agent，再合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录及人工操作。
+可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab、GitHub.com 与 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）、Claude Code 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务准入后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，可选启动独立审查 Agent，再合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录、团队授权及人工操作。
+
+## 成员与权限
+
+一个部署默认服务一个组织。平台管理员使用环境变量管理员账号进行初装和应急管理，维护团队、组织连接、Node、镜像与网络，并创建项目和指定初始负责人。配置 STARTTLS SMTP 后，成员可在登录页申请账号；邮箱验证及管理员审批完成后才能登录。项目默认只对成员可见，直接授权与团队授权取较高角色：观察者只读，操作员可创建和处置任务，负责人可管理项目配置、直接成员、人工批准与合并。停用账号会撤销已有会话。首版不含 SSO、多因素认证和自定义角色。
+
+GitLab 成员须在“个人 GitLab 身份”中验证并绑定自己的 Token，工作台操作使用该成员的 Token；自动任务继续使用组织连接。GitLab 标签和 `/swarmjet run` 评论只有在项目启用相应触发策略、且作者是已绑定的负责人或操作员时才自动接单；无法核验时保持待处理。GitHub 自动接单由平台管理员逐项目显式开启，默认关闭。升级后旧会话失效，已有项目仅平台管理员可见，需分配负责人并复核自动接单策略。
 
 ## 架构
 
@@ -39,7 +45,7 @@ Temporal 是运行流程的事实源；业务 PostgreSQL 保存配置、查询�
 
 ## 项目接入
 
-普通用户不需要理解 Meta-Repo。新建 GitLab 项目时填写地址和 Access Token；新建 GitHub.com 项目时选择已配置的 GitHub App 安装。验证连接后搜索并选择仓库、确认目标分支，随后在页面内嵌终端完成 `opencode auth login` 并选择模型做一次实际调用验证。系统据此创建受管的内部 Meta-Repo，运行初始化 Agent 分析项目，并在独立副本中执行验证。GitLab 连接加密保存（`SWARMJET_MASTER_KEY`）并可跨项目复用；GitHub 连接仅保存安装 ID，短期令牌按需签发。凭证不回显，也不写入日志、URL、任务快照或 Temporal 历史。模型和验收未就绪时项目保持草稿，不接单；初始化未通过验证时也不会自动启用。
+成员不需要理解 Meta-Repo。平台管理员新建 GitLab 项目时填写地址和 Access Token；新建 GitHub.com 项目时选择已配置的 GitHub App 安装，并指定初始负责人。验证连接后搜索并选择仓库、确认目标分支，随后在页面内嵌终端完成 `opencode auth login` 并选择模型做一次实际调用验证。系统据此创建受管的内部 Meta-Repo，运行初始化 Agent 分析项目，并在独立副本中执行验证。GitLab 连接加密保存（`SWARMJET_MASTER_KEY`）并可跨项目复用；GitHub 连接仅保存安装 ID，短期令牌按需签发。凭证不回显，也不写入日志、URL、任务快照或 Temporal 历史。模型和验收未就绪时项目保持草稿，不接单；初始化未通过验证时也不会自动启用。
 
 控制台的“执行器环境”提供五种 Agent 的适配列表，管理员统一勾选启用，默认全部未勾选；项目选择一个已启用的默认 Agent。CLI 必须安装在配置终端与任务所用的镜像中，勾选启用不会自动安装软件。可通过独立的“镜像管理”页面查看仓库版本、分发或回退节点镜像，并选择 Agent、设置构建参数，由持久化 BuildKit 构建并发布到 Distribution；在“系统设置 → 开发者选项”启用后，同页还可构建、发布和管理平台程序镜像。也可继续通过 `AGENT_CLIS=opencode,codex` 等构建参数按需打包，详见 [部署说明](deploy/README.md)。终端配置保存在持久化 Home 中。
 

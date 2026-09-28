@@ -14,6 +14,50 @@ CREATE TABLE IF NOT EXISTS webhook_receipts(provider text NOT NULL, delivery_id 
 CREATE TABLE IF NOT EXISTS events(id bigserial PRIMARY KEY, task_id text NOT NULL, kind text NOT NULL, message text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS task_events ON events(task_id,id);
 CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY, expires_at timestamptz NOT NULL);
+CREATE TABLE IF NOT EXISTS users (
+ id text PRIMARY KEY, email text NOT NULL UNIQUE, display_name text NOT NULL,
+ password_hash text NOT NULL, status text NOT NULL CHECK (status IN ('pending_email','pending_approval','active','disabled','rejected')),
+ platform_admin boolean NOT NULL DEFAULT false,
+ created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id text REFERENCES users(id);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS principal_type text NOT NULL DEFAULT 'legacy';
+-- Revoke pre-authorization cookies once. New breakglass cookies use a distinct type.
+DELETE FROM sessions WHERE principal_type='legacy';
+CREATE INDEX IF NOT EXISTS sessions_by_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS email_tokens (
+ token_hash text PRIMARY KEY, user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ kind text NOT NULL CHECK (kind IN ('verify','reset')), expires_at timestamptz NOT NULL,
+ consumed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS email_tokens_by_user ON email_tokens(user_id,kind) WHERE consumed_at IS NULL;
+CREATE TABLE IF NOT EXISTS teams (id text PRIMARY KEY, name text NOT NULL UNIQUE, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS team_members (team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE, user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY(team_id,user_id));
+CREATE TABLE IF NOT EXISTS project_grants (project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE, user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE, role text NOT NULL CHECK (role IN ('owner','operator','viewer')), PRIMARY KEY(project_id,user_id));
+CREATE TABLE IF NOT EXISTS team_project_grants (project_id text NOT NULL REFERENCES projects(id) ON DELETE CASCADE, team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE, role text NOT NULL CHECK (role IN ('owner','operator','viewer')), PRIMARY KEY(project_id,team_id));
+CREATE TABLE IF NOT EXISTS external_identities (
+ user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE, provider text NOT NULL,
+ instance text NOT NULL, external_id text NOT NULL, username text NOT NULL,
+ secret text NOT NULL DEFAULT '', updated_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(user_id,provider,instance), UNIQUE(provider,instance,external_id)
+);
+CREATE TABLE IF NOT EXISTS audit_events (
+ id bigserial PRIMARY KEY, actor_user_id text REFERENCES users(id) ON DELETE SET NULL,
+ actor_type text NOT NULL, action text NOT NULL, target_type text NOT NULL,
+ target_id text NOT NULL, details jsonb NOT NULL DEFAULT '{}'::jsonb,
+ created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS audit_events_recent ON audit_events(created_at DESC,id DESC);
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS dedupe_key text;
+CREATE UNIQUE INDEX IF NOT EXISTS audit_events_dedupe ON audit_events(dedupe_key) WHERE dedupe_key IS NOT NULL;
+CREATE TABLE IF NOT EXISTS denied_issue_run_commands (
+ source text NOT NULL, note_id bigint NOT NULL, reason text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(source,note_id)
+);
+CREATE TABLE IF NOT EXISTS denied_issue_label_events (
+ source text NOT NULL, event_id bigint NOT NULL, reason text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(source,event_id)
+);
 CREATE TABLE IF NOT EXISTS leases(name text PRIMARY KEY, owner text NOT NULL, expires_at timestamptz NOT NULL);
 CREATE TABLE IF NOT EXISTS connections(id text PRIMARY KEY, version integer NOT NULL, body jsonb NOT NULL, secret text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS gitlab_identities(instance text PRIMARY KEY, username text NOT NULL, secret text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());

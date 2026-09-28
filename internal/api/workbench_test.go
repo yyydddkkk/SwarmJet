@@ -260,7 +260,7 @@ func TestWorkbenchOptionsScopeAndPersonalIdentity(t *testing.T) {
 	a := &server{s: s, cfg: Config{Box: box}}
 	for _, kind := range []string{"issues", "merge-requests"} {
 		w := httptest.NewRecorder()
-		a.workbench(w, httptest.NewRequest(http.MethodGet, "/api/workbench/"+kind+"/one/repo/options?search=alice", nil))
+		a.workbench(w, withPrincipal(httptest.NewRequest(http.MethodGet, "/api/workbench/"+kind+"/one/repo/options?search=alice", nil), store.Principal{Breakglass: true, PlatformAdmin: true}))
 		if w.Code != 200 || strings.Contains(w.Body.String(), "personal-secret") {
 			t.Fatalf("options %s: %d %s", kind, w.Code, w.Body.String())
 		}
@@ -280,7 +280,7 @@ func TestWorkbenchOptionsScopeAndPersonalIdentity(t *testing.T) {
 	before := calls.Load()
 	for _, path := range []string{"/api/workbench/issues/other/repo/options", "/api/workbench/issues/one/other/options"} {
 		w := httptest.NewRecorder()
-		a.workbench(w, httptest.NewRequest(http.MethodGet, path, nil))
+		a.workbench(w, withPrincipal(httptest.NewRequest(http.MethodGet, path, nil), store.Principal{Breakglass: true, PlatformAdmin: true}))
 		if w.Code != 404 {
 			t.Fatalf("cross scope %s: %d %s", path, w.Code, w.Body.String())
 		}
@@ -289,7 +289,7 @@ func TestWorkbenchOptionsScopeAndPersonalIdentity(t *testing.T) {
 		t.Fatal("cross-scope request reached GitLab")
 	}
 	w := httptest.NewRecorder()
-	a.workbench(w, httptest.NewRequest(http.MethodGet, "/api/workbench/issues/one/repo/options?search=denied", nil))
+	a.workbench(w, withPrincipal(httptest.NewRequest(http.MethodGet, "/api/workbench/issues/one/repo/options?search=denied", nil), store.Principal{Breakglass: true, PlatformAdmin: true}))
 	if w.Code != 403 || strings.Contains(w.Body.String(), "personal-secret") {
 		t.Fatalf("permission/token response: %d %s", w.Code, w.Body.String())
 	}

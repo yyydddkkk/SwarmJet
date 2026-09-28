@@ -54,9 +54,43 @@ func (s *Store) TasksForIssue(ctx context.Context, base string, issue domain.Iss
 	return out, rows.Err()
 }
 
+// TasksForIssueInProject is the only issue-to-task lookup exposed through a
+// project-scoped console view. Historical tasks from another SwarmJet project
+// can share the same GitLab issue after repository reassignment.
+func (s *Store) TasksForIssueInProject(ctx context.Context, projectID, base string, issue domain.Issue) ([]domain.Task, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT body FROM tasks WHERE project_id=$1 AND source=$2 ORDER BY COALESCE((body->>'createdAt')::timestamptz,updated_at),id`, projectID, issueSource(base, issue))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.Task{}
+	for rows.Next() {
+		var body []byte
+		var task domain.Task
+		if err = rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(body, &task); err != nil {
+			return nil, err
+		}
+		out = append(out, task)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) TaskForMR(ctx context.Context, gitlabURL string, gitlabProjectID, iid int64) (domain.Task, error) {
 	var body []byte
 	err := s.Pool.QueryRow(ctx, `SELECT t.body FROM task_mrs m JOIN tasks t ON t.id=m.task_id WHERE m.instance=$1 AND m.gitlab_project_id=$2 AND m.mr_iid=$3`, domain.GitLabIdentity(gitlabURL), gitlabProjectID, iid).Scan(&body)
+	var task domain.Task
+	if err == nil {
+		err = json.Unmarshal(body, &task)
+	}
+	return task, mapErr(err)
+}
+
+func (s *Store) TaskForMRInProject(ctx context.Context, projectID, gitlabURL string, gitlabProjectID, iid int64) (domain.Task, error) {
+	var body []byte
+	err := s.Pool.QueryRow(ctx, `SELECT t.body FROM task_mrs m JOIN tasks t ON t.id=m.task_id WHERE t.project_id=$1 AND m.instance=$2 AND m.gitlab_project_id=$3 AND m.mr_iid=$4`, projectID, domain.GitLabIdentity(gitlabURL), gitlabProjectID, iid).Scan(&body)
 	var task domain.Task
 	if err == nil {
 		err = json.Unmarshal(body, &task)

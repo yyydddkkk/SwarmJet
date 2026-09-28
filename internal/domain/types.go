@@ -77,6 +77,11 @@ type Project struct {
 	// AutoMerge is a project-level switch. A nil value means the legacy default
 	// (enabled) so existing projects keep their behavior across upgrades.
 	AutoMerge *bool `json:"autoMerge,omitempty"`
+	// GitLabTriggerMode controls autonomous admission: off, owner, or operator.
+	// An empty value is off so upgraded projects cannot admit work implicitly.
+	GitLabTriggerMode string `json:"gitlabTriggerMode,omitempty"`
+	// GitHubAutoIntake is an explicit administrator-only legacy intake switch.
+	GitHubAutoIntake bool `json:"githubAutoIntake,omitempty"`
 	// InitStatus tracks the managed-Meta initialization funnel.
 	InitStatus   string            `json:"initStatus,omitempty"`
 	Repositories []Repository      `json:"repositories"`

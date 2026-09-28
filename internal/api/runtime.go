@@ -101,6 +101,23 @@ func (a *server) runtime(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), duration)
 	defer cancel()
 	if terminal {
+		// Revocation of a member administrator must also end an already open
+		// terminal connection, rather than waiting for its one-hour deadline.
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if _, err := a.sessionPrincipal(r.WithContext(ctx)); err != nil {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
 		if a.s != nil {
 			_ = a.s.Event(ctx, "", "runtime_terminal_open", "管理员打开执行器配置终端")
 		}

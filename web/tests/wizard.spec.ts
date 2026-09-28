@@ -60,7 +60,9 @@ async function setupWizard(page: Page, options?: { verifyFails?: boolean; branch
     if (method !== "GET")
       expect(request.headers()["x-requested-with"]).toBe("swarmjet");
     if (pathname === "/api/session")
-      return route.fulfill({ json: { username: "admin" } });
+      return route.fulfill({ json: { username: "admin", platformAdmin: true } });
+    if (pathname === "/api/users")
+      return route.fulfill({ json: { users: [{ id: "11111111-1111-4111-8111-111111111111", email: "owner@example.test", displayName: "Project Owner", status: "active" }] } });
     if (pathname === "/api/project-defaults")
       return route.fulfill({ json: { agentImage: "swarmjet-agent:configured" } });
     if (pathname === "/api/connections" && method === "GET")
@@ -268,6 +270,7 @@ test("wizard connects, paginates repos, verifies a model and completes initializ
   await expect(page.locator("select").filter({has:page.locator('option[value="example/development"]')})).toHaveValue("example/development");
   await page.getByRole("button", { name: "验证模型" }).click();
   await expect(page.getByText("模型验证通过")).toBeVisible();
+  await page.getByLabel("初始负责人", { exact: true }).selectOption("11111111-1111-4111-8111-111111111111");
   await page.getByRole("button", { name: "创建项目并开始初始化" }).click();
   await expect(
     page.getByRole("heading", { name: "需要补充信息" }),
@@ -401,6 +404,7 @@ test("GitHub installation creates a managed project with platform checks", async
   await page.getByLabel("项目默认 Agent",{exact:true}).selectOption("opencode");
   await page.getByRole("button",{name:"验证模型"}).click();
   await expect(page.getByText("模型验证通过")).toBeVisible();
+  await page.getByLabel("初始负责人", { exact: true }).selectOption("11111111-1111-4111-8111-111111111111");
   await page.getByRole("button",{name:"创建项目并开始初始化"}).click();
   await expect(page.getByRole("heading",{name:"需要补充信息"})).toBeVisible();
   expect(state.saves[0]).toMatchObject({provider:"github",connectionId:"gh1",metaMode:"managed",gitlabUrl:"",mergeMethod:"squash",acceptanceStrategy:"platform_ci",requireCI:true});

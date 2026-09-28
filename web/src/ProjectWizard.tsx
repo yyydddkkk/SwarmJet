@@ -11,6 +11,7 @@ import type {
   Project,
   Repository,
 } from "./types";
+import type { Account } from "./AccessSettings";
 import "./wizard.css";
 
 const stepList = [
@@ -145,6 +146,9 @@ export default function ProjectWizard({
   const [metaRef, setMetaRef] = useState("main");
   const [autoMerge, setAutoMerge] = useState(true);
   const [projectId, setProjectId] = useState(initialProject?.id || "");
+  const [activeUsers, setActiveUsers] = useState<Account[]>([]);
+  const [initialOwnerUserId, setInitialOwnerUserId] = useState("");
+  useEffect(() => { if (!initialProject) void api<{ users: Account[] }>("/users?status=active").then(result => setActiveUsers(result.users || [])).catch(() => setActiveUsers([])); }, [initialProject]);
   const [runtime, setRuntime] = useState<{
     available: boolean;
     opencode: { installed: boolean; configured: boolean; providers: string[] | null };
@@ -465,6 +469,7 @@ export default function ProjectWizard({
   }
 
   async function startInitialization() {
+    if (!projectId && !initialOwnerUserId) { setError("请选择初始负责人。"); return; }
     setSaving(true);
     setError("");
     try {
@@ -480,7 +485,7 @@ export default function ProjectWizard({
           { ...payload, id: projectId, version: current.version, enabled: false },
         );
       } else {
-        saved = await api<Project>("/projects", "POST", payload);
+        saved = await api<Project>("/projects", "POST", { ...payload, initialOwnerUserId });
       }
       setProjectId(saved.id);
       onSaved?.(saved);
@@ -1052,6 +1057,7 @@ export default function ProjectWizard({
             <p className="runtime-model-help">
               检测到配置文件或模型名称不代表凭据有效；只有实际调用成功才算验证通过。
             </p>
+            {!projectId && <Field label="初始负责人" hint="该成员将管理项目配置、直接成员与交付决策。"><select required value={initialOwnerUserId} onChange={event => setInitialOwnerUserId(event.target.value)}><option value="">选择已启用成员</option>{activeUsers.map(user => <option key={user.id} value={user.id}>{user.displayName || user.email}</option>)}</select></Field>}
             <div className="actions wizard-actions">
               <button type="button" onClick={() => setStep(2)}>
                 上一步
@@ -1059,7 +1065,7 @@ export default function ProjectWizard({
               <button
                 type="button"
                 className="primary"
-                disabled={saving || !modelVerified || !agentCatalog.enabled.includes(defaultAgent)}
+                disabled={saving || !modelVerified || !agentCatalog.enabled.includes(defaultAgent) || (!projectId && !initialOwnerUserId)}
                 onClick={() => void startInitialization()}
               >
                 {saving ? "正在创建项目…" : "创建项目并开始初始化"}

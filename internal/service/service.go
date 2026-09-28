@@ -500,6 +500,9 @@ func (s *Service) scan(ctx context.Context, provider domain.Provider, repoID int
 		if !p.Enabled || provider != "" && p.HostingProvider() != provider {
 			continue
 		}
+		if p.HostingProvider() == domain.ProviderGitHub && !p.GitHubAutoIntake {
+			continue
+		}
 		if repoID > 0 {
 			found := false
 			for _, repo := range p.Repositories {
@@ -551,6 +554,13 @@ func (s *Service) scan(ctx context.Context, provider domain.Provider, repoID int
 						}
 					}
 					if legacy {
+						continue
+					}
+					authorized, e := s.authorizeInitialTrigger(ctx, g, p, issue)
+					if e != nil {
+						return e
+					}
+					if !authorized {
 						continue
 					}
 					task, e := intake.Schedule(ctx, s.Store, p, issue, enabled, s.intakeOptions(p.ID, false))
@@ -628,6 +638,13 @@ func (s *Service) scanFollowup(ctx context.Context, g forge.Client, p domain.Pro
 		}
 		body, ok := runComment(note.Body)
 		if !ok {
+			continue
+		}
+		authorized, err := s.authorizeRunNote(ctx, g, p, issue, note)
+		if err != nil {
+			return err
+		}
+		if !authorized {
 			continue
 		}
 		if err := s.Store.RecordIssueRunCommand(ctx, p.HostingURL(), issue, note.ID, body, note.CreatedAt); err != nil {

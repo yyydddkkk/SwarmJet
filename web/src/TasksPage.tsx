@@ -12,7 +12,7 @@ const initialView = (): TaskView => {
   return value === "active" || value === "waiting" || value === "attention" || value === "ended" ? value : "all";
 };
 
-export default function Tasks({ projectId, onProjectChange }: { projectId: string; onProjectChange?: (projectId: string) => void }) {
+export default function Tasks({ projectId, onProjectChange, platformAdmin = false }: { projectId: string; onProjectChange?: (projectId: string) => void; platformAdmin?: boolean }) {
   const [tasks, setTasks] = useState<Task[]>([]),
     [page, setPage] = useState<TaskPage | null>(null),
     [attention, setAttention] = useState<Task[]>([]),
@@ -67,6 +67,7 @@ export default function Tasks({ projectId, onProjectChange }: { projectId: strin
       [...tasks.map((t) => t.project), ...projects].map((p) => [p.id, p]),
     ).values(),
   );
+  const operableProjects = projects.filter(project => project.enabled && (platformAdmin || project.myRole === "owner" || project.myRole === "operator"));
   return (
     <div className="tasks-page">
       <div className="page-head">
@@ -74,9 +75,9 @@ export default function Tasks({ projectId, onProjectChange }: { projectId: strin
           <h1>任务中心</h1>
           <p>掌握进展，把注意力留给需要你的地方。</p>
         </div>
-        <button className="primary" onClick={() => setCreate(true)}>
+        {operableProjects.length > 0 && <button className="primary" onClick={() => setCreate(true)}>
           <Icon name="plus" /> 创建任务
-        </button>
+        </button>}
       </div>
       <div className="task-overview" aria-label="任务概况">
         <span>
@@ -302,7 +303,7 @@ export default function Tasks({ projectId, onProjectChange }: { projectId: strin
         </div>
       </section>
       {create && (
-        <CreateTask projects={projects} close={() => setCreate(false)} />
+        <CreateTask projects={operableProjects} close={() => setCreate(false)} />
       )}
     </div>
   );

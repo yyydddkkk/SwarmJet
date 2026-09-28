@@ -57,6 +57,12 @@ func TestWorkbenchIdentityAssociationAndManualMergeEvidence(t *testing.T) {
 	if err != nil || len(issueTasks) != 1 || issueTasks[0].ID != task.ID {
 		t.Fatalf("Issue history: %+v %v", issueTasks, err)
 	}
+	if scoped, err := s.TasksForIssueInProject(ctx, "another-project", project.GitLabURL, task.Issue); err != nil || len(scoped) != 0 {
+		t.Fatalf("cross-project Issue association leaked: %+v %v", scoped, err)
+	}
+	if _, err := s.TaskForMRInProject(ctx, "another-project", project.GitLabURL, 1, 7); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-project MR association leaked: %v", err)
+	}
 	record := ManualAcceptanceRecord{Digest: domain.ManualMergeEvidenceDigest(task), Checks: []ManualAcceptanceCheck{{Index: 0, Confirmed: true}, {Index: 1, Confirmed: true}}, Note: "verified by administrator"}
 	if err = s.SaveManualAcceptance(ctx, task.ID, record); err != nil {
 		t.Fatal(err)

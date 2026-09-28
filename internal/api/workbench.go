@@ -38,14 +38,24 @@ func (a *server) gitlabIdentities(w http.ResponseWriter, r *http.Request) {
 			failure(w, err)
 			return
 		}
+		visible, err := a.visibleProjects(r)
+		if err != nil {
+			failure(w, err)
+			return
+		}
 		seen := map[string]bool{}
 		out := []map[string]any{}
 		for _, p := range projects {
+			if visible != nil {
+				if _, ok := visible[p.ID]; !ok {
+					continue
+				}
+			}
 			if p.HostingProvider() != domain.ProviderGitLab || p.GitLabURL == "" || seen[p.GitLabURL] {
 				continue
 			}
 			seen[p.GitLabURL] = true
-			_, username, err := a.s.GitLabIdentity(r.Context(), p.GitLabURL)
+			_, username, _, err := a.workbenchSecret(r.Context(), p.GitLabURL)
 			out = append(out, map[string]any{"gitlabUrl": p.GitLabURL, "username": username, "configured": err == nil})
 		}
 		respond(w, 200, map[string]any{"identities": out})
@@ -82,10 +92,17 @@ func (a *server) gitlabIdentities(w http.ResponseWriter, r *http.Request) {
 			failure(w, err)
 			return
 		}
-		if err = a.s.SaveGitLabIdentity(r.Context(), base, sealed, user.Username); err != nil {
+		principal := requestPrincipal(r)
+		if principal.Breakglass {
+			err = a.s.SaveGitLabIdentity(r.Context(), base, sealed, user.Username)
+		} else {
+			err = a.s.UpsertExternalIdentity(r.Context(), principal.UserID, "gitlab", base, strconv.FormatInt(user.ID, 10), user.Username, sealed)
+		}
+		if err != nil {
 			failure(w, err)
 			return
 		}
+		_ = a.s.Audit(r.Context(), principal, "identity.gitlab.bind", "gitlab", base, map[string]string{"externalId": strconv.FormatInt(user.ID, 10)})
 		respond(w, 200, map[string]any{"gitlabUrl": base, "username": user.Username, "configured": true})
 	case http.MethodDelete:
 		base, err := domain.NormalizeGitLabURL(r.URL.Query().Get("gitlabUrl"))
@@ -93,10 +110,17 @@ func (a *server) gitlabIdentities(w http.ResponseWriter, r *http.Request) {
 			problem(w, 400, "GitLab 地址无效。")
 			return
 		}
-		if err = a.s.DeleteGitLabIdentity(r.Context(), base); err != nil {
+		principal := requestPrincipal(r)
+		if principal.Breakglass {
+			err = a.s.DeleteGitLabIdentity(r.Context(), base)
+		} else {
+			err = a.s.DeleteExternalIdentity(r.Context(), principal.UserID, "gitlab", base)
+		}
+		if err != nil {
 			failure(w, err)
 			return
 		}
+		_ = a.s.Audit(r.Context(), principal, "identity.gitlab.unbind", "gitlab", base, nil)
 		w.WriteHeader(204)
 	default:
 		problem(w, 405, "method not allowed")
@@ -112,6 +136,13 @@ func (a *server) knownGitLabInstance(ctx context.Context, base string) bool {
 		return false
 	}
 	for _, p := range projects {
+		principal, _ := ctx.Value(principalContextKey{}).(store.Principal)
+		if !principal.PlatformAdmin && !principal.Breakglass {
+			role, err := a.s.ProjectRole(ctx, principal.UserID, p.ID)
+			if err != nil || role == "" {
+				continue
+			}
+		}
 		if p.HostingProvider() == domain.ProviderGitLab && domain.GitLabIdentity(p.GitLabURL) == domain.GitLabIdentity(base) {
 			return true
 		}
@@ -119,11 +150,20 @@ func (a *server) knownGitLabInstance(ctx context.Context, base string) bool {
 	return false
 }
 
+func (a *server) workbenchSecret(ctx context.Context, instance string) (externalID, username, secret string, err error) {
+	principal, _ := ctx.Value(principalContextKey{}).(store.Principal)
+	if principal.Breakglass || principal.UserID == "" {
+		secret, username, err = a.s.GitLabIdentity(ctx, instance)
+		return "", username, secret, err
+	}
+	return a.s.ExternalIdentitySecret(ctx, principal.UserID, "gitlab", instance)
+}
+
 func (a *server) workbenchClient(ctx context.Context, p domain.Project) (*gitlab.Client, error) {
 	if a.cfg.Box == nil {
 		return nil, errors.New("个人 GitLab Token 存储未启用，请配置 SWARMJET_MASTER_KEY。")
 	}
-	sealed, _, err := a.s.GitLabIdentity(ctx, p.GitLabURL)
+	_, _, sealed, err := a.workbenchSecret(ctx, p.GitLabURL)
 	if err != nil {
 		return nil, errors.New("请先在系统设置中为此 GitLab 实例配置个人 Token。")
 	}
@@ -145,6 +185,20 @@ func (a *server) workbenchRepos(ctx context.Context, projectID, repoID string) (
 	if err != nil {
 		return nil, err
 	}
+	principal, _ := ctx.Value(principalContextKey{}).(store.Principal)
+	if !principal.PlatformAdmin && !principal.Breakglass && principal.UserID != "" {
+		visible, err := a.s.VisibleProjectIDs(ctx, principal.UserID)
+		if err != nil {
+			return nil, err
+		}
+		allowed := projects[:0]
+		for _, p := range projects {
+			if _, ok := visible[p.ID]; ok {
+				allowed = append(allowed, p)
+			}
+		}
+		projects = allowed
+	}
 	return filterWorkbenchRepos(projects, projectID, repoID), nil
 }
 
@@ -164,6 +218,13 @@ func filterWorkbenchRepos(projects []domain.Project, projectID, repoID string) [
 }
 
 func (a *server) workbenchScope(w http.ResponseWriter, r *http.Request, projectID, repoID string) (workbenchRepository, *gitlab.Client, bool) {
+	minimum := store.RoleViewer
+	if r.Method != http.MethodGet {
+		minimum = store.RoleOperator
+	}
+	if !a.requireProjectRole(w, r, projectID, minimum) {
+		return workbenchRepository{}, nil, false
+	}
 	repos, err := a.workbenchRepos(r.Context(), projectID, repoID)
 	if err != nil {
 		problem(w, 400, err.Error())
@@ -223,7 +284,7 @@ func (a *server) fetchWorkbenchPage(ctx context.Context, scope workbenchReposito
 	if a.cfg.Box == nil {
 		return nil, false, workbenchIdentityError("个人 GitLab Token 存储未启用，请配置 SWARMJET_MASTER_KEY。")
 	}
-	sealed, _, err := a.s.GitLabIdentity(ctx, scope.Project.GitLabURL)
+	_, _, sealed, err := a.workbenchSecret(ctx, scope.Project.GitLabURL)
 	if err != nil {
 		return nil, false, workbenchIdentityError("请先在系统设置中为此 GitLab 实例配置个人 Token。")
 	}
@@ -531,7 +592,7 @@ func (a *server) workbenchPage(w http.ResponseWriter, r *http.Request, kind stri
 				item := workbenchRow(raw, repos[i])
 				iid, _ := item["iid"].(float64)
 				if kind == "issues" {
-					tasks, err := a.s.TasksForIssue(r.Context(), repos[i].Project.GitLabURL, domain.Issue{ProjectID: repos[i].Repo.ProjectID, IID: int64(iid)})
+					tasks, err := a.s.TasksForIssueInProject(r.Context(), repos[i].Project.ID, repos[i].Project.GitLabURL, domain.Issue{ProjectID: repos[i].Repo.ProjectID, IID: int64(iid)})
 					if err != nil {
 						failure(w, err)
 						return
@@ -542,7 +603,7 @@ func (a *server) workbenchPage(w http.ResponseWriter, r *http.Request, kind stri
 					}
 					item["taskIds"] = ids
 				} else {
-					task, err := a.s.TaskForMR(r.Context(), repos[i].Project.GitLabURL, repos[i].Repo.ProjectID, int64(iid))
+					task, err := a.s.TaskForMRInProject(r.Context(), repos[i].Project.ID, repos[i].Project.GitLabURL, repos[i].Repo.ProjectID, int64(iid))
 					if err == nil {
 						item["taskId"] = task.ID
 					} else if !errors.Is(err, store.ErrNotFound) {
@@ -619,6 +680,7 @@ func (a *server) workbenchCreate(w http.ResponseWriter, r *http.Request, kind st
 		return
 	}
 	a.invalidateWorkbenchPages()
+	_ = a.s.Audit(r.Context(), requestPrincipal(r), "workbench."+kind+".create", "project", scope.Project.ID, map[string]string{"repositoryId": scope.Repo.ID})
 	respond(w, 201, workbenchRow(row, scope))
 }
 func stringValue(v any) string { s, _ := v.(string); return s }
@@ -650,14 +712,14 @@ func (a *server) workbenchDetail(w http.ResponseWriter, r *http.Request, kind st
 				return
 			}
 			item["notes"] = notes
-			tasks, err := a.s.TasksForIssue(r.Context(), scope.Project.GitLabURL, domain.Issue{ProjectID: scope.Repo.ProjectID, IID: iid})
+			tasks, err := a.s.TasksForIssueInProject(r.Context(), scope.Project.ID, scope.Project.GitLabURL, domain.Issue{ProjectID: scope.Repo.ProjectID, IID: iid})
 			if err != nil {
 				failure(w, err)
 				return
 			}
 			item["tasks"] = tasks
 		} else {
-			task, err := a.s.TaskForMR(r.Context(), scope.Project.GitLabURL, scope.Repo.ProjectID, iid)
+			task, err := a.s.TaskForMRInProject(r.Context(), scope.Project.ID, scope.Project.GitLabURL, scope.Repo.ProjectID, iid)
 			if err == nil {
 				item["taskId"] = task.ID
 			} else if !errors.Is(err, store.ErrNotFound) {
@@ -679,7 +741,7 @@ func (a *server) workbenchDetail(w http.ResponseWriter, r *http.Request, kind st
 			approvals, err := client.WorkbenchSubresource(r.Context(), http.MethodGet, kind, scope.Repo.ProjectID, iid, "/approvals", nil)
 			if err == nil {
 				item["approvals"] = approvals
-				_, username, identityErr := a.s.GitLabIdentity(r.Context(), scope.Project.GitLabURL)
+				_, username, _, identityErr := a.workbenchSecret(r.Context(), scope.Project.GitLabURL)
 				if identityErr != nil {
 					failure(w, identityErr)
 					return
@@ -756,7 +818,7 @@ func (a *server) workbenchAction(w http.ResponseWriter, r *http.Request, kind st
 		return
 	}
 	if kind == "issues" && len(parts) == 1 && parts[0] == "next-round" && r.Method == http.MethodPost {
-		tasks, err := a.s.TasksForIssue(r.Context(), scope.Project.GitLabURL, domain.Issue{ProjectID: scope.Repo.ProjectID, IID: iid})
+		tasks, err := a.s.TasksForIssueInProject(r.Context(), scope.Project.ID, scope.Project.GitLabURL, domain.Issue{ProjectID: scope.Repo.ProjectID, IID: iid})
 		if err != nil {
 			failure(w, err)
 			return

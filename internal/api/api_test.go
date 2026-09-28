@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -269,6 +270,13 @@ func TestLoginPostgres(t *testing.T) {
 	if err = isolated.SetEnabledAgents(context.Background(), []string{"opencode", "codex"}); err != nil {
 		t.Fatal(err)
 	}
+	initialOwnerUserID, err := newID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = isolated.Pool.Exec(context.Background(), `INSERT INTO users(id,email,display_name,password_hash,status) VALUES($1,'owner@example.test','Owner','hash','active')`, initialOwnerUserID); err != nil {
+		t.Fatal(err)
+	}
 
 	h := New(isolated, Config{Username: "admin", Password: "secret", AllowedOrigin: "https://console.test", SecureCookies: true})
 	r := httptest.NewRequest("POST", "https://console.test/api/login", strings.NewReader(`{"username":"admin","password":"secret"}`))
@@ -363,12 +371,18 @@ func TestLoginPostgres(t *testing.T) {
 		t.Fatalf("configured image ignored: %d %s", configuredDefaults.Code, configuredDefaults.Body)
 	}
 	draft := domain.Project{ID: "draft", Name: "Meta draft", MetaURL: remote.URL + "/group/draft-meta.git"}
-	draftResponse := call("POST", "/api/projects", draft)
+	draftResponse := call("POST", "/api/projects", struct {
+		domain.Project
+		InitialOwnerUserID string `json:"initialOwnerUserId"`
+	}{draft, initialOwnerUserID})
 	if draftResponse.Code != 200 {
 		t.Fatal("draft rejected", draftResponse.Code, draftResponse.Body)
 	}
 	if err = json.Unmarshal(draftResponse.Body.Bytes(), &draft); err != nil || draft.Version != 1 || draft.Enabled {
 		t.Fatal("invalid persisted draft", err, draft)
+	}
+	if err = isolated.DeleteProjectGrant(context.Background(), draft.ID, initialOwnerUserID); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("last project owner removed: %v", err)
 	}
 	incomplete := draft
 	incomplete.Enabled = true
@@ -406,7 +420,10 @@ func TestLoginPostgres(t *testing.T) {
 	if err = domain.ValidateProject(activated); err != nil {
 		t.Fatal("activated snapshot not executable", err)
 	}
-	created := call("POST", "/api/projects", project)
+	created := call("POST", "/api/projects", struct {
+		domain.Project
+		InitialOwnerUserID string `json:"initialOwnerUserId"`
+	}{project, initialOwnerUserID})
 	if created.Code != 200 {
 		t.Fatal(created.Code, created.Body)
 	}

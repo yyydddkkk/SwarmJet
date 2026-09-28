@@ -3,6 +3,8 @@ import { api } from "./api";
 import type { Project } from "./types";
 import { ProjectEditor, newProject } from "./ProjectEditor";
 import { Empty, ErrorBox, Modal, Panel } from "./ui";
+import { canManageProject } from "./permissions";
+import ProjectAccess from "./ProjectAccess";
 
 const ProjectWizard = lazy(() => import("./ProjectWizard"));
 const go = (path: string) => { location.hash = path; };
@@ -11,10 +13,12 @@ export default function Projects({
   id,
   initialization,
   importing,
+  platformAdmin,
 }: {
   id?: string;
   initialization?: boolean;
   importing?: boolean;
+  platformAdmin: boolean;
 }) {
   const [projects, setProjects] = useState<Project[]>([]),
     [error, setError] = useState(""),
@@ -40,6 +44,7 @@ export default function Projects({
     return (
       <ProjectEditor
         initial={newProject()}
+        platformAdmin={platformAdmin}
         onSaved={(project) => go(`/projects/${encodeURIComponent(project.id)}`)}
       />
     );
@@ -55,6 +60,9 @@ export default function Projects({
     );
   if (id) {
     const p = projects.find((p) => p.id === decodeURIComponent(id));
+    if (p && (initialization || importing) && !canManageProject(p.myRole, platformAdmin)) return <Empty>当前账号没有项目配置权限。</Empty>;
+    if (p && !initialization && !importing && location.hash.split("?")[0].endsWith("/access"))
+      return canManageProject(p.myRole, platformAdmin) ? <ProjectAccess project={p} platformAdmin={platformAdmin} /> : <Empty>当前账号没有成员管理权限。</Empty>;
     if (p && initialization && p.metaMode === "managed")
       return (
         <Suspense fallback={<div className="loading">正在加载初始化进度…</div>}>
@@ -66,10 +74,11 @@ export default function Projects({
           />
         </Suspense>
       );
-    return p ? (
+    return p && !canManageProject(p.myRole, platformAdmin) ? <div className="access-page"><div className="page-head"><div><a href="#/projects">← 项目列表</a><h1>{p.name}</h1><p>你在此项目的角色：{p.myRole === "operator" ? "操作员" : "观察者"}</p></div></div><section className="panel panel-padding"><h2>项目信息</h2><p>项目 ID：{p.id}</p><p>接入平台：{p.provider === "github" ? "GitHub" : "GitLab"}</p><p>仓库：{p.repositories?.length || 0} 个</p></section></div> : p ? (
       <ProjectEditor
         key={p.id}
         initial={p}
+        platformAdmin={platformAdmin}
         onSaved={(p) => {
           setProjects((old) =>
             old.map((item) => (item.id === p.id ? p : item)),
@@ -94,9 +103,9 @@ export default function Projects({
           <h1>项目配置</h1>
           <p>连接 Meta-Repo，定义仓库目标、Agent 和交付检查。</p>
         </div>
-        <a className="button primary" href="#/projects/new">
+        {platformAdmin && <a className="button primary" href="#/projects/new">
           ＋ 新建项目
-        </a>
+        </a>}
       </div>
       <ErrorBox error={error} retry={refresh} />
       {loading ? (
@@ -133,7 +142,7 @@ export default function Projects({
                     查看初始化进度
                   </a>
                 )}
-                <button
+                {canManageProject(p.myRole, platformAdmin) && <button
                   disabled={checking === p.id}
                   onClick={async () => {
                     setChecking(p.id);
@@ -155,12 +164,13 @@ export default function Projects({
                   }}
                 >
                   {checking === p.id ? "检查中…" : "检查连接"}
-                </button>
+                </button>}
+                {canManageProject(p.myRole, platformAdmin) && <a className="button" href={`#/projects/${encodeURIComponent(p.id)}/access`}>成员与触发</a>}
                 <a
                   className="button"
                   href={`#/projects/${encodeURIComponent(p.id)}`}
                 >
-                  编辑项目 →
+                  {canManageProject(p.myRole, platformAdmin) ? "编辑项目 →" : "查看项目 →"}
                 </a>
               </div>
             </article>

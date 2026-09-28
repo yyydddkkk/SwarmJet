@@ -95,6 +95,7 @@ export interface Initialization {
   agentStopped?: boolean;
 }
 export interface Project {
+  myRole?: "viewer" | "operator" | "owner";
   provider?: "gitlab" | "github";
   mergeMethod?: "merge" | "squash" | "rebase";
   nodes?: {mode:string;ids?:string[]};

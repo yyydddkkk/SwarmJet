@@ -7,6 +7,7 @@ import { ProjectLabels } from "./ProjectLabels";
 import { AddRepository } from "./AddRepository";
 import { ErrorBox, Field } from "./ui";
 import { formatCommand, parseCommand } from "./commands";
+import type { Account } from "./AccessSettings";
 import "./wizard.css";
 
 const agent = (): AgentConfig => ({
@@ -67,13 +68,18 @@ const inferOrigin = (raw: string) => {
 export function ProjectEditor({
   initial,
   onSaved,
+  platformAdmin = true,
 }: {
   initial: Project;
   onSaved: (p: Project) => void;
+  platformAdmin?: boolean;
 }) {
   const [p, setP] = useState<Project>(() => structuredClone(initial));
+  const [activeUsers, setActiveUsers] = useState<Account[]>([]);
+  const [initialOwnerUserId, setInitialOwnerUserId] = useState("");
+  useEffect(() => { if (initial.version === 0) void api<{ users: Account[] }>("/users?status=active").then(result => setActiveUsers(result.users || [])).catch(() => setActiveUsers([])); }, [initial.version]);
   const [nodes,setNodes]=useState<NodeView[]>([]);
-  useEffect(()=>{api<NodeView[]>("/nodes").then(setNodes).catch(()=>{});},[]);
+  useEffect(()=>{if (platformAdmin) api<NodeView[]>("/nodes").then(setNodes).catch(()=>{});},[platformAdmin]);
   const [registryImages, setRegistryImages] = useState<RegistryImage[]>([]);
   const [registryError, setRegistryError] = useState("");
   const [registryLoading, setRegistryLoading] = useState(false);
@@ -91,10 +97,11 @@ export function ProjectEditor({
     }
   }
   useEffect(() => {
+    if (!platformAdmin) return;
     const controller = new AbortController();
     void loadRegistryImages(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [platformAdmin]);
   const latestProject = useRef(p);
   latestProject.current = p;
   const runnerSettings = useRef<HTMLDetailsElement>(null);
@@ -132,7 +139,7 @@ export function ProjectEditor({
   const platformName = github ? "GitHub" : "GitLab";
   const changeName = github ? "PR" : "MR";
   useEffect(() => {
-    if (managed) return;
+    if (managed || !platformAdmin) return;
     api<Connection[] | null>("/connections")
       .then((list) => setConnections(list || []))
       .catch(() => setConnections([]));
@@ -399,6 +406,7 @@ export function ProjectEditor({
   const ready = readiness.every((r) => r.ok);
   const saving = busy || discovering;
   async function save(enabled: boolean) {
+    if (!existing && !initialOwnerUserId) { setError("请选择初始负责人。"); return; }
     setError("");
     setSaved("");
     if (!p.name.trim() || (!managed && !p.metaUrl.trim())) {
@@ -440,10 +448,11 @@ export function ProjectEditor({
           sensitivePaths: lines((r.sensitivePaths || []).join("\n")),
         })),
       };
+      const { myRole: _myRole, ...projectBody } = payload;
       const result = await api<Project>(
         existing ? `/projects/${encodeURIComponent(p.id)}` : "/projects",
         existing ? "PUT" : "POST",
-        payload,
+        existing ? projectBody : { ...projectBody, initialOwnerUserId },
       );
       setP(result);
       setSaved(
@@ -489,7 +498,9 @@ export function ProjectEditor({
             {saved}
           </div>
         )}
+        {!existing && <div className="panel panel-padding"><Field label="初始负责人" hint="项目创建后，此成员可管理项目配置和成员。"><select required value={initialOwnerUserId} onChange={event => setInitialOwnerUserId(event.target.value)}><option value="">选择已启用成员</option>{activeUsers.map(user => <option key={user.id} value={user.id}>{user.displayName || user.email}</option>)}</select></Field></div>}
         <nav className="setup-steps" aria-label="配置步骤">
+          {platformAdmin && <>
           <a
             href="#connection"
             onClick={(e) => {
@@ -523,9 +534,12 @@ export function ProjectEditor({
           >
             <span>03</span>执行与验收
           </a>
+          </>}
+          {!platformAdmin && <a href="#execution"><span>01</span>执行与验收</a>}
         </nav>
         <div className="setup-layout">
           <div className="setup-content">
+            {platformAdmin && <>
             <section className="panel setup-section" id="connection">
               <div className="setup-section-head">
                 <div>
@@ -984,13 +998,15 @@ export function ProjectEditor({
                 {existing && !github && <AddRepository project={p} onApplied={(updated) => { setP(updated); onSaved(updated); }} />}
               </div>
             </section>
+            </>}
+            {!platformAdmin && <section className="panel setup-section"><div className="setup-section-head"><h2>项目基本信息</h2></div><div className="panel-padding"><Field label="项目名称"><input value={p.name} onChange={event => set("name", event.target.value)} required /></Field></div></section>}
             <section className="panel setup-section" id="execution">
               <div className="setup-section-head">
                 <div>
                   <h2>Runner 与 Agent</h2>
                   <p>{independentReview ? "开发与独立审查使用不同会话。" : "开发、返工与合并沿用开发 Agent 会话。"}</p>
-                  <Field label="执行节点范围"><select value={p.nodes?.mode||'auto'} onChange={e=>setP({...p,nodes:{mode:e.target.value,ids:[]}})}><option value="auto">所有符合条件的节点</option><option value="selected">指定节点</option></select></Field>
-                  {p.nodes?.mode==='selected'&&nodes.map(n=><label className="checkbox" key={n.node.id}><input type="checkbox" checked={p.nodes?.ids?.includes(n.node.id)||false} onChange={e=>setP({...p,nodes:{mode:'selected',ids:e.target.checked?[...(p.nodes?.ids||[]),n.node.id]:(p.nodes?.ids||[]).filter(id=>id!==n.node.id)}})}/>{n.config?.name||n.node.id}</label>)}
+                  {platformAdmin && <Field label="执行节点范围"><select value={p.nodes?.mode||'auto'} onChange={e=>setP({...p,nodes:{mode:e.target.value,ids:[]}})}><option value="auto">所有符合条件的节点</option><option value="selected">指定节点</option></select></Field>}
+                  {platformAdmin && p.nodes?.mode==='selected'&&nodes.map(n=><label className="checkbox" key={n.node.id}><input type="checkbox" checked={p.nodes?.ids?.includes(n.node.id)||false} onChange={e=>setP({...p,nodes:{mode:'selected',ids:e.target.checked?[...(p.nodes?.ids||[]),n.node.id]:(p.nodes?.ids||[]).filter(id=>id!==n.node.id)}})}/>{n.config?.name||n.node.id}</label>)}
                 </div>
                 <span className="setup-label">可稍后补充</span>
               </div>
@@ -1279,7 +1295,7 @@ export function ProjectEditor({
               </div>
             </section>
           </div>
-          <aside className="setup-readiness" aria-label="启用前检查">
+          {platformAdmin && <aside className="setup-readiness" aria-label="启用前检查">
             <div className="eyebrow">接入进度</div>
             <h2>{ready ? "配置已齐全" : "按你的节奏完成"}</h2>
             <p>
@@ -1318,7 +1334,7 @@ export function ProjectEditor({
                 清单时会自动生成，无需单独维护。
               </p>
             </div>
-          </aside>
+          </aside>}
         </div>
         <section className="panel setup-section" id="merge-policy">
           <div className="setup-section-head">

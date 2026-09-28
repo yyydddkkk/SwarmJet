@@ -20,6 +20,24 @@ type IssueNote struct {
 	} `json:"author"`
 }
 
+// LabelEvent describes the actor who changed an issue label. Event IDs are
+// stable across scans and let admission reject an event permanently.
+type LabelEvent struct {
+	ID        int64     `json:"id"`
+	Action    string    `json:"action"`
+	CreatedAt time.Time `json:"created_at"`
+	Label     struct {
+		Name string `json:"name"`
+	} `json:"label"`
+	User struct {
+		ID int64 `json:"id"`
+	} `json:"user"`
+}
+
+type LabelEventReader interface {
+	ListIssueLabelEvents(context.Context, domain.Issue) ([]LabelEvent, error)
+}
+
 type Branch struct {
 	Name      string `json:"name"`
 	Protected bool   `json:"protected"`

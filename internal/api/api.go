@@ -55,6 +55,7 @@ type Config struct {
 	Artifacts                                             artifacts.Store
 	LabelsWake                                            chan struct{}
 	SecureCookies                                         bool
+	SMTP                                                  SMTPConfig
 	ResolveCredential                                     func(string) (string, error)
 	// Box encrypts saved connection tokens. nil disables connection storage
 	// while deployment environment credentials keep working.
@@ -170,8 +171,8 @@ func csrfAllowed(r *http.Request, configured string) bool {
 	return origin == strings.TrimRight(expected, "/")
 }
 func (a *server) authenticated(r *http.Request) bool {
-	c, err := r.Cookie("swarmjet_session")
-	return err == nil && len(c.Value) == 64 && a.s != nil && a.s.Session(r.Context(), tokenHash(c.Value))
+	_, err := a.sessionPrincipal(r)
+	return err == nil
 }
 func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -193,12 +194,29 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		problem(w, 403, "same-origin swarmjet request required")
 		return
 	}
+	if a.identityPublic(w, r) {
+		return
+	}
 	if r.URL.Path == "/api/login" && r.Method == "POST" {
 		a.login(w, r)
 		return
 	}
-	if !a.authenticated(r) {
+	principal, err := a.sessionPrincipal(r)
+	if err != nil {
 		problem(w, 401, "authentication required")
+		return
+	}
+	r = withPrincipal(r, principal)
+	if !a.authorizeRoute(w, r) {
+		return
+	}
+	writer, finishAudit, ok := a.auditMutation(w, r)
+	if !ok {
+		return
+	}
+	w = writer
+	defer finishAudit()
+	if a.identityPrivate(w, r, principal) {
 		return
 	}
 	if r.URL.Path == "/api/system/developer-options" {
@@ -262,7 +280,17 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 			problem(w, 405, "method not allowed")
 			return
 		}
-		respond(w, 200, map[string]string{"username": a.cfg.Username})
+		username := principal.Email
+		if principal.Breakglass {
+			username = a.cfg.Username
+		}
+		respond(w, 200, map[string]any{"id": principal.UserID, "username": username, "email": principal.Email, "displayName": principal.DisplayName, "platformAdmin": principal.PlatformAdmin, "breakGlass": principal.Breakglass})
+		return
+	case "/api/teams":
+		a.teams(w, r, nil)
+		return
+	case "/api/audit":
+		a.audit(w, r)
 		return
 	case "/api/connections":
 		a.connections(w, r)
@@ -348,7 +376,14 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		case "tasks":
 			a.task(w, r, parts[1], parts[2:])
 			return
+		case "teams":
+			a.teams(w, r, parts[1:])
+			return
 		}
+	}
+	if len(parts) >= 2 && parts[0] == "teams" {
+		a.teams(w, r, parts[1:])
+		return
 	}
 	problem(w, 404, "API route not found")
 }
@@ -394,6 +429,9 @@ func (a *server) login(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	if a.loginAccount(w, r, req.Username, req.Password) {
+		return
+	}
 	userOK := secureEqual(req.Username, a.cfg.Username)
 	passwordOK := secureEqual(req.Password, a.cfg.Password)
 	if a.cfg.Username == "" || a.cfg.Password == "" || !userOK || !passwordOK {
@@ -405,12 +443,13 @@ func (a *server) login(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	if err = a.s.AddSession(r.Context(), tokenHash(token)); err != nil {
+	if err = a.s.AddBreakglassSession(r.Context(), tokenHash(token)); err != nil {
 		failure(w, err)
 		return
 	}
 	a.cookie(w, token, 12*60*60)
-	respond(w, 200, map[string]string{"username": a.cfg.Username})
+	respond(w, 200, map[string]any{"username": a.cfg.Username, "platformAdmin": true, "breakGlass": true})
+	_ = a.s.Audit(r.Context(), store.Principal{Breakglass: true, PlatformAdmin: true}, "session.login", "system", "breakglass", map[string]any{"ip": r.RemoteAddr})
 }
 func (a *server) projects(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -420,21 +459,60 @@ func (a *server) projects(w http.ResponseWriter, r *http.Request) {
 			failure(w, err)
 			return
 		}
-		respond(w, 200, p)
-	case "POST":
-		var p domain.Project
-		if !decode(w, r, &p) {
+		visible, err := a.visibleProjects(r)
+		if err != nil {
+			failure(w, err)
 			return
 		}
+		out := []projectWithRole{}
+		for _, project := range p {
+			role := store.RoleOwner
+			if visible != nil {
+				var ok bool
+				role, ok = visible[project.ID]
+				if !ok {
+					continue
+				}
+			}
+			out = append(out, projectWithRole{Project: project, MyRole: role})
+		}
+		respond(w, 200, out)
+	case "POST":
+		var req struct {
+			domain.Project
+			InitialOwnerUserID string `json:"initialOwnerUserId"`
+		}
+		if !decode(w, r, &req) {
+			return
+		}
+		p := req.Project
 		if p.Version != 0 {
 			problem(w, 400, "new project version must be zero")
 			return
 		}
+		if req.InitialOwnerUserID == "" {
+			problem(w, 400, "active initial project owner required")
+			return
+		}
+		user, err := a.s.UserByID(r.Context(), req.InitialOwnerUserID)
+		if err != nil || user.Status != "active" {
+			problem(w, 400, "active initial project owner required")
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), initialOwnerKey{}, req.InitialOwnerUserID))
 		a.saveProject(w, r, p)
 	default:
 		problem(w, 405, "method not allowed")
 	}
 }
+
+type projectWithRole struct {
+	domain.Project
+	MyRole store.ProjectRole `json:"myRole"`
+}
+
+type initialOwnerKey struct{}
+
 func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Project) {
 	if p.Version > 0 && a.s != nil && a.s.Pool != nil {
 		previous, err := a.s.Project(r.Context(), p.ID)
@@ -522,11 +600,18 @@ func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Pr
 		}
 	}
 
-	p, err := a.s.SaveProject(r.Context(), p)
+	ownerID, _ := r.Context().Value(initialOwnerKey{}).(string)
+	var err error
+	if ownerID != "" {
+		p, err = a.s.SaveProjectWithOwner(r.Context(), p, ownerID)
+	} else {
+		p, err = a.s.SaveProject(r.Context(), p)
+	}
 	if err != nil {
 		failure(w, err)
 		return
 	}
+	_ = a.s.Audit(r.Context(), requestPrincipal(r), "project.save", "project", p.ID, map[string]any{"version": p.Version})
 	if p.Enabled {
 		a.wakeLabels()
 	}
@@ -541,7 +626,12 @@ func (a *server) project(w http.ResponseWriter, r *http.Request, id string, tail
 				failure(w, err)
 				return
 			}
-			respond(w, 200, p)
+			role, err := a.projectRole(r, id)
+			if err != nil {
+				failure(w, err)
+				return
+			}
+			respond(w, 200, projectWithRole{Project: p, MyRole: role})
 		case "PUT":
 			var p domain.Project
 			if !decode(w, r, &p) {
@@ -551,10 +641,29 @@ func (a *server) project(w http.ResponseWriter, r *http.Request, id string, tail
 				problem(w, 400, "project ID and current version are required")
 				return
 			}
+			if !requestPrincipal(r).PlatformAdmin {
+				current, err := a.s.Project(r.Context(), id)
+				if err != nil {
+					failure(w, err)
+					return
+				}
+				if p.Provider != current.Provider || p.GitLabURL != current.GitLabURL || p.ConnectionID != current.ConnectionID || p.CredentialRef != current.CredentialRef || p.MergeCredentialRef != current.MergeCredentialRef || p.MetaMode != current.MetaMode || p.MetaURL != current.MetaURL || p.MetaRef != current.MetaRef || !reflect.DeepEqual(p.Repositories, current.Repositories) || !reflect.DeepEqual(p.Nodes, current.Nodes) || p.GitHubAutoIntake != current.GitHubAutoIntake || p.GitLabTriggerMode != current.GitLabTriggerMode {
+					problem(w, 403, "platform administrator required to change project sources or credentials")
+					return
+				}
+			}
 			a.saveProject(w, r, p)
 		default:
 			problem(w, 405, "method not allowed")
 		}
+		return
+	}
+	if len(tail) >= 1 && tail[0] == "members" {
+		a.projectMembers(w, r, id, tail[1:])
+		return
+	}
+	if len(tail) == 1 && tail[0] == "trigger-policy" {
+		a.triggerPolicy(w, r, id)
 		return
 	}
 	if len(tail) >= 1 && tail[0] == "initialization" {
@@ -738,7 +847,26 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 			problem(w, 400, "invalid project filter")
 			return
 		}
-		tasks, err := a.s.TaskPage(r.Context(), store.TaskPageOptions{ProjectID: project, Stage: query.Get("stage"), View: view, Search: query.Get("q"), Cursor: query.Get("cursor"), Limit: limit})
+		visible, err := a.visibleProjects(r)
+		if err != nil {
+			failure(w, err)
+			return
+		}
+		if project != "" && visible != nil {
+			if _, ok := visible[project]; !ok {
+				problem(w, 404, "not found")
+				return
+			}
+		}
+		options := store.TaskPageOptions{ProjectID: project, Stage: query.Get("stage"), View: view, Search: query.Get("q"), Cursor: query.Get("cursor"), Limit: limit}
+		if visible != nil {
+			options.RestrictProjects = true
+			options.ProjectIDs = []string{}
+			for id := range visible {
+				options.ProjectIDs = append(options.ProjectIDs, id)
+			}
+		}
+		tasks, err := a.s.TaskPage(r.Context(), options)
 		if err != nil {
 			if strings.Contains(err.Error(), "task cursor") || strings.Contains(err.Error(), "task search") {
 				problem(w, 400, err.Error())
@@ -761,6 +889,9 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 		p, err := a.s.Project(r.Context(), req.ProjectID)
 		if err != nil {
 			failure(w, err)
+			return
+		}
+		if !a.requireProjectRole(w, r, p.ID, store.RoleOperator) {
 			return
 		}
 		registered := false
@@ -827,6 +958,7 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.recordScheduledTask(scheduled)
+		_ = a.s.Audit(r.Context(), requestPrincipal(r), "task.create", "project", p.ID, map[string]string{"taskId": scheduled.ID})
 		respond(w, 202, scheduled)
 	default:
 		problem(w, 405, "method not allowed")
@@ -863,6 +995,11 @@ func (a *server) task(w http.ResponseWriter, r *http.Request, id string, tail []
 		if !decode(w, r, &c) {
 			return
 		}
+		if c.Kind == "approve" || c.Kind == "merge_round" || c.Kind == "set_auto_merge" {
+			if !a.requireProjectRole(w, r, t.Project.ID, store.RoleOwner) {
+				return
+			}
+		}
 		if err = validateCommand(t, c); err != nil {
 			problem(w, 409, err.Error())
 			return
@@ -889,6 +1026,7 @@ func (a *server) task(w http.ResponseWriter, r *http.Request, id string, tail []
 			failure(w, err)
 			return
 		}
+		_ = a.s.Audit(r.Context(), requestPrincipal(r), "task.command."+c.Kind, "project", t.Project.ID, map[string]string{"taskId": id})
 		respond(w, 202, map[string]bool{"accepted": true})
 	case "manual-acceptance":
 		if t.Project.HostingProvider() != domain.ProviderGitLab {
@@ -1068,6 +1206,10 @@ func (a *server) stream(w http.ResponseWriter, r *http.Request, id string) {
 	for {
 		t, err := a.s.Task(r.Context(), id)
 		if err != nil {
+			return
+		}
+		role, err := a.projectRole(r, t.Project.ID)
+		if err != nil || roleRankAPI(role) < roleRankAPI(store.RoleViewer) {
 			return
 		}
 		events, err := a.s.Events(r.Context(), id, after)

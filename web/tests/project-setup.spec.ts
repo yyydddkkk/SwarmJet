@@ -136,7 +136,9 @@ async function setupAPI(page: Page, initial?: Project) {
     if (request.method() !== "GET")
       expect(request.headers()["x-requested-with"]).toBe("swarmjet");
     if (pathname === "/api/session")
-      return route.fulfill({ json: { username: "admin" } });
+      return route.fulfill({ json: { username: "admin", platformAdmin: true } });
+    if (pathname === "/api/users")
+      return route.fulfill({ json: { users: [{ id: "11111111-1111-4111-8111-111111111111", email: "owner@example.test", displayName: "Project Owner", status: "active" }] } });
     if (pathname === "/api/project-defaults")
       return route.fulfill({
         json: { agentImage: "swarmjet-agent:configured" },
@@ -148,7 +150,7 @@ async function setupAPI(page: Page, initial?: Project) {
     if (pathname === "/api/connections" && request.method() === "GET")
       return route.fulfill({ json: connections });
     if (pathname === "/api/connections/verify" && request.method() === "POST")
-      return route.fulfill({ json: { username: "admin" } });
+      return route.fulfill({ json: { username: "admin", platformAdmin: true } });
     if (pathname === "/api/connections" && request.method() === "POST") {
       const input = request.postDataJSON();
       const connection = { ...connections[0], id: "c2", name: input.name, gitlabUrl: input.gitlabUrl };
@@ -245,6 +247,7 @@ test("new project can import an existing Meta-Repo with a saved GitLab connectio
   await page.getByLabel("Meta-Repo 地址", { exact: true }).fill(discovery.metaUrl);
   await page.getByRole("button", { name: "读取仓库清单" }).click();
   await expect(page.getByLabel("项目名称", { exact: true })).toHaveValue(discovery.name);
+  await page.getByLabel("初始负责人", { exact: true }).selectOption("11111111-1111-4111-8111-111111111111");
   await page.getByRole("button", { name: "保存草稿" }).click();
   await expect.poll(() => state.saves.length).toBe(1);
   expect(state.imports[0]).toMatchObject({ connectionId: "c1", metaUrl: discovery.metaUrl });
