@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"swarmjet/internal/gitlab"
 	"swarmjet/internal/labels"
 	"swarmjet/internal/managedmeta"
+	"swarmjet/internal/observability"
 	"swarmjet/internal/store"
 	"swarmjet/internal/workspace"
 )
@@ -34,6 +36,7 @@ type Activities struct {
 	resolvedIntegrationNetwork map[string]string
 	NetworkEnv                 func(context.Context, domain.NetworkVersion) (map[string]string, error)
 	Store                      *store.Store
+	Metrics                    *observability.Metrics
 	Workspace                  *workspace.Manager
 	Agents                     execution.AgentBackend
 	Integration                IntegrationRunner
@@ -44,7 +47,9 @@ type Activities struct {
 	Credential                 func(string) (string, error)
 	// ProjectCredential resolves a project token with its GitLab address binding.
 	ProjectCredential func(domain.Project, bool) (string, error)
-	AgentEnv          map[string]string
+	// PersonalGitLabToken is resolved only inside trusted manual merge activity.
+	PersonalGitLabToken func(context.Context, string) (string, error)
+	AgentEnv            map[string]string
 }
 
 // credentialFor resolves a project token. The bound resolver refuses to send a
@@ -154,8 +159,26 @@ func (a *Activities) SaveTask(ctx context.Context, t domain.Task) error {
 	return nil
 }
 func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error) {
+	start := time.Now()
+	out, err := a.step(ctx, in)
+	if a.Metrics != nil {
+		a.Metrics.Activity(in.Phase, time.Since(start), err)
+	}
+	result := "ok"
+	if err != nil {
+		result = "error"
+	}
+	slog.Info("task activity step finished", "task_id", in.Task.ID, "execution_id", in.ExecutionID, "phase", in.Phase, "result", result, "duration_ms", time.Since(start).Milliseconds(), "trace_id", observability.TraceID(ctx))
+	return out, err
+}
+
+func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error) {
 	t := in.Task
 	out := StepResult{Task: t, Ready: true}
+	if in.Phase == "recover_manual_merge" {
+		fresh, err := a.Store.Task(ctx, t.ID)
+		return StepResult{Task: fresh, Ready: true}, err
+	}
 	if in.Phase == "acquiring_merge" || in.Phase == "merging" || in.Phase == "partial_merge" {
 		allowed, err := a.taskAutoMergeAllowed(ctx, t)
 		if err != nil {
@@ -261,6 +284,9 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 		}
 		out.Task = t
 		return out, nil
+	}
+	if in.Phase == "manual_merging" {
+		return a.manualMergeRound(ctx, t)
 	}
 	c, e := a.client(t.Project, false)
 	if e != nil {

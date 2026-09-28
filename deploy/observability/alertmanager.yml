@@ -1,0 +1,10 @@
+# Baseline deployment collects and groups alerts locally. Replace this receiver
+# with a protected notification endpoint before relying on external paging.
+route:
+  receiver: local-only
+  group_by: ['alertname', 'job']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: local-only

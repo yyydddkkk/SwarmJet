@@ -11,6 +11,7 @@ import (
 
 	"swarmjet/internal/domain"
 	"swarmjet/internal/imagebuild"
+	"swarmjet/internal/observability"
 )
 
 // Readiness is supplied by the persisted managed Meta initialization.
@@ -70,6 +71,7 @@ func Schedule(ctx context.Context, scheduler Scheduler, p domain.Project, issue 
 	now := time.Now().UTC()
 	t := domain.Task{
 		ID: hex.EncodeToString(id), Project: project, Issue: issue,
+		TraceParent:  observability.TraceParent(ctx),
 		Dependencies: options.Dependencies, Stage: "queued",
 		Executions: map[string]domain.Execution{}, Verification: []domain.Verification{},
 		Assumptions: []string{}, Notes: []string{}, CreatedAt: now, UpdatedAt: now,

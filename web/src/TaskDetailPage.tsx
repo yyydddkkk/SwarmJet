@@ -6,6 +6,7 @@ import { TaskTerminal } from "./TaskTerminal";
 import { Icon } from "./ConsoleIcon";
 import { stageLabel, date, Status } from "./TaskStatus";
 import { ConfirmDialog, Empty, ErrorBox, Field, Modal, Panel } from "./ui";
+import ManualMergePanel from "./ManualMergePanel";
 
 export default function TaskDetail({ id }: { id: string }) {
   const [task, setTask] = useState<Task | null>(null),
@@ -114,7 +115,7 @@ export default function TaskDetail({ id }: { id: string }) {
     );
   const terminal = ["completed", "cancelled"].includes(task.stage);
   const autoMergeEnabled = task.autoMergeOverride ?? task.project.autoMerge ?? true;
-  const mergeStarted = terminal || ["merging", "partial_merge", "finalizing"].includes(task.stage) || (task.workspace?.revisions || []).some((r) => r.merged) || !!task.executions?.merge?.id;
+  const mergeStarted = terminal || ["merging", "manual_merging", "partial_merge", "finalizing"].includes(task.stage) || (task.workspace?.revisions || []).some((r) => r.merged) || !!task.executions?.merge?.id;
   return (
     <>
       <a className="back" href="#/tasks">
@@ -222,6 +223,7 @@ export default function TaskDetail({ id }: { id: string }) {
               </div>
             </section>
           )}
+          {task.project.provider !== "github" && (["waiting_manual_merge", "manual_merging", "partial_merge"].includes(task.stage) || task.acceptanceIncomplete) && <ManualMergePanel task={task} refresh={refresh} />}
           <div className="view-tabs detail-views" aria-label="任务详情视图">
             {[
               ["delivery", "交付结果"],
@@ -264,11 +266,7 @@ export default function TaskDetail({ id }: { id: string }) {
                       {r.baseSha?.slice(0, 12) || "—"} →{" "}
                       {r.headSha?.slice(0, 12) || "—"}
                     </small>
-                    {r.mrUrl && (
-                      <a href={r.mrUrl} target="_blank" rel="noreferrer">
-                        {task.project.provider === "github" ? "PR #" : "MR !"}{r.mrIid} ↗
-                      </a>
-                    )}
+                    {r.mrUrl && (task.project.provider === "github" ? <a href={r.mrUrl} target="_blank" rel="noreferrer">PR #{r.mrIid} ↗</a> : <a href={`#/merge-requests/${encodeURIComponent(task.project.id)}/${encodeURIComponent(r.repositoryId)}/${r.mrIid}`}>MR !{r.mrIid} →</a>)}
                     {r.sensitive && (
                       <small className="warning-text">包含敏感路径变更</small>
                     )}
@@ -441,7 +439,7 @@ export default function TaskDetail({ id }: { id: string }) {
               <div className="task-merge-setting">
                 <div>
                   <strong>此任务自动合并</strong>
-                  <small>{mergeStarted ? "合并流程已开始，开关已锁定。" : autoMergeEnabled ? `开启时，符合合并条件后自动合并 ${task.project.provider === "github" ? "PR" : "MR"}。` : `关闭后继续开发与发布，合并时等待你在 ${task.project.provider === "github" ? "GitHub" : "GitLab"} 操作。`}</small>
+                  <small>{mergeStarted ? "合并流程已开始，开关已锁定。" : autoMergeEnabled ? `开启时，符合合并条件后自动合并 ${task.project.provider === "github" ? "PR" : "MR"}。` : task.project.provider === "github" ? "关闭后继续开发与发布，合并时等待你在 GitHub 操作。" : "关闭后继续开发与发布，合并前在任务页确认验收并提交整轮合并。"}</small>
                 </div>
                 <button
                   type="button"

@@ -13,7 +13,7 @@ SwarmJet 是 AI 开发任务的控制与执行平台：接收需求，编排 Age
 - Temporal 管理任务流程，PostgreSQL 保存配置、查询投影、命令与租约；任务快照固定项目配置。已有单机 Docker 和远程 Node 实现，`execution.Node` 封装工作区、Agent、验收、报告与清理。
 - Webhook 已在验证后先写 PostgreSQL inbox 再应答；后台按仓库扫描并周期对账。inbox、outbox、准入与周期扫描已有独立运行循环，但仍在同一服务进程内。当前 inbox 待处理上限和待准入 Task 全局上限均为 1000；webhook 入库与建单分别使用全局 advisory lock。这些限制和锁是高突发负载下需测量、重构的接缝。
 - 任务固定归属 Node。节点失联后保留现场并阻断；工作区、会话跨节点恢复和旧节点恢复后的执行权校验尚未完成。历史报告依赖原节点在线。
-- 控制台当前以单管理员会话为主，已有结构化日志和健康检查；尚需完整的身份授权、指标、追踪、成本计量及告警体系。
+- 控制台当前以单管理员会话为主，已有结构化日志、首批 API/Worker Prometheus 指标和存活检查；尚需完整的身份授权、跨进程追踪、容量与成本计量及告警体系。首批指标范围见[可观测性说明](observability.md)。
 
 现有实现分别见 [实现约定](architecture.md)、[执行节点](execution-nodes.md)、[托管平台接口](../internal/forge/client.go) 和 [建单逻辑](../internal/store/store.go)。
 

@@ -16,6 +16,7 @@ CREATE INDEX IF NOT EXISTS task_events ON events(task_id,id);
 CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY, expires_at timestamptz NOT NULL);
 CREATE TABLE IF NOT EXISTS leases(name text PRIMARY KEY, owner text NOT NULL, expires_at timestamptz NOT NULL);
 CREATE TABLE IF NOT EXISTS connections(id text PRIMARY KEY, version integer NOT NULL, body jsonb NOT NULL, secret text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS gitlab_identities(instance text PRIMARY KEY, username text NOT NULL, secret text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS initializations(id text PRIMARY KEY, project_id text NOT NULL, status text NOT NULL, body jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS active_initializations ON initializations(status) WHERE status NOT IN ('ready','cancelled');
 CREATE TABLE IF NOT EXISTS repository_changes(id text PRIMARY KEY, project_id text NOT NULL REFERENCES projects(id), status text NOT NULL, body jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
@@ -77,6 +78,18 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS gitlab_sync_retry_at timestamptz;
 CREATE INDEX IF NOT EXISTS tasks_pending_gitlab_sync ON tasks(updated_at) WHERE gitlab_synced_at IS NULL OR updated_at > gitlab_synced_at;
 CREATE INDEX IF NOT EXISTS tasks_page ON tasks(updated_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS tasks_by_project_page ON tasks(project_id,updated_at DESC,id DESC);
+
+-- The index contains only Task ownership. GitLab remains the source of MR content.
+CREATE TABLE IF NOT EXISTS task_mrs(instance text NOT NULL, gitlab_project_id bigint NOT NULL, mr_iid bigint NOT NULL, task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, repository_id text NOT NULL, PRIMARY KEY(instance,gitlab_project_id,mr_iid));
+CREATE INDEX IF NOT EXISTS task_mrs_by_task ON task_mrs(task_id);
+INSERT INTO task_mrs(instance,gitlab_project_id,mr_iid,task_id,repository_id)
+SELECT regexp_replace(trim(trailing '/' from t.body->'project'->>'gitlabUrl'), '/api/v4$', ''), (r.value->>'projectId')::bigint, (r.value->>'mrIid')::bigint, t.id, r.value->>'repositoryId'
+FROM tasks t CROSS JOIN LATERAL jsonb_array_elements(coalesce(t.body->'workspace'->'revisions','[]'::jsonb)) AS r(value)
+WHERE coalesce(t.body->'project'->>'provider','gitlab') <> 'github'
+AND coalesce(r.value->>'mrIid','0') ~ '^[0-9]+$' AND (r.value->>'mrIid')::bigint > 0
+AND coalesce(r.value->>'projectId','0') ~ '^[0-9]+$' AND (r.value->>'projectId')::bigint > 0
+ON CONFLICT(instance,gitlab_project_id,mr_iid) DO NOTHING;
+CREATE TABLE IF NOT EXISTS task_manual_acceptance(task_id text PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, digest text NOT NULL, checks jsonb NOT NULL, note text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
 
 -- Existing nodes require explicit environment configuration before new managed work.
 INSERT INTO node_configs(id,version,body) SELECT id,1,jsonb_build_object('version',1,'name',id,'enabled',false,'archived',false,'capacity',capacity,'network',jsonb_build_object('mode','default'),'image','') FROM nodes ON CONFLICT(id) DO NOTHING;

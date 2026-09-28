@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -18,8 +20,31 @@ import (
 	"swarmjet/internal/artifacts"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/k8srunner"
+	"swarmjet/internal/observability"
 	"swarmjet/internal/store"
 )
+
+func TestKubernetesActivityFailuresAreObserved(t *testing.T) {
+	metrics := observability.New()
+	a := &KubernetesActivities{Metrics: metrics}
+	if _, err := a.RunKubernetesTask(context.Background(), domain.Task{ID: "private-task-id"}); err == nil {
+		t.Fatal("expected unconfigured run to fail")
+	}
+	if err := a.StopKubernetesTask(context.Background(), "private-task-id"); err == nil {
+		t.Fatal("expected unconfigured stop to fail")
+	}
+	response := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := response.Body.String()
+	for _, phase := range []string{"run_kubernetes_task", "stop_kubernetes_task"} {
+		if !strings.Contains(body, `swarmjet_activity_steps_total{phase="`+phase+`",result="error"} 1`) {
+			t.Fatalf("missing %s failure metric", phase)
+		}
+	}
+	if strings.Contains(body, "private-task-id") {
+		t.Fatal("task ID leaked into metric labels")
+	}
+}
 
 type fixtureRunner struct {
 	created     k8srunner.Spec

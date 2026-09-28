@@ -95,7 +95,7 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 				t.Paused = false
 			}
 		case "set_auto_merge":
-			if c.AutoMerge == nil || t.Stage == "finalizing" || t.Stage == "completed" || t.Stage == "cancelled" || t.Stage == "partial_merge" {
+			if c.AutoMerge == nil || t.Stage == "finalizing" || t.Stage == "completed" || t.Stage == "cancelled" || t.Stage == "partial_merge" || t.Stage == "manual_merging" {
 				break
 			}
 			if t.Stage == "merging" && *c.AutoMerge {
@@ -117,6 +117,18 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 				t.Stage = "waiting_manual_merge"
 			} else if !value && t.Stage == "waiting_approval" {
 				t.Stage = "waiting_manual_merge"
+			}
+		case "merge_round":
+			if t.Project.HostingProvider() == domain.ProviderGitLab && t.Stage == "waiting_manual_merge" && !t.Paused {
+				disabled := false
+				t.AutoMergeOverride = &disabled
+				autoMergeControlVersion++
+				t.Stage = "manual_merging"
+				t.Message = "正在按人工验收记录合并整轮 MR"
+				if activeCancel != nil {
+					interrupted = true
+					activeCancel()
+				}
 			}
 		case "cancel":
 			cancelled = true
@@ -303,20 +315,32 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 		activeCancel = nil
 		cancel()
 		if cancelled || t.Paused || interrupted {
-			// Read the durable execution after cancellation to retain an exact resume session.
 			var recovered StepResult
-			if e := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "recover", Task: t, ExecutionID: op}).Get(ctx, &recovered); e == nil {
-				t.Executions = recovered.Task.Executions
+			if previousPhase == "manual_merging" {
+				if e := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "recover_manual_merge", Task: t, ExecutionID: op}).Get(ctx, &recovered); e != nil {
+					return e
+				}
+				t.Workspace = recovered.Task.Workspace
 			} else {
-				t.Paused = false
-				t.Stage = "blocked"
-				t.Message = "无法确认执行已停止：" + e.Error()
+				// Read the durable execution after cancellation to retain an exact resume session.
+				if e := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "recover", Task: t, ExecutionID: op}).Get(ctx, &recovered); e == nil {
+					t.Executions = recovered.Task.Executions
+				} else {
+					t.Paused = false
+					t.Stage = "blocked"
+					t.Message = "无法确认执行已停止：" + e.Error()
+				}
 			}
 			continue
 		}
 		if err != nil {
 			var recovered StepResult
-			if e := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "recover", Task: t, ExecutionID: op}).Get(ctx, &recovered); e == nil && recovered.Task.Executions != nil {
+			if previousPhase == "manual_merging" {
+				if e := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "recover_manual_merge", Task: t, ExecutionID: op}).Get(ctx, &recovered); e != nil {
+					return e
+				}
+				t.Workspace = recovered.Task.Workspace
+			} else if e := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "recover", Task: t, ExecutionID: op}).Get(ctx, &recovered); e == nil && recovered.Task.Executions != nil {
 				t.Executions = recovered.Task.Executions
 			}
 			t.Stage = "blocked"
@@ -517,6 +541,13 @@ func WorkTask(ctx workflow.Context, t domain.Task) error {
 					return err
 				}
 				previousPhase = "partial_merge"
+				t.Stage = "blocked"
+			}
+		case "manual_merging":
+			if result.Ready {
+				t.Stage = "finalizing"
+			} else {
+				previousPhase = "manual_merging"
 				t.Stage = "blocked"
 			}
 		case "finalizing":

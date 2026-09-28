@@ -4,6 +4,10 @@ x-app-environment: &app-environment
   TEMPORAL_ADDRESS: temporal:7233
   TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-swarmjet}
   RABBITMQ_URL: ${RABBITMQ_URL:-amqp://swarmjet:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}@rabbitmq:5672/}
+  # Internal-only scrape listener; no host port is published.
+  METRICS_LISTEN_ADDRESS: ':9090'
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
   RUNTIME_ADMIN_SECRET: ${RUNTIME_ADMIN_SECRET:-}
   NODE_SECRET: ${NODE_SECRET:-}
   EXECUTION_MODE: ${EXECUTION_MODE:-local}
@@ -32,6 +36,7 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+      - ./observability/rabbitmq-enabled-plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: [CMD, rabbitmq-diagnostics, -q, ping]
       interval: 10s
@@ -104,6 +109,8 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_DEFAULT_NAMESPACE: ${TEMPORAL_NAMESPACE:-swarmjet}
       TEMPORAL_CORS_ORIGINS: ${TEMPORAL_UI_ORIGIN:-http://localhost:8333}
+      # SwarmJet owns task commands and audit; the Temporal UI is diagnostic.
+      TEMPORAL_DISABLE_WRITE_ACTIONS: 'true'
     ports:
       - '127.0.0.1:${TEMPORAL_UI_PORT:-8333}:8080'
   migrate:
@@ -184,6 +191,50 @@ services:
     image: ${AGENT_IMAGE:-swarmjet-agent:local}
     profiles: [tools]
     command: [--version]
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    profiles: [observability]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '127.0.0.1:${PROMETHEUS_PORT:-9090}:9090'
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+    profiles: [observability]
+    restart: unless-stopped
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATA_SOURCE_URI: postgres:5432/swarmjet?sslmode=disable
+      DATA_SOURCE_USER: swarmjet
+      DATA_SOURCE_PASS: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+  alertmanager:
+    image: prom/alertmanager:v0.30.1
+    profiles: [observability]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - '127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093'
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    profiles: [observability]
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${JAEGER_UI_PORT:-16686}:16686'
 volumes:
   postgres-data:
   rabbitmq-data:
+  prometheus-data:
+  alertmanager-data:

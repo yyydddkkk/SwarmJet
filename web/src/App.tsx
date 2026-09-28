@@ -12,12 +12,14 @@ const NodeSettings = lazy(() => import("./NodeSettings"));
 const NetworkSettings = lazy(() => import("./NetworkSettings"));
 const ImageSettings = lazy(() => import("./ImageSettings"));
 const SystemSettings = lazy(() => import("./SystemSettings"));
+const IssuesWorkbench = lazy(() => import("./IssuesWorkbench"));
+const MergeRequestsWorkbench = lazy(() => import("./MergeRequestsWorkbench"));
 
 export default function App() {
   const [user, setUser] = useState<string | null>(null),
     [checking, setChecking] = useState(true),
     [error, setError] = useState(""),
-    [route, setRoute] = useState(location.hash.slice(1) || "/tasks");
+    [route, setRoute] = useState(location.hash.slice(1) || "/issues");
   const session = useCallback(async () => {
     setChecking(true);
     setError("");
@@ -32,7 +34,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     void session();
-    const hash = () => setRoute(location.hash.slice(1) || "/tasks");
+    const hash = () => setRoute(location.hash.slice(1) || "/issues");
     const expired = () => {
       setUser(null);
       setError("会话已过期，请重新登录。");
@@ -56,6 +58,9 @@ export default function App() {
       />
     );
   const projectPage = route.startsWith("/projects");
+  const issuePage = route.startsWith("/issues");
+  const mrPage = route.startsWith("/merge-requests");
+  const taskPage = route.startsWith("/tasks");
   const runtimePage = route.startsWith("/runtime");
   const imagesPage = route.startsWith("/images");
   const settingsPage = route.startsWith("/settings");
@@ -76,7 +81,7 @@ export default function App() {
         跳至主要内容
       </a>
       <aside className="sidebar">
-        <a className="brand" href="#/tasks">
+        <a className="brand" href="#/issues">
           <span className="brand-mark">
             <Icon name="bolt" />
           </span>
@@ -90,9 +95,11 @@ export default function App() {
           </div>
         </div>
         <nav aria-label="主导航">
+          <a aria-current={issuePage ? "page" : undefined} className={issuePage ? "active" : ""} href="#/issues"><Icon name="tasks" />Issue 工作台</a>
+          <a aria-current={mrPage ? "page" : undefined} className={mrPage ? "active" : ""} href="#/merge-requests"><Icon name="branch" />MR 工作台</a>
           <a
-            aria-current={!projectPage && !runtimePage && !imagesPage && !nodesPage && !networksPage && !settingsPage ? "page" : undefined}
-            className={!projectPage && !runtimePage && !imagesPage && !nodesPage && !networksPage && !settingsPage ? "active" : ""}
+            aria-current={taskPage ? "page" : undefined}
+            className={taskPage ? "active" : ""}
             href="#/tasks"
           >
             <Icon name="tasks" />
@@ -149,14 +156,14 @@ export default function App() {
         <header className="topbar">
           <span>
             工作空间 <span className="slash">/</span>{" "}
-            {settingsPage ? "系统设置" : nodesPage ? "Node 管理" : networksPage ? "网络配置" : imagesPage ? "镜像管理" : runtimePage ? "Runner 环境" : projectPage ? "项目配置" : "任务中心"}
+            {issuePage ? "Issue 工作台" : mrPage ? "MR 工作台" : settingsPage ? "系统设置" : nodesPage ? "Node 管理" : networksPage ? "网络配置" : imagesPage ? "镜像管理" : runtimePage ? "Runner 环境" : projectPage ? "项目配置" : "任务中心"}
           </span>
           <span className="top-note">SwarmJet / 工作空间</span>
         </header>
         <main id="main" tabIndex={-1}>
           <ErrorBox error={error} />
           <Suspense fallback={<div className="loading">正在加载页面…</div>}>
-          {settingsPage ? (<SystemSettings section={parts[2] || "overview"} />) : nodesPage ? (<Suspense fallback={<p>正在加载节点…</p>}><NodeSettings/></Suspense>) : networksPage ? (<Suspense fallback={<p>正在加载网络配置…</p>}><NetworkSettings/></Suspense>) : imagesPage ? (
+          {issuePage ? <IssuesWorkbench key={route} route={route} /> : mrPage ? <MergeRequestsWorkbench key={route} route={route} /> : settingsPage ? (<SystemSettings section={parts[2] || "overview"} />) : nodesPage ? (<Suspense fallback={<p>正在加载节点…</p>}><NodeSettings/></Suspense>) : networksPage ? (<Suspense fallback={<p>正在加载网络配置…</p>}><NetworkSettings/></Suspense>) : imagesPage ? (
             <Suspense fallback={<div className="loading">正在加载镜像管理…</div>}><ImageSettings /></Suspense>
           ) : runtimePage ? (
             <Suspense
@@ -197,7 +204,7 @@ function Login({
   return (
     <div className="login">
       <div className="login-story">
-        <a className="brand" href="#/tasks">
+        <a className="brand" href="#/issues">
           <span className="brand-mark">
             <Icon name="bolt" />
           </span>

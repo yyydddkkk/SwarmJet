@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"go.temporal.io/api/enums/v1"
@@ -12,6 +13,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/mq"
+	"swarmjet/internal/observability"
 	"swarmjet/internal/pipeline"
 	"swarmjet/internal/store"
 )
@@ -41,9 +43,15 @@ func (s *Service) PublishCommands(ctx context.Context, publisher CommandPublishe
 		return err
 	}
 	for _, item := range commands {
+		publishCtx := ctx
+		if task, taskErr := s.Store.Task(ctx, item.TaskID); taskErr == nil {
+			publishCtx = observability.ContinueTaskTrace(ctx, task.TraceParent)
+		} else {
+			return fmt.Errorf("load command task %s: %w", item.TaskID, taskErr)
+		}
 		message, err := json.Marshal(commandMessage{ID: item.Command.ID, TaskID: item.TaskID})
 		if err == nil {
-			err = publisher.Publish(ctx, CommandQueue, message, item.Command.ID)
+			err = publisher.Publish(publishCtx, CommandQueue, message, item.Command.ID)
 		}
 		if err == nil {
 			err = s.Store.MarkCommandPublished(ctx, item.Command.ID)
@@ -58,14 +66,22 @@ func (s *Service) PublishCommands(ctx context.Context, publisher CommandPublishe
 // ConsumeCommand applies a durable command before its RabbitMQ delivery is
 // acknowledged. Repeated start messages use the fixed Workflow ID; repeated
 // signals are ignored inside each Workflow by command ID.
-func (s *Service) ConsumeCommand(ctx context.Context, body []byte) error {
+func (s *Service) ConsumeCommand(ctx context.Context, body []byte) (err error) {
+	start := time.Now()
 	var message commandMessage
-	if err := json.Unmarshal(body, &message); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidCommandDelivery, err)
+	if decodeErr := json.Unmarshal(body, &message); decodeErr != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidCommandDelivery, decodeErr)
 	}
 	if message.ID == "" || message.TaskID == "" {
 		return ErrInvalidCommandDelivery
 	}
+	defer func() {
+		result := "ok"
+		if err != nil {
+			result = "error"
+		}
+		slog.Info("task command processed", "task_id", message.TaskID, "command_id", message.ID, "result", result, "duration_ms", time.Since(start).Milliseconds(), "trace_id", observability.TraceID(ctx))
+	}()
 	item, delivered, err := s.Store.CommandForDelivery(ctx, message.ID)
 	if err != nil {
 		return err

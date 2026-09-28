@@ -8,14 +8,48 @@ import (
 // OperationsSnapshot reports durable backlog and occupied Runner slots. A
 // lease counts a reserved slot, including workspace preparation and verification.
 type OperationsSnapshot struct {
-	InboxPending           int       `json:"inboxPending"`
-	InboxRetrying          int       `json:"inboxRetrying"`
-	InboxOldestWaitSeconds float64   `json:"inboxOldestWaitSeconds"`
-	InboxProcessedLastHour int       `json:"inboxProcessedLastHour"`
-	InboxP95ProcessSeconds float64   `json:"inboxP95ProcessSeconds"`
-	AdmissionWaiting       int       `json:"admissionWaiting"`
-	RunnerSlotsReserved    int       `json:"runnerSlotsReserved"`
-	MeasuredAt             time.Time `json:"measuredAt"`
+	InboxPending               int       `json:"inboxPending"`
+	InboxRetrying              int       `json:"inboxRetrying"`
+	InboxOldestWaitSeconds     float64   `json:"inboxOldestWaitSeconds"`
+	InboxProcessedLastHour     int       `json:"inboxProcessedLastHour"`
+	InboxP95ProcessSeconds     float64   `json:"inboxP95ProcessSeconds"`
+	AdmissionWaiting           int       `json:"admissionWaiting"`
+	AdmissionOldestWaitSeconds float64   `json:"admissionOldestWaitSeconds"`
+	CommandPending             int       `json:"commandPending"`
+	CommandOldestWaitSeconds   float64   `json:"commandOldestWaitSeconds"`
+	RunnerSlotsReserved        int       `json:"runnerSlotsReserved"`
+	MeasuredAt                 time.Time `json:"measuredAt"`
+}
+
+// BacklogSnapshot keeps periodic metrics scrapes cheap. OperationsSnapshot
+// additionally computes a one-hour percentile for interactive inspection.
+type BacklogSnapshot struct {
+	LegacyInboxPending         int
+	AdmissionWaiting           int
+	AdmissionOldestWaitSeconds float64
+	CommandPending             int
+	CommandOldestWaitSeconds   float64
+	RunnerSlotsReserved        int
+}
+
+func (s *Store) BacklogSnapshot(ctx context.Context) (BacklogSnapshot, error) {
+	var out BacklogSnapshot
+	err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM webhook_inbox WHERE processed_at IS NULL`).Scan(&out.LegacyInboxPending)
+	if err != nil {
+		return out, err
+	}
+	err = s.Pool.QueryRow(ctx, `SELECT count(*),COALESCE(EXTRACT(EPOCH FROM now()-min(COALESCE((body->>'createdAt')::timestamptz,updated_at))),0)
+		FROM tasks WHERE stage='queued' AND body->>'admissionStatus'='waiting'`).Scan(&out.AdmissionWaiting, &out.AdmissionOldestWaitSeconds)
+	if err != nil {
+		return out, err
+	}
+	err = s.Pool.QueryRow(ctx, `SELECT count(*),COALESCE(EXTRACT(EPOCH FROM now()-min(created_at)),0)
+		FROM commands WHERE NOT delivered`).Scan(&out.CommandPending, &out.CommandOldestWaitSeconds)
+	if err != nil {
+		return out, err
+	}
+	err = s.Pool.QueryRow(ctx, `SELECT count(*) FROM leases WHERE expires_at>now() AND name LIKE 'agent-slot:%'`).Scan(&out.RunnerSlotsReserved)
+	return out, err
 }
 
 func (s *Store) OperationsSnapshot(ctx context.Context) (OperationsSnapshot, error) {
@@ -32,7 +66,13 @@ func (s *Store) OperationsSnapshot(ctx context.Context) (OperationsSnapshot, err
 	if err != nil {
 		return out, err
 	}
-	err = s.Pool.QueryRow(ctx, `SELECT count(*) FROM tasks WHERE stage='queued' AND body->>'admissionStatus'='waiting'`).Scan(&out.AdmissionWaiting)
+	err = s.Pool.QueryRow(ctx, `SELECT count(*),COALESCE(EXTRACT(EPOCH FROM now()-min(COALESCE((body->>'createdAt')::timestamptz,updated_at))),0)
+		FROM tasks WHERE stage='queued' AND body->>'admissionStatus'='waiting'`).Scan(&out.AdmissionWaiting, &out.AdmissionOldestWaitSeconds)
+	if err != nil {
+		return out, err
+	}
+	err = s.Pool.QueryRow(ctx, `SELECT count(*),COALESCE(EXTRACT(EPOCH FROM now()-min(created_at)),0)
+		FROM commands WHERE NOT delivered`).Scan(&out.CommandPending, &out.CommandOldestWaitSeconds)
 	if err != nil {
 		return out, err
 	}

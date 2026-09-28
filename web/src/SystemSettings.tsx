@@ -3,6 +3,7 @@ import { api } from "./api";
 import type { NodeView } from "./NodeSettings";
 import NetworkSettings from "./NetworkSettings";
 import RegistrySettings from "./RegistrySettings";
+import GitLabIdentitySettings from "./GitLabIdentitySettings";
 import { ErrorBox } from "./ui";
 import "./settings-page.css";
 import "./system-settings.css";
@@ -43,7 +44,7 @@ const statusLabel: Record<Check["status"], string> = {
 };
 
 export default function SystemSettings({ section }: { section: string }) {
-  const current = section === "network" || section === "registry" || section === "developer" ? section : "overview";
+  const current = section === "network" || section === "registry" || section === "developer" || section === "gitlab" ? section : "overview";
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [registry, setRegistry] = useState<Registry | null>(null);
   const [proxy, setProxy] = useState<Proxy | null>(null);
@@ -106,9 +107,11 @@ export default function SystemSettings({ section }: { section: string }) {
         <a href="#/settings" aria-current={current === "overview" ? "page" : undefined}>概览与服务地址</a>
         <a href="#/settings/network" aria-current={current === "network" ? "page" : undefined}>网络与代理</a>
         <a href="#/settings/registry" aria-current={current === "registry" ? "page" : undefined}>镜像仓库</a>
+        <a href="#/settings/gitlab" aria-current={current === "gitlab" ? "page" : undefined}>GitLab 身份</a>
         <a href="#/settings/developer" aria-current={current === "developer" ? "page" : undefined}>开发者选项</a>
       </nav>
       {current === "network" && <NetworkSettings embedded />}
+      {current === "gitlab" && <GitLabIdentitySettings />}
       {current === "registry" && <div className="system-registry">
         <div className="system-section-intro">
           <h2>镜像仓库</h2>

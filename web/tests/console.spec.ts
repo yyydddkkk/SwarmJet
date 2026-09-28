@@ -245,6 +245,7 @@ test("login, task filtering, exact-digest approval errors, logs and logout", asy
   await page.getByLabel("用户名", { exact: true }).fill("admin");
   await page.getByLabel("密码", { exact: true }).fill("password");
   await page.getByLabel("密码", { exact: true }).press("Enter");
+  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "任务中心" }).click();
   await expect(
     page.getByRole("heading", { name: "任务中心", exact: true }),
   ).toBeVisible();
@@ -302,7 +303,7 @@ test("create task dialog supports keyboard, narrow screens have no page overflow
 }) => {
   await mock(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/#/tasks");
   await page.getByRole("button", { name: "创建任务" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page
@@ -346,7 +347,7 @@ test("workbench separates intervention states and combines project, stage and te
       i === 0 ? { ...project, id: "payments", name: "交易服务" } : project,
   }));
   await mock(page, true, list);
-  await page.goto("/");
+  await page.goto("/#/tasks");
   await expect(page.locator(".task-list tbody tr")).toHaveCount(8);
   await expect(page.locator(".attention-card")).toHaveCount(4);
   await expect(
@@ -572,7 +573,7 @@ for (const width of [390, 1440]) {
       },
     ]);
     await page.setViewportSize({ width, height: 1000 });
-    await page.goto("/");
+    await page.goto("/#/tasks");
     await expect(page.locator(".task-list tbody tr")).toHaveCount(2);
     expect(
       await page.evaluate(

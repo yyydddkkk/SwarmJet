@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -81,6 +82,7 @@ func (s *Store) AdmitKubernetesTasks(ctx context.Context, pool string, capacity,
 		return 0, err
 	}
 	count := 0
+	admittedIDs := make([]string, 0, free)
 	for _, c := range waiting {
 		if count >= free {
 			break
@@ -119,8 +121,15 @@ func (s *Store) AdmitKubernetesTasks(ctx context.Context, pool string, capacity,
 			return 0, mapErr(err)
 		}
 		count++
+		admittedIDs = append(admittedIDs, c.id)
 	}
-	return count, tx.Commit(ctx)
+	if err = tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	for _, id := range admittedIDs {
+		slog.Info("task admitted", "task_id", id, "backend", "kubernetes", "command_id", "start-"+id)
+	}
+	return count, nil
 }
 
 // CancelKubernetesTask cancels only a waiting task. An admitted task must

@@ -8,7 +8,36 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
+
+func TestTraceHeadersRoundTrip(t *testing.T) {
+	previous := otel.GetTextMapPropagator()
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	defer otel.SetTextMapPropagator(previous)
+	traceID, err := trace.TraceIDFromHex("00112233445566778899aabbccddeeff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spanID, err := trace.SpanIDFromHex("0011223344556677")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := trace.NewSpanContext(trace.SpanContextConfig{TraceID: traceID, SpanID: spanID, TraceFlags: trace.FlagsSampled})
+	headers := traceHeaders(trace.ContextWithSpanContext(context.Background(), parent))
+	if _, ok := headers["traceparent"].(string); !ok {
+		t.Fatalf("missing traceparent: %v", headers)
+	}
+	recovered := trace.SpanContextFromContext(deliveryContext(context.Background(), headers))
+	if recovered.TraceID() != traceID || recovered.SpanID() != spanID || !recovered.IsRemote() {
+		t.Fatalf("trace parent lost: %v", recovered)
+	}
+	if recovered := trace.SpanContextFromContext(deliveryContext(context.Background(), amqp.Table{"traceparent": 123})); recovered.IsValid() {
+		t.Fatal("invalid header accepted")
+	}
+}
 
 // Run only against a disposable RabbitMQ 4.3 instance: this test deletes and
 // redeclares the webhook queue to exercise mandatory returns and overflow.

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,9 +25,38 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/imagebuild"
+	"swarmjet/internal/observability"
 	"swarmjet/internal/pipeline"
 	"swarmjet/internal/store"
 )
+
+func TestTaskScheduledLogLinksWebhookDelivery(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+	defer slog.SetDefault(previous)
+	ctx := context.WithValue(context.Background(), webhookDeliveryContextKey{}, webhookDeliveryContext{provider: "gitlab", deliveryID: "delivery-123"})
+	logTaskScheduled(ctx, domain.Task{ID: "task-123", Issue: domain.Issue{ProjectID: 7, IID: 3}})
+	var entry map[string]any
+	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry["task_id"] != "task-123" || entry["delivery_id"] != "delivery-123" || entry["issue_iid"] != float64(3) {
+		t.Fatalf("missing task-to-delivery correlation: %v", entry)
+	}
+}
+
+func TestScheduledAdmissionCountsOnlyAssignedTask(t *testing.T) {
+	metrics := observability.New()
+	svc := &Service{Metrics: metrics}
+	svc.recordScheduledAdmission(domain.Task{AdmissionStatus: "waiting", AdmissionBackend: "node"})
+	svc.recordScheduledAdmission(domain.Task{AdmissionStatus: "assigned", AdmissionBackend: "local"})
+	response := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(response.Body.String(), `swarmjet_admitted_tasks_total{backend="local_or_node"} 1`) {
+		t.Fatalf("immediate admission count missing: %s", response.Body.String())
+	}
+}
 
 func TestWorkflowRouteSeparatesKubernetesWorker(t *testing.T) {
 	for _, tc := range []struct{ backend, name, queue string }{

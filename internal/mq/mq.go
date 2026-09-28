@@ -6,10 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"sync"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -44,6 +49,48 @@ type Broker struct {
 }
 
 func New(url string) *Broker { return &Broker{url: url, slots: make(chan struct{}, 32)} }
+
+// Ping checks that RabbitMQ can accept a connection and declare our queues.
+func (b *Broker) Ping(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	conn, err := amqp.DialConfig(b.url, amqp.Config{Dial: func(network, addr string) (net.Conn, error) {
+		socket, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		if deadline, ok := ctx.Deadline(); ok {
+			_ = socket.SetDeadline(deadline)
+		}
+		return socket, nil
+	}, Heartbeat: 10 * time.Second})
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return declare(conn)
+}
+
+func traceHeaders(ctx context.Context) amqp.Table {
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+	headers := amqp.Table{}
+	for key, value := range carrier {
+		headers[key] = value
+	}
+	return headers
+}
+
+func deliveryContext(ctx context.Context, headers amqp.Table) context.Context {
+	carrier := propagation.MapCarrier{}
+	for key, value := range headers {
+		if s, ok := value.(string); ok && (key == "traceparent" || key == "tracestate") {
+			carrier[key] = s
+		}
+	}
+	return otel.GetTextMapPropagator().Extract(ctx, carrier)
+}
 
 func (b *Broker) Close() error {
 	b.mu.Lock()
@@ -121,6 +168,8 @@ func (b *Broker) Publish(ctx context.Context, queue string, body []byte, id stri
 	if queue != WebhookQueue && queue != CommandQueue {
 		return fmt.Errorf("unknown queue %q", queue)
 	}
+	ctx, span := otel.Tracer("swarmjet/rabbitmq").Start(ctx, "rabbitmq.publish", trace.WithSpanKind(trace.SpanKindProducer), trace.WithAttributes(attribute.String("messaging.destination.name", queue)))
+	defer span.End()
 	if _, bounded := ctx.Deadline(); !bounded {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
@@ -149,6 +198,7 @@ func (b *Broker) Publish(ctx context.Context, queue string, body []byte, id stri
 		DeliveryMode: amqp.Persistent,
 		ContentType:  "application/json",
 		MessageId:    id,
+		Headers:      traceHeaders(ctx),
 		Body:         body,
 	})
 	if err != nil {
@@ -256,10 +306,19 @@ func (b *Broker) consumeBatchOnce(ctx context.Context, queue string, handler fun
 		}
 		window.Stop()
 		bodies := make([][]byte, len(batch))
+		links := make([]trace.Link, 0, len(batch))
 		for i := range batch {
 			bodies[i] = batch[i].Body
+			if sc := trace.SpanContextFromContext(deliveryContext(ctx, batch[i].Headers)); sc.IsValid() {
+				links = append(links, trace.Link{SpanContext: sc})
+			}
 		}
-		results := handler(ctx, bodies)
+		// A single delivery continues its producer trace. For a coalesced batch,
+		// the first delivery is the parent and the remaining producers are links.
+		parentCtx := deliveryContext(ctx, first.Headers)
+		batchCtx, span := otel.Tracer("swarmjet/rabbitmq").Start(parentCtx, "rabbitmq.consume_batch", trace.WithSpanKind(trace.SpanKindConsumer), trace.WithLinks(links...), trace.WithAttributes(attribute.String("messaging.destination.name", queue)))
+		results := handler(batchCtx, bodies)
+		span.End()
 		if len(results) != len(batch) {
 			return fmt.Errorf("batch handler returned %d results for %d deliveries", len(results), len(batch))
 		}
@@ -320,7 +379,10 @@ func (b *Broker) consumeOnce(ctx context.Context, queue string, handler func(con
 			if !ok {
 				return errors.New("delivery channel closed")
 			}
-			err := settle(queue, d, handler(ctx, d.Body))
+			messageCtx, span := otel.Tracer("swarmjet/rabbitmq").Start(deliveryContext(ctx, d.Headers), "rabbitmq.consume", trace.WithSpanKind(trace.SpanKindConsumer), trace.WithAttributes(attribute.String("messaging.destination.name", queue)))
+			result := handler(messageCtx, d.Body)
+			span.End()
+			err := settle(queue, d, result)
 			if err != nil {
 				return err
 			}

@@ -20,6 +20,7 @@ import (
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 	"swarmjet/internal/agent"
@@ -40,6 +41,7 @@ import (
 	"swarmjet/internal/mq"
 	"swarmjet/internal/networkconfig"
 	"swarmjet/internal/nodeenvironment"
+	"swarmjet/internal/observability"
 	"swarmjet/internal/pipeline"
 	"swarmjet/internal/repochange"
 	"swarmjet/internal/runtimeadmin"
@@ -406,7 +408,20 @@ func run() error {
 		}
 		return gitlab.New(p.GitLabURL, token), nil
 	}
-	tc, e := client.Dial(client.Options{HostPort: env("TEMPORAL_ADDRESS", "localhost:7233"), Namespace: env("TEMPORAL_NAMESPACE", "default")})
+	traceBridge, shutdownTracing, e := observability.StartTracing(ctx, "swarmjet-"+mode)
+	if e != nil {
+		return fmt.Errorf("start tracing: %w", e)
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTracing(flushCtx)
+	}()
+	temporalOptions := client.Options{HostPort: env("TEMPORAL_ADDRESS", "localhost:7233"), Namespace: env("TEMPORAL_NAMESPACE", "default")}
+	if traceBridge != nil {
+		temporalOptions.Interceptors = []interceptor.ClientInterceptor{traceBridge}
+	}
+	tc, e := client.Dial(temporalOptions)
 	if e != nil {
 		return e
 	}
@@ -418,6 +433,36 @@ func run() error {
 		}
 		fmt.Println("PostgreSQL and Temporal reachable; use console project checks for repository configuration")
 		return nil
+	}
+	metrics := observability.New()
+	var readinessBroker *mq.Broker
+	if mode == "serve" {
+		readinessBroker = mq.New(required("RABBITMQ_URL"))
+		defer readinessBroker.Close()
+	}
+	checkReadiness := func(parent context.Context) error {
+		checkCtx, cancel := context.WithTimeout(parent, 3*time.Second)
+		defer cancel()
+		if err := s.Pool.Ping(checkCtx); err != nil {
+			return err
+		}
+		if _, err := tc.CheckHealth(checkCtx, &client.CheckHealthRequest{}); err != nil {
+			return err
+		}
+		if mode == "serve" {
+			if readinessBroker == nil {
+				return errors.New("RabbitMQ is not initialized")
+			}
+			return readinessBroker.Ping(checkCtx)
+		}
+		return nil
+	}
+	metrics.SetReadiness(checkReadiness)
+	if address := os.Getenv("METRICS_LISTEN_ADDRESS"); address != "" {
+		if err := metrics.Serve(ctx, address); err != nil {
+			return fmt.Errorf("metrics listener: %w", err)
+		}
+		go observeState(ctx, s, metrics)
 	}
 	data, e := filepath.Abs(env("DATA_DIR", "./data"))
 	if e != nil {
@@ -446,8 +491,7 @@ func run() error {
 		}
 	}
 	if mode == "serve" {
-		broker := mq.New(required("RABBITMQ_URL"))
-		defer broker.Close()
+		broker := readinessBroker
 		adminUser := env("ADMIN_USERNAME", "admin")
 		password := required("ADMIN_PASSWORD")
 		if len(password) < 12 {
@@ -464,8 +508,8 @@ func run() error {
 			return n.CancelTask(ctx, in.ProjectID)
 		}
 		labelsWake := make(chan struct{}, 1)
-		handler := api.New(s, api.Config{GitHubApp: ghApp, Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, RepositoryChanges: repositoryChanges, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), BuilderURL: os.Getenv("BUILDER_ADMIN_URL"), RegistryCAFile: os.Getenv("REGISTRY_CA_FILE"), PlatformImage: os.Getenv("PLATFORM_IMAGE"), MihomoURL: os.Getenv("MIHOMO_ADMIN_URL"), MihomoSecret: os.Getenv("MIHOMO_ADMIN_SECRET"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}, LabelsWake: labelsWake, Artifacts: k8sArtifacts})
-		svc := &service.Service{DataDir: data, Store: s, Temporal: tc, WebhookPublisher: broker, GitLabSigningToken: os.Getenv("GITLAB_WEBHOOK_SIGNING_TOKEN"), CommandPublisher: broker, ResolveCredential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", KubernetesPool: k8sValidation.Pool, KubernetesValidationProjectID: k8sValidation.ProjectID, KubernetesCapacity: k8sValidation.Capacity, RunnerResources: k8sValidation.Resources, RunnerImage: k8sValidation.Image, Wake: make(chan struct{}, 1), LabelsWake: labelsWake}
+		handler := api.New(s, api.Config{GitHubApp: ghApp, Metrics: metrics, Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: env("STATIC_DIR", "web/dist"), SecureCookies: env("SECURE_COOKIES", "false") == "true", ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, RepositoryChanges: repositoryChanges, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), BuilderURL: os.Getenv("BUILDER_ADMIN_URL"), RegistryCAFile: os.Getenv("REGISTRY_CA_FILE"), PlatformImage: os.Getenv("PLATFORM_IMAGE"), MihomoURL: os.Getenv("MIHOMO_ADMIN_URL"), MihomoSecret: os.Getenv("MIHOMO_ADMIN_SECRET"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}, LabelsWake: labelsWake, Artifacts: k8sArtifacts})
+		svc := &service.Service{DataDir: data, Store: s, Metrics: metrics, Temporal: tc, WebhookPublisher: broker, GitLabSigningToken: os.Getenv("GITLAB_WEBHOOK_SIGNING_TOKEN"), CommandPublisher: broker, ResolveCredential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", KubernetesPool: k8sValidation.Pool, KubernetesValidationProjectID: k8sValidation.ProjectID, KubernetesCapacity: k8sValidation.Capacity, RunnerResources: k8sValidation.Resources, RunnerImage: k8sValidation.Image, Wake: make(chan struct{}, 1), LabelsWake: labelsWake}
 		go svc.Run(ctx)
 		go broker.ConsumeBatch(ctx, mq.WebhookQueue, func(ctx context.Context, bodies [][]byte) []error {
 			results := svc.ProcessWebhookDeliveries(ctx, bodies)
@@ -475,17 +519,28 @@ func run() error {
 				} else if errors.Is(err, store.ErrAdmissionQueueFull) {
 					results[i] = mq.Defer(err)
 				}
+				result := "acked"
+				if results[i] != nil {
+					result = "retry"
+					if errors.Is(results[i], store.ErrWebhookConflict) || errors.Is(results[i], service.ErrInvalidWebhookDelivery) {
+						result = "dead_letter"
+					}
+				}
+				metrics.Message("webhook", result)
 			}
 			return results
 		})
 		go broker.Consume(ctx, mq.CommandQueue, func(ctx context.Context, body []byte) error {
 			err := svc.ConsumeCommand(ctx, body)
 			if errors.Is(err, service.ErrInvalidCommandDelivery) || errors.Is(err, store.ErrNotFound) {
+				metrics.Message("command", "dead_letter")
 				return mq.Permanent(err)
 			}
 			if err != nil {
+				metrics.Message("command", "retry")
 				return mq.Defer(err)
 			}
+			metrics.Message("command", "acked")
 			return nil
 		})
 		go svc.SyncLabels(ctx)
@@ -494,8 +549,16 @@ func run() error {
 		routes := http.NewServeMux()
 		routes.Handle("/api/webhooks/gitlab", svc.Webhook(os.Getenv("GITLAB_WEBHOOK_SECRET")))
 		routes.Handle("/api/webhooks/github", svc.GitHubWebhook(os.Getenv("GITHUB_WEBHOOK_SECRET")))
+		routes.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+			if err := checkReadiness(r.Context()); err != nil {
+				http.Error(w, "not ready", http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ready"))
+		})
 		routes.Handle("/", handler)
-		server := &http.Server{Addr: env("LISTEN_ADDRESS", ":8080"), Handler: routes, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
+		server := &http.Server{Addr: env("LISTEN_ADDRESS", ":8080"), Handler: observability.TraceHTTP(metrics.HTTP(routes)), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 		go func() {
 			<-ctx.Done()
 			c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -540,7 +603,16 @@ func run() error {
 	}
 	localAgents := agent.New(data)
 	nodes := &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}
-	a := &pipeline.Activities{Store: s, Workspace: wm, Agents: localAgents, Integration: im, Nodes: nodes, IntegrationEnv: im.Env, DataDir: data, Concurrency: n, Credential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, AgentEnv: agentEnv, NetworkEnv: func(ctx context.Context, ref domain.NetworkVersion) (map[string]string, error) {
+	a := &pipeline.Activities{Store: s, Metrics: metrics, Workspace: wm, Agents: localAgents, Integration: im, Nodes: nodes, IntegrationEnv: im.Env, DataDir: data, Concurrency: n, Credential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, PersonalGitLabToken: func(ctx context.Context, instance string) (string, error) {
+		if box == nil {
+			return "", fmt.Errorf("credential encryption is unavailable")
+		}
+		cipher, _, err := s.GitLabIdentity(ctx, instance)
+		if err != nil {
+			return "", err
+		}
+		return box.Open(cipher)
+	}, AgentEnv: agentEnv, NetworkEnv: func(ctx context.Context, ref domain.NetworkVersion) (map[string]string, error) {
 		return networkconfig.Resolve(ctx, s, box, ref)
 	}}
 	// Initialization is resumed here so a worker restart recovers running jobs.
@@ -635,7 +707,7 @@ func run() error {
 	defer w.Stop()
 	if k8sValidation.Pool != "" {
 		kw := worker.New(tc, pipeline.KubernetesQueue, worker.Options{MaxConcurrentActivityExecutionSize: k8sValidation.Capacity*4 + 4, WorkerStopTimeout: 30 * time.Second})
-		ka := &pipeline.KubernetesActivities{Store: s, Runner: k8sController, Artifacts: k8sArtifacts}
+		ka := &pipeline.KubernetesActivities{Store: s, Runner: k8sController, Artifacts: k8sArtifacts, Metrics: metrics}
 		kw.RegisterWorkflowWithOptions(pipeline.KubernetesTask, workflow.RegisterOptions{Name: pipeline.KubernetesWorkflowName})
 		kw.RegisterActivityWithOptions(a.SaveTask, activity.RegisterOptions{Name: "SaveTask"})
 		kw.RegisterActivityWithOptions(ka.RunKubernetesTask, activity.RegisterOptions{Name: "RunKubernetesTask"})

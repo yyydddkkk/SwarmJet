@@ -88,7 +88,7 @@ chmod 600 .env
 
 ## 网络、凭证与访问
 
-默认 API 与 Temporal UI 仅绑定宿主 `127.0.0.1`。生产反向代理应提供 HTTPS，并把 `PUBLIC_ORIGIN` 设成用户访问的精确 origin、`SECURE_COOKIES=true`。不要代理绕过登录的 `/api` 路由。Temporal UI 位于 `http://localhost:8333`，没有本应用的登录保护；远程运维使用 SSH 转发或带认证的代理。Temporal gRPC 和 PostgreSQL 不发布宿主端口，Temporal 无认证模式只用于这个隔离的 Compose 网络。
+默认 API 与 Temporal UI 仅绑定宿主 `127.0.0.1`。生产反向代理应提供 HTTPS，并把 `PUBLIC_ORIGIN` 设成用户访问的精确 origin、`SECURE_COOKIES=true`。不要代理绕过登录的 `/api` 路由。Temporal UI 位于 `http://localhost:8333`，仅用于查看 Workflow 历史和排障，Compose 已禁用其中的写操作；日常任务命令应通过 SwarmJet 控制台执行。该 UI 没有本应用的登录保护，远程运维使用 SSH 转发或带认证的代理。Temporal gRPC 和 PostgreSQL 不发布宿主端口，Temporal 无认证模式只用于这个隔离的 Compose 网络。
 
 只把显式模型变量放入 `AGENT_ENV_ALLOWLIST`。API / Worker 需要 GitLab 读取与状态同步权限；开发 token 可以创建任务分支/MR，但应由 GitLab 保护分支规则禁止合并目标。另一个 merge token 只在合并阶段注入 agent。Worker 的 Docker socket 属于高权限边界；部署主机和管理员必须可信，不能把它挂入 API 或 agent。
 
@@ -223,6 +223,21 @@ Node 容器启动后，回到 Node 管理页确认“在线”，选择默认 Ag
 本地开发不受影响：不注册节点时任务 `nodeId` 为空，继续使用宿主机进程内的 workspace / agent / integration 管理器，也不要求 `NODE_SECRET`。
 
 ## 检查与备份
+
+API 与 Worker 的内部 Prometheus 指标监听、可选 Prometheus profile 和指标解释见[可观测性说明](../docs/observability.md)。
+
+可选监控栈同时采集 API、Worker、RabbitMQ、Temporal 与 PostgreSQL。RabbitMQ 的 Prometheus 插件随 Compose 的 `rabbitmq` 服务启用；Temporal 在私有网络的 `:8000/metrics` 输出原生指标；`postgres-exporter` 使用现有数据库凭据在私有网络提供 `:9187/metrics`。这些端口均不发布到宿主机。Prometheus 额外抓取 RabbitMQ 的 `/metrics/detailed` 队列深度和消费者数；相关配置在 `observability/`。启动或更新时在 `deploy` 目录执行：
+
+```sh
+docker compose --profile observability up -d rabbitmq temporal postgres-exporter alertmanager prometheus
+docker compose --profile observability ps
+```
+
+可选 Jaeger 追踪服务也属于 `observability` profile；将 `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318` 写入 `deploy/.env` 后，执行 `docker compose --profile observability up -d jaeger api worker`，使 API/Worker 将 OTLP/HTTP trace 发送到私有网络中的 Jaeger。UI 只绑定 `127.0.0.1:${JAEGER_UI_PORT:-16686}`。设置为空时应用不启用 trace 导出；原生开发进程可分别设置 `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`，但需自行提供可达的 OTLP 接收端。此 Compose 配置不将 OTLP 接收端口发布到宿主机，原生开发可使用单独的本机 Jaeger 或临时端口转发。Jaeger 使用内存存储，仅用于开发排障，容器重建会清除 trace。
+
+Prometheus 与 Alertmanager UI 分别只绑定宿主回环地址 `127.0.0.1:${PROMETHEUS_PORT:-9090}` 和 `127.0.0.1:${ALERTMANAGER_PORT:-9093}`。前者在 `/targets` 检查各采集目标，`/rules` 和 `/alerts` 检查告警；后者在 `/` 查看收到的告警。初始规则只对采集失败、PostgreSQL exporter 连接失败、应用数据库采样失败和 RabbitMQ 死信积压发出告警，`evidence` 标签说明直接观测到的信号；两分钟保持时间仅用于抑制短暂启动抖动，不是实测 SLO。默认 Alertmanager receiver `local-only` 仅在 UI 中展示告警，不发送通知；生产使用前需在受保护的 `observability/alertmanager.yml` 中配置实际通知接收端，并验证到达。队列积压、ACK 延迟与容量阈值需结合真实负载与故障演练设定，不能直接套用当前规则。
+
+诊断时先查看 Prometheus 的 `up`、`pg_up`、`swarmjet_state_snapshot_success` 和 `rabbitmq_detailed_queue_messages_ready`，再用 `docker compose logs --tail=100 prometheus alertmanager postgres-exporter rabbitmq temporal api worker` 及 `docker compose exec rabbitmq rabbitmqctl list_queues name messages_ready messages_unacknowledged consumers` 定位。API HTTP 入口及 API/Worker 内部指标监听的 `/healthz` 只表示进程存活；内部 `/readyz` 检查 PostgreSQL、Temporal，API 还检查 RabbitMQ，API HTTP 入口也提供 `/readyz`。监控栈配置可用 `docker compose --profile observability config --quiet` 检查；有 Prometheus 镜像时用 `docker compose --profile observability run --rm --no-deps --entrypoint promtool prometheus check config /etc/prometheus/prometheus.yml` 检查采集与规则语法。告警路由可用 `docker compose --profile observability run --rm --no-deps --entrypoint amtool alertmanager check-config /etc/alertmanager/alertmanager.yml` 检查。告警触发逻辑可在 `deploy/` 目录执行 `docker run --rm --entrypoint promtool -v "$PWD/observability:/etc/prometheus:ro" prom/prometheus:v3.15.0 test rules /etc/prometheus/alerts_test.yml` 验证。
 
 以下命令均在 `deploy/` 目录执行。
 

@@ -26,7 +26,9 @@ export function nextAction(task: Task): string {
     case "waiting_approval":
       return "审查已完成，请核对变更并批准当前版本，或退回修改。";
     case "waiting_manual_merge":
-      return `请在 ${task.project.provider === "github" ? "GitHub" : "GitLab"} 合并下方 ${task.project.provider === "github" ? "PR" : "MR"}，系统确认全部合并后会完成任务。`;
+      return task.project.provider === "github" ? "请在 GitHub 合并下方 PR，系统确认全部合并后会完成任务。" : "确认人工验收后，使用“合并整轮”依次合并各仓库 MR。";
+    case "manual_merging":
+      return "整轮合并正在执行，请查看各仓库状态。";
     case "partial_merge":
       return "部分仓库已经合并，请先核对各仓库状态，再处理剩余合并。";
     case "blocked":
@@ -53,6 +55,7 @@ export function taskPhase(task: Task): number | null {
     waiting_manual_merge: 4,
     acquiring_merge: 4,
     merging: 4,
+    manual_merging: 4,
     partial_merge: 4,
     finalizing: 5,
     completed: 5,

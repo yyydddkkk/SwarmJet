@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"swarmjet/internal/observability"
 	"sync"
 	"time"
 )
@@ -79,6 +80,8 @@ func (c *Client) request(ctx context.Context, method, path string, body, out any
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2026-03-10")
 	req.Header.Set("Content-Type", "application/json")
+	req, span := observability.TraceOutboundHTTP(req, "github")
+	defer span.End()
 	res, err := c.http.Do(req)
 	if err != nil {
 		return nil, err

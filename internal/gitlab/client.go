@@ -11,10 +11,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/forge"
+	"swarmjet/internal/observability"
 	"sync"
 	"time"
 )
@@ -39,7 +41,12 @@ func New(baseURL, token string) *Client {
 	return &Client{baseURL: baseURL, token: token, http: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 
-type APIError struct{ StatusCode int }
+type APIError struct {
+	StatusCode int
+	// Reason is bounded, sanitized GitLab feedback for an interactive client.
+	// Error() deliberately omits it so ordinary logs remain terse.
+	Reason string
+}
 
 func (e *APIError) Error() string { return fmt.Sprintf("GitLab API returned HTTP %d", e.StatusCode) }
 func (c *Client) request(ctx context.Context, method, path string, body, out any) (http.Header, error) {
@@ -57,13 +64,15 @@ func (c *Client) request(ctx context.Context, method, path string, body, out any
 	}
 	req.Header.Set("PRIVATE-TOKEN", c.token)
 	req.Header.Set("Content-Type", "application/json")
+	req, span := observability.TraceOutboundHTTP(req, "gitlab")
+	defer span.End()
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &APIError{resp.StatusCode}
+		return nil, &APIError{StatusCode: resp.StatusCode, Reason: gitlabErrorReason(resp.Body, c.token)}
 	}
 	data, err = io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024+1))
 	if err != nil {
@@ -72,12 +81,74 @@ func (c *Client) request(ctx context.Context, method, path string, body, out any
 	if len(data) > 8*1024*1024 {
 		return nil, errors.New("GitLab response exceeds size limit")
 	}
-	if out != nil {
+	if out != nil && len(data) > 0 {
 		if err = json.Unmarshal(data, out); err != nil {
 			return nil, fmt.Errorf("decode GitLab response: %w", err)
 		}
 	}
 	return resp.Header, nil
+}
+
+func gitlabErrorReason(body io.Reader, token string) string {
+	data, err := io.ReadAll(io.LimitReader(body, 4096))
+	if err != nil {
+		return ""
+	}
+	var payload map[string]json.RawMessage
+	if json.Unmarshal(data, &payload) != nil {
+		return ""
+	}
+	var reason string
+	for _, key := range []string{"message", "error"} {
+		if len(payload[key]) == 0 {
+			continue
+		}
+		if json.Unmarshal(payload[key], &reason) == nil && reason != "" {
+			break
+		}
+		var messages []string
+		if json.Unmarshal(payload[key], &messages) == nil {
+			reason = strings.Join(messages, "; ")
+			break
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(payload[key], &fields) == nil {
+			keys := make([]string, 0, len(fields))
+			for field := range fields {
+				keys = append(keys, field)
+			}
+			sort.Strings(keys)
+			parts := []string{}
+			for _, field := range keys {
+				var value string
+				if json.Unmarshal(fields[field], &value) == nil {
+					parts = append(parts, field+": "+value)
+					continue
+				}
+				var values []string
+				if json.Unmarshal(fields[field], &values) == nil {
+					parts = append(parts, field+": "+strings.Join(values, ", "))
+				}
+			}
+			reason = strings.Join(parts, "; ")
+			if reason != "" {
+				break
+			}
+		}
+	}
+	if token != "" {
+		reason = strings.ReplaceAll(reason, token, "[redacted]")
+	}
+	reason = strings.Map(func(r rune) rune {
+		if r < ' ' || r == 127 {
+			return ' '
+		}
+		return r
+	}, reason)
+	if len(reason) > 400 {
+		reason = reason[:400]
+	}
+	return strings.TrimSpace(reason)
 }
 func paginate[T any](ctx context.Context, c *Client, path string, q url.Values) ([]T, error) {
 	if q == nil {
@@ -405,6 +476,12 @@ func (c *Client) CloseIssue(ctx context.Context, issue domain.Issue) error {
 // Merge is an optional helper. It conservatively requires successful CI for this exact SHA.
 // GitLab atomically checks the submitted source SHA. Callers must also serialize target changes.
 func (c *Client) Merge(ctx context.Context, repoID, mr int64, sha, target string) error {
+	return c.MergePinned(ctx, repoID, mr, sha, target, true)
+}
+
+// MergePinned checks the current MR and asks GitLab to enforce the source SHA
+// atomically. Manual merge can use the project's configured CI requirement.
+func (c *Client) MergePinned(ctx context.Context, repoID, mr int64, sha, target string, requireCI bool) error {
 	m, err := c.GetMR(ctx, repoID, mr)
 	if err != nil {
 		return err
@@ -415,7 +492,7 @@ func (c *Client) Merge(ctx context.Context, repoID, mr int64, sha, target string
 	if m.State == "merged" {
 		return nil
 	}
-	if m.State != "opened" || m.HasConflicts || m.DetailedMergeStatus != "mergeable" || !ciPassed(m, sha) {
+	if m.State != "opened" || m.HasConflicts || m.DetailedMergeStatus != "mergeable" || requireCI && !ciPassed(m, sha) {
 		return errors.New("merge request is not ready for exact-SHA merge")
 	}
 	_, err = c.request(ctx, "PUT", mrPath(repoID, mr)+"/merge", map[string]any{"sha": sha, "auto_merge": false, "should_remove_source_branch": false}, nil)

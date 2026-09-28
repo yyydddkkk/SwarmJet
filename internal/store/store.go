@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"time"
@@ -428,6 +429,7 @@ func (s *Store) AdmitPendingTasks(ctx context.Context, limit int) (int, error) {
 		return 0, err
 	}
 	admitted := 0
+	admittedIDs := make([]string, 0, limit)
 	for _, t := range queued {
 		if admitted >= limit {
 			break
@@ -476,8 +478,15 @@ func (s *Store) AdmitPendingTasks(ctx context.Context, limit int) (int, error) {
 			return 0, mapErr(err)
 		}
 		admitted++
+		admittedIDs = append(admittedIDs, t.ID)
 	}
-	return admitted, tx.Commit(ctx)
+	if err = tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	for _, id := range admittedIDs {
+		slog.Info("task admitted", "task_id", id, "backend", "local_or_node", "command_id", "start-"+id)
+	}
+	return admitted, nil
 }
 
 // CancelPendingTask completes a task that has not been assigned or started.
@@ -637,6 +646,19 @@ func (s *Store) SaveTask(ctx context.Context, t domain.Task) error {
 	if e != nil {
 		return e
 	}
+	if _, e = tx.Exec(ctx, `DELETE FROM task_mrs WHERE task_id=$1`, t.ID); e != nil {
+		return e
+	}
+	if t.Project.HostingProvider() == domain.ProviderGitLab {
+		for _, revision := range t.Workspace.Revisions {
+			if revision.MRIID < 1 || revision.ProjectID < 1 {
+				continue
+			}
+			if _, e = tx.Exec(ctx, `INSERT INTO task_mrs(instance,gitlab_project_id,mr_iid,task_id,repository_id) VALUES($1,$2,$3,$4,$5)`, domain.GitLabIdentity(t.Project.GitLabURL), revision.ProjectID, revision.MRIID, t.ID, revision.RepositoryID); e != nil {
+				return mapErr(e)
+			}
+		}
+	}
 	return tx.Commit(ctx)
 }
 
@@ -710,6 +732,13 @@ func (s *Store) EnqueueAutoMerge(ctx context.Context, taskID string, c domain.Co
 		return err
 	}
 	if domain.Terminal(stage) || stage == "merging" || stage == "partial_merge" || stage == "finalizing" {
+		return ErrConflict
+	}
+	var manualMergeRequested bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM commands WHERE task_id=$1 AND body->>'kind'='merge_round')`, taskID).Scan(&manualMergeRequested); err != nil {
+		return err
+	}
+	if manualMergeRequested {
 		return ErrConflict
 	}
 	body, err := json.Marshal(c)

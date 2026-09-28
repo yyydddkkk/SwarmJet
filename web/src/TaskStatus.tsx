@@ -12,6 +12,7 @@ export const stages: Record<string, string> = {
   waiting_manual_merge: "等待人工合并",
   acquiring_merge: "等待合并锁",
   merging: "合并中",
+  manual_merging: "整轮合并中",
   partial_merge: "部分已合并",
   finalizing: "收尾中",
   completed: "已完成",

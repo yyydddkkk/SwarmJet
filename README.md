@@ -134,7 +134,7 @@ Worker 经 Docker socket 创建同宿主机的任务容器，`DATA_DIR` 必须�
 
 接口见 [api/contract.md](api/contract.md)，内部约定见 [docs/architecture.md](docs/architecture.md)。Kubernetes 当前进度见 [接入阶段总结](docs/kubernetes-status.md)，目标执行架构与迁移边界见 [迁移设计](docs/kubernetes-migration.md)。
 
-已执行的检查及真实环境验收缺口见 [docs/validation.md](docs/validation.md)。
+已执行的检查及真实环境验收缺口见 [docs/validation.md](docs/validation.md)，首批运行指标见 [可观测性说明](docs/observability.md)。
 
 ## 发布与贡献
 

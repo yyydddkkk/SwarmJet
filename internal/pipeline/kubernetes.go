@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"swarmjet/internal/artifacts"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/k8srunner"
+	"swarmjet/internal/observability"
 	"swarmjet/internal/store"
 )
 
@@ -36,6 +38,7 @@ type KubernetesActivities struct {
 	Store     *store.Store
 	Runner    KubernetesRunner
 	Artifacts artifacts.Store
+	Metrics   *observability.Metrics
 }
 
 // KubernetesTask runs one deterministic, network isolated Agent contract.
@@ -162,6 +165,13 @@ func parseDeterministicResult(data []byte, taskID, executionID string, generatio
 }
 
 func (a *KubernetesActivities) RunKubernetesTask(ctx context.Context, task domain.Task) (domain.Task, error) {
+	start := time.Now()
+	out, err := a.runKubernetesTask(ctx, task)
+	a.observeActivity("run_kubernetes_task", task.ID, time.Since(start), err)
+	return out, err
+}
+
+func (a *KubernetesActivities) runKubernetesTask(ctx context.Context, task domain.Task) (domain.Task, error) {
 	if a.Store == nil || a.Runner == nil || a.Artifacts == nil || task.AdmissionBackend != "kubernetes" {
 		return task, errors.New("Kubernetes execution is not configured")
 	}
@@ -288,6 +298,24 @@ func (a *KubernetesActivities) RunKubernetesTask(ctx context.Context, task domai
 // StopKubernetesTask revokes the database right before stopping the Job. It
 // returns only after the controller observes both Job and Pods absent.
 func (a *KubernetesActivities) StopKubernetesTask(ctx context.Context, taskID string) error {
+	start := time.Now()
+	err := a.stopKubernetesTask(ctx, taskID)
+	a.observeActivity("stop_kubernetes_task", taskID, time.Since(start), err)
+	return err
+}
+
+func (a *KubernetesActivities) observeActivity(phase, taskID string, elapsed time.Duration, err error) {
+	if a.Metrics != nil {
+		a.Metrics.Activity(phase, elapsed, err)
+	}
+	result := "ok"
+	if err != nil {
+		result = "error"
+	}
+	slog.Info("task activity step finished", "task_id", taskID, "phase", phase, "result", result, "duration_ms", elapsed.Milliseconds())
+}
+
+func (a *KubernetesActivities) stopKubernetesTask(ctx context.Context, taskID string) error {
 	if a.Store == nil || a.Runner == nil {
 		return errors.New("Kubernetes execution is not configured")
 	}

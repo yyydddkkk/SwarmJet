@@ -208,15 +208,18 @@ type Task struct {
 	AcceptanceIncomplete bool                `json:"acceptanceIncomplete,omitempty"`
 	Checkpoint           *WorkflowCheckpoint `json:"checkpoint,omitempty"`
 	ID                   string              `json:"id"`
-	NodeID               string              `json:"nodeId,omitempty"`
-	ExecutionPool        string              `json:"executionPool,omitempty"`
-	RunnerResources      RunnerResources     `json:"runnerResources,omitempty"`
-	RunnerImage          string              `json:"runnerImage,omitempty"`
-	ExecutionID          string              `json:"executionId,omitempty"`
-	AuthorityVersion     int64               `json:"authorityVersion,omitempty"`
-	AdmissionStatus      string              `json:"admissionStatus,omitempty"`
-	AdmissionBackend     string              `json:"admissionBackend,omitempty"`
-	Project              Project             `json:"project"`
+	// TraceParent carries only the W3C trace context across the durable command
+	// outbox. It contains no task input, credentials, or repository metadata.
+	TraceParent      string          `json:"traceParent,omitempty"`
+	NodeID           string          `json:"nodeId,omitempty"`
+	ExecutionPool    string          `json:"executionPool,omitempty"`
+	RunnerResources  RunnerResources `json:"runnerResources,omitempty"`
+	RunnerImage      string          `json:"runnerImage,omitempty"`
+	ExecutionID      string          `json:"executionId,omitempty"`
+	AuthorityVersion int64           `json:"authorityVersion,omitempty"`
+	AdmissionStatus  string          `json:"admissionStatus,omitempty"`
+	AdmissionBackend string          `json:"admissionBackend,omitempty"`
+	Project          Project         `json:"project"`
 	// nil inherits the project's snapshot; an explicit value controls this task.
 	AutoMergeOverride *bool                `json:"autoMergeOverride,omitempty"`
 	Issue             Issue                `json:"issue"`

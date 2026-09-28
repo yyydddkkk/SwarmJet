@@ -27,6 +27,7 @@ import (
 	"swarmjet/internal/intake"
 	"swarmjet/internal/labels"
 	"swarmjet/internal/mq"
+	"swarmjet/internal/observability"
 	"swarmjet/internal/pipeline"
 	"swarmjet/internal/store"
 )
@@ -42,6 +43,7 @@ type Service struct {
 	ForgeClient      func(domain.Project, bool) (forge.Client, error)
 	DataDir          string
 	Store            *store.Store
+	Metrics          *observability.Metrics
 	WebhookPublisher interface {
 		Publish(context.Context, string, []byte, string) error
 	}
@@ -160,11 +162,19 @@ func (s *Service) runAdmission(ctx context.Context) {
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	for {
-		if _, err := s.Store.AdmitPendingTasks(ctx, 20); err != nil && ctx.Err() == nil {
+		admitted, err := s.Store.AdmitPendingTasks(ctx, 20)
+		if s.Metrics != nil {
+			s.Metrics.Admission("local_or_node", admitted, err)
+		}
+		if err != nil && ctx.Err() == nil {
 			slog.Error("task admission", "error", err)
 		}
 		if s.KubernetesPool != "" {
-			if _, err := s.Store.AdmitKubernetesTasks(ctx, s.KubernetesPool, s.KubernetesCapacity, 20); err != nil && ctx.Err() == nil {
+			admitted, err := s.Store.AdmitKubernetesTasks(ctx, s.KubernetesPool, s.KubernetesCapacity, 20)
+			if s.Metrics != nil {
+				s.Metrics.Admission("kubernetes", admitted, err)
+			}
+			if err != nil && ctx.Err() == nil {
 				slog.Error("Kubernetes task admission", "error", err)
 			}
 		}
@@ -449,18 +459,29 @@ func (s *Service) acceptWebhook(w http.ResponseWriter, r *http.Request, provider
 	defer cancel()
 	err = s.WebhookPublisher.Publish(publishCtx, mq.WebhookQueue, message, provider+":"+id)
 	if err != nil {
-		slog.Error("webhook publish", "provider", provider, "error", err)
+		slog.Error("webhook publish", "provider", provider, "delivery_id", id, "error", err)
 		http.Error(w, "webhook queue unavailable", http.StatusServiceUnavailable)
 		return false
 	}
+	slog.Info("webhook published", "provider", provider, "delivery_id", id, "trace_id", observability.TraceID(r.Context()))
 	return true
 }
 func (s *Service) Scan(ctx context.Context) error {
-	return s.scan(ctx, "", 0)
+	start := time.Now()
+	err := s.scan(ctx, "", 0)
+	if s.Metrics != nil {
+		s.Metrics.Scan("all", time.Since(start), err)
+	}
+	return err
 }
 
 func (s *Service) ScanRepository(ctx context.Context, provider domain.Provider, repoID int64) error {
-	return s.scan(ctx, provider, repoID)
+	start := time.Now()
+	err := s.scan(ctx, provider, repoID)
+	if s.Metrics != nil {
+		s.Metrics.Scan("repository", time.Since(start), err)
+	}
+	return err
 }
 
 func (s *Service) scan(ctx context.Context, provider domain.Provider, repoID int64) error {
@@ -532,7 +553,7 @@ func (s *Service) scan(ctx context.Context, provider domain.Provider, repoID int
 					if legacy {
 						continue
 					}
-					_, e = intake.Schedule(ctx, s.Store, p, issue, enabled, s.intakeOptions(p.ID, false))
+					task, e := intake.Schedule(ctx, s.Store, p, issue, enabled, s.intakeOptions(p.ID, false))
 					if e != nil {
 						if errors.Is(e, store.ErrNoNode) {
 							// Distributed mode: leave the issue unclaimed until a node has capacity.
@@ -552,6 +573,8 @@ func (s *Service) scan(ctx context.Context, provider domain.Provider, repoID int
 						}
 						continue
 					}
+					logTaskScheduled(ctx, task)
+					s.recordScheduledAdmission(task)
 				}
 				return nil
 			})
@@ -561,6 +584,20 @@ func (s *Service) scan(ctx context.Context, provider domain.Provider, repoID int
 		}
 	}
 	return errors.Join(scanErrors...)
+}
+
+func logTaskScheduled(ctx context.Context, task domain.Task) {
+	attrs := []any{"task_id", task.ID, "project_id", task.Project.ID, "provider", task.Project.HostingProvider(), "repository_id", task.Issue.ProjectID, "issue_iid", task.Issue.IID, "admission_backend", task.AdmissionBackend, "admission_status", task.AdmissionStatus, "trace_id", observability.TraceID(ctx)}
+	if delivery, ok := ctx.Value(webhookDeliveryContextKey{}).(webhookDeliveryContext); ok {
+		attrs = append(attrs, "webhook_provider", delivery.provider, "delivery_id", delivery.deliveryID)
+	}
+	slog.Info("task scheduled", attrs...)
+}
+
+func (s *Service) recordScheduledAdmission(task domain.Task) {
+	if s.Metrics != nil && task.AdmissionStatus == "assigned" {
+		s.Metrics.Admitted(task.AdmissionBackend)
+	}
 }
 
 func runComment(body string) (string, bool) {
@@ -605,9 +642,13 @@ func (s *Service) scanFollowup(ctx context.Context, g forge.Client, p domain.Pro
 	if err != nil || !domain.Terminal(previous.Stage) {
 		return err
 	}
-	_, err = intake.Schedule(ctx, s.Store, p, issue, enabled, s.intakeOptions(p.ID, true))
+	task, err := intake.Schedule(ctx, s.Store, p, issue, enabled, s.intakeOptions(p.ID, true))
 	if errors.Is(err, store.ErrNoNode) || errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 		return nil
+	}
+	if err == nil {
+		logTaskScheduled(ctx, task)
+		s.recordScheduledAdmission(task)
 	}
 	return err
 }

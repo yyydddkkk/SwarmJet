@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,12 +33,14 @@ import (
 	"swarmjet/internal/imagebuild"
 	"swarmjet/internal/intake"
 	"swarmjet/internal/labels"
+	"swarmjet/internal/observability"
 	"swarmjet/internal/repochange"
 	"swarmjet/internal/secretbox"
 	"swarmjet/internal/store"
 )
 
 type Config struct {
+	Metrics                                               *observability.Metrics
 	GitHubApp                                             *githubapp.App
 	MihomoURL, MihomoSecret                               string
 	Username, Password, AllowedOrigin, StaticDir, DataDir string
@@ -67,11 +70,12 @@ type Config struct {
 	}
 }
 type server struct {
-	s        *store.Store
-	conns    connectionStore
-	cfg      Config
-	mu       sync.Mutex
-	attempts map[string]attempt
+	s              *store.Store
+	conns          connectionStore
+	cfg            Config
+	mu             sync.Mutex
+	attempts       map[string]attempt
+	workbenchPages workbenchPageCache
 }
 type attempt struct {
 	start time.Time
@@ -203,6 +207,14 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/system" || r.URL.Path == "/api/system/checks" {
 		a.system(w, r)
+		return
+	}
+	if r.URL.Path == "/api/gitlab-identities" {
+		a.gitlabIdentities(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/workbench/") {
+		a.workbench(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/mihomo/") {
@@ -814,9 +826,17 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 			failure(w, err)
 			return
 		}
+		a.recordScheduledTask(scheduled)
 		respond(w, 202, scheduled)
 	default:
 		problem(w, 405, "method not allowed")
+	}
+}
+
+func (a *server) recordScheduledTask(task domain.Task) {
+	slog.Info("task scheduled", "task_id", task.ID, "project_id", task.Project.ID, "provider", task.Project.HostingProvider(), "repository_id", task.Issue.ProjectID, "issue_iid", task.Issue.IID, "admission_backend", task.AdmissionBackend, "admission_status", task.AdmissionStatus, "source", "manual_api")
+	if a.cfg.Metrics != nil && task.AdmissionStatus == "assigned" {
+		a.cfg.Metrics.Admitted(task.AdmissionBackend)
 	}
 }
 func (a *server) task(w http.ResponseWriter, r *http.Request, id string, tail []string) {
@@ -860,6 +880,8 @@ func (a *server) task(w http.ResponseWriter, r *http.Request, id string, tail []
 		}
 		if c.Kind == "set_auto_merge" {
 			err = a.s.EnqueueAutoMerge(r.Context(), id, c)
+		} else if c.Kind == "merge_round" {
+			err = a.s.EnqueueManualMerge(r.Context(), id, c)
 		} else {
 			err = a.s.Enqueue(r.Context(), id, c)
 		}
@@ -868,6 +890,37 @@ func (a *server) task(w http.ResponseWriter, r *http.Request, id string, tail []
 			return
 		}
 		respond(w, 202, map[string]bool{"accepted": true})
+	case "manual-acceptance":
+		if t.Project.HostingProvider() != domain.ProviderGitLab {
+			problem(w, 404, "API route not found")
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			record, recordErr := a.s.ManualAcceptance(r.Context(), id)
+			if errors.Is(recordErr, store.ErrNotFound) {
+				respond(w, 200, store.ManualAcceptanceRecord{Checks: []store.ManualAcceptanceCheck{}, ExpectedDigest: domain.ManualMergeEvidenceDigest(t)})
+				return
+			}
+			if recordErr != nil {
+				failure(w, recordErr)
+				return
+			}
+			record.ExpectedDigest = domain.ManualMergeEvidenceDigest(t)
+			respond(w, 200, record)
+		case http.MethodPut:
+			var record store.ManualAcceptanceRecord
+			if !decode(w, r, &record) {
+				return
+			}
+			if recordErr := a.s.SaveManualAcceptance(r.Context(), id, record); recordErr != nil {
+				failure(w, recordErr)
+				return
+			}
+			respond(w, 200, record)
+		default:
+			problem(w, 405, "method not allowed")
+		}
 	case "events":
 		if r.Method != "GET" {
 			problem(w, 405, "method not allowed")
@@ -904,7 +957,7 @@ func validateCommand(t domain.Task, c domain.Command) error {
 	if !domain.IDPattern.MatchString(c.ID) {
 		return errors.New("valid command id required")
 	}
-	if domain.Terminal(t.Stage) && c.Kind != "note" {
+	if domain.Terminal(t.Stage) && c.Kind != "note" && c.Kind != "merge_round" {
 		return errors.New("task is terminal")
 	}
 	switch c.Kind {
@@ -955,6 +1008,10 @@ func validateCommand(t domain.Task, c domain.Command) error {
 		}
 		if *c.AutoMerge && t.AcceptanceIncomplete {
 			return errors.New("automatic merge requires complete acceptance evidence")
+		}
+	case "merge_round":
+		if t.Project.HostingProvider() != domain.ProviderGitLab {
+			return errors.New("manual merge requires a GitLab task")
 		}
 	case "pause":
 		if t.Paused {

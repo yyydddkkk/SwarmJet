@@ -20,6 +20,13 @@ type WebhookMessage struct {
 
 var ErrInvalidWebhookDelivery = errors.New("invalid webhook queue message")
 
+type webhookDeliveryContextKey struct{}
+
+type webhookDeliveryContext struct {
+	provider   string
+	deliveryID string
+}
+
 // ProcessWebhookDelivery is called by a manual-ACK RabbitMQ consumer. A nil
 // result means the receipt is durable and the delivery can be ACKed.
 func (s *Service) ProcessWebhookDelivery(ctx context.Context, body []byte) error {
@@ -67,17 +74,22 @@ func (s *Service) ProcessWebhookDeliveries(ctx context.Context, bodies [][]byte)
 				if scanned || scanErr != nil {
 					return scanErr
 				}
+				scanCtx := context.WithValue(ctx, webhookDeliveryContextKey{}, webhookDeliveryContext{provider: event.Provider, deliveryID: event.DeliveryID})
 				if key.repoID == 0 {
-					scanErr = s.Scan(ctx)
+					scanErr = s.Scan(scanCtx)
 				} else {
 					provider, _ := webhookRepository(key.provider, event.Payload)
-					scanErr = s.ScanRepository(ctx, provider, key.repoID)
+					scanErr = s.ScanRepository(scanCtx, provider, key.repoID)
 				}
 				scanned = scanErr == nil
 				return scanErr
 			})
 			if errors.Is(results[i], store.ErrWebhookConflict) {
-				slog.Error("webhook delivery ID content mismatch", "provider", event.Provider, "delivery_id", event.DeliveryID)
+				slog.Error("webhook delivery ID content mismatch", "provider", event.Provider, "delivery_id", event.DeliveryID, "repository_id", key.repoID, "error", results[i])
+			} else if results[i] == nil {
+				slog.Info("webhook delivery processed", "provider", event.Provider, "delivery_id", event.DeliveryID, "repository_id", key.repoID)
+			} else {
+				slog.Warn("webhook delivery processing failed", "provider", event.Provider, "delivery_id", event.DeliveryID, "repository_id", key.repoID, "error", results[i])
 			}
 		}
 	}

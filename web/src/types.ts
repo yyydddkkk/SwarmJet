@@ -192,6 +192,8 @@ export interface ArtifactRef {
   size: number;
 }
 export interface Task {
+  humanAcceptance?: { prerequisites: string[] | null; steps: { action: string; expected: string }[] | null; notes: string[] | null };
+  acceptanceIncomplete?: boolean;
   round?: number;
   previousTaskId?: string;
   triggerNoteIds?: number[];
