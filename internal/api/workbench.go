@@ -877,7 +877,8 @@ func (a *server) workbenchAction(w http.ResponseWriter, r *http.Request, kind st
 	}
 	if len(parts) == 1 && parts[0] == "notes" {
 		var req struct {
-			Body string `json:"body"`
+			Body           string `json:"body"`
+			StartNextRound bool   `json:"startNextRound"`
 		}
 		if !decode(w, r, &req) {
 			return
@@ -886,7 +887,15 @@ func (a *server) workbenchAction(w http.ResponseWriter, r *http.Request, kind st
 			problem(w, 400, "评论不能为空")
 			return
 		}
-		row, err := client.WorkbenchSubresource(r.Context(), http.MethodPost, kind, scope.Repo.ProjectID, iid, "/notes", map[string]any{"body": req.Body})
+		if req.StartNextRound && kind != "issues" {
+			problem(w, 400, "只有 Issue 评论可以发起下一轮")
+			return
+		}
+		body := req.Body
+		if req.StartNextRound {
+			body = "/swarmjet run " + body
+		}
+		row, err := client.WorkbenchSubresource(r.Context(), http.MethodPost, kind, scope.Repo.ProjectID, iid, "/notes", map[string]any{"body": body})
 		if err != nil {
 			workbenchError(w, err)
 			return

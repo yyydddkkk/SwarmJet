@@ -1,6 +1,5 @@
 .access-page { display: grid; gap: 20px; }
-.access-page .system-tabs button { border: 0; background: transparent; cursor: pointer; padding: 10px 14px; }
-.access-page .system-tabs button[aria-current="page"] { color: var(--accent, #1763a6); border-bottom: 2px solid currentColor; }
+.access-page .system-tabs { margin-bottom: 6px; }
 .access-page h2 { margin: 0 0 10px; }
 .access-list { display: grid; gap: 0; }
 .access-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; border-top: 1px solid #e5eaf0; }

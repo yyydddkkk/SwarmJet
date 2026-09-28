@@ -6,7 +6,7 @@ export type WorkbenchIssue = {
   projectId: string; repositoryId: string; gitlabProjectId: number; iid: number;
   title: string; description: string; state: string; labels: string[];
   assignees: Assignee[]; webUrl: string; updatedAt: string; taskIds: string[];
-  notes?: Note[]; tasks?: { id: string; stage: string; round?: number; createdAt?: string }[];
+  notes?: Note[]; tasks?: { id: string; stage: string; round?: number; createdAt?: string; triggerNoteIds?: number[]; workspace?: { revisions?: { repositoryId?: string; path?: string; mrUrl?: string }[] } }[];
 };
 export type WorkbenchMR = {
   projectId: string; repositoryId: string; gitlabProjectId: number; iid: number;

@@ -23,6 +23,36 @@ test("Issue workbench opens detail and starts a task", async ({ page }) => {
   await expect(page).toHaveURL(/#\/tasks\/task-42/);
 });
 
+test("Issue detail opens in reading mode and saves edits back to the overview", async ({ page }) => {
+  let current = { ...issue, description: "## 验收标准\n\n- 登录可用" };
+  let saves = 0;
+  await page.route("**/api/**", route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
+    if (url.pathname === "/api/workbench/issues/platform/api/42" && route.request().method() === "PUT") {
+      saves++;
+      current = { ...current, ...route.request().postDataJSON() };
+      return route.fulfill({ json: current });
+    }
+    if (url.pathname === "/api/workbench/issues/platform/api/42") return route.fulfill({ json: current });
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/#/issues/platform/api/42");
+  await expect(page.getByRole("heading", { name: "验收标准" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "标题" })).toHaveCount(0);
+  await page.getByRole("button", { name: "编辑 Issue" }).click();
+  await page.getByRole("textbox", { name: "标题" }).fill("暂存标题");
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "修复权限检查" })).toBeVisible();
+  expect(saves).toBe(0);
+  await page.getByRole("button", { name: "编辑 Issue" }).click();
+  await page.getByRole("textbox", { name: "标题" }).fill("更新后的 Issue");
+  await page.getByRole("button", { name: "保存更改" }).click();
+  await expect(page.getByRole("heading", { name: "更新后的 Issue" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "标题" })).toHaveCount(0);
+  expect(saves).toBe(1);
+});
+
 test("Issue detail renders uploaded images and shows the newest comment below the composer", async ({ page }) => {
   const secret = "0123456789abcdef0123456789abcdef";
   const withComments = {
@@ -54,6 +84,114 @@ test("Issue detail renders uploaded images and shows the newest comment below th
   const text = await comments.innerText();
   expect(text.indexOf("发表评论")).toBeLessThan(text.indexOf("较新评论"));
   expect(text.indexOf("较新评论")).toBeLessThan(text.indexOf("较早评论"));
+});
+
+test("Issue comments keep plain text and request a follow-up through a new note", async ({ page }) => {
+  const posts: Record<string, unknown>[] = [];
+  let nextRoundCalls = 0;
+  const withPreviousRound = { ...issue, tasks: [{ id: "task-1", stage: "completed", round: 1 }] };
+  await page.route("**/api/**", route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
+    if (url.pathname === "/api/workbench/issues/platform/api/42/notes") {
+      posts.push(route.request().postDataJSON());
+      return route.fulfill({ status: 201, json: { id: posts.length } });
+    }
+    if (url.pathname.endsWith("/next-round")) nextRoundCalls++;
+    if (url.pathname === "/api/workbench/issues/platform/api/42") return route.fulfill({ json: withPreviousRound });
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/#/issues/platform/api/42");
+  await expect(page.getByRole("button", { name: "发起下一轮", exact: true })).toHaveCount(0);
+  const editor = page.getByRole("textbox", { name: "评论内容或补充需求" });
+  await editor.fill("普通评论 `代码`\n第二行");
+  await page.getByRole("button", { name: "发表评论" }).click();
+  await expect(page.getByRole("status")).toHaveText("评论已发表。");
+  await editor.fill("补充 `特殊`\u00a0空格\n再加一项");
+  await page.getByRole("button", { name: "评论并发起下一轮" }).click();
+  await expect(page.getByRole("status")).toHaveText("评论已提交，等待系统创建任务。");
+  expect(posts).toEqual([
+    { body: "普通评论 `代码`\n第二行" },
+    { body: "补充 `特殊`\u00a0空格\n再加一项", startNextRound: true },
+  ]);
+  expect(nextRoundCalls).toBe(0);
+});
+
+test("Issue follow-up queues during an active round, ignores double clicks, and keeps failed text", async ({ page }) => {
+  let postCount = 0;
+  const activeIssue = { ...issue, tasks: [{ id: "task-1", stage: "implementing", round: 1 }] };
+  await page.route("**/api/**", async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
+    if (url.pathname === "/api/workbench/issues/platform/api/42/notes") {
+      postCount++;
+      await new Promise(resolve => setTimeout(resolve, 75));
+      return postCount === 1
+        ? route.fulfill({ status: 201, json: { id: 81 } })
+        : route.fulfill({ status: 503, json: { error: "GitLab 暂不可用" } });
+    }
+    if (url.pathname === "/api/workbench/issues/platform/api/42") return route.fulfill({ json: activeIssue });
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/#/issues/platform/api/42");
+  await expect(page.getByText("当前轮仍在运行，补充需求会排队等待本轮结束后创建下一轮任务。")).toBeVisible();
+  const editor = page.getByRole("textbox", { name: "评论内容或补充需求" });
+  await editor.fill("第一条补充需求");
+  await page.getByRole("button", { name: "评论并发起下一轮" }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+  await expect(page.getByRole("status")).toHaveText("评论已提交，等待系统创建任务。");
+  expect(postCount).toBe(1);
+  await editor.fill("失败后保留的需求");
+  await page.getByRole("button", { name: "评论并发起下一轮" }).click();
+  await expect(page.getByRole("alert")).toContainText("GitLab 暂不可用");
+  await expect(editor).toHaveValue("失败后保留的需求");
+  await expect(page.getByRole("status")).toHaveCount(0);
+  expect(postCount).toBe(2);
+});
+
+test("Issue timeline presents SwarmJet notes and system activity without raw control text", async ({ page }) => {
+  const createdAt = "2026-09-28T12:00:00Z";
+  const taskId = "b2b196e48f1dd0730fc7f47cb2f89ede";
+  const review = `<!-- swarmjet-review:${taskId}:${"a".repeat(64)} -->\n## 人工复核指引 · SwarmJet 第 2 轮\n\n任务：\`${taskId}\`。本轮由系统执行验收与独立审查。\n\n审查提交集合：\`${"c".repeat(64)}\`\n\n### 本轮 MR\n- api：https://gitlab.example/group/api/-/merge_requests/53 · \`${"d".repeat(40)}\` → \`main\`\n\n### 操作步骤与预期结果\n1. 检查登录\n2. 检查退出`;
+  const progress = `<!-- swarmjet-progress:${"b".repeat(64)} -->\n**waiting_manual_merge** · ${taskId} · 第 2 轮\n\n等待合并`;
+  const withTimeline = { ...issue, tasks: [{ id: taskId, stage: "completed", round: 2, createdAt, triggerNoteIds: [3], workspace: { revisions: [{ path: "api", mrUrl: "https://gitlab.example/group/api/-/merge_requests/53" }] } }], notes: [
+    { id: 5, body: "mentioned in commit 1c394033999a2c90f387b05d782a2bbde0d53a55", system: true, created_at: "2026-09-28T12:04:00Z", author: { name: "GitLab" } },
+    { id: 4, body: review, created_at: "2026-09-28T12:03:00Z", author: { name: "SwarmJet" } },
+    { id: 3, body: "/swarmjet run 改进错误提示\n补充第二行", created_at: "2026-09-28T12:02:00Z", author: { name: "甲" } },
+    { id: 2, body: progress, created_at: "2026-09-28T12:01:00Z", author: { name: "SwarmJet" } },
+    { id: 1, body: "普通讨论", created_at: "2026-09-28T11:59:00Z", author: { name: "乙" } },
+  ] };
+  await page.route("**/api/**", route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
+    if (url.pathname === "/api/workbench/issues/platform/api/42") return route.fulfill({ json: withTimeline });
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/#/issues/platform/api/42");
+  await expect(page.getByRole("heading", { name: "第 2 轮期间" })).toBeVisible();
+  const reviewCard = page.locator(".issue-note-review");
+  await expect(reviewCard.getByText("人工复核指引 · 第 2 轮")).toBeVisible();
+  await expect(reviewCard.getByText("2 个操作步骤", { exact: false })).toBeVisible();
+  await expect(reviewCard.getByRole("link", { name: "api MR !53" })).toBeVisible();
+  await expect(reviewCard.getByText("swarmjet-review", { exact: false })).toBeHidden();
+  await reviewCard.getByText("查看完整复核指引").click();
+  await expect(reviewCard.getByText("检查登录", { exact: true })).toBeVisible();
+  await expect(reviewCard.locator(".issue-note-expanded")).not.toContainText(taskId);
+  await expect(reviewCard.locator(".issue-note-expanded")).not.toContainText("c".repeat(64));
+  await expect(reviewCard.locator(".issue-note-expanded")).not.toContainText("https://gitlab.example/group/api/-/merge_requests/53");
+  await expect(reviewCard.locator(".issue-note-expanded").getByRole("link", { name: "MR !53" })).toHaveAttribute("href", "https://gitlab.example/group/api/-/merge_requests/53");
+  await expect(page.locator(".issue-note-progress .issue-note-kind")).toHaveText("任务进展 · 等待合并");
+  await expect(page.locator(".issue-note-progress .issue-note-body")).not.toContainText(taskId);
+  await expect(page.getByText("在提交 1c394033 中提及此 Issue")).toBeVisible();
+  await expect(page.getByText("改进错误提示")).toBeVisible();
+  await expect(page.locator(".issue-note-followup .issue-note-body")).not.toContainText("/swarmjet run");
+  await page.getByRole("button", { name: "讨论 2" }).click();
+  await expect(page.locator(".issue-note-review")).toHaveCount(0);
+  await expect(page.locator(".issue-note-followup")).toBeVisible();
+  await page.getByRole("button", { name: "系统活动 1" }).click();
+  await expect(page.locator(".issue-activity")).toHaveCount(1);
+  await expect(page.locator(".issue-note-followup")).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
 test("MR workbench shows paged diff and approval with current SHA", async ({ page }) => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { ErrorBox, Field } from "./ui";
+import "./workbench-pages.css";
 
 type Identity = { gitlabUrl: string; username: string; gitlabUserId?: number; configured: boolean };
 

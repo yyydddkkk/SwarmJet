@@ -421,6 +421,9 @@
   border-bottom-color: #edf0f5;
   vertical-align: middle;
 }
+.app .task-list .task-row {
+  cursor: pointer;
+}
 .app .task-list td:first-child {
   width: 47%;
 }

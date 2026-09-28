@@ -91,7 +91,7 @@ PostgreSQL、Temporal 使用 SwarmJet 自己的 Compose 容器。启动脚本会
 ./scripts/dev stop     # 只停止本地进程，保留依赖和数据
 ```
 
-开发页面默认 **http://localhost:5273**，API 为 `127.0.0.1:8180`，Worker 管理接口为 `127.0.0.1:8191`，独立构建服务为 `127.0.0.1:8193`。Vite 代理 API、事件流和终端 WebSocket；开发环境的登录 Origin 使用 5273。进程日志位于 `.cache/dev/`，不提交到 Git。启动后项目状态与任务记录保存在 SwarmJet 数据库，已阻塞的任务不会被脚本自动重试。
+开发页面默认 **http://localhost:5273**，API 仅在 `127.0.0.1:8181` 提供接口，不再提供第二个网页入口。Worker 管理接口为 `127.0.0.1:8191`，独立构建服务为 `127.0.0.1:8193`。Vite 代理 API、事件流和终端 WebSocket；开发环境的登录 Origin 使用 5273。进程日志位于 `.cache/dev/`，不提交到 Git。启动后项目状态与任务记录保存在 SwarmJet 数据库，已阻塞的任务不会被脚本自动重试。
 
 启动脚本会为宿主机 Git 设置仓库内的 `scripts/askpass.sh`；手动启动 Worker 时可用 `SWARMJET_GIT_ASKPASS` 指定该绝对路径。Agent 容器继续使用镜像内的凭据助手。
 

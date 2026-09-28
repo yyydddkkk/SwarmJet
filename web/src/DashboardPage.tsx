@@ -72,7 +72,7 @@ export function WorkbenchOverview({ projectId, platformAdmin, canCreateIssue }: 
   const flow = [...(active?.items || []), ...(waiting?.items || [])].slice(0, 4);
   const offline = nodes?.filter(item => !item.online).length || 0;
   return <div className="dashboard-page">
-    <div className="page-head dashboard-head"><div><h1>今天先处理这些</h1><p>需要决策的任务排在前面，了解项目当前进展。</p></div>{canCreateIssue && <a className="button primary" href={workbenchLink("/issues", projectId)}>创建 Issue</a>}</div>
+    <div className="page-head dashboard-head"><div><h1>今天先处理这些</h1><p>需要决策的任务排在前面，平台状态随时可见。</p></div>{canCreateIssue && <a className="button primary" href={workbenchLink("/issues?create=1", projectId)}>创建 Issue</a>}</div>
     <ErrorBox error={error} retry={() => void load()} />
     <div className="dashboard-layout"><div className="dashboard-primary">
       <section className="dashboard-section" aria-labelledby="dashboard-attention"><div className="dashboard-section-head"><div><span className="dashboard-kicker">待我处理</span><h2 id="dashboard-attention">{attentionCount === undefined ? "需要决策的任务" : `${attentionCount} 项需要决策`}</h2></div><small>按最近更新排序</small></div>

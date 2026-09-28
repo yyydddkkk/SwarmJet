@@ -241,7 +241,21 @@ export default function Tasks({ projectId, onProjectChange, platformAdmin = fals
               </thead>
               <tbody>
                 {rows.map((t) => (
-                  <tr key={t.id}>
+                  <tr
+                    key={t.id}
+                    className="task-row"
+                    onClick={(event) => {
+                      if (
+                        event.button !== 0 ||
+                        event.metaKey ||
+                        event.ctrlKey ||
+                        event.shiftKey ||
+                        event.altKey ||
+                        (event.target as Element).closest("a, button, input, select")
+                      ) return;
+                      go(`/tasks/${encodeURIComponent(t.id)}`);
+                    }}
+                  >
                     <td>
                       <a
                         className="task-title"

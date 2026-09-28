@@ -198,7 +198,7 @@ sudo python3 deploy/publish_platform.py --tag v1.2.3
 
 若控制面通过本仓库的 `scripts/dev start` 原生运行，程序镜像不会自动构建。开发主机使用 `python3 deploy/publish_platform.py --dev --build --tag dev-20260924` 一次构建并发布；脚本读取 `.cache/dev/.env.registry`，检查本机 API/Worker 进程，并将当前源码构建为 `swarmjet:local`。正式 Compose 部署继续使用上面的命令。
 
-原生开发 API 默认只监听回环地址。要让另一台内网主机注册 Node，在 `deploy/.env.development` 设置 `DEV_API_HOST` 为控制面主机的内网 IPv4，再运行 `./scripts/dev restart`；目标机的 `CONTROL_PLANE_URL` 填 `http://<该内网 IP>:8180`。浏览器仍可通过本机 Vite 页面访问。完成测试后可移除该变量并重启，恢复回环监听。
+原生开发 API 默认只监听回环地址。要让另一台内网主机注册 Node，在 `deploy/.env.development` 设置 `DEV_API_HOST` 为控制面主机的内网 IPv4，再运行 `./scripts/dev restart`；目标机的 `CONTROL_PLANE_URL` 填 `http://<该内网 IP>:8181`。浏览器仍可通过本机 Vite 页面访问。完成测试后可移除该变量并重启，恢复回环监听。
 
 在控制台 **Node 管理 → 添加节点**填写唯一 ID、已发布的程序镜像、两端内网地址、数据目录和端口，下载私密部署包。`CONTROL_PLANE_URL` 必须从目标服务器访问到 API；默认安装的 `LISTEN_HOST=127.0.0.1` 仅允许本机访问，跨机器部署前应为 API 配置可达的内网监听地址或 HTTPS 反向代理。`NODE_ADVERTISE_URL` 必须能从控制面访问目标服务器；默认包使用目标机 8092 端口。限制该端口只接受控制面访问。生产网络按前文要求使用 HTTPS。
 

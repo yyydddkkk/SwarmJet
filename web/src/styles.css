@@ -70,6 +70,38 @@ button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.system-tabs {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 26px;
+}
+.app .system-tabs :is(a, button) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.app .system-tabs :is(a, button):hover {
+  background: transparent;
+  color: var(--ink);
+}
+.app .system-tabs :is(a, button)[aria-current="page"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+@media (max-width: 760px) {
+  .system-tabs { gap: 16px; overflow-x: auto; }
+}
 .primary {
   background: var(--accent);
   color: var(--surface);

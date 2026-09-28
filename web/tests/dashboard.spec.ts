@@ -74,3 +74,14 @@ test("workbench and control fit a narrow viewport", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "运行总览" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test("overview create Issue opens the creation dialog with the selected project", async ({ page }) => {
+  await mockDashboard(page);
+  await page.goto("/#/overview");
+  await page.getByLabel("项目范围").selectOption("platform");
+  await page.getByRole("link", { name: "创建 Issue" }).click();
+  await expect(page).toHaveURL(/#\/issues\?create=1&project=platform$/);
+  const dialog = page.getByRole("dialog", { name: "创建 Issue" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("项目")).toHaveValue("platform");
+});

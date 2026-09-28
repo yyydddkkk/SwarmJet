@@ -205,6 +205,11 @@ func TestStaticDoesNotFallbackAPI(t *testing.T) {
 	if w.Code != 404 || strings.Contains(w.Body.String(), "SPA") {
 		t.Fatal(w.Code)
 	}
+	w = httptest.NewRecorder()
+	New(nil, Config{}).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	if w.Code != 404 {
+		t.Fatalf("API-only server served a web page: %d", w.Code)
+	}
 }
 func TestMetaCheckReadOnly(t *testing.T) {
 	methods := []string{}

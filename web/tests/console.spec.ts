@@ -381,6 +381,16 @@ test("workbench separates intervention states and combines project, stage and te
   await expect(page.locator(".attention-card")).toHaveCount(0);
 });
 
+test("clicking a task row opens its detail", async ({ page }) => {
+  await mock(page);
+  await page.goto("/#/tasks");
+  const row = page.locator(".task-list tbody tr").first();
+  await expect(row).toBeVisible();
+  await row.locator("td").nth(1).click();
+  await expect(page).toHaveURL(/#\/tasks\/task-001$/);
+  await expect(page.getByRole("heading", { name: task.issue.title, exact: true })).toBeVisible();
+});
+
 for (const stage of [
   "blocked",
   "waiting_manual_merge",

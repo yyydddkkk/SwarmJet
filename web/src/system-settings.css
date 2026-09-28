@@ -1,9 +1,5 @@
 .system-settings { max-width: 1180px; }
 .system-settings .system-page-head { margin-bottom: 18px; }
-.system-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line); margin-bottom: 26px; }
-.system-tabs a { display: inline-flex; align-items: center; min-height: 44px; color: var(--muted); text-decoration: none; font-weight: 600; border-bottom: 2px solid transparent; padding: 0 2px; }
-.system-tabs a:hover { color: var(--ink); }
-.system-tabs a[aria-current="page"] { color: var(--accent); border-color: var(--accent); }
 .system-context { display: flex; flex-wrap: wrap; gap: 0; margin-bottom: 18px; color: var(--muted); font-size: 12px; }
 .system-context span { padding: 0 15px; border-right: 1px solid var(--line); }
 .system-context span:first-child { padding-left: 0; }
@@ -47,8 +43,6 @@
 .system-developer .environment-check { font-weight: 650; }
 .system-developer .panel-body > p:not(.notice) { max-width: 70ch; color: var(--muted); font-size: 13px; line-height: 1.7; }
 @media (max-width: 760px) {
-  .system-tabs { gap: 16px; overflow-x: auto; }
-  .system-tabs a { white-space: nowrap; }
   .system-address-row { grid-template-columns: 1fr; gap: 7px; }
   .system-address-row a { margin-top: 3px; }
   .system-check-row { grid-template-columns: 75px 1fr; gap: 4px 12px; }

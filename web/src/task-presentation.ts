@@ -2,6 +2,16 @@ import type { Task } from "./types";
 
 export type TaskView = "all" | "active" | "waiting" | "attention" | "ended";
 
+export function taskStageLabel(stage: string): string {
+  const labels: Record<string, string> = {
+    queued: "等待执行", waiting_dependencies: "等待前置任务", implementing: "开发中",
+    reviewing: "审查中", integrating: "集成中", waiting_approval: "等待批准",
+    waiting_manual_merge: "等待合并", manual_merging: "合并中", partial_merge: "部分已合并",
+    completed: "已完成", blocked: "需要处理", cancelled: "已取消",
+  };
+  return labels[stage] || stage.replaceAll("_", " ");
+}
+
 export function taskView(task: Task): Exclude<TaskView, "all"> {
   if (["completed", "cancelled"].includes(task.stage)) return "ended";
   if (task.stage === "queued" && task.admissionStatus === "waiting") return "waiting";

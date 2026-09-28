@@ -250,9 +250,10 @@ func environment() (map[string]string, error) {
 	if apiIP == nil || apiIP.To4() == nil || !(apiIP.IsPrivate() || apiIP.IsLoopback()) {
 		return nil, errors.New("DEV_API_HOST 必须是本机回环或内网 IPv4 地址")
 	}
-	env["LISTEN_ADDRESS"] = net.JoinHostPort(apiHost, value(env, "DEV_API_PORT", "8180"))
+	env["LISTEN_ADDRESS"] = net.JoinHostPort(apiHost, value(env, "DEV_API_PORT", "8181"))
 	env["SWARMJET_HOST_LISTEN_ADDRESS"] = env["LISTEN_ADDRESS"]
 	env["DEV_API_URL"] = "http://" + env["LISTEN_ADDRESS"]
+	env["SWARMJET_API_ONLY"] = "1"
 	env["RUNTIME_ADMIN_LISTEN"] = "127.0.0.1:" + value(env, "DEV_RUNTIME_PORT", "8191")
 	env["RUNTIME_ADMIN_URL"] = "http://" + env["RUNTIME_ADMIN_LISTEN"]
 	if env["NODE_SECRET"] == "" {
@@ -678,7 +679,7 @@ func supervise() error {
 	if _, err := run(env, "docker", "compose", "-f", filepath.Join(root, "deploy/compose.buildkit-dev.yaml"), "up", "-d"); err != nil {
 		return err
 	}
-	for _, port := range []string{env["DEV_WEB_PORT"], value(env, "DEV_API_PORT", "8180"), value(env, "DEV_RUNTIME_PORT", "8191"), value(env, "DEV_BUILDER_PORT", "8193"), value(env, "DEV_BUILDER_PROXY_PORT", "8194"), value(env, "DEV_NODE_PORT", "8192")} {
+	for _, port := range []string{env["DEV_WEB_PORT"], value(env, "DEV_API_PORT", "8181"), value(env, "DEV_RUNTIME_PORT", "8191"), value(env, "DEV_BUILDER_PORT", "8193"), value(env, "DEV_BUILDER_PROXY_PORT", "8194"), value(env, "DEV_NODE_PORT", "8192")} {
 		listener, err := net.Listen("tcp", "127.0.0.1:"+port)
 		if err != nil {
 			return fmt.Errorf("port %s is unavailable: %w", port, err)

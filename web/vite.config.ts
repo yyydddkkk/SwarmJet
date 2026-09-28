@@ -6,7 +6,7 @@ export default defineConfig({
     port: 5273,
     proxy: {
       "/api": {
-        target: process.env.DEV_API_URL || "http://127.0.0.1:8180",
+        target: process.env.DEV_API_URL || "http://127.0.0.1:8181",
         ws: true,
       },
     },
