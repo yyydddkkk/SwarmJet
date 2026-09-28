@@ -14,12 +14,17 @@ const ImageSettings = lazy(() => import("./ImageSettings"));
 const SystemSettings = lazy(() => import("./SystemSettings"));
 const IssuesWorkbench = lazy(() => import("./IssuesWorkbench"));
 const MergeRequestsWorkbench = lazy(() => import("./MergeRequestsWorkbench"));
+const WorkbenchOverview = lazy(() => import("./DashboardPage").then(module => ({ default: module.WorkbenchOverview })));
+const ControlOverview = lazy(() => import("./DashboardPage").then(module => ({ default: module.ControlOverview })));
+const ResourcesOverview = lazy(() => import("./DashboardPage").then(module => ({ default: module.ResourcesOverview })));
 
 export default function App() {
   const [user, setUser] = useState<string | null>(null),
     [checking, setChecking] = useState(true),
     [error, setError] = useState(""),
-    [route, setRoute] = useState(location.hash.slice(1) || "/issues");
+    [route, setRoute] = useState(location.hash.slice(1) || "/overview"),
+    [projectScope, setProjectScope] = useState(new URLSearchParams(location.hash.split("?")[1] || "").get("project") || ""),
+    [projects, setProjects] = useState<Project[]>([]);
   const session = useCallback(async () => {
     setChecking(true);
     setError("");
@@ -34,7 +39,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     void session();
-    const hash = () => setRoute(location.hash.slice(1) || "/issues");
+    const hash = () => setRoute(location.hash.slice(1) || "/overview");
     const expired = () => {
       setUser(null);
       setError("会话已过期，请重新登录。");
@@ -46,6 +51,14 @@ export default function App() {
       window.removeEventListener("session-expired", expired);
     };
   }, [session]);
+  useEffect(() => {
+    if (!user) return;
+    api<Project[] | null>("/projects").then(result => setProjects(result || [])).catch(() => setProjects([]));
+  }, [user]);
+  useEffect(() => {
+    const scoped = new URLSearchParams(route.split("?")[1] || "").get("project");
+    if (scoped !== null) setProjectScope(scoped);
+  }, [route]);
   if (checking) return <div className="loading">正在连接控制台…</div>;
   if (!user)
     return (
@@ -57,17 +70,30 @@ export default function App() {
         }}
       />
     );
-  const projectPage = route.startsWith("/projects");
-  const issuePage = route.startsWith("/issues");
-  const mrPage = route.startsWith("/merge-requests");
-  const taskPage = route.startsWith("/tasks");
-  const runtimePage = route.startsWith("/runtime");
-  const imagesPage = route.startsWith("/images");
-  const settingsPage = route.startsWith("/settings");
-  const nodesPage=route.startsWith("/nodes"), networksPage=route.startsWith("/networks");
-  const parts = route.split("?")[0].split("/");
-  const selectedProject =
-    new URLSearchParams(route.split("?")[1]).get("project") || "";
+  const path = route.split("?")[0];
+  const parts = path.split("/");
+  const overviewPage = path === "/overview" || path === "/";
+  const controlPage = path === "/control";
+  const resourcesPage = path === "/resources";
+  const projectPage = path.startsWith("/projects");
+  const issuePage = path.startsWith("/issues");
+  const mrPage = path.startsWith("/merge-requests");
+  const taskPage = path.startsWith("/tasks");
+  const runtimePage = path.startsWith("/runtime");
+  const imagesPage = path.startsWith("/images");
+  const settingsPage = path.startsWith("/settings");
+  const nodesPage = path.startsWith("/nodes"), networksPage = path.startsWith("/networks");
+  const executionPage = resourcesPage || runtimePage || nodesPage || imagesPage;
+  const controlArea = controlPage || executionPage || projectPage || settingsPage || networksPage;
+  const scopeVisible = overviewPage || (taskPage && !parts[2]) || (issuePage && !parts[2]) || (mrPage && !parts[2]);
+  const scopedHref = (target: string) => `#${target}${projectScope ? `?project=${encodeURIComponent(projectScope)}` : ""}`;
+  const changeScope = (value: string) => {
+    setProjectScope(value);
+    const params = new URLSearchParams(location.hash.split("?")[1] || "");
+    if (value) params.set("project", value); else params.delete("project");
+    history.replaceState(null, "", `#${path}${params.size ? `?${params}` : ""}`);
+  };
+  const pageName = overviewPage ? "行动总览" : taskPage ? "任务" : issuePage ? "Issue" : mrPage ? "MR" : controlPage ? "运行总览" : projectPage ? "项目与接入" : resourcesPage ? "执行资源" : runtimePage ? "Runner 环境" : nodesPage ? "Node 管理" : imagesPage ? "镜像管理" : networksPage ? "网络配置" : "系统设置";
   return (
     <div className="app">
       <a
@@ -81,7 +107,7 @@ export default function App() {
         跳至主要内容
       </a>
       <aside className="sidebar">
-        <a className="brand" href="#/issues">
+        <a className="brand" href="#/overview">
           <span className="brand-mark">
             <Icon name="bolt" />
           </span>
@@ -91,45 +117,21 @@ export default function App() {
           <span>S</span>
           <div>
             <strong>开发工作空间</strong>
-            <small>自主开发 · 跨仓库协作</small>
+            <small>任务协作与平台控制</small>
           </div>
         </div>
-        <nav aria-label="主导航">
-          <a aria-current={issuePage ? "page" : undefined} className={issuePage ? "active" : ""} href="#/issues"><Icon name="tasks" />Issue 工作台</a>
-          <a aria-current={mrPage ? "page" : undefined} className={mrPage ? "active" : ""} href="#/merge-requests"><Icon name="branch" />MR 工作台</a>
-          <a
-            aria-current={taskPage ? "page" : undefined}
-            className={taskPage ? "active" : ""}
-            href="#/tasks"
-          >
-            <Icon name="tasks" />
-            任务中心
-          </a>
-          <a
-            aria-current={projectPage ? "page" : undefined}
-            className={projectPage ? "active" : ""}
-            href="#/projects"
-          >
-            <Icon name="projects" />
-            项目配置
-          </a>
-          <a
-            aria-current={runtimePage ? "page" : undefined}
-            className={runtimePage ? "active" : ""}
-            href="#/runtime"
-          >
-            <Icon name="runtime" />
-            Runner 环境
-          </a>
-          <a href="#/nodes" className={nodesPage?"active":""} aria-current={nodesPage?"page":undefined}><Icon name="nodes"/>Node 管理</a>
-          <a aria-current={imagesPage ? "page" : undefined} className={imagesPage ? "active" : ""} href="#/images">
-            <Icon name="images" />镜像管理
-          </a>
-          <a aria-current={settingsPage ? "page" : undefined} className={settingsPage ? "active" : ""} href="#/settings">
-            <Icon name="settings" />系统设置
-          </a>
-        </nav>
-        <SidebarProjects route={route} selectedProject={selectedProject} />
+        <div className="nav-group"><div className="nav-label">工作台</div><nav aria-label="工作台导航">
+          <a aria-current={overviewPage ? "page" : undefined} className={overviewPage ? "active" : ""} href={scopedHref("/overview")}><Icon name="overview" />行动总览</a>
+          <a aria-current={taskPage ? "page" : undefined} className={taskPage ? "active" : ""} href={scopedHref("/tasks")}><Icon name="tasks" />任务</a>
+          <a aria-current={issuePage ? "page" : undefined} className={issuePage ? "active" : ""} href={scopedHref("/issues")}><Icon name="issue" />Issue</a>
+          <a aria-current={mrPage ? "page" : undefined} className={mrPage ? "active" : ""} href={scopedHref("/merge-requests")}><Icon name="branch" />MR</a>
+        </nav></div>
+        <div className="nav-group"><div className="nav-label">控制台</div><nav aria-label="控制台导航">
+          <a aria-current={controlPage ? "page" : undefined} className={controlPage ? "active" : ""} href="#/control"><Icon name="activity" />运行总览</a>
+          <a aria-current={projectPage ? "page" : undefined} className={projectPage ? "active" : ""} href="#/projects"><Icon name="projects" />项目与接入</a>
+          <a aria-current={executionPage ? "page" : undefined} className={executionPage ? "active" : ""} href="#/resources"><Icon name="nodes" />执行资源</a>
+          <a aria-current={settingsPage || networksPage ? "page" : undefined} className={settingsPage || networksPage ? "active" : ""} href="#/settings"><Icon name="settings" />系统设置</a>
+        </nav></div>
         <div className="sidebar-foot">
           <div className="avatar">{user.slice(0, 1).toUpperCase()}</div>
           <div>
@@ -153,17 +155,11 @@ export default function App() {
         </div>
       </aside>
       <div className="body">
-        <header className="topbar">
-          <span>
-            工作空间 <span className="slash">/</span>{" "}
-            {issuePage ? "Issue 工作台" : mrPage ? "MR 工作台" : settingsPage ? "系统设置" : nodesPage ? "Node 管理" : networksPage ? "网络配置" : imagesPage ? "镜像管理" : runtimePage ? "Runner 环境" : projectPage ? "项目配置" : "任务中心"}
-          </span>
-          <span className="top-note">SwarmJet / 工作空间</span>
-        </header>
+        <header className="topbar"><span>{controlArea ? "控制台" : "工作台"}<span className="slash">/</span><strong>{pageName}</strong></span>{scopeVisible ? <label className="topbar-scope">项目范围 <select aria-label="项目范围" value={projectScope} onChange={event => changeScope(event.target.value)}><option value="">全部项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name || project.id}</option>)}</select></label> : <span className="top-note">全平台</span>}</header>
         <main id="main" tabIndex={-1}>
           <ErrorBox error={error} />
           <Suspense fallback={<div className="loading">正在加载页面…</div>}>
-          {issuePage ? <IssuesWorkbench key={route} route={route} /> : mrPage ? <MergeRequestsWorkbench key={route} route={route} /> : settingsPage ? (<SystemSettings section={parts[2] || "overview"} />) : nodesPage ? (<Suspense fallback={<p>正在加载节点…</p>}><NodeSettings/></Suspense>) : networksPage ? (<Suspense fallback={<p>正在加载网络配置…</p>}><NetworkSettings/></Suspense>) : imagesPage ? (
+          {overviewPage ? <WorkbenchOverview key={projectScope} projectId={projectScope} /> : controlPage ? <ControlOverview /> : resourcesPage ? <ResourcesOverview /> : issuePage ? <IssuesWorkbench key={route} route={route} initialProjectId={projectScope} onProjectChange={changeScope} /> : mrPage ? <MergeRequestsWorkbench key={route} route={route} initialProjectId={projectScope} onProjectChange={changeScope} /> : settingsPage ? (<SystemSettings section={parts[2] || "overview"} />) : nodesPage ? (<Suspense fallback={<p>正在加载节点…</p>}><NodeSettings/></Suspense>) : networksPage ? (<Suspense fallback={<p>正在加载网络配置…</p>}><NetworkSettings/></Suspense>) : imagesPage ? (
             <Suspense fallback={<div className="loading">正在加载镜像管理…</div>}><ImageSettings /></Suspense>
           ) : runtimePage ? (
             <Suspense
@@ -181,7 +177,7 @@ export default function App() {
           ) : parts[1] === "tasks" && parts[2] ? (
             <TaskDetail key={route} id={decodeURIComponent(parts[2])} />
           ) : (
-            <Tasks key={route} projectId={selectedProject} />
+            <Tasks key={route} projectId={projectScope} onProjectChange={changeScope} />
           )}
           </Suspense>
         </main>
@@ -204,7 +200,7 @@ function Login({
   return (
     <div className="login">
       <div className="login-story">
-        <a className="brand" href="#/issues">
+        <a className="brand" href="#/overview">
           <span className="brand-mark">
             <Icon name="bolt" />
           </span>
@@ -273,59 +269,6 @@ function Login({
           <small className="muted">仅限授权管理员访问</small>
         </form>
       </div>
-    </div>
-  );
-}
-function SidebarProjects({
-  route,
-  selectedProject,
-}: {
-  route: string;
-  selectedProject: string;
-}) {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    let current = true;
-    api<Project[] | null>("/projects")
-      .then((result) => {
-        if (current) {
-          setProjects(result || []);
-          setFailed(false);
-        }
-      })
-      .catch(() => {
-        if (current) setFailed(true);
-      });
-    return () => {
-      current = false;
-    };
-  }, [route]);
-  return (
-    <div className="sidebar-projects">
-      <div className="nav-label">项目</div>
-      {failed ? (
-        <a className="sidebar-project-hint" href="#/projects">
-          项目加载失败，前往重试
-        </a>
-      ) : projects.length ? (
-        <nav aria-label="按项目查看任务">
-          {projects.map((p) => (
-            <a
-              key={p.id}
-              className={selectedProject === p.id ? "active" : ""}
-              href={`#/tasks?project=${encodeURIComponent(p.id)}`}
-            >
-              <i className="project-dot" />
-              <span>{p.name || p.id}</span>
-            </a>
-          ))}
-        </nav>
-      ) : (
-        <a className="sidebar-project-hint" href="#/projects">
-          接入你的第一个项目
-        </a>
-      )}
     </div>
   );
 }

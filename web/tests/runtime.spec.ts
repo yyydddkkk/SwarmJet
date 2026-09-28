@@ -219,7 +219,8 @@ test("leaving runtime closes its socket and returning does not reconnect", async
   );
   await page.evaluate(() => { location.hash = "/tasks"; });
   await expect.poll(() => closed).toBe(1);
-  await page.getByRole("link", { name: "Runner 环境", exact: true }).click();
+  await page.getByRole("navigation", { name: "控制台导航" }).getByRole("link", { name: "执行资源" }).click();
+  await page.getByRole("link", { name: /Runner 环境/ }).click();
   await expect(
     page.getByRole("button", { name: "打开终端", exact: true }),
   ).toBeEnabled();

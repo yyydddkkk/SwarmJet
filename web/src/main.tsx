@@ -5,6 +5,7 @@ import App from "./App";
 import "./styles.css";
 import "./project-setup.css";
 import "./workbench.css";
+import "./console-shell.css";
 // Development-only, disposable design study. Never replaces the production console.
 const Prototype =
   import.meta.env.DEV &&

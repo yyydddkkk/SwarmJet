@@ -9,17 +9,18 @@ import "./workbench-pages.css";
 
 const date = (value?: string) => value ? new Date(value).toLocaleString("zh-CN") : "—";
 
-export default function MergeRequestsWorkbench({ route }: { route: string }) {
+export default function MergeRequestsWorkbench({ route, initialProjectId = "", onProjectChange }: { route: string; initialProjectId?: string; onProjectChange?: (projectId: string) => void }) {
   const parts = route.split("?")[0].split("/");
   if (parts[2] && parts[3] && parts[4]) return <MRDetail projectId={decodeURIComponent(parts[2])} repositoryId={decodeURIComponent(parts[3])} iid={Number(parts[4])} />;
-  return <MRList />;
+  return <MRList initialProjectId={initialProjectId} onProjectChange={onProjectChange} />;
 }
 
-function MRList() {
+function MRList({ initialProjectId, onProjectChange }: { initialProjectId: string; onProjectChange?: (projectId: string) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState(""); const [repositoryId, setRepositoryId] = useState(""); const [state, setState] = useState("opened"); const [search, setSearch] = useState("");
+  const [projectId, setProjectId] = useState(initialProjectId); const [repositoryId, setRepositoryId] = useState(""); const [state, setState] = useState("opened"); const [search, setSearch] = useState("");
   const [cursor, setCursor] = useState(""); const [history, setHistory] = useState<string[]>([]);
   const [page, setPage] = useState<Page<WorkbenchMR>>({ items: [] }); const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [creating, setCreating] = useState(false);
+  useEffect(() => { setProjectId(initialProjectId); setRepositoryId(""); setCursor(""); setHistory([]); }, [initialProjectId]);
   useEffect(() => { void getProjects().then(setProjects).catch(cause => setError((cause as Error).message)); }, []);
   const repositories = useMemo(() => projects.find(p => p.id === projectId)?.repositories || [], [projects, projectId]);
   const reset = () => { setCursor(""); setHistory([]); };
@@ -30,7 +31,7 @@ function MRList() {
   }, [projectId, repositoryId, state, search, cursor]);
   useEffect(() => { void load(); }, [load]);
   return <div className="workbench-page"><div className="page-head"><div><h1>MR 工作台</h1><p>在一个地方查看变更、CI、讨论与合并状态。</p></div><button className="primary" onClick={() => setCreating(true)}>创建 MR</button></div><section className="panel workbench-list">
-    <div className="workbench-filters"><label>项目<select value={projectId} onChange={e => { setProjectId(e.target.value); setRepositoryId(""); reset(); }}><option value="">全部项目</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>仓库<select value={repositoryId} disabled={!projectId} onChange={e => { setRepositoryId(e.target.value); reset(); }}><option value="">全部仓库</option>{repositories.map(r => <option key={r.id} value={r.id}>{r.path || r.id}</option>)}</select></label><label>状态<select value={state} onChange={e => { setState(e.target.value); reset(); }}><option value="opened">未合并</option><option value="merged">已合并</option><option value="closed">已关闭</option><option value="all">全部</option></select></label><label>搜索<input type="search" value={search} onChange={e => { setSearch(e.target.value); reset(); }} placeholder="标题或内容" /></label></div>
+    <div className="workbench-filters"><label>项目<select value={projectId} onChange={e => { setProjectId(e.target.value); setRepositoryId(""); reset(); onProjectChange?.(e.target.value); }}><option value="">全部项目</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>仓库<select value={repositoryId} disabled={!projectId} onChange={e => { setRepositoryId(e.target.value); reset(); }}><option value="">全部仓库</option>{repositories.map(r => <option key={r.id} value={r.id}>{r.path || r.id}</option>)}</select></label><label>状态<select value={state} onChange={e => { setState(e.target.value); reset(); }}><option value="opened">未合并</option><option value="merged">已合并</option><option value="closed">已关闭</option><option value="all">全部</option></select></label><label>搜索<input type="search" value={search} onChange={e => { setSearch(e.target.value); reset(); }} placeholder="标题或内容" /></label></div>
     <ErrorBox error={error} retry={() => void load()} />
     {loading ? <p className="workbench-muted">正在读取 MR…</p> : page.items.length ? <div className="workbench-rows">{page.items.map(mr => <a className="workbench-row" key={`${mr.projectId}/${mr.repositoryId}/${mr.iid}`} href={detailHash("merge-requests", mr.projectId, mr.repositoryId, mr.iid)}><div><span className="workbench-number">!{mr.iid}</span><strong>{mr.title}</strong><span className="workbench-state">{mr.state === "merged" ? "已合并" : mr.state === "closed" ? "已关闭" : "待审查"}</span></div><p>{projects.find(p => p.id === mr.projectId)?.name || mr.projectId} / {mr.repositoryId} · {mr.sourceBranch} → {mr.targetBranch}</p><small>{mr.taskId ? "托管任务 · " : ""}更新于 {date(mr.updatedAt)}</small></a>)}</div> : <Empty>{state === "opened" ? "当前没有符合条件的未合并 MR。可将状态切换为“全部”查看历史记录。" : "没有符合条件的 MR。"}</Empty>}
     <div className="workbench-pager"><button disabled={!history.length || loading} onClick={() => { setCursor(history.at(-1) || ""); setHistory(h => h.slice(0, -1)); }}>上一页</button><button disabled={!page.nextCursor || loading} onClick={() => { setHistory(h => [...h, cursor]); setCursor(page.nextCursor || ""); }}>下一页</button></div>

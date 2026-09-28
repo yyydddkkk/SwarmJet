@@ -245,7 +245,7 @@ test("login, task filtering, exact-digest approval errors, logs and logout", asy
   await page.getByLabel("用户名", { exact: true }).fill("admin");
   await page.getByLabel("密码", { exact: true }).fill("password");
   await page.getByLabel("密码", { exact: true }).press("Enter");
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "任务中心" }).click();
+  await page.getByRole("navigation", { name: "工作台导航" }).getByRole("link", { name: "任务", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "任务中心", exact: true }),
   ).toBeVisible();
@@ -372,11 +372,11 @@ test("workbench separates intervention states and combines project, stage and te
   await expect(page.locator(".task-list tbody tr")).toHaveCount(1);
   await page.getByLabel("搜索任务").fill("不存在");
   await expect(page.getByText("没有符合筛选条件的任务。")).toBeVisible();
-  await page
-    .getByRole("navigation", { name: "按项目查看任务" })
-    .getByRole("link", { name: "交易服务" })
-    .click();
+  await page.getByLabel("项目范围").selectOption("payments");
   await expect(page.getByLabel("筛选项目")).toHaveValue("payments");
+  await expect(page.getByText("没有符合筛选条件的任务。")).toBeVisible();
+  await page.getByLabel("筛选任务阶段").selectOption("");
+  await page.getByLabel("搜索任务").fill("");
   await expect(page.locator(".task-list tbody tr")).toHaveCount(1);
   await expect(page.locator(".attention-card")).toHaveCount(0);
 });

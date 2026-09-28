@@ -1,0 +1,28 @@
+/* Workbench and control console share one shell. */
+.app .sidebar { overflow-y: auto; }
+.app .sidebar .nav-group { margin-bottom: 18px; }
+.app .sidebar .nav-group .nav-label { margin: 0 12px 8px; color: #91a2b8; font-size: 11px; font-weight: 600; }
+.app .sidebar .nav-group nav { display: grid; gap: 3px; }
+.app .sidebar .nav-group nav a { min-height: 40px; padding: 9px 12px; gap: 11px; }
+.app .sidebar .nav-group nav a.active { background: #ffffff12; color: white; box-shadow: inset 2px 0 #86a8ff; }
+.app .sidebar .nav-group nav a:hover { color: white; background: #ffffff12; }
+.app .topbar { gap: 20px; }
+.app .topbar strong { color: #31415b; font-weight: 600; }
+.app .topbar-scope { display: flex; align-items: center; gap: 10px; white-space: nowrap; color: #728097; font-size: 11px; }
+.app .topbar-scope select { width: 145px; min-height: 32px; padding: 5px 27px 5px 9px; border-radius: 5px; font-size: 12px; }
+.app .topbar .top-note { padding: 5px 9px; border: 1px solid #e0e6ee; border-radius: 5px; background: #f4f6fa; color: #4d5e77; font-size: 12px; }
+@media (max-width: 640px) {
+  .app .sidebar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0; padding: 14px 16px 10px; }
+  .app .sidebar > .brand { grid-column: 1; grid-row: 1; margin-bottom: 14px; }
+  .app .sidebar > .sidebar-foot { grid-column: 2; grid-row: 1; margin: 0; padding: 0; }
+  .app .sidebar .nav-group { grid-column: 1 / -1; margin: 0 0 4px; }
+  .app .sidebar .nav-group .nav-label { display: none; }
+  .app .sidebar .nav-group nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 0; }
+  .app .sidebar .nav-group nav a { display: flex; justify-content: center; min-width: 0; min-height: 36px; gap: 5px; padding: 7px 3px; font-size: 11px; white-space: nowrap; }
+  .app .sidebar .nav-group nav a .ui-icon { width: 14px; height: 14px; }
+  .app .topbar { height: 54px; padding: 0 16px; }
+  .app .topbar-scope { gap: 0; }
+  .app .topbar-scope select { width: 114px; }
+  .app .topbar-scope { font-size: 0; }
+  .app .topbar .slash { margin: 0 7px; }
+}

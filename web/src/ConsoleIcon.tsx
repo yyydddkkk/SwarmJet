@@ -2,7 +2,10 @@ export function Icon({
   name,
 }: {
   name:
+    | "overview"
     | "tasks"
+    | "issue"
+    | "activity"
     | "projects"
     | "nodes"
     | "runtime"
@@ -19,6 +22,9 @@ export function Icon({
     | "check";
 }) {
   const paths = {
+    overview: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
+    issue: "M4 4h16v5a3 3 0 0 0 0 6v5H4v-5a3 3 0 0 0 0-6V4Zm8 1v3m0 3v2m0 3v3",
+    activity: "M2 12h4l3-7 5 14 3-7h5",
     bolt: "m13 2-9 12h7l-1 8 10-13h-7l1-7Z",
     branch: "M6 3v12a4 4 0 0 0 4 4h8M6 8h7a4 4 0 0 0 4-4V3",
     settings: "M10 2h4l.5 2.3c.6.2 1.2.4 1.7.7l2-.9 2.8 2.8-.9 2c.3.5.5 1.1.7 1.7L23 10v4l-2.2.5c-.2.6-.4 1.2-.7 1.7l.9 2-2.8 2.8-2-.9c-.5.3-1.1.5-1.7.7L14 23h-4l-.5-2.2c-.6-.2-1.2-.4-1.7-.7l-2 .9-2.8-2.8.9-2c-.3-.5-.5-1.1-.7-1.7L1 14v-4l2.2-.5c.2-.6.4-1.2.7-1.7l-.9-2L5.8 3l2 .9c.5-.3 1.1-.5 1.7-.7L10 2ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z",

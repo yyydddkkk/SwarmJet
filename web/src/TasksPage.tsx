@@ -7,8 +7,12 @@ import { stages, stageLabel, date, Status } from "./TaskStatus";
 import { Empty, ErrorBox, Field, Modal } from "./ui";
 
 const go = (path: string) => { location.hash = path; };
+const initialView = (): TaskView => {
+  const value = new URLSearchParams(location.hash.split("?")[1] || "").get("view");
+  return value === "active" || value === "waiting" || value === "attention" || value === "ended" ? value : "all";
+};
 
-export default function Tasks({ projectId }: { projectId: string }) {
+export default function Tasks({ projectId, onProjectChange }: { projectId: string; onProjectChange?: (projectId: string) => void }) {
   const [tasks, setTasks] = useState<Task[]>([]),
     [page, setPage] = useState<TaskPage | null>(null),
     [attention, setAttention] = useState<Task[]>([]),
@@ -18,7 +22,7 @@ export default function Tasks({ projectId }: { projectId: string }) {
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [filter, setFilter] = useState(""),
-    [view, setView] = useState<TaskView>("all"),
+    [view, setView] = useState<TaskView>(initialView),
     [projectFilter, setProjectFilter] = useState(projectId),
     [search, setSearch] = useState(""),
     [create, setCreate] = useState(false);
@@ -197,7 +201,7 @@ export default function Tasks({ projectId }: { projectId: string }) {
             <select
               aria-label="筛选项目"
               value={projectFilter}
-              onChange={(e) => { setProjectFilter(e.target.value); resetPage(); }}
+              onChange={(e) => { setProjectFilter(e.target.value); onProjectChange?.(e.target.value); resetPage(); }}
             >
               <option value="">全部项目</option>
               {projectOptions.map((p) => (

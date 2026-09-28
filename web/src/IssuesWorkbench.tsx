@@ -9,15 +9,15 @@ import "./workbench-pages.css";
 
 const date = (value?: string) => value ? new Date(value).toLocaleString("zh-CN") : "—";
 
-export default function IssuesWorkbench({ route }: { route: string }) {
+export default function IssuesWorkbench({ route, initialProjectId = "", onProjectChange }: { route: string; initialProjectId?: string; onProjectChange?: (projectId: string) => void }) {
   const parts = route.split("?")[0].split("/");
   if (parts[2] && parts[3] && parts[4]) return <IssueDetail projectId={decodeURIComponent(parts[2])} repositoryId={decodeURIComponent(parts[3])} iid={Number(parts[4])} />;
-  return <IssueList />;
+  return <IssueList initialProjectId={initialProjectId} onProjectChange={onProjectChange} />;
 }
 
-function IssueList() {
+function IssueList({ initialProjectId, onProjectChange }: { initialProjectId: string; onProjectChange?: (projectId: string) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(initialProjectId);
   const [repositoryId, setRepositoryId] = useState("");
   const [state, setState] = useState("opened");
   const [label, setLabel] = useState<WorkbenchLabel[]>([]);
@@ -29,6 +29,7 @@ function IssueList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  useEffect(() => { setProjectId(initialProjectId); setRepositoryId(""); setLabel([]); setAssignee([]); setCursor(""); setHistory([]); }, [initialProjectId]);
   useEffect(() => { void getProjects().then(setProjects).catch(cause => setError((cause as Error).message)); }, []);
   const reset = () => { setCursor(""); setHistory([]); };
   const refresh = useCallback(async () => {
@@ -50,7 +51,7 @@ function IssueList() {
     <div className="page-head"><div><h1>Issue 工作台</h1><p>查看已接入 GitLab 仓库中的需求、讨论与任务轮次。</p></div><button className="primary" onClick={() => setCreating(true)}>创建 Issue</button></div>
     <section className="panel workbench-list">
       <div className="workbench-filters">
-        <label>项目<select value={projectId} onChange={e => { setProjectId(e.target.value); setRepositoryId(""); setLabel([]); setAssignee([]); reset(); }}><option value="">全部项目</option>{projects.map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label>
+        <label>项目<select value={projectId} onChange={e => { setProjectId(e.target.value); setRepositoryId(""); setLabel([]); setAssignee([]); reset(); onProjectChange?.(e.target.value); }}><option value="">全部项目</option>{projects.map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label>
         <label>仓库<select value={repositoryId} disabled={!projectId} onChange={e => { setRepositoryId(e.target.value); setLabel([]); setAssignee([]); reset(); }}><option value="">全部仓库</option>{repositories.map(r => <option value={r.id} key={r.id}>{r.path || r.id}</option>)}</select></label>
         <label>状态<select value={state} onChange={e => { setState(e.target.value); reset(); }}><option value="opened">未关闭</option><option value="closed">已关闭</option><option value="all">全部</option></select></label>
         <LabelSelector kind="issues" projectId={projectId} repositoryId={repositoryId} selected={label} onChange={value => { setLabel(value); reset(); }} multiple={false} />
