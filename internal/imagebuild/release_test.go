@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"swarmjet/internal/domain"
 	"testing"
 )
 
@@ -38,6 +39,46 @@ func localReleaseRepo(t *testing.T) (string, string) {
 	command("tag", "v1.2.3")
 	command("tag", "v1.2.3-rc1")
 	return dir, sha
+}
+
+func TestPlatformReleasePinsNetworkBeforeGitAndBuild(t *testing.T) {
+	repo, _ := localReleaseRepo(t)
+	m, err := New(t.TempDir(), func(_ context.Context, args []string, _ io.Writer) error {
+		for i, arg := range args {
+			if arg == "--metadata-file" && i+1 < len(args) {
+				return os.WriteFile(args[i+1], []byte(`{"containerimage.digest":"`+digestA+`"}`), 0600)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.releaseSourceURL = repo
+	currentVersion, resolveCount := 1, 0
+	m.ReleaseEnv = func(context.Context) (Prepared, error) {
+		resolveCount++
+		p := Prepared{Env: map[string]string{"HTTP_PROXY": ""}, NetworkVersion: domain.NetworkVersion{ID: "build-proxy", Version: currentVersion}}
+		currentVersion = 2 // Setting changes while the release source is fetched.
+		return p, nil
+	}
+	m.ResolvePlatform = func(ctx context.Context, _ string) (Prepared, string, error) {
+		p, ok := PinnedReleaseNetwork(ctx)
+		if !ok || p.NetworkVersion.Version != 1 {
+			t.Errorf("release network was not pinned: %+v", p.NetworkVersion)
+		}
+		return p, "registry.test/swarmjet/platform", nil
+	}
+	b, err := m.BuildPlatformRelease(context.Background(), "v1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := awaitBuild(t, m, b.ID); result.Status != "succeeded" {
+		t.Fatal(result)
+	}
+	if resolveCount != 1 || b.Config.NetworkVersion != (domain.NetworkVersion{ID: "build-proxy", Version: 1}) {
+		t.Fatalf("resolved %d times, build version %+v", resolveCount, b.Config.NetworkVersion)
+	}
 }
 
 func TestUnavailableReleaseSourceNeverBuildsCurrentTree(t *testing.T) {

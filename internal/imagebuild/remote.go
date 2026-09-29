@@ -16,8 +16,9 @@ import (
 
 // Prepared is ephemeral. Credential material is never part of the build record.
 type Prepared struct {
-	Env      map[string]string
-	Registry registryconfig.Access
+	Env            map[string]string
+	NetworkVersion domain.NetworkVersion
+	Registry       registryconfig.Access
 }
 type preparedKey struct{}
 

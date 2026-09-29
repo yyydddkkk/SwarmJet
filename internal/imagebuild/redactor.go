@@ -28,6 +28,7 @@ func newSecretWriter(out io.Writer, p Prepared) *secretWriter {
 		if u, e := url.Parse(raw); e == nil && u.User != nil {
 			pass, _ := u.User.Password()
 			values = append(values, pass, url.QueryEscape(pass), url.PathEscape(pass))
+			values = append(values, base64.StdEncoding.EncodeToString([]byte(u.User.Username()+":"+pass)))
 		}
 	}
 	w := &secretWriter{out: out, max: 1}

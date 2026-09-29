@@ -53,6 +53,41 @@ func (a *server) networks(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, req)
 		return
 	}
+	if r.URL.Path == "/api/networks/buildkit-default" {
+		switch r.Method {
+		case http.MethodGet:
+			choice, e := a.s.BuildkitNetworkChoice(r.Context())
+			if e != nil {
+				failure(w, e)
+				return
+			}
+			respond(w, 200, choice)
+		case http.MethodPut:
+			var choice domain.NetworkChoice
+			if !decode(w, r, &choice) {
+				return
+			}
+			if e := choice.Validate(); e != nil {
+				problem(w, 400, e.Error())
+				return
+			}
+			if choice.Mode == "" {
+				choice.Mode = "default"
+			}
+			if e := a.s.SetBuildkitNetworkChoice(r.Context(), choice); e != nil {
+				if errors.Is(e, store.ErrNotFound) {
+					problem(w, 400, "网络配置不可用")
+					return
+				}
+				failure(w, e)
+				return
+			}
+			respond(w, 200, choice)
+		default:
+			problem(w, 405, "method not allowed")
+		}
+		return
+	}
 	if r.Method == "GET" {
 		items, e := a.s.NetworkProfiles(r.Context())
 		if e != nil {

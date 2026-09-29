@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"swarmjet/internal/buildproxy"
 	"swarmjet/internal/domain"
 	"swarmjet/internal/imagebuild"
@@ -66,16 +68,17 @@ func runBuilder(ctx context.Context, s *store.Store, box *secretbox.Box) error {
 			if c.Platform != "linux/"+runtime.GOARCH {
 				return imagebuild.Prepared{}, fmt.Errorf("当前构建服务仅支持本机架构 %s", runtime.GOARCH)
 			}
-			ref, e := s.ResolveNetwork(cctx, c.Network)
+			ref, e := s.ResolveBuildNetwork(cctx, c.Network)
 			if e != nil {
 				return imagebuild.Prepared{}, e
 			}
 			c.NetworkVersion = ref
 			vars, e := networkconfig.Resolve(cctx, s, box, ref)
 			if e == nil {
+				vars = buildNetworkEnv(vars, reg.Address)
 				proxy.Use(vars)
 			}
-			return imagebuild.Prepared{Env: vars, Registry: access}, e
+			return imagebuild.Prepared{Env: vars, NetworkVersion: ref, Registry: access}, e
 		}
 		m.ResolvePlatform = func(cctx context.Context, tag string) (imagebuild.Prepared, string, error) {
 			reg, access, err := registryconfig.Load(cctx, s, box, true)
@@ -94,23 +97,33 @@ func runBuilder(ctx context.Context, s *store.Store, box *secretbox.Box) error {
 					}
 				}
 			}
-			ref, err := s.ResolveNetwork(cctx, domain.NetworkChoice{Mode: "default"})
+			prepared, pinned := imagebuild.PinnedReleaseNetwork(cctx)
+			if !pinned {
+				ref, err := s.ResolveBuildNetwork(cctx, domain.NetworkChoice{Mode: "default"})
+				if err != nil {
+					return imagebuild.Prepared{}, "", err
+				}
+				prepared.Env, err = networkconfig.Resolve(cctx, s, box, ref)
+				if err != nil {
+					return imagebuild.Prepared{}, "", err
+				}
+				prepared.NetworkVersion = ref
+			}
+			prepared.Env = buildNetworkEnv(prepared.Env, reg.Address)
+			prepared.Registry = access
+			proxy.Use(prepared.Env)
+			return prepared, reg.Address + "/swarmjet/platform", nil
+		}
+		m.ReleaseEnv = func(cctx context.Context) (imagebuild.Prepared, error) {
+			ref, err := s.ResolveBuildNetwork(cctx, domain.NetworkChoice{Mode: "default"})
 			if err != nil {
-				return imagebuild.Prepared{}, "", err
+				return imagebuild.Prepared{}, err
 			}
 			vars, err := networkconfig.Resolve(cctx, s, box, ref)
 			if err != nil {
-				return imagebuild.Prepared{}, "", err
+				return imagebuild.Prepared{}, err
 			}
-			proxy.Use(vars)
-			return imagebuild.Prepared{Env: vars, Registry: access}, reg.Address + "/swarmjet/platform", nil
-		}
-		m.ReleaseEnv = func(cctx context.Context) (map[string]string, error) {
-			ref, err := s.ResolveNetwork(cctx, domain.NetworkChoice{Mode: "default"})
-			if err != nil {
-				return nil, err
-			}
-			return networkconfig.Resolve(cctx, s, box, ref)
+			return imagebuild.Prepared{Env: buildNetworkEnv(vars, os.Getenv("SWARMJET_BUILTIN_REGISTRY_ADDRESS")), NetworkVersion: ref}, nil
 		}
 		return nil
 	}
@@ -156,4 +169,25 @@ func runBuilder(ctx context.Context, s *store.Store, box *secretbox.Box) error {
 		return nil
 	}
 	return e
+}
+
+// BuildKit's external proxy must never receive local service or registry traffic.
+func buildNetworkEnv(vars map[string]string, registryAddress string) map[string]string {
+	out := make(map[string]string, len(vars))
+	for key, value := range vars {
+		out[key] = value
+	}
+	bypass := []string{"localhost", "127.0.0.1", "::1", "api", "builder", "buildkit", "registry", "registry-gateway", "postgres", "rabbitmq", "temporal", "mihomo"}
+	if registryAddress != "" {
+		bypass = append(bypass, registryAddress)
+		if host, _, err := net.SplitHostPort(registryAddress); err == nil {
+			bypass = append(bypass, host)
+		}
+	}
+	if out["NO_PROXY"] != "" {
+		bypass = append(bypass, out["NO_PROXY"])
+	}
+	out["NO_PROXY"] = strings.Join(bypass, ",")
+	out["no_proxy"] = out["NO_PROXY"]
+	return out
 }

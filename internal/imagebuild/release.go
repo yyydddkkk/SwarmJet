@@ -36,6 +36,15 @@ type ReleaseManifest struct {
 	Digest    string `json:"digest,omitempty"`
 }
 
+type releaseNetworkKey struct{}
+
+// PinnedReleaseNetwork returns the network resolved before fetching a release tag.
+// It remains in memory and is never written to the build record.
+func PinnedReleaseNetwork(ctx context.Context) (Prepared, bool) {
+	p, ok := ctx.Value(releaseNetworkKey{}).(Prepared)
+	return p, ok
+}
+
 func (m *Manager) releaseURL() string {
 	if m.releaseSourceURL != "" {
 		return m.releaseSourceURL // local test fixture only
@@ -46,12 +55,16 @@ func (m *Manager) releaseURL() string {
 func (m *Manager) gitOutput(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if m.ReleaseEnv != nil {
-		vars, err := m.ReleaseEnv(ctx)
+	if pinned, ok := PinnedReleaseNetwork(ctx); ok {
+		for key, value := range pinned.Env {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
+	} else if m.ReleaseEnv != nil {
+		prepared, err := m.ReleaseEnv(ctx)
 		if err != nil {
 			return "", fmt.Errorf("无法读取发布网络配置: %w", err)
 		}
-		for key, value := range vars {
+		for key, value := range prepared.Env {
 			cmd.Env = append(cmd.Env, key+"="+value)
 		}
 	}
@@ -119,6 +132,13 @@ func (m *Manager) BuildPlatformRelease(ctx context.Context, tag string) (Build, 
 		}
 	}
 	m.mu.Unlock()
+	if m.ReleaseEnv != nil {
+		prepared, err := m.ReleaseEnv(ctx)
+		if err != nil {
+			return Build{}, fmt.Errorf("无法读取发布网络配置: %w", err)
+		}
+		ctx = context.WithValue(ctx, releaseNetworkKey{}, prepared)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	sourceRoot := filepath.Join(m.dir, "release-sources")
@@ -156,7 +176,7 @@ func (m *Manager) BuildPlatformRelease(ctx context.Context, tag string) (Build, 
 		return Build{}, err
 	}
 	manifest := &ReleaseManifest{Version: tag, CommitSHA: sha, Platform: "linux/" + runtime.GOARCH}
-	build, err := m.buildPlatform(tag, dir, manifest)
+	build, err := m.buildPlatform(ctx, tag, dir, manifest)
 	if err != nil {
 		return Build{}, err
 	}

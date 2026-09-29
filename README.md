@@ -1,153 +1,75 @@
 # SwarmJet
 
-可自托管的 AI 开发任务平台，支持并发任务和跨仓库自动化。当前提供 GitLab、GitHub.com 与 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）、Claude Code 集成，默认单机 Docker Compose 部署，也支持把资源消耗大的执行部分放到独立执行节点，任务准入后固定归属不再迁移。一个开发 Agent 在独立工作区内修改一组仓库，可选启动独立审查 Agent，再合并到**各仓库配置的目标分支**。Go + Temporal + PostgreSQL 管理可恢复流程，React 控制台提供项目配置、执行记录、团队授权及人工操作。
+SwarmJet 是一个可自托管的 AI 开发任务平台。它从 GitLab 或 GitHub.com 的 Issue 接收任务，让 Agent 在独立工作区修改一个或多个仓库，并通过验证、审查和 MR/PR 交付改动。管理员和团队成员可以在 Web 控制台配置项目、查看执行记录并处理需要人工介入的步骤。
 
-## 成员与权限
+## 功能概览
 
-一个部署默认服务一个组织。平台管理员使用环境变量管理员账号进行初装和应急管理，维护团队、组织连接、Node、镜像与网络，并创建项目和指定初始负责人。配置 STARTTLS SMTP 后，成员可在登录页申请账号；邮箱验证及管理员审批完成后才能登录。项目默认只对成员可见，直接授权与团队授权取较高角色：观察者只读，操作员可创建和处置任务，负责人可管理项目配置、直接成员、人工批准与合并。停用账号会撤销已有会话。首版不含 SSO、多因素认证和自定义角色。
+- **跨仓库任务**：一次任务可修改多个仓库，各仓库独立指定目标分支。
+- **可恢复的执行流程**：使用 Temporal 编排开发、验证、审查和合并；任务状态和操作记录持久化。
+- **可选的 Agent 与检查**：支持 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）和 Claude Code；项目可配置独立审查、额外验收与自动合并。
+- **独立执行环境**：每轮任务拥有私有 Git 工作区和角色会话；可在单机运行，也可分配给独立执行节点。
+- **团队管理**：提供成员与项目权限、连接管理、执行器镜像管理和人工操作入口。
 
-GitLab 成员须在“个人 GitLab 身份”中验证并绑定自己的 Token，工作台操作使用该成员的 Token；自动任务继续使用组织连接。GitLab 标签和 `/swarmjet run` 评论只有在项目启用相应触发策略、且作者是已绑定的负责人或操作员时才自动接单；无法核验时保持待处理。GitHub 自动接单由平台管理员逐项目显式开启，默认关闭。升级后旧会话失效，已有项目仅平台管理员可见，需分配负责人并复核自动接单策略。
+平台负责协调任务和记录结果；仓库、Issue、MR/PR、CI 与分支规则仍由 GitLab 或 GitHub 管理。默认部署方式是单机 Docker Compose。
 
-## 架构
+## 快速开始
 
-```mermaid
-flowchart LR
-  Host[GitLab / GitHub Issue、MR / PR] --> Ingress[Webhook inbox + 周期对账]
-  Console[Web 控制台] --> API[Go 管理 API]
-  Ingress --> Admission[PostgreSQL 准入队列]
-  API --> Admission
-  Admission --> Outbox[PostgreSQL 命令 outbox]
-  Outbox --> Temporal[Temporal Server]
-  Temporal <--> Workflow[Go Workflow Worker]
-  Temporal --> Activity[Go Activity Worker]
-  Activity --> Workspace[meta + 任务私有 Git 副本]
-  Activity --> Agents[可选 CLI 开发 / 审查 / 合并]
-  Activity --> Tests[隔离 Compose 联调]
-  Activity --> Host
-  Activity --> Reports[报告与执行记录]
-  Reports --> Console
-```
-
-Temporal 是运行流程的事实源；业务 PostgreSQL 保存配置、查询投影、操作记录和审计。项目所选的托管平台是分支、MR/PR、检查和合并结果的事实源。控制台操作先写持久化命令，再交给 Workflow，重复命令按 ID 去重。
-
-## 工作流程
-
-1. 登记仓库的 opened Issue 添加 `autonomous` 标签，Webhook 或轮询启动第一轮；后续以 `/swarmjet run` 开头的 Issue 评论排队启动下一轮。
-2. 等待明确的 Issue 阻塞依赖；平台管理的上游以当前轮任务完成为准，普通关联关系不阻塞。
-3. 固定配置与仓库基线，在长期缓存外建立任务私有源仓库和 meta worktree 集合。
-4. 一个开发 Agent 跨仓库实现、补充测试并提交；开启额外验收时 Worker 执行配置的检查。
-5. 开发 Agent 推送任务分支并创建 MR；启用独立审查时，审查 Agent 检查整组改动。
-6. 审查失败或目标分支变化时有限次返工，并重新审查当前提交集合；启用额外验收后，其必需检查不完整时禁止自动合并。
-7. 合并 Agent 顺序合并到配置目标分支；关闭独立审查时沿用开发会话。允许中间版本暂时不兼容，部分合并保留记录并核实后恢复。
-8. 全部完成后清理任务工作区与联调环境，来源 Issue 保持打开，保留按提交版本发布的人工复核指引及后续讨论。
-
-需求歧义记录假设、添加 `needs-clarification` 并**继续执行**；只有具体障碍无法解决才 blocked。当前轮运行期间的 `/swarmjet run` 评论进入下一轮队列，不改变已审查的提交集合。提交/MR 只引用来源 Issue，不使用 `Closes/Fixes/Resolves` 指令。
-
-## 项目接入
-
-成员不需要理解 Meta-Repo。平台管理员新建 GitLab 项目时填写地址和 Access Token；新建 GitHub.com 项目时选择已配置的 GitHub App 安装，并指定初始负责人。验证连接后搜索并选择仓库、确认目标分支，随后在页面内嵌终端完成 `opencode auth login` 并选择模型做一次实际调用验证。系统据此创建受管的内部 Meta-Repo，运行初始化 Agent 分析项目，并在独立副本中执行验证。GitLab 连接加密保存（`SWARMJET_MASTER_KEY`）并可跨项目复用；GitHub 连接仅保存安装 ID，短期令牌按需签发。凭证不回显，也不写入日志、URL、任务快照或 Temporal 历史。模型和验收未就绪时项目保持草稿，不接单；初始化未通过验证时也不会自动启用。
-
-控制台的“执行器环境”提供五种 Agent 的适配列表，管理员统一勾选启用，默认全部未勾选；项目选择一个已启用的默认 Agent。CLI 必须安装在配置终端与任务所用的镜像中，勾选启用不会自动安装软件。可通过独立的“镜像管理”页面查看仓库版本、分发或回退节点镜像，并选择 Agent、设置构建参数，由持久化 BuildKit 构建并发布到 Distribution；在“系统设置 → 开发者选项”启用后，同页还可构建、发布和管理平台程序镜像。也可继续通过 `AGENT_CLIS=opencode,codex` 等构建参数按需打包，详见 [部署说明](deploy/README.md)。终端配置保存在持久化 Home 中。
-
-Issue 继续用 `autonomous` 接单，可添加一个 `agent:opencode`、`agent:codex`、`agent:dst`、`agent:agy` 或 `agent:claude` 标签，统一指定开发、审查、发布与合并执行器。不加标签沿用项目默认；多个标签、未知或未启用的 Agent 会明确拒绝接单，修正后轮询重试。任务接单后执行器固定，已有任务不会因标签或启用列表变化而切换。
-
-项目启用后，标签管理会在登记的仓库中补齐 `autonomous` 和平台已启用 Agent 对应的 `agent:*` 标签；项目设置页可查看各仓库状态并手动重试。已有同名标签的颜色和描述不会被修改，停用 Agent 的旧标签不会自动删除。任务阶段和 `needs-clarification` 标签首次使用时按统一配色创建。后台在配置变化后及定期重试失败的标签同步，标签同步失败不会阻断 Issue 扫描。
-
-任务不指定模型，使用 CLI 保存的默认配置。首次执行时复制一份任务级配置快照，开发与审查各自获得私有副本和独立会话；合并恢复审查会话。后续终端配置修改影响之后首次启动的新任务，不影响已有任务的角色配置。临时会话切换或终端 `export` 不保证持久化；API key 应配置到部署环境。旧任务仍按旧快照运行。Meta 静态初始化仍使用受限的 OpenCode，创建受管项目的镜像需保留 OpenCode。
-
-自动合并是项目级开关，新项目默认开启。关闭时系统仍会开发、验证、创建 MR/PR 和审查，待全部变更请求在托管平台合并后完成该轮任务。所有新任务的来源 Issue 都保持打开；`no-auto-close` 对新任务无需再设置。只有 `/swarmjet run` 评论会启动后续轮次，普通复核回复不会触发开发。
-
-“导入已有 Meta-Repo”仍是高级入口。此时填写 Meta-Repo URL/ref 并读取清单，仓库列表与 Meta-Repo 的 `.meta.yaml`、`.meta.yml` 或 `.meta` 校验一致：
-
-```yaml
-projects:
-  backend:
-    repo: https://gitlab.example.com/team/backend.git
-  client:
-    repo: https://gitlab.example.com/team/client.git
-    depends_on: [backend]
-```
-
-各仓库独立配置 `targetBranch`。不存在时须提供 `createFrom`，从明确起点初始化一次。配置修改默认仅影响新任务。Meta-Repo 自身需要改码时，将它登记为 `path: "."` 的仓库，目标分支与 `metaRef` 对齐。
-
-执行器选择与模型选择分离：Issue 标签只接受 Agent ID，不接受 `agent:codex/model`。OpenCode 的项目模型字段仅用于旧任务兼容及静态初始化；新开发任务会忽略它。GitLab 凭证来自页面连接或部署环境引用，不放进标签。
-
-联调至少包含一条 required 检查。Compose 使用任务私有网络和卷，不使用固定容器名、共享外部卷、Docker socket、宿主机网络或固定宿主机端口。Worker 凭证不会整体传入联调服务。
-
-公共 HTTP 联调示例见 [examples/http-check/README.md](examples/http-check/README.md)，可直接验证服务启动及必需检查，不依赖公司项目。
-
-## 本地开发（推荐）
-
-前端、API 和 Worker 直接在宿主机运行。Vite 热更新页面；Go 源码变化时，开发启动器自动重新编译并重启 Go 进程，不构建应用镜像。编译失败时保留旧进程，并在 `.cache/dev/supervisor.log` 记录错误。`deploy/` 中的 Dockerfile 和 Compose 用于部署；现阶段 Agent、联调验收仍通过容器隔离执行。
-
-Linux 开发环境需要 Node.js、Go 1.25+、Git、`meta` 和可访问的 Docker daemon。先执行 `npm ci --prefix web`。从 `deploy/.env.example` 创建本项目独立的 `deploy/.env`，设置数据库凭据、`DATA_DIR`、执行器配置和 Temporal namespace；可复制 `deploy/.env.development.example` 为 `deploy/.env.development` 覆盖本机工具路径和端口。dotenv 内容作为数据解析，不作为 shell 脚本执行，文件不可提交。启动器自身需要先编译，Go 不在 PATH 时用 `GO_BINARY=/path/to/go ./scripts/dev start`。
-
-PostgreSQL、Temporal 使用 SwarmJet 自己的 Compose 容器。启动脚本会动态查询 Compose 网络中的地址，不重建依赖、不清空数据；若使用其他数据库或 Temporal，在 `deploy/.env.development` 显式填写地址。首次准备依赖可执行 `(cd deploy && docker compose up -d postgres temporal-namespace temporal-ui)`，不必启动容器版 API、Worker。全新数据库需先在仓库根目录执行 `(cd deploy && docker compose -f compose.yaml -f compose.build.yaml run --build --rm migrate)`；开发启动会在启动进程前执行幂等数据库迁移。Agent 镜像的构建见部署文档。
+在 **Linux** 主机上准备 Docker Engine、Docker Compose 插件、Git、Python 3、OpenSSL 和 `ip` 命令。获取源码后，在仓库根目录运行：
 
 ```bash
-./scripts/dev start    # 编译 Go，检查依赖，停止旧容器版 API/Worker，启动本地进程并监视 Go 源码
-./scripts/dev status
-./scripts/dev restart  # 仅需要重新读取开发环境配置时使用
-./scripts/dev stop     # 只停止本地进程，保留依赖和数据
+sudo python3 deploy/install.py
 ```
 
-开发页面默认 **http://localhost:5273**，API 仅在 `127.0.0.1:8181` 提供接口，不再提供第二个网页入口。Worker 管理接口为 `127.0.0.1:8191`，独立构建服务为 `127.0.0.1:8193`。Vite 代理 API、事件流和终端 WebSocket；开发环境的登录 Origin 使用 5273。进程日志位于 `.cache/dev/`，不提交到 Git。启动后项目状态与任务记录保存在 SwarmJet 数据库，已阻塞的任务不会被脚本自动重试。
-
-启动脚本会为宿主机 Git 设置仓库内的 `scripts/askpass.sh`；手动启动 Worker 时可用 `SWARMJET_GIT_ASKPASS` 指定该绝对路径。Agent 容器继续使用镜像内的凭据助手。
-
-从容器切换时，先停止旧 API、Worker 及执行器配置终端，再将 `DATA_DIR` 中旧的 root 所有文件交给本机运行用户（不要更改权限为全员可读）。之后 Agent 容器以 Worker 的 UID/GID 写入任务文件，私有 HOME 位于任务目录。保持 `DATA_DIR` 的绝对路径不变，否则旧任务工作区、凭据和日志无法复用。不要同时运行容器版与本地版应用进程。
-
-## 开发验证
-
-`./scripts/test.sh` 默认只使用本地工具链。需要检查部署 Compose 时显式设置 `VALIDATE_DEPLOY=1`；浏览器测试用 `RUN_BROWSER_TESTS=1` 启用。
+安装脚本生成部署配置和密钥、构建镜像、初始化数据库并启动服务。默认控制台只监听服务器本机；从自己的电脑通过 SSH 隧道访问：
 
 ```bash
-go test -race ./cmd/... ./internal/...
-cd web
-npm ci
-npm run build
-npm test
+ssh -N -L 8180:127.0.0.1:8180 用户名@服务器
 ```
 
-可选集成测试使用专用数据库，测试自行创建临时 schema：
+然后打开 <http://localhost:8180>。管理员用户名默认为 `admin`，密码保存在服务器 `deploy/.env` 的 `ADMIN_PASSWORD` 中。
+
+首次登录后，在控制台启用已安装的 Agent、配置模型认证、添加 GitLab 或 GitHub 项目，并完成项目初始化。项目验证通过且启用后才会接收任务。GitLab 的逐步接入流程见[项目快速接入](docs/getting-started.md)；GitHub App 的配置见[部署指南](deploy/README.md#githubcom-app-接入)。更多安装选项、备份与升级说明也在[部署指南](deploy/README.md)。
+
+## 任务如何运行
+
+1. 项目启用相应触发策略后，在已登记仓库的 Issue 上添加 `autonomous` 标签，启动第一轮任务。
+2. SwarmJet 固定本轮的项目配置、仓库基线和执行节点，在独立工作区运行选定的 Agent。
+3. Agent 提交改动并创建 MR/PR；按项目配置执行额外验收和独立审查。
+4. 检查通过后自动合并，或等待团队在托管平台人工合并。来源 Issue 保持打开，并附上按提交版本生成的人工复核指引。
+
+需要继续开发时，在 Issue 中发布以 `/swarmjet run` 开头的评论，启动下一轮。运行中的新命令会排队，不改动当前轮已审查的提交集合。自动接单还受项目策略和成员权限约束；GitHub 项目默认关闭自动接单，需要管理员逐项目开启。
+
+## 本地开发
+
+需要 Go 1.25+、Node.js、npm、Git、`meta` 和可访问的 Docker daemon。前端依赖安装后，通过仓库提供的开发启动器运行：
 
 ```bash
-TEST_DATABASE_URL='postgres://postgres:test@localhost:5432/swarmjet_test?sslmode=disable' go test -race ./internal/store ./internal/api
-SWARMJET_DOCKER_TEST=1 go test ./internal/integration
+npm ci --prefix web
+./scripts/dev start
 ```
 
-测试包括 Temporal 时间跳跃与故障恢复、GitLab HTTP 契约、真实 Git 工作区、Runtime Docker 协议、PostgreSQL/API，以及真实双任务 Docker 隔离。控制台 Playwright 使用隔离 API fixture。
+首次启动前需要准备 `deploy/.env`、PostgreSQL、Temporal 和 Agent 镜像。完整步骤、默认端口及常见问题见[本地开发指南](docs/development.md)。
 
-## 部署与迁移
+运行主要检查：
 
-单机首次部署：服务器安装 Docker Engine、Compose 插件和 Python 3，获取源码后执行 `sudo python3 deploy/install.py`，自动生成配置与密钥、构建镜像并启动服务。默认通过 SSH 隧道访问；首次安装多个执行器可加 `--agent-clis opencode,codex,claude`。详细步骤见 [单机快速部署](deploy/README.md#单机快速部署源码构建)。
+```bash
+./scripts/test.sh
+```
 
-步骤见 [deploy/README.md](deploy/README.md)。管理程序支持 `serve`、`worker`、`node`、`migrate`、`doctor`、`legacy-inventory`。
+部署配置检查和浏览器测试可分别通过 `VALIDATE_DEPLOY=1`、`RUN_BROWSER_TESTS=1` 启用；集成测试的环境要求见[本地开发指南](docs/development.md)。
 
-Worker 经 Docker socket 创建同宿主机的任务容器，`DATA_DIR` 必须是宿主机与容器内一致的绝对路径。Agent 仅挂载自己的私有 Git 副本、当前执行目录、角色会话及只读报告；共享缓存和调度记录不暴露给 Agent。需要多机时，启动 `swarmjet node` 执行节点并在控制面设置 `EXECUTION_MODE=distributed`，任务会固定归属到节点；节点失联保留现场并 blocked，不自动迁移。
+## 文档
 
-本仓库从独立源码起步，不包含旧实现的 Git 历史。切换前停止旧版取单、备份数据，用 `swarmjet legacy-inventory /path/to/state.json` 生成手工接管清单。扫描跳过 `ai:working`、`ai:mr-opened`、`ai:needs-human`，确认存量分支/MR 后再调整标签。两套调度器不同时处理同一批任务。
+| 主题 | 文档 |
+| --- | --- |
+| 单机安装、GitHub App、执行节点、升级与运维 | [部署指南](deploy/README.md) |
+| GitLab 项目接入与任务验收策略 | [项目快速接入](docs/getting-started.md) |
+| 成员权限、Agent 选择与任务规则 | [使用指南](docs/user-guide.md) |
+| 开发环境与测试 | [本地开发指南](docs/development.md) |
+| 系统架构与执行流程 | [架构说明](docs/architecture.md) · [架构图](docs/architecture-diagram.md) |
+| 接口契约 | [API 契约](api/contract.md) |
+| 贡献方式 | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-## 排障
+## 贡献与许可证
 
-- 控制台查看阶段、会话、假设、测试及 MR；Temporal UI 查看执行历史。
-- 暂停停止当前执行并保留现场，继续恢复确切会话；取消不回滚已合并代码或删除远端 MR。
-- 自动扫描只首次接单；后续轮次由 Issue 评论中的 `/swarmjet run` 明确触发，运行中的评论合并排队，取消后也不会仅因保留 `autonomous` 标签自动重启。
-- 停止容器失败会反馈阻断，不误报取消成功。
-- 提交变化使原审查/批准失效；目标分支推进需要同步和重新验证。
-- 报告位于 `DATA_DIR/runs/<task>/`；监督记录与任务目录隔离。
-- 真实模型认证、GitLab 权限或测试夹具缺失会明确失败，不用模拟测试代替验收。
-
-接口见 [api/contract.md](api/contract.md)，内部约定见 [docs/architecture.md](docs/architecture.md)。Kubernetes 当前进度见 [接入阶段总结](docs/kubernetes-status.md)，目标执行架构与迁移边界见 [迁移设计](docs/kubernetes-migration.md)。
-
-已执行的检查及真实环境验收缺口见 [docs/validation.md](docs/validation.md)，首批运行指标见 [可观测性说明](docs/observability.md)。
-
-## 发布与贡献
-
-从源码安装见 [部署指南](deploy/README.md)，贡献与检查见 [CONTRIBUTING.md](CONTRIBUTING.md)。CI 使用标准 GitLab Container Registry，不依赖私有构建工具。当前尚未指定许可证；公开发布前需要明确代码授权与许可证。
-
-### 节点、代理与跨机器镜像
-
-“执行节点”管理节点容量、网络配置、默认及额外预加载镜像；项目选择自动调度或指定节点范围。一个 Node 可使用多个镜像，任务固定节点、各角色镜像摘要和网络配置版本。新节点默认暂停，完成镜像准备后再启用。
-
-“系统设置”显示当前生效的服务地址、仓库及 Node 心跳检查，并集中管理网络代理和镜像仓库。Node 和构建服务按需引用网络配置；部署地址仍在服务器环境文件中修改并重启生效。构建服务使用独立 BuildKit；镜像通过自建 Distribution 分发。部署及权限配置见 [仓库与构建服务](docs/registry.md)，测试记录见 [分布式验收](docs/distributed-validation.md)。
+欢迎按[贡献指南](CONTRIBUTING.md)提交改动。项目目前尚未指定开源许可证；公开使用和再分发的授权范围有待明确。

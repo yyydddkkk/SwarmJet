@@ -1,6 +1,7 @@
 package imagebuild
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,13 +28,14 @@ func TestPublishedDigestIsRegistryReferenceNotLocalID(t *testing.T) {
 func TestBuildLogSecretsAcrossWrites(t *testing.T) {
 	var out strings.Builder
 	w := newSecretWriter(&out, Prepared{Env: map[string]string{"HTTP_PROXY": "http://user:very-secret@proxy:8080"}})
-	for _, part := range []string{"before very-", "secret and http://user:very-", "secret@proxy:8080 after"} {
+	encoded := base64.StdEncoding.EncodeToString([]byte("user:very-secret"))
+	for _, part := range []string{"before very-", "secret and http://user:very-", "secret@proxy:8080 and Basic " + encoded + " after"} {
 		_, _ = w.Write([]byte(part))
 	}
 	if e := w.Close(); e != nil {
 		t.Fatal(e)
 	}
-	if strings.Contains(out.String(), "very-secret") || out.String() != "before [REDACTED] and [REDACTED] after" {
+	if strings.Contains(out.String(), "very-secret") || strings.Contains(out.String(), encoded) || out.String() != "before [REDACTED] and [REDACTED] and Basic [REDACTED] after" {
 		t.Fatal(out.String())
 	}
 }

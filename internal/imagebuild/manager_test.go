@@ -2,6 +2,7 @@ package imagebuild
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -30,6 +31,49 @@ func awaitBuild(t *testing.T, m *Manager, id string) Build {
 	}
 	t.Fatal("build never finished")
 	return Build{}
+}
+
+func TestBuildProxyCredentialOnlyInEphemeralPreparation(t *testing.T) {
+	dir := t.TempDir()
+	secret := "private-proxy-password"
+	m, err := New(dir, func(_ context.Context, args []string, out io.Writer) error {
+		_, _ = io.WriteString(out, "RUN HTTP_PROXY=http://builder:"+secret+"@proxy.test:8080\n")
+		for i, arg := range args {
+			if arg == "--metadata-file" && i+1 < len(args) {
+				return os.WriteFile(args[i+1], []byte(`{"containerimage.digest":"`+digestA+`"}`), 0600)
+			}
+		}
+		return errors.New("missing metadata file")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Resolve = func(_ context.Context, c *Config) (Prepared, error) {
+		c.NetworkVersion = domain.NetworkVersion{ID: "build-proxy", Version: 3}
+		return Prepared{Env: map[string]string{"HTTP_PROXY": "http://builder:" + secret + "@proxy.test:8080"}}, nil
+	}
+	c := DefaultConfig()
+	c.Repository = "registry.test/swarmjet/agent"
+	c.Agents = []string{"codex"}
+	b, err := m.Build(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := awaitBuild(t, m, b.ID); result.Status != "succeeded" || result.Config.NetworkVersion.Version != 3 {
+		t.Fatal(result)
+	}
+	log, err := m.Logs(b.ID)
+	if err != nil || strings.Contains(log, secret) || !strings.Contains(log, "[REDACTED]") {
+		t.Fatalf("build log leaked proxy credential or lacked redaction: %q %v", log, err)
+	}
+	state, err := os.ReadFile(filepath.Join(root(dir), "state.json"))
+	if err != nil || strings.Contains(string(state), secret) {
+		t.Fatal("persisted build record contains proxy credential", err)
+	}
+	view, err := json.Marshal(m.Snapshot())
+	if err != nil || strings.Contains(string(view), secret) {
+		t.Fatal("build response contains proxy credential", err)
+	}
 }
 
 func TestBuildSnapshotLogsAndExplicitActivation(t *testing.T) {

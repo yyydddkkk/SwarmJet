@@ -57,7 +57,7 @@ type State struct {
 type Manager struct {
 	Resolve         func(context.Context, *Config) (Prepared, error)
 	ResolvePlatform func(context.Context, string) (Prepared, string, error)
-	ReleaseEnv      func(context.Context) (map[string]string, error)
+	ReleaseEnv      func(context.Context) (Prepared, error)
 	SaveState       func(State) error
 
 	mu               sync.Mutex
@@ -74,10 +74,10 @@ var platformTag = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 // BuildPlatform uses the same serialized BuildKit queue and durable history as
 // Agent images, while leaving the Agent build recipe untouched.
 func (m *Manager) BuildPlatform(tag, sourceDir string) (Build, error) {
-	return m.buildPlatform(tag, sourceDir, nil)
+	return m.buildPlatform(context.Background(), tag, sourceDir, nil)
 }
 
-func (m *Manager) buildPlatform(tag, sourceDir string, release *ReleaseManifest) (Build, error) {
+func (m *Manager) buildPlatform(sourceCtx context.Context, tag, sourceDir string, release *ReleaseManifest) (Build, error) {
 	if !platformTag.MatchString(tag) {
 		return Build{}, errors.New("平台镜像版本标签无效")
 	}
@@ -103,7 +103,7 @@ func (m *Manager) buildPlatform(tag, sourceDir string, release *ReleaseManifest)
 	if m.running != "" {
 		return Build{}, errors.New("已有镜像正在构建，请等待完成或取消")
 	}
-	resolveCtx, stop := context.WithTimeout(context.Background(), 45*time.Second)
+	resolveCtx, stop := context.WithTimeout(sourceCtx, 45*time.Second)
 	prepared, repository, err := m.ResolvePlatform(resolveCtx, tag)
 	stop()
 	if err != nil {
@@ -120,7 +120,7 @@ func (m *Manager) buildPlatform(tag, sourceDir string, release *ReleaseManifest)
 	if err = os.MkdirAll(buildDir, 0700); err != nil {
 		return Build{}, err
 	}
-	b := Build{ID: id, Tag: repository + ":" + tag, Status: "building", Source: "platform", Config: Config{Repository: repository, Platform: "linux/" + runtime.GOARCH}, CreatedAt: time.Now().UTC(), Release: release}
+	b := Build{ID: id, Tag: repository + ":" + tag, Status: "building", Source: "platform", Config: Config{Repository: repository, Platform: "linux/" + runtime.GOARCH, NetworkVersion: prepared.NetworkVersion}, CreatedAt: time.Now().UTC(), Release: release}
 	m.state.Builds = append([]Build{b}, m.state.Builds...)
 	if err = m.save(); err != nil {
 		m.state.Builds = m.state.Builds[1:]

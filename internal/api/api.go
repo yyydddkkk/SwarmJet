@@ -273,7 +273,7 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		a.platformImages(w, r)
 		return
 	}
-	if r.URL.Path == "/api/networks" || r.URL.Path == "/api/networks/default" {
+	if r.URL.Path == "/api/networks" || r.URL.Path == "/api/networks/default" || r.URL.Path == "/api/networks/buildkit-default" {
 		a.networks(w, r)
 		return
 	}

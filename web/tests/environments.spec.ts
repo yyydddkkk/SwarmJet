@@ -4,6 +4,7 @@ const publishedRef = "registry.test/swarmjet/agent@sha256:" + "b".repeat(64);
 async function mock(page: Page) {
   const profiles: any[] = [];
   let defaultId = "";
+  let buildkitNetwork = { mode: "default" } as { mode: string; id?: string };
   let saved: any;
   const nodes = [
     {
@@ -53,6 +54,10 @@ async function mock(page: Page) {
       defaultId = r.postDataJSON().id;
       return route.fulfill({ json: { id: defaultId } });
     }
+    if (path === "/api/networks/buildkit-default") {
+      if (r.method() === "PUT") buildkitNetwork = r.postDataJSON();
+      return route.fulfill({ json: buildkitNetwork });
+    }
     if (path === "/api/networks" && r.method() === "DELETE") {
       const id = u.searchParams.get("id");
       const index = profiles.findIndex((p) => p.id === id);
@@ -93,8 +98,29 @@ async function mock(page: Page) {
     }
     return route.fulfill({ status: 404, json: { error: "not found" } });
   });
-  return { saved: () => saved, nodes };
+  return { saved: () => saved, buildkitNetwork: () => buildkitNetwork, nodes };
 }
+test("BuildKit default outlet inherits, connects directly, or selects a saved proxy", async ({ page }) => {
+  const state = await mock(page);
+  await page.goto("/#/networks");
+  const selector = page.getByLabel("BuildKit 默认网络");
+  await expect(selector).toHaveValue("default");
+  await expect(page.getByText("Dockerfile RUN 中的 apt、npm、Go 下载")).toBeVisible();
+  await selector.selectOption("direct");
+  await expect(selector).toHaveValue("direct");
+  expect(state.buildkitNetwork()).toEqual({ mode: "direct" });
+  await page.getByRole("button", { name: "新增配置" }).click();
+  await page.getByLabel("名称", { exact: true }).fill("构建出口");
+  await page.getByRole("button", { name: "保存配置", exact: true }).click();
+  await page.getByRole("button", { name: "关闭网络配置" }).click();
+  await selector.selectOption({ label: "构建出口" });
+  await expect(selector).toHaveValue(state.saved().id);
+  expect(state.buildkitNetwork()).toEqual({ mode: "profile", id: state.saved().id });
+  await page.reload();
+  await expect(selector).toHaveValue(state.saved().id);
+  await selector.selectOption("default");
+  expect(state.buildkitNetwork()).toEqual({ mode: "default" });
+});
 test("network editor creates versioned profile without placing password in the list", async ({
   page,
 }) => {
@@ -202,10 +228,10 @@ test("saved network profile can be deleted and default returns to direct", async
   await page.getByRole("button", { name: "保存配置", exact: true }).click();
   await page.getByRole("button", { name: "关闭网络配置" }).click();
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.getByLabel("默认网络").click();
+  await page.getByLabel("默认网络", { exact: true }).click();
   await page.screenshot({ path: "test-results/network-select-open-390.png" });
   await page.keyboard.press("Escape");
-  await page.getByLabel("默认网络").selectOption({ label: "临时出口" });
+  await page.getByLabel("默认网络", { exact: true }).selectOption({ label: "临时出口" });
   await page.getByRole("button", { name: /临时出口/ }).click();
   await page.getByRole("dialog", { name: "编辑网络配置" }).getByRole("button", { name: "删除配置" }).click();
   const confirmation = page.getByRole("dialog", { name: "删除网络配置" });
@@ -215,7 +241,7 @@ test("saved network profile can be deleted and default returns to direct", async
   await confirmation.getByRole("button", { name: "删除配置" }).click();
   await expect(page.getByRole("status").filter({ hasText: "网络配置已删除" })).toBeVisible();
   await expect(page.getByText("临时出口", { exact: true })).toHaveCount(0);
-  await expect(page.getByLabel("默认网络")).toHaveValue("");
+  await expect(page.getByLabel("默认网络", { exact: true })).toHaveValue("");
 });
 test("node drain preserves image and scopes network tests to selected node", async ({
   page,
