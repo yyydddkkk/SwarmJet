@@ -63,7 +63,11 @@ function IssueList({ initialProjectId, openCreate, onProjectChange, platformAdmi
         <label>搜索<input type="search" value={search} onChange={e => { setSearch(e.target.value); reset(); }} placeholder="标题或内容" /></label>
       </div>
       <ErrorBox error={error} retry={() => void refresh()} />
-      {loading ? <p className="workbench-muted">正在读取 Issue…</p> : page.items.length === 0 ? <Empty>没有符合条件的 Issue。</Empty> : <div className="workbench-rows">{page.items.map(issue => <a className="workbench-row" key={`${issue.projectId}/${issue.repositoryId}/${issue.iid}`} href={detailHash("issues", issue.projectId, issue.repositoryId, issue.iid)}><div><span className="workbench-number">#{issue.iid}</span><strong>{issue.title}</strong><span className="workbench-state">{issue.state === "closed" ? "已关闭" : "未关闭"}</span></div><p>{projects.find(p => p.id === issue.projectId)?.name || issue.projectId} / {issue.repositoryId} · {(issue.labels || []).join(" · ") || "无标签"}</p><small>关联任务 {(issue.taskIds || []).length} · 更新于 {date(issue.updatedAt)}</small></a>)}</div>}
+      {loading ? <p className="workbench-muted">正在读取 Issue…</p> : page.items.length === 0 ? <Empty>没有符合条件的 Issue。</Empty> : <div className="workbench-rows">{page.items.map(issue => <a className="workbench-row" key={`${issue.projectId}/${issue.repositoryId}/${issue.iid}`} href={detailHash("issues", issue.projectId, issue.repositoryId, issue.iid)}>
+        <div><span className="workbench-number">#{issue.iid}</span><strong>{issue.title}</strong><span className="workbench-state">{issue.state === "closed" ? "已关闭" : "未关闭"}</span></div>
+        <div className="workbench-row-labels" role="group" aria-label="标签">{(issue.labels || []).length ? issue.labels.map(label => <span className="issue-meta-chip" key={label}>{label}</span>) : <span className="workbench-row-no-labels">无标签</span>}</div>
+        <p>{projects.find(p => p.id === issue.projectId)?.name || issue.projectId} / {issue.repositoryId}</p>
+      </a>)}</div>}
       <div className="workbench-pager"><button disabled={!history.length || loading} onClick={() => { setCursor(history.at(-1) || ""); setHistory(h => h.slice(0, -1)); }}>上一页</button><button disabled={!page.nextCursor || loading} onClick={() => { setHistory(h => [...h, cursor]); setCursor(page.nextCursor || ""); }}>下一页</button></div>
     </section>
     {creating && writableProjects.length > 0 && <CreateIssue projects={writableProjects} initialProjectId={writableProjects.some(project => project.id === projectId) ? projectId : ""} close={() => setCreating(false)} />}

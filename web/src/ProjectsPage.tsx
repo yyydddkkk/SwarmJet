@@ -26,7 +26,24 @@ export default function Projects({
     [checks, setChecks] = useState<
       { name: string; ok: boolean; message: string }[] | null
     >(null),
-    [checking, setChecking] = useState("");
+    [checking, setChecking] = useState(""),
+    [openMenu, setOpenMenu] = useState<string | null>(null);
+  useEffect(() => {
+    if (!openMenu) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Element && !event.target.closest(".project-action-menu"))
+        setOpenMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenMenu(null);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openMenu]);
   const refresh = useCallback(async () => {
     try {
       setProjects((await api<Project[] | null>("/projects")) || []);
@@ -113,7 +130,7 @@ export default function Projects({
       ) : projects.length ? (
         <div className="project-grid">
           {projects.map((p) => (
-            <article className="panel project-card" key={p.id}>
+            <article className={`panel project-card${openMenu === p.id ? " project-card-menu-open" : ""}`} key={p.id}>
               <div className="row-between">
                 <span className="project-icon">{p.name.slice(0, 1)}</span>
                 <span
@@ -133,39 +150,53 @@ export default function Projects({
                 <span>{p.repositories?.length || 0} 个仓库</span>
                 <span>{p.integration?.checks?.length || 0} 项检查</span>
               </div>
-              <div className="form-actions">
-                {p.metaMode === "managed" && (
-                  <a
-                    className="button"
-                    href={`#/projects/${encodeURIComponent(p.id)}/initialization`}
-                  >
-                    查看初始化进度
-                  </a>
+              <div className="form-actions project-actions">
+                {(p.metaMode === "managed" || canManageProject(p.myRole, platformAdmin)) && (
+                  <div className="project-action-menu">
+                    <button
+                      type="button"
+                      className="project-action-trigger"
+                      aria-expanded={openMenu === p.id}
+                      aria-label={`${p.name} 的更多操作`}
+                      onClick={() => setOpenMenu(current => current === p.id ? null : p.id)}
+                    >
+                      更多操作
+                    </button>
+                    {openMenu === p.id && <div className="project-action-list">
+                      {p.metaMode === "managed" && (
+                        <a href={`#/projects/${encodeURIComponent(p.id)}/initialization`}>查看初始化进度</a>
+                      )}
+                      {canManageProject(p.myRole, platformAdmin) && <>
+                        <button
+                          type="button"
+                          disabled={checking === p.id}
+                          onClick={async () => {
+                            setOpenMenu(null);
+                            setChecking(p.id);
+                            setError("");
+                            try {
+                              const result = await api<{
+                                checks: {
+                                  name: string;
+                                  ok: boolean;
+                                  message: string;
+                                }[];
+                              }>(`/projects/${encodeURIComponent(p.id)}/check`, "POST");
+                              setChecks(result.checks || []);
+                            } catch (e) {
+                              setError((e as Error).message);
+                            } finally {
+                              setChecking("");
+                            }
+                          }}
+                        >
+                          {checking === p.id ? "检查中…" : "检查连接"}
+                        </button>
+                        <a href={`#/projects/${encodeURIComponent(p.id)}/access`}>成员与触发</a>
+                      </>}
+                    </div>}
+                  </div>
                 )}
-                {canManageProject(p.myRole, platformAdmin) && <button
-                  disabled={checking === p.id}
-                  onClick={async () => {
-                    setChecking(p.id);
-                    setError("");
-                    try {
-                      const result = await api<{
-                        checks: {
-                          name: string;
-                          ok: boolean;
-                          message: string;
-                        }[];
-                      }>(`/projects/${encodeURIComponent(p.id)}/check`, "POST");
-                      setChecks(result.checks || []);
-                    } catch (e) {
-                      setError((e as Error).message);
-                    } finally {
-                      setChecking("");
-                    }
-                  }}
-                >
-                  {checking === p.id ? "检查中…" : "检查连接"}
-                </button>}
-                {canManageProject(p.myRole, platformAdmin) && <a className="button" href={`#/projects/${encodeURIComponent(p.id)}/access`}>成员与触发</a>}
                 <a
                   className="button"
                   href={`#/projects/${encodeURIComponent(p.id)}`}

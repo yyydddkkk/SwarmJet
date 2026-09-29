@@ -17,6 +17,7 @@ test("Issue workbench opens detail and starts a task", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("navigation", { name: "工作台导航" }).getByRole("link", { name: "Issue", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Issue 工作台" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /修复权限检查/ }).locator(".workbench-row-labels")).toHaveText("autonomous");
   await page.getByRole("link", { name: /修复权限检查/ }).click();
   await expect(page.getByRole("heading", { name: "修复权限检查" })).toBeVisible();
   await page.getByRole("button", { name: "开始任务" }).click();
