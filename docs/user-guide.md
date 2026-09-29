@@ -47,4 +47,4 @@ Issue 可以添加一个 `agent:opencode`、`agent:codex`、`agent:dst`、`agent
 
 控制台可查看任务阶段、会话、假设、检查和 MR/PR；Temporal UI 可查看执行历史。暂停会停止当前执行并保留现场，继续时恢复确切会话；取消不会回滚已经合并的代码或删除远端 MR/PR。报告位于 `DATA_DIR/runs/<task>/`。
 
-单机部署由 Worker 通过宿主 Docker socket 创建任务容器，`DATA_DIR` 在宿主机与容器内必须是相同的绝对路径。分布式模式下，任务接单后固定到一个执行节点；节点失联时保留现场并阻塞，不自动迁移。节点容量、镜像和网络配置见[部署指南](../deploy/README.md)；验证记录见[分布式验收](distributed-validation.md)。
+单机部署由 Worker 通过宿主 Docker socket 创建任务容器，`DATA_DIR` 在宿主机与容器内必须是相同的绝对路径。分布式模式下，任务接单后固定到一个执行节点；节点失联时保留现场并阻塞，不自动迁移。节点容量、镜像和网络配置见[部署指南](../deploy/README.md)和[执行节点说明](execution-nodes.md)。

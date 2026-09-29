@@ -1,5 +1,6 @@
 # Run from deploy/ with:
-# docker compose -p swarmjet-node-ingress -f compose.node-ingress.yaml up -d
+# NODE_INGRESS_LISTEN_IP=192.0.2.10 NODE_INGRESS_ALLOWED_IP=192.0.2.20 \
+#   docker compose -p swarmjet-node-ingress -f compose.node-ingress.yaml up -d
 # The explicit project name keeps this proxy separate from the app stack's
 # COMPOSE_PROJECT_NAME in deploy/.env.
 name: swarmjet-node-ingress
@@ -8,8 +9,11 @@ services:
     image: nginx:1.28.0-alpine
     restart: unless-stopped
     network_mode: host
+    environment:
+      NODE_INGRESS_LISTEN_IP: ${NODE_INGRESS_LISTEN_IP:?Set the node IP to listen on}
+      NODE_INGRESS_ALLOWED_IP: ${NODE_INGRESS_ALLOWED_IP:?Set the API IP to allow}
     volumes:
-      - ./node-ingress.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./node-ingress.conf:/etc/nginx/templates/default.conf.template:ro
     logging:
       driver: json-file
       options: {max-size: 10m, max-file: '3'}

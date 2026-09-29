@@ -4,7 +4,7 @@
 
 ## 结论
 
-SwarmJet 已有一条显式启用的 Kubernetes 离线验证路径，并分别验证了受限 Job、持久执行权、产物保存、OpenCode 跨 Pod 会话续接和部分联调能力。**按默认配置启动时，任务仍走原来的 Node、Docker Runner 和 Docker Compose 路径。** 目前没有把 Kubernetes 设为企业主线的默认执行方式，也没有迁移公司快照中的任务和数据。
+SwarmJet 已有一条显式启用的 Kubernetes 离线验证路径，并分别验证了受限 Job、持久执行权、产物保存、OpenCode 跨 Pod 会话续接和部分联调能力。**按默认配置启动时，任务仍走原来的 Node、Docker Runner 和 Docker Compose 路径。** 目前没有把 Kubernetes 设为默认执行方式，也没有提供现有任务和数据的自动迁移。
 
 Kubernetes 集群是 SwarmJet 之外的运行基础设施。云服务商托管集群和自有服务器集群都可作为未来部署环境；但接入不只是增加连接配置，还要改变任务归属、Runner 生命周期、工作区、凭证、报告、取消和恢复机制。本文记录当前代码边界，避免把单项验证误认为完整上线。
 
@@ -25,7 +25,7 @@ Kubernetes 路径使用独立的 Temporal task queue。PostgreSQL 记录执行�
 | 准入与执行权 | [持久准入、取消、冻结和版本校验](../internal/store/kubernetes_admission.go) | 隔离 PostgreSQL 的并发准入、取消、接管、结果提交和写入锁测试 |
 | Runner | [受限 Job 控制器](../internal/k8srunner/controller.go)、任务 PVC、默认拒绝网络策略 | 一次性 kind+Cilium 集群中实测拒绝和定向放行；固定摘要 Job 完成，另一 Pod 读回相同 PVC 结果 |
 | 结果和报告 | [产物存储接口与 S3 实现](../internal/artifacts/store.go)、[控制台读取](../internal/api/api.go) | 摘要校验、冲突与篡改测试；一次性 MinIO 实测；报告独立于 Runner Pod 读取 |
-| CLI 会话 | 相同 PVC 上的精确 OpenCode session ID 续接 | 使用临时 DeepSeek 凭证，在两个不同 Pod 中实测会话记忆；测试 Secret、集群和本机凭证文件已删除 |
+| CLI 会话 | 相同 PVC 上的精确 OpenCode session ID 续接 | 使用临时测试凭证，在两个不同 Pod 中实测会话记忆；测试资源已清理 |
 | 远端写入 | [固定 SHA 的可信写入与对账模块](../internal/platformwrite/reconciler.go) | 一次性本机 GitLab 实测 push、MR、merge，分别注入“远端成功但响应丢失” |
 | 联调资源 | [Kubernetes 单容器和多容器检查包](../internal/k8sintegration/integration.go) | 一次性 kind+Cilium 集群中实测成功、预期失败、取消和资源清理 |
 | Workflow 历史 | 独立 `KubernetesTaskV1` 与[回放样本](../internal/pipeline/testdata/kubernetes_v1_history.json) | 独立 Temporal namespace 中的 Worker 更换、离线信号和 51 条历史事件回放 |
@@ -48,4 +48,4 @@ Kubernetes 路径使用独立的 Temporal task queue。PostgreSQL 记录执行�
 4. 在可安全重新挂载 PVC 的**隔离多节点环境**验证节点故障与旧进程隔离；仅在旧执行确认停止、检查点有效时开放自动接管。
 5. 完成数据库兼容迁移、Workflow 历史回放、混合版本滚动升级和回滚验收，再决定是否把 Kubernetes 设为企业主线默认路径并收敛 Node 专属实现。
 
-现在不需要为现有默认运行路径准备 Kubernetes 集群。未来正式验收既可使用云托管集群，也可使用自有服务器；选择时应先确定数据边界、运维责任和跨节点存储能力。公司独立快照保持原边界，不连接公司 GitLab，也不迁入其运行中的 Task 或 Workflow 历史。临时 DeepSeek 测试密钥的本地副本和 Kubernetes Secret 已删除；**密钥所有者仍须在 DeepSeek 后台撤销该密钥**。
+现在不需要为现有默认运行路径准备 Kubernetes 集群。未来正式验收既可使用云托管集群，也可使用自有服务器；选择时应先确定数据边界、运维责任和跨节点存储能力。现有部署中的 Task 和 Workflow 历史不会自动迁移，正式切换前须制定独立的数据处理方案。

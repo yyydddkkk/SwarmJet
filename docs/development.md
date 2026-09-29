@@ -63,4 +63,4 @@ TEST_DATABASE_URL='postgres://postgres:test@localhost:5432/swarmjet_test?sslmode
 SWARMJET_DOCKER_TEST=1 go test ./internal/integration
 ```
 
-测试数据库会创建临时 schema。更多真实环境验收结果与尚未覆盖的项目见[验证记录](validation.md)。
+测试数据库会创建临时 schema。运行真实环境集成测试前，应确认数据库、Broker 和 Docker 资源属于隔离测试环境。

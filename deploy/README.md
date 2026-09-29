@@ -178,7 +178,7 @@ Worker 执行保留期清理：`FAILED_KEEP_DAYS=7` 用于已取消任务的现�
 
 Compose 使用 RabbitMQ 4.3 单节点 quorum queue 和持久化数据卷，分别缓冲 webhook、命令和死信。此配置适用于开发与单机部署，覆盖容器/Broker 重启后的持久恢复，不提供节点故障高可用。生产部署应使用三台独立故障域中的 RabbitMQ 节点，为 webhook、command 与 DLQ 建立三副本 quorum queues，并配置 TLS、认证、受限网络访问及节点磁盘告警。单节点 Compose 不构成生产 HA。
 
-新安装由 `install.py` 生成独立 `RABBITMQ_PASSWORD`；旧安装执行 `update.sh` 时会为缺少该键的 `.env` 追加随机密码。已有外部集群可向应用提供 `RABBITMQ_URL`，地址应指向可切换节点的 TLS 入口；当前 Compose 仍会启动本地 Broker，生产三节点集群需在独立部署中管理。检查积压可在单节点运行 `docker compose exec rabbitmq rabbitmqctl list_queues name messages_ready messages_unacknowledged message_bytes consumers`；死信重放前先停止或隔离相关消费者，核对消息 ID 与 PostgreSQL 收据，再按原 ID 重新发布并等待确认。实际验证数据与未通过的验收项见 [RabbitMQ 接入验证](../docs/rabbitmq-validation.md)。
+新安装由 `install.py` 生成独立 `RABBITMQ_PASSWORD`；旧安装执行 `update.sh` 时会为缺少该键的 `.env` 追加随机密码。已有外部集群可向应用提供 `RABBITMQ_URL`，地址应指向可切换节点的 TLS 入口；当前 Compose 仍会启动本地 Broker，生产三节点集群需在独立部署中管理。检查积压可在单节点运行 `docker compose exec rabbitmq rabbitmqctl list_queues name messages_ready messages_unacknowledged message_bytes consumers`；死信重放前先停止或隔离相关消费者，核对消息 ID 与 PostgreSQL 收据，再按原 ID 重新发布并等待确认。生产切换前仍需单独验收平台重试、可接单事件积压以及三节点故障切换。
 
 生产集群先按 [RabbitMQ 集群指南](https://www.rabbitmq.com/docs/clustering) 建立三台独立持久磁盘节点，共享集群 cookie，并在应用首次声明队列前确认三个节点在线；默认 quorum 初始成员数为三。把应用 `RABBITMQ_URL` 指向带 TLS 的集群入口，限制 vhost/user 权限。若从单节点队列迁移，先备份并排空或逐条确认迁移中的消息，随后用 `rabbitmq-queues grow <node> all --queue-pattern 'swarmjet.*'` 为新节点增加成员，逐队列核对成员数、leader 和积压，再切换发布与消费。新增集群节点不会自动成为既有 quorum queue 的成员；官方 [成员管理说明](https://www.rabbitmq.com/docs/quorum-queues#managing-members)列出扩容命令和多数派要求。生产切换前演练断开一个节点后的发布确认、消费和恢复。
 

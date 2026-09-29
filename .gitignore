@@ -18,3 +18,10 @@ runs/
 build-cache/
 *.log
 backups/
+
+# Local plans, validation records, and design notes
+/docs/distributed-execution-plan.md
+/docs/distributed-validation.md
+/docs/validation.md
+/docs/rabbitmq-validation.md
+/web/DESIGN-PROTOTYPE.md

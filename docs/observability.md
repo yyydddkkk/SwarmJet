@@ -26,7 +26,7 @@ Compose API/Worker 在私有网络监听 `:9090`。`docker compose --profile obs
 
 ## 实测与首批 SLI/SLO
 
-隔离夹具 `TestObservabilityTaskFixture` 使用独立 PostgreSQL schema、临时 RabbitMQ、独立 Temporal namespace 和假 GitLab HTTP 服务。一次运行记录了 1 条 webhook 持久收据、1 个待准入 Task、1 条送达命令、1 次预设返回 503 的平台依赖查询；对应的 HTTP、消息、准入、命令、Activity 指标及 Task 日志均出现。OTLP 收到 HTTP、RabbitMQ、Temporal 启动/Activity 与平台调用等 10 种 span 名称，全部属于同一个 trace ID。指标文本未出现该 Task ID、delivery ID 或夹具凭证。该夹具证明关联链路和故障定位，不提供吞吐或生产延迟分布。此前隔离 10,000 条 webhook 的 ACK p95 为 167.59 ms，但不生成 Task，见[消息接入验证](rabbitmq-validation.md)。
+隔离夹具 `TestObservabilityTaskFixture` 使用独立 PostgreSQL schema、临时 RabbitMQ、独立 Temporal namespace 和假 GitLab HTTP 服务。一次运行记录了 webhook 收据、待准入 Task、已送达命令和预设的 503 平台依赖故障；对应的指标、日志与 trace 均可关联。该夹具证明关联链路和故障定位，不提供吞吐或生产延迟分布。此前的隔离 webhook 压测不生成 Task，仍需以真实代码平台和可接单事件复测。
 
 复现命令（Broker 和 Temporal namespace 只能供此夹具使用，不能有其他消费者；数据库测试 helper 自动创建并删除独立 schema）：
 
