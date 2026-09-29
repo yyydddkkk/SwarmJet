@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { ErrorBox, Field } from "./ui";
+import { useToast } from "./ToastProvider";
 import { NetworkSelect, type NetworkChoice } from "./NetworkSelect";
 import "./settings-page.css";
 import "./node-settings.css";
@@ -49,6 +50,8 @@ const stateNames: Record<string, string> = {
   unconfigured: "待配置",
 };
 export default function NodeSettings() {
+  const toast = useToast();
+  const addRef = useRef<HTMLDialogElement>(null);
   const detailRef = useRef<HTMLDialogElement>(null);
   const detailGeneration = useRef(0);
   const [target, setTarget] = useState("https://registry-1.docker.io/v2/");
@@ -74,10 +77,13 @@ export default function NodeSettings() {
     [newID, setNewID] = useState(""),
     [secret, setSecret] = useState(""),
     [error, setError] = useState(""),
+    [addError, setAddError] = useState(""),
     [detailError, setDetailError] = useState(""),
-    [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
-  const load = () => api<NodeView[]>("/nodes").then(setNodes);
+  const load = () => api<NodeView[]>("/nodes").then((result) => {
+    setNodes(result);
+    setError("");
+  });
   const resolvedNodeDataDir = nodeDataDir || `/srv/swarmjet/nodes/${newID || "node-1"}`;
   async function loadPlatformImages() {
     try {
@@ -123,7 +129,6 @@ export default function NodeSettings() {
     setID("");
     setChecks([]);
     setDetailError("");
-    setNotice("");
     setManualImage(false);
   }
   function edit(n: NodeView) {
@@ -142,7 +147,6 @@ export default function NodeSettings() {
     );
     setChecks([]);
     setDetailError("");
-    setNotice("");
     setManualImage(false);
   }
   async function save() {
@@ -162,7 +166,7 @@ export default function NodeSettings() {
       }
       await load();
       if (detailGeneration.current === generation)
-        setNotice("配置已保存，等待节点同步。");
+        toast.success("配置已保存，等待节点同步。");
     } catch (e) {
       if (detailGeneration.current === generation)
         setDetailError((e as Error).message);
@@ -177,11 +181,25 @@ export default function NodeSettings() {
           <h1>Node 管理</h1>
           <p>Node 承载任务工作区与 Runner，项目可以使用多个符合条件的 Node。</p>
         </div>
+        <button className="primary" type="button" onClick={() => addRef.current?.showModal()}>添加节点</button>
       </div>
       <ErrorBox error={error} />
-      <details className="panel">
-        <summary>添加节点</summary>
-        <div className="panel-body">
+      <dialog
+        ref={addRef}
+        className="node-add-dialog"
+        aria-labelledby="node-add-title"
+        onClose={() => {
+          setSecret("");
+          setAddError("");
+          setBundleNotice("");
+        }}
+      >
+        <div className="node-detail-head">
+          <h2 id="node-add-title">添加节点</h2>
+          <button type="button" onClick={() => addRef.current?.close()} aria-label="关闭添加节点">关闭</button>
+        </div>
+        <div className="node-detail-body">
+          <ErrorBox error={addError} />
           {bundleNotice && <p role="status">{bundleNotice}</p>}
           <p>
             下载部署包，在目标服务器检查环境并运行安装脚本。安装包包含节点注册凭据和仓库只读凭据，请作为私密文件保存。新节点默认不接收任务。
@@ -226,7 +244,7 @@ export default function NodeSettings() {
             disabled={busy || !newID || !platformImage || !advertiseUrl || !controlPlaneUrl}
             onClick={async () => {
               setBusy(true);
-              setError("");
+              setAddError("");
               setBundleNotice("");
               try {
                 const response = await fetch(`/api/nodes/${encodeURIComponent(newID)}/deployment`, {
@@ -247,7 +265,7 @@ export default function NodeSettings() {
                 setTimeout(() => URL.revokeObjectURL(url), 60_000);
                 setBundleNotice("部署包已下载。请将其安全传到目标服务器，先运行 --check，再执行安装。");
               } catch (e) {
-                setError((e as Error).message);
+                setAddError((e as Error).message);
               } finally {
                 setBusy(false);
               }
@@ -267,7 +285,7 @@ export default function NodeSettings() {
                 );
                 setSecret(v.secret);
               } catch (e) {
-                setError((e as Error).message);
+                setAddError((e as Error).message);
               }
             }}
           >
@@ -286,11 +304,11 @@ export default function NodeSettings() {
           </p>
           </details>
         </div>
-      </details>
+      </dialog>
       <section className="panel">
         <div className="panel-body">
           {nodes.length === 0 ? (
-            <p>尚无节点注册。</p>
+            <p>{error ? "节点列表暂不可用。" : "尚无节点注册。"}</p>
           ) : (
             nodes.map((n) => (
               <button
@@ -345,7 +363,6 @@ export default function NodeSettings() {
             </div>
             <div className="node-detail-body">
               <ErrorBox error={detailError} />
-              {notice && <p role="status">{notice}</p>}
               <details>
                 <summary>镜像准备详情</summary>
                 {nodes

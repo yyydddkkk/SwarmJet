@@ -112,6 +112,8 @@ test("network editor creates versioned profile without placing password in the l
     .fill("private-fixture-password");
   await page.getByRole("button", { name: "保存配置", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("已保存");
+  await page.locator(".toast").getByRole("button", { name: "关闭通知" }).click();
+  await expect(page.locator(".toast")).toHaveCount(0);
   expect(state.saved().password).toBe("private-fixture-password");
   await expect(
     page.getByText("private-fixture-password", { exact: true }),
@@ -145,15 +147,35 @@ test("node deployment bundle uses a published platform image and private LAN add
     return route.fulfill({ status: 200, contentType: "application/gzip", body: Buffer.from("bundle") });
   });
   await page.goto("/#/nodes");
-  await page.getByText("添加节点", { exact: true }).click();
-  await page.getByLabel("节点 ID").fill("remote1");
-  await page.getByLabel("Node 内网访问地址").fill("http://10.0.0.21:8092");
-  await page.getByLabel("控制面内网地址").fill("http://10.0.0.20:8180");
+  const addNode = page.getByRole("dialog", { name: "添加节点" });
+  await expect(addNode).not.toBeVisible();
+  await page.getByRole("button", { name: "添加节点" }).click();
+  await expect(addNode).toBeVisible();
+  await addNode.getByLabel("节点 ID").fill("remote1");
+  await addNode.getByLabel("Node 内网访问地址").fill("http://10.0.0.21:8092");
+  await addNode.getByLabel("控制面内网地址").fill("http://10.0.0.20:8180");
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载 Node 部署包" }).click();
+  await addNode.getByRole("button", { name: "下载 Node 部署包" }).click();
   expect((await download).suggestedFilename()).toBe("swarmjet-node-remote1.tar.gz");
   expect(request).toMatchObject({ image: platformRef, advertiseUrl: "http://10.0.0.21:8092", controlPlaneUrl: "http://10.0.0.20:8180" });
-  await expect(page.getByRole("status")).toContainText("部署包已下载");
+  await expect(addNode.getByRole("status")).toContainText("部署包已下载");
+  await addNode.getByRole("button", { name: "关闭添加节点" }).click();
+  await expect(addNode).not.toBeVisible();
+});
+test("node list failure does not claim all nodes are gone", async ({ page }) => {
+  await mock(page);
+  const failNodes = (route: import("@playwright/test").Route) => route.fulfill({
+    status: 500,
+    json: { error: "operation failed; check server configuration and retry" },
+  });
+  await page.route("**/api/nodes", failNodes);
+  await page.goto("/#/nodes");
+  await expect(page.getByRole("alert")).toContainText("operation failed");
+  await expect(page.getByText("尚无节点注册。")).toHaveCount(0);
+  await page.unroute("**/api/nodes", failNodes);
+  await page.reload();
+  await expect(page.getByRole("button", { name: /内网执行节点/ })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 test("Mihomo management opens above the overview with versions shown first", async ({ page }) => {
   await mock(page);
@@ -191,7 +213,7 @@ test("saved network profile can be deleted and default returns to direct", async
   await page.setViewportSize({ width: 390, height: 900 });
   await page.screenshot({ path: "test-results/network-delete-confirm-390.png" });
   await confirmation.getByRole("button", { name: "删除配置" }).click();
-  await expect(page.getByRole("status")).toContainText("网络配置已删除");
+  await expect(page.getByRole("status").filter({ hasText: "网络配置已删除" })).toBeVisible();
   await expect(page.getByText("临时出口", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("默认网络")).toHaveValue("");
 });

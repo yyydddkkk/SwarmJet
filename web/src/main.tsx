@@ -2,6 +2,7 @@
 import React, { lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { ToastProvider } from "./ToastProvider";
 import "./styles.css";
 import "./project-setup.css";
 import "./workbench.css";
@@ -14,6 +15,7 @@ const Prototype =
     : null;
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
+    <ToastProvider>
     {Prototype ? (
       <Suspense fallback={null}>
         <Prototype />
@@ -21,5 +23,6 @@ createRoot(document.getElementById("root")!).render(
     ) : (
       <App />
     )}
+    </ToastProvider>
   </React.StrictMode>,
 );

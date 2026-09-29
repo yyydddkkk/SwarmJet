@@ -8,8 +8,10 @@ import { Icon } from "./ConsoleIcon";
 import { stageLabel, date, Status } from "./TaskStatus";
 import { ConfirmDialog, Empty, ErrorBox, Field, Modal, Panel } from "./ui";
 import ManualMergePanel from "./ManualMergePanel";
+import { useToast } from "./ToastProvider";
 
 export default function TaskDetail({ id, platformAdmin = false }: { id: string; platformAdmin?: boolean }) {
+  const toast = useToast();
   const [task, setTask] = useState<Task | null>(null),
     [role, setRole] = useState<Project["myRole"]>(),
     [events, setEvents] = useState<TaskEvent[]>([]),
@@ -17,7 +19,6 @@ export default function TaskDetail({ id, platformAdmin = false }: { id: string; 
     [busy, setBusy] = useState(false),
     [pendingAutoMerge, setPendingAutoMerge] = useState<boolean | null>(null),
     [text, setText] = useState(""),
-    [feedback, setFeedback] = useState(""),
     [reject, setReject] = useState(false),
     [confirmCancel, setConfirmCancel] = useState(false),
     [log, setLog] = useState<{ name: string; body: string } | null>(null),
@@ -43,12 +44,12 @@ export default function TaskDetail({ id, platformAdmin = false }: { id: string; 
     const current = task.autoMergeOverride ?? task.project.autoMerge ?? true;
     if (current === pendingAutoMerge) {
       setPendingAutoMerge(null);
-      setFeedback(`此任务自动合并已${current ? "开启" : "关闭"}。`);
+      toast.success(`此任务自动合并已${current ? "开启" : "关闭"}。`);
     } else if (["partial_merge", "finalizing", "completed", "cancelled"].includes(task.stage)) {
       setPendingAutoMerge(null);
       setError("合并流程已结束或部分合并，本次开关切换未生效。");
     }
-  }, [task, pendingAutoMerge]);
+  }, [task, pendingAutoMerge, toast]);
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => {
@@ -60,7 +61,6 @@ export default function TaskDetail({ id, platformAdmin = false }: { id: string; 
     if (!task) return;
     setBusy(true);
     setError("");
-    setFeedback("");
     try {
       await api(`/tasks/${encodeURIComponent(id)}/commands`, "POST", {
         id: crypto.randomUUID(),
@@ -68,7 +68,7 @@ export default function TaskDetail({ id, platformAdmin = false }: { id: string; 
         text: message,
         digest: kind === "approve" ? task.reviewDigest : "",
       });
-      setFeedback("指令已提交，任务状态将在执行后更新。");
+      toast.info("指令已提交，任务状态将在执行后更新。");
       setText("");
       setReject(false);
       await refresh();
@@ -82,17 +82,16 @@ export default function TaskDetail({ id, platformAdmin = false }: { id: string; 
     setBusy(true);
     setPendingAutoMerge(value);
     setError("");
-    setFeedback("自动合并切换已提交，待任务状态更新后生效。");
     try {
       await api(`/tasks/${encodeURIComponent(id)}/commands`, "POST", {
         id: crypto.randomUUID(),
         kind: "set_auto_merge",
         autoMerge: value,
       });
+      toast.info("自动合并切换已提交，待任务状态更新后生效。");
       await refresh();
     } catch (e) {
       setPendingAutoMerge(null);
-      setFeedback("");
       setError((e as Error).message);
     } finally {
       setBusy(false);
@@ -153,11 +152,6 @@ export default function TaskDetail({ id, platformAdmin = false }: { id: string; 
           void refresh();
         }}
       />
-      {feedback && (
-        <div className="notice" role="status">
-          {feedback}
-        </div>
-      )}
       <div className="detail-grid">
         <div className="main-column">
           <section className="task-summary">

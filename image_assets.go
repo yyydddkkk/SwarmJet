@@ -12,5 +12,5 @@ var AgentImageAssets embed.FS
 // Deployment credentials and CA are added only when an administrator downloads
 // a private bundle; they are never embedded in the application image.
 //
-//go:embed deploy/install_node.py deploy/compose.node.yaml
+//go:embed deploy/install_node.py deploy/compose.node.yaml deploy/upgrade_host.py deploy/Dockerfile.updater
 var NodeDeploymentAssets embed.FS

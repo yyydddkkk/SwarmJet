@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "minimumNodeProtocol": 2,
+  "updaterProtocolVersion": 1,
+  "nodeDataFormat": 1,
+  "supportsBootstrap": true,
+  "dependencyImages": {
+    "postgres": "postgres:18.1-alpine3.23",
+    "rabbitmq": "rabbitmq:4.3.6-management",
+    "temporal-schema": "temporalio/admin-tools:1.32.0",
+    "temporal": "temporalio/server:1.32.0",
+    "temporal-namespace": "temporalio/admin-tools:1.32.0",
+    "temporal-ui": "temporalio/ui:2.54.1",
+    "registry": "registry:3",
+    "gateway": "nginx:1.28.0-alpine",
+    "buildkit": "moby/buildkit:v0.23.2"
+  },
+  "dependencyUpgradePaths": {}
+}

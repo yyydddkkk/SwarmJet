@@ -38,6 +38,12 @@ func (s *Service) authorizeInitialTrigger(ctx context.Context, g forge.Client, p
 	if !slices.Contains(issue.Labels, "autonomous") {
 		return false, nil
 	}
+	if p.GitLabTriggerMode == "all" {
+		if err := s.auditTrigger(ctx, p, issue, "label", 0, 0, "accepted", "all labeled issues"); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
 	reader, ok := g.(forge.LabelEventReader)
 	if !ok {
 		if err := s.auditTrigger(ctx, p, issue, "label", 0, 0, "denied", "label event reader unavailable"); err != nil {

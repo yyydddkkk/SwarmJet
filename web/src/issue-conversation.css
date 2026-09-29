@@ -4,7 +4,7 @@
 .issue-comment-composer { padding: 18px 20px 15px; border: 1px solid #d9e4f6; border-radius: 9px; background: #f8faff; }
 .issue-comment-composer .markdown-editor { margin-bottom: 5px; }
 .issue-comment-composer .markdown-editor textarea { min-height: 118px; background: var(--surface); }
-.issue-comment-composer .form-actions { margin-top: 8px; }
+.issue-comment-composer .form-actions { margin-top: 8px; flex-wrap: wrap; }
 .issue-comment-composer > small { display: block; margin-top: 9px; color: var(--muted); font-size: 12px; }
 .issue-conversation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin: 26px 0 8px; }
 .issue-conversation-toolbar > strong { font-size: 14px; }

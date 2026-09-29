@@ -4,6 +4,89 @@ const project = { id: "platform", name: "平台工程", provider: "gitlab", gitl
 const issue = { projectId: "platform", repositoryId: "api", gitlabProjectId: 12, iid: 42, title: "修复权限检查", description: "需求说明", state: "opened", labels: ["autonomous"], assignees: [], webUrl: "https://gitlab.example/issues/42", updatedAt: "2026-09-28T01:00:00Z", taskIds: [], tasks: [], notes: [] };
 const mr = { projectId: "platform", repositoryId: "api", gitlabProjectId: 12, iid: 8, title: "实现权限检查", description: "变更说明", state: "opened", sourceBranch: "feature", targetBranch: "main", sha: "abc123", detailedMergeStatus: "mergeable", webUrl: "https://gitlab.example/merge_requests/8", updatedAt: "2026-09-28T02:00:00Z", discussions: [], pipelines: [], approvals: { approved_by: [] } };
 
+test("Issue list separates a failed request from an empty result and retries", async ({ page }) => {
+  let fail = true;
+  await page.route("**/api/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
+    if (path === "/api/projects") return route.fulfill({ json: [project] });
+    if (path === "/api/workbench/issues") {
+      return fail
+        ? route.fulfill({ status: 503, json: { error: "Issue 列表暂不可用" } })
+        : route.fulfill({ json: { items: [issue], nextCursor: "" } });
+    }
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/#/issues");
+  await expect(page.getByRole("alert")).toContainText("Issue 列表暂不可用");
+  await expect(page.getByText("正在读取 Issue…")).toHaveCount(0);
+  await expect(page.getByText("没有符合条件的 Issue。")).toHaveCount(0);
+  fail = false;
+  await page.getByRole("button", { name: "重试" }).click();
+  await expect(page.getByRole("link", { name: /修复权限检查/ })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("MR list separates a failed request from an empty result and retries", async ({ page }) => {
+  let fail = true;
+  await page.route("**/api/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
+    if (path === "/api/projects") return route.fulfill({ json: [project] });
+    if (path === "/api/workbench/merge-requests") {
+      return fail
+        ? route.fulfill({ status: 503, json: { error: "MR 列表暂不可用" } })
+        : route.fulfill({ json: { items: [mr], nextCursor: "" } });
+    }
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/#/merge-requests");
+  await expect(page.getByRole("alert")).toContainText("MR 列表暂不可用");
+  await expect(page.getByText("正在读取 MR…")).toHaveCount(0);
+  await expect(page.getByText(/当前没有符合条件的未合并 MR/)).toHaveCount(0);
+  fail = false;
+  await page.getByRole("button", { name: "重试" }).click();
+  await expect(page.getByRole("link", { name: /实现权限检查/ })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("Issue list ignores an older response after filters change", async ({ page }) => {
+  let releaseOld!: () => void;
+  let oldStarted!: () => void;
+  let oldFinished!: () => void;
+  const oldResponse = new Promise<void>(resolve => { releaseOld = resolve; });
+  const started = new Promise<void>(resolve => { oldStarted = resolve; });
+  const finished = new Promise<void>(resolve => { oldFinished = resolve; });
+  await page.route("**/api/**", async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
+    if (url.pathname === "/api/projects") return route.fulfill({ json: [project] });
+    if (url.pathname === "/api/workbench/issues") {
+      if (url.searchParams.get("state") === "closed") {
+        oldStarted();
+        await oldResponse;
+        await route.fulfill({ json: { items: [{ ...issue, iid: 43, title: "已关闭需求", state: "closed" }], nextCursor: "" } }).catch(() => {});
+        oldFinished();
+        return;
+      }
+      if (url.searchParams.get("state") === "all")
+        return route.fulfill({ json: { items: [{ ...issue, iid: 44, title: "全部状态需求" }], nextCursor: "" } });
+      return route.fulfill({ json: { items: [issue], nextCursor: "" } });
+    }
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/#/issues");
+  await expect(page.getByRole("link", { name: /修复权限检查/ })).toBeVisible();
+  await page.getByLabel("状态").selectOption("closed");
+  await started;
+  await page.getByLabel("状态").selectOption("all");
+  await expect(page.getByRole("link", { name: /全部状态需求/ })).toBeVisible();
+  releaseOld();
+  await finished;
+  await expect(page.getByRole("link", { name: /已关闭需求/ })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /全部状态需求/ })).toBeVisible();
+});
+
 test("Issue workbench opens detail and starts a task", async ({ page }) => {
   await page.route("**/api/**", route => {
     const url = new URL(route.request().url());
@@ -107,15 +190,69 @@ test("Issue comments keep plain text and request a follow-up through a new note"
   const editor = page.getByRole("textbox", { name: "评论内容或补充需求" });
   await editor.fill("普通评论 `代码`\n第二行");
   await page.getByRole("button", { name: "发表评论" }).click();
-  await expect(page.getByRole("status")).toHaveText("评论已发表。");
+  await expect(page.getByRole("status").filter({ hasText: "评论已发表。" })).toBeVisible();
   await editor.fill("补充 `特殊`\u00a0空格\n再加一项");
   await page.getByRole("button", { name: "评论并发起下一轮" }).click();
-  await expect(page.getByRole("status")).toHaveText("评论已提交，等待系统创建任务。");
+  await expect(page.getByRole("status").filter({ hasText: "评论已提交，等待系统创建任务。" })).toBeVisible();
   expect(posts).toEqual([
     { body: "普通评论 `代码`\n第二行" },
     { body: "补充 `特殊`\u00a0空格\n再加一项", startNextRound: true },
   ]);
   expect(nextRoundCalls).toBe(0);
+});
+
+test("Issue closes from the comment actions only after confirmation", async ({ page }) => {
+  let current = { ...issue };
+  const writes: Record<string, unknown>[] = [];
+  await page.route("**/api/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
+    if (path === "/api/workbench/issues/platform/api/42") {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        writes.push(body);
+        current = { ...current, state: body.stateEvent === "close" ? "closed" : "opened" };
+      }
+      return route.fulfill({ json: current });
+    }
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/#/issues/platform/api/42");
+  const actions = page.locator(".issue-comment-composer .form-actions");
+  await expect(actions.locator("button")).toHaveText(["发表评论", "关闭 Issue", "评论并发起下一轮"]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await actions.getByRole("button", { name: "关闭 Issue" }).click();
+  const confirmation = page.getByRole("dialog", { name: "关闭 Issue" });
+  await expect(confirmation).toBeVisible();
+  expect(writes).toHaveLength(0);
+  await confirmation.getByRole("button", { name: "取消" }).click();
+  await expect(confirmation).not.toBeVisible();
+  expect(writes).toHaveLength(0);
+  await actions.getByRole("button", { name: "关闭 Issue" }).click();
+  await confirmation.getByRole("button", { name: "确认关闭 Issue" }).click();
+  const toast = page.locator(".toast").filter({ hasText: "已关闭 Issue。" });
+  await expect(toast).toBeVisible();
+  const toastBox = await toast.boundingBox();
+  expect(toastBox).not.toBeNull();
+  expect(toastBox!.y).toBeLessThan(40);
+  expect(toastBox!.x + toastBox!.width).toBeGreaterThan(375);
+  expect(writes).toEqual([{ stateEvent: "close" }]);
+  await expect(actions.getByRole("button", { name: "关闭 Issue" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "重开 Issue" })).toBeVisible();
+  await toast.getByRole("button", { name: "关闭通知" }).click();
+  await expect(toast).toHaveCount(0);
+});
+
+test("Issue with an active task cannot be closed from the comment actions", async ({ page }) => {
+  await page.route("**/api/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/session") return route.fulfill({ json: { username: "admin", platformAdmin: true } });
+    if (path === "/api/workbench/issues/platform/api/42") return route.fulfill({ json: { ...issue, tasks: [{ id: "task-1", stage: "implementing", round: 1 }] } });
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/#/issues/platform/api/42");
+  await expect(page.locator(".issue-comment-composer").getByRole("button", { name: "关闭 Issue" })).toBeDisabled();
 });
 
 test("Issue follow-up queues during an active round, ignores double clicks, and keeps failed text", async ({ page }) => {
@@ -139,13 +276,12 @@ test("Issue follow-up queues during an active round, ignores double clicks, and 
   const editor = page.getByRole("textbox", { name: "评论内容或补充需求" });
   await editor.fill("第一条补充需求");
   await page.getByRole("button", { name: "评论并发起下一轮" }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
-  await expect(page.getByRole("status")).toHaveText("评论已提交，等待系统创建任务。");
+  await expect(page.getByRole("status").filter({ hasText: "评论已提交，等待系统创建任务。" })).toBeVisible();
   expect(postCount).toBe(1);
   await editor.fill("失败后保留的需求");
   await page.getByRole("button", { name: "评论并发起下一轮" }).click();
   await expect(page.getByRole("alert")).toContainText("GitLab 暂不可用");
   await expect(editor).toHaveValue("失败后保留的需求");
-  await expect(page.getByRole("status")).toHaveCount(0);
   expect(postCount).toBe(2);
 });
 

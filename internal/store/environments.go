@@ -216,7 +216,8 @@ func (s *Store) SaveNodeCredential(ctx context.Context, id, secret string, revok
 // pickTaskNode runs under the same allocation lock as configuration updates.
 // Unmanaged legacy nodes retain old semantics until explicitly configured.
 func pickTaskNode(ctx context.Context, tx pgx.Tx, t *domain.Task) (string, bool, error) {
-	rows, e := tx.Query(ctx, `SELECT n.id,n.readiness,c.body,COALESCE(r.running,0),n.capacity
+	rows, e := tx.Query(ctx, `SELECT n.id,n.readiness,c.body,COALESCE(r.running,0),n.capacity,n.protocol_version,
+ EXISTS(SELECT 1 FROM platform_upgrades WHERE status='succeeded')
  FROM nodes n LEFT JOIN node_configs c ON c.id=n.id
  LEFT JOIN (SELECT node_id,count(*) running FROM (
  SELECT node_id FROM tasks WHERE `+activeNodeTask+`
@@ -228,14 +229,15 @@ func pickTaskNode(ctx context.Context, tx pgx.Tx, t *domain.Task) (string, bool,
 	}
 	defer rows.Close()
 	type candidate struct {
-		id                string
-		ready, config     []byte
-		running, capacity int
+		id                          string
+		ready, config               []byte
+		running, capacity, protocol int
+		requireProtocol             bool
 	}
 	all := []candidate{}
 	for rows.Next() {
 		var c candidate
-		if e = rows.Scan(&c.id, &c.ready, &c.config, &c.running, &c.capacity); e != nil {
+		if e = rows.Scan(&c.id, &c.ready, &c.config, &c.running, &c.capacity, &c.protocol, &c.requireProtocol); e != nil {
 			return "", false, e
 		}
 		all = append(all, c)
@@ -246,6 +248,10 @@ func pickTaskNode(ctx context.Context, tx pgx.Tx, t *domain.Task) (string, bool,
 	rows.Close()
 	reasons := []string{}
 	for _, n := range all {
+		if n.requireProtocol && n.protocol < 2 {
+			reasons = append(reasons, n.id+": 程序协议版本过旧")
+			continue
+		}
 		if !t.Project.Nodes.Allows(n.id) {
 			reasons = append(reasons, n.id+": 不在项目节点范围")
 			continue

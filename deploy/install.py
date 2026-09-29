@@ -39,6 +39,15 @@ def initialize(path, example, data_dir, agent_clis):
             with path.open("a") as stream:
                 stream.write("\nRABBITMQ_PASSWORD=" + secrets.token_hex(24) + "\n")
             print("已为现有 .env 增加独立 RabbitMQ 密码。", flush=True)
+        values = dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
+        additions = {}
+        if not values.get("UPDATER_SECRET"):
+            additions["UPDATER_SECRET"] = secrets.token_hex(32)
+        if not values.get("UPDATER_DEPLOY_DIR"):
+            additions["UPDATER_DEPLOY_DIR"] = str(path.parent.resolve())
+        if additions:
+            with path.open("a") as stream:
+                stream.write("".join(f"\n{k}={v}" for k, v in additions.items()) + "\n")
         else:
             print("保留已有 .env，不修改密码、密钥或配置。", flush=True)
         return
@@ -51,6 +60,8 @@ def initialize(path, example, data_dir, agent_clis):
         "RUNTIME_ADMIN_SECRET": secrets.token_hex(32),
         "NODE_SECRET": secrets.token_hex(32),
         "SWARMJET_MASTER_KEY": secrets.token_hex(32),
+        "UPDATER_SECRET": secrets.token_hex(32),
+        "UPDATER_DEPLOY_DIR": str(path.parent.resolve()),
         "DATA_DIR": data_dir,
         "AGENT_CLIS": agent_clis,
         "INIT_VERIFY_IMAGE": "swarmjet-agent:local",

@@ -19,6 +19,12 @@ import (
 
 //go:embed schema.sql
 var schema string
+
+//go:embed schema_upgrade_2.sql
+var schemaUpgrade2 string
+
+//go:embed schema_upgrade_3.sql
+var schemaUpgrade3 string
 var ErrConflict = errors.New("conflict: stale version or active task already exists")
 var ErrNotFound = errors.New("not found")
 var ErrNoNode = errors.New("no execution node with spare capacity")
@@ -92,8 +98,44 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 	}
 	return &Store{p}, nil
 }
-func (s *Store) Close()                            { s.Pool.Close() }
-func (s *Store) Migrate(ctx context.Context) error { _, e := s.Pool.Exec(ctx, schema); return e }
+func (s *Store) Close() { s.Pool.Close() }
+func (s *Store) Migrate(ctx context.Context) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(84261305)`); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, schema); err != nil {
+		return err
+	}
+	var version int
+	if err = tx.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil {
+		return err
+	}
+	if version > 3 {
+		return fmt.Errorf("database schema version %d is newer than this application supports", version)
+	}
+	if version < 2 {
+		if _, err = tx.Exec(ctx, schemaUpgrade2); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO schema_version(version) VALUES(2) ON CONFLICT DO NOTHING`); err != nil {
+			return err
+		}
+	}
+	if version < 3 {
+		if _, err = tx.Exec(ctx, schemaUpgrade3); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO schema_version(version) VALUES(3) ON CONFLICT DO NOTHING`); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
 func mapErr(e error) error {
 	if errors.Is(e, pgx.ErrNoRows) {
 		return ErrNotFound
@@ -884,9 +926,9 @@ func (s *Store) HeartbeatNode(ctx context.Context, n domain.Node) error {
 		return e
 	}
 	defer tx.Rollback(ctx)
-	tag, e := tx.Exec(ctx, `INSERT INTO nodes(id,address,capacity,version,last_seen,readiness) VALUES($1,$2,$3,$4,now(),$5)
- ON CONFLICT(id) DO UPDATE SET address=excluded.address,capacity=excluded.capacity,version=excluded.version,last_seen=now(),readiness=excluded.readiness
- WHERE nodes.address=excluded.address OR nodes.last_seen<now()-interval '30 seconds'`, n.ID, n.Address, n.Capacity, n.Version, b)
+	tag, e := tx.Exec(ctx, `INSERT INTO nodes(id,address,capacity,version,protocol_version,last_seen,readiness) VALUES($1,$2,$3,$4,$5,now(),$6)
+ ON CONFLICT(id) DO UPDATE SET address=excluded.address,capacity=excluded.capacity,version=excluded.version,protocol_version=excluded.protocol_version,last_seen=now(),readiness=excluded.readiness
+ WHERE nodes.address=excluded.address OR nodes.last_seen<now()-interval '30 seconds'`, n.ID, n.Address, n.Capacity, n.Version, n.ProtocolVersion, b)
 	if e != nil {
 		return e
 	}
@@ -909,7 +951,7 @@ func (s *Store) HeartbeatNode(ctx context.Context, n domain.Node) error {
 func (s *Store) Node(ctx context.Context, id string) (domain.Node, error) {
 	var n domain.Node
 	var readiness []byte
-	e := s.Pool.QueryRow(ctx, "SELECT id,address,capacity,version,last_seen,readiness FROM nodes WHERE id=$1", id).Scan(&n.ID, &n.Address, &n.Capacity, &n.Version, &n.LastSeen, &readiness)
+	e := s.Pool.QueryRow(ctx, "SELECT id,address,capacity,version,protocol_version,last_seen,readiness FROM nodes WHERE id=$1", id).Scan(&n.ID, &n.Address, &n.Capacity, &n.Version, &n.ProtocolVersion, &n.LastSeen, &readiness)
 	if e == nil {
 		e = json.Unmarshal(readiness, &n.Readiness)
 	}
@@ -923,7 +965,7 @@ func (s *Store) NodeAddress(ctx context.Context, id string) (string, error) {
 }
 
 func (s *Store) Nodes(ctx context.Context) ([]domain.Node, error) {
-	rows, e := s.Pool.Query(ctx, "SELECT id,address,capacity,version,last_seen,readiness FROM nodes ORDER BY id")
+	rows, e := s.Pool.Query(ctx, "SELECT id,address,capacity,version,protocol_version,last_seen,readiness FROM nodes ORDER BY id")
 	if e != nil {
 		return nil, e
 	}
@@ -932,7 +974,7 @@ func (s *Store) Nodes(ctx context.Context) ([]domain.Node, error) {
 	for rows.Next() {
 		var n domain.Node
 		var readiness []byte
-		if e = rows.Scan(&n.ID, &n.Address, &n.Capacity, &n.Version, &n.LastSeen, &readiness); e != nil {
+		if e = rows.Scan(&n.ID, &n.Address, &n.Capacity, &n.Version, &n.ProtocolVersion, &n.LastSeen, &readiness); e != nil {
 			return nil, e
 		}
 		if e = json.Unmarshal(readiness, &n.Readiness); e != nil {
@@ -944,7 +986,7 @@ func (s *Store) Nodes(ctx context.Context) ([]domain.Node, error) {
 }
 
 func (s *Store) NodeStatuses(ctx context.Context) ([]domain.NodeStatus, error) {
-	rows, e := s.Pool.Query(ctx, `SELECT n.id,n.address,n.capacity,n.version,n.last_seen,n.readiness,
+	rows, e := s.Pool.Query(ctx, `SELECT n.id,n.address,n.capacity,n.version,n.protocol_version,n.last_seen,n.readiness,
 		COALESCE(r.running,0), (n.last_seen > now() - $1::interval) AS online
 		FROM nodes n
 		LEFT JOIN (
@@ -962,7 +1004,7 @@ func (s *Store) NodeStatuses(ctx context.Context) ([]domain.NodeStatus, error) {
 	for rows.Next() {
 		var v domain.NodeStatus
 		var readiness []byte
-		if e = rows.Scan(&v.Node.ID, &v.Node.Address, &v.Node.Capacity, &v.Node.Version, &v.Node.LastSeen, &readiness, &v.Running, &v.Online); e != nil {
+		if e = rows.Scan(&v.Node.ID, &v.Node.Address, &v.Node.Capacity, &v.Node.Version, &v.Node.ProtocolVersion, &v.Node.LastSeen, &readiness, &v.Running, &v.Online); e != nil {
 			return nil, e
 		}
 		if e = json.Unmarshal(readiness, &v.Node.Readiness); e != nil {

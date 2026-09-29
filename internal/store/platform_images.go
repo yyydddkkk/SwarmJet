@@ -22,6 +22,13 @@ func platformImageUsage(ctx context.Context, q imageUsageQuerier, reference stri
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
+	var prepared bool
+	if err = q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM platform_upgrades WHERE active AND body#>>'{target,reference}'=$1)`, reference).Scan(&prepared); err != nil {
+		return nil, err
+	}
+	if prepared {
+		usage = append(usage, "进行中的平台升级")
+	}
 	var building bool
 	err = q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM platform_settings p, jsonb_array_elements(COALESCE(p.body->'builds','[]'::jsonb)) b WHERE p.name='image_build_state' AND b->>'status' IN ('building','cancelling'))`).Scan(&building)
 	if err != nil {

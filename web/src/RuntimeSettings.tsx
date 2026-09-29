@@ -5,6 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { api } from "./api";
 import { useAgentCatalog, type AgentCatalog } from "./agents";
 import type { NodeView } from "./NodeSettings";
+import { useToast } from "./ToastProvider";
 import "@xterm/xterm/css/xterm.css";
 import "./runtime-settings.css";
 
@@ -49,6 +50,7 @@ const commands = [
 const requestedNode=()=>new URLSearchParams(location.hash.split('?')[1]||'').get('node')||'';
 const nodePath=(path:string,nodeID:string)=>`${path}?node=${encodeURIComponent(nodeID)}`;
 export default function RuntimeSettings() {
+  const toast = useToast();
   const [nodes,setNodes] = useState<NodeView[]>([]);
   const [nodeID,setNodeID] = useState("");
   const [nodesLoading,setNodesLoading] = useState(true);
@@ -59,7 +61,6 @@ export default function RuntimeSettings() {
   const {catalog,setCatalog,error:agentsError,setError:setAgentsError} = useAgentCatalog();
   const [savingAgents,setSavingAgents] = useState(false);
   const [expandedAgents, setExpandedAgents] = useState<string[]>([]);
-  const [agentsNotice,setAgentsNotice] = useState("");
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [statusError, setStatusError] = useState("");
@@ -305,7 +306,8 @@ export default function RuntimeSettings() {
     try {
       await navigator.clipboard.writeText(text);
       if (!mounted.current) return;
-      setCopyNotice(message);
+      setCopyNotice("");
+      toast.success(message);
     } catch {
       if (!mounted.current) return;
       setCopyNotice("浏览器未允许复制，请选中文字后使用系统复制快捷键。");
@@ -384,7 +386,6 @@ export default function RuntimeSettings() {
                       checked={catalog.enabled.includes(agent.id)}
                       disabled={savingAgents}
                       onChange={(e) => {
-                        setAgentsNotice("");
                         setCatalog({
                           ...catalog,
                           enabled: e.target.checked
@@ -421,12 +422,11 @@ export default function RuntimeSettings() {
           })}
         </div>
         <button type="button" disabled={savingAgents || !catalog.agents.length} onClick={async () => {
-          setSavingAgents(true); setAgentsError(""); setAgentsNotice("");
-          try { setCatalog(await api<AgentCatalog>("/runtime/agents","PUT",{enabled:catalog.enabled})); setAgentsNotice("启用列表已保存，作用于新任务；已有任务继续使用原 Agent。"); }
+          setSavingAgents(true); setAgentsError("");
+          try { setCatalog(await api<AgentCatalog>("/runtime/agents","PUT",{enabled:catalog.enabled})); toast.success("启用列表已保存，作用于新任务；已有任务继续使用原 Agent。"); }
           catch(e) { setAgentsError((e as Error).message); }
           finally { setSavingAgents(false); }
         }}>{savingAgents ? "保存中…" : "保存启用列表"}</button>
-        {agentsNotice && <p role="status">{agentsNotice}</p>}
       </section>
 
       <TerminalWindow title="Runner 配置终端" available={!!nodeID && !!status?.available && !loading} connection={connection}

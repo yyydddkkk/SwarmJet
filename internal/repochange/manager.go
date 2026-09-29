@@ -18,6 +18,7 @@ import (
 )
 
 type Store interface {
+	UpgradeMaintenance(context.Context) (bool, error)
 	Project(context.Context, string) (domain.Project, error)
 	SaveProject(context.Context, domain.Project) (domain.Project, error)
 	SaveRepositoryChange(context.Context, domain.RepositoryChange) error
@@ -167,6 +168,15 @@ func (m *Manager) Run(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
+		maintenance, checkErr := m.Store.UpgradeMaintenance(ctx)
+		if checkErr != nil || maintenance {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				continue
+			}
+		}
 		changes, err := m.Store.RepositoryChanges(ctx, "")
 		if err != nil {
 			m.log("list repository changes", err)

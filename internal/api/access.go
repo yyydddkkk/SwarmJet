@@ -192,7 +192,7 @@ func (a *server) triggerPolicy(w http.ResponseWriter, r *http.Request, id string
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.GitLabTriggerMode != "off" && req.GitLabTriggerMode != "owner" && req.GitLabTriggerMode != "operator" {
+	if !validGitLabTriggerMode(req.GitLabTriggerMode) {
 		problem(w, 400, "invalid GitLab trigger mode")
 		return
 	}
@@ -209,4 +209,13 @@ func (a *server) triggerPolicy(w http.ResponseWriter, r *http.Request, id string
 	}
 	_ = a.s.Audit(r.Context(), requestPrincipal(r), "project.trigger-policy.update", "project", id, map[string]any{"gitlabTriggerMode": saved.GitLabTriggerMode, "githubAutoIntake": saved.GitHubAutoIntake})
 	respond(w, 200, map[string]any{"gitlabTriggerMode": saved.GitLabTriggerMode, "githubAutoIntake": saved.GitHubAutoIntake})
+}
+
+func validGitLabTriggerMode(mode string) bool {
+	switch mode {
+	case "off", "owner", "operator", "all":
+		return true
+	default:
+		return false
+	}
 }

@@ -2,6 +2,7 @@ package runtimeadmin
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -42,7 +43,31 @@ func (s *server) images(w http.ResponseWriter, r *http.Request) {
 				builds = append(builds, build)
 			}
 		}
-		writeJSON(w, 200, map[string]any{"builds": builds, "available": s.imageManager.ResolvePlatform != nil && s.cfg.PlatformSourceDir != ""})
+		writeJSON(w, 200, map[string]any{"builds": builds, "available": s.imageManager.ResolvePlatform != nil})
+	case path == "/platform/releases" && r.Method == http.MethodGet:
+		tags, err := s.imageManager.ListReleaseTags(r.Context())
+		if err != nil {
+			writeJSON(w, 502, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"repository": imagebuild.ReleaseRepository, "tags": tags})
+	case path == "/platform/releases/builds" && r.Method == http.MethodPost:
+		var req struct {
+			Tag string `json:"tag"`
+		}
+		if !decodeImageRequest(w, r, &req) {
+			return
+		}
+		build, err := s.imageManager.BuildPlatformRelease(r.Context(), req.Tag)
+		if err != nil {
+			if errors.Is(err, imagebuild.ErrReleaseSource) {
+				writeJSON(w, 502, map[string]string{"error": err.Error()})
+			} else {
+				fail(err)
+			}
+			return
+		}
+		writeJSON(w, 202, build)
 	case path == "/platform/builds" && r.Method == http.MethodPost:
 		var req struct {
 			Tag string `json:"tag"`

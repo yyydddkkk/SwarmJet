@@ -216,7 +216,7 @@ func makeNodeBundle(files map[string][]byte) ([]byte, error) {
 	zw := gzip.NewWriter(&body)
 	tw := tar.NewWriter(zw)
 	createdAt := time.Now().UTC().Truncate(time.Second)
-	for _, name := range []string{"install_node.py", "compose.node.yaml", "registry-ca.crt", "node.json", "README.txt"} {
+	for _, name := range []string{"install_node.py", "compose.node.yaml", "upgrade_host.py", "Dockerfile.updater", "registry-ca.crt", "node.json", "README.txt"} {
 		content := files[name]
 		mode := int64(0644)
 		if name == "node.json" {
@@ -302,6 +302,16 @@ func (a *server) nodeDeployment(w http.ResponseWriter, r *http.Request, id strin
 		failure(w, err)
 		return
 	}
+	upgrader, err := swarmjet.NodeDeploymentAssets.ReadFile("deploy/upgrade_host.py")
+	if err != nil {
+		failure(w, err)
+		return
+	}
+	updaterDockerfile, err := swarmjet.NodeDeploymentAssets.ReadFile("deploy/Dockerfile.updater")
+	if err != nil {
+		failure(w, err)
+		return
+	}
 	secret, err := opaqueToken()
 	if err != nil {
 		failure(w, err)
@@ -318,7 +328,7 @@ func (a *server) nodeDeployment(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	readme := fmt.Sprintf("SwarmJet Node %s deployment bundle\n\nKeep this archive private. node.json contains registration and registry pull credentials.\nOn the target Linux server:\n  mkdir -m 700 swarmjet-node-%s\n  tar -xzf swarmjet-node-%s.tar.gz -C swarmjet-node-%s\n  cd swarmjet-node-%s\n  python3 install_node.py --check\n  sudo python3 install_node.py\nThen open Node management, assign an Agent image, configure Runner, and enable the node.\n", id, id, id, id, id)
-	bundle, err := makeNodeBundle(map[string][]byte{"install_node.py": installer, "compose.node.yaml": compose, "registry-ca.crt": ca, "node.json": settings, "README.txt": []byte(readme)})
+	bundle, err := makeNodeBundle(map[string][]byte{"install_node.py": installer, "compose.node.yaml": compose, "upgrade_host.py": upgrader, "Dockerfile.updater": updaterDockerfile, "registry-ca.crt": ca, "node.json": settings, "README.txt": []byte(readme)})
 	if err != nil {
 		failure(w, err)
 		return

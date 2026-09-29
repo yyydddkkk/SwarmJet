@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { api } from "./api";
 import { Field } from "./ui";
+import { useToast } from "./ToastProvider";
 import "./registry-settings.css";
 
 function PasswordField({ label, value, onChange, readOnly = false, initialVisible = false }: { label: string; value: string; onChange: (value: string) => void; readOnly?: boolean; initialVisible?: boolean }) {
@@ -34,6 +35,7 @@ type Config = {
   hasPullPassword: boolean;
 };
 export default function RegistrySettings({ expanded = false }: { expanded?: boolean }) {
+  const toast = useToast();
   const [c, setC] = useState<Config>({
       mode: "custom",
       address: "",
@@ -46,12 +48,12 @@ export default function RegistrySettings({ expanded = false }: { expanded?: bool
     [push, setPush] = useState(""),
     [pull, setPull] = useState(""),
     [revealed, setRevealed] = useState(false),
-    [message, setMessage] = useState(""),
+    [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   useEffect(() => {
     api<Config>("/registry")
       .then((v) => setC({ ...v, repository: v.repository || "swarmjet/agent" }))
-      .catch((e) => setMessage(e.message));
+      .catch((e) => setError(e.message));
   }, []);
   return (
     <details className="panel" open={expanded}>
@@ -104,18 +106,20 @@ export default function RegistrySettings({ expanded = false }: { expanded?: bool
         </>}
         {(c.hasPushPassword || c.hasPullPassword) && <button type="button" disabled={busy} onClick={async () => {
           setBusy(true);
+          setError("");
           try {
             const secrets = await api<{pushPassword: string; pullPassword: string}>("/registry/reveal", "POST");
             setPush(secrets.pushPassword);
             setPull(secrets.pullPassword);
             setRevealed(true);
-          } catch (e) { setMessage((e as Error).message); }
+          } catch (e) { setError((e as Error).message); }
           finally { setBusy(false); }
         }}>查看已保存密码</button>}
         <button
           disabled={busy}
           onClick={async () => {
             setBusy(true);
+            setError("");
             try {
               setC(
                 await api<Config>("/registry", "PUT", {
@@ -127,9 +131,9 @@ export default function RegistrySettings({ expanded = false }: { expanded?: bool
               setPush("");
               setPull("");
               setRevealed(false);
-              setMessage("仓库配置已保存。");
+              toast.success("仓库配置已保存。");
             } catch (e) {
-              setMessage((e as Error).message);
+              setError((e as Error).message);
             } finally {
               setBusy(false);
             }
@@ -137,7 +141,7 @@ export default function RegistrySettings({ expanded = false }: { expanded?: bool
         >
           保存仓库选择
         </button>
-        <p role="status">{message}</p>
+        {error && <p role="alert">{error}</p>}
       </div>
     </details>
   );

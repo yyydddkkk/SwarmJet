@@ -636,6 +636,7 @@ td small span {
   color: #7c8795;
   font-size: 13px;
 }
+.async-collection-loading { color: var(--muted); font-size: 13px; }
 .muted {
   color: var(--muted);
 }

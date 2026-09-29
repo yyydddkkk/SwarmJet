@@ -1,6 +1,7 @@
 // Disposable design study: can an intervention-first workbench make parallel AI tasks easier to follow?
 // Sample data only. All actions are in memory; no API calls or persisted changes.
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useToast } from "./ToastProvider";
 import "./workbench-prototype.css";
 
 type State = "approval" | "blocked" | "developing" | "reviewing" | "verifying" | "completed" | "paused";
@@ -36,6 +37,7 @@ function Dialog({ title, close, children }: { title: string; close: () => void; 
   return <dialog className="wb-dialog" ref={ref} onCancel={close}><div className="wb-dialog-head"><h2>{title}</h2><button aria-label="关闭" onClick={close}><Icon name="close" /></button></div>{children}</dialog>;
 }
 export default function WorkbenchPrototype() {
+  const toast = useToast();
   const [tasks, setTasks] = useState(initial);
   const [route, setRoute] = useState(location.hash || "#/tasks");
   const [filter, setFilter] = useState("all");
@@ -43,9 +45,8 @@ export default function WorkbenchPrototype() {
   const [query, setQuery] = useState("");
   const [detailTab, setDetailTab] = useState("overview");
   const [dialog, setDialog] = useState("");
-  const [notice, setNotice] = useState("");
   const [notes, setNotes] = useState<Record<number, string[]>>({});
-  useEffect(() => { const change = () => { setRoute(location.hash); setNotice(""); setDetailTab("overview"); window.scrollTo(0, 0); }; window.addEventListener("hashchange", change); return () => window.removeEventListener("hashchange", change); }, []);
+  useEffect(() => { const change = () => { setRoute(location.hash); setDetailTab("overview"); window.scrollTo(0, 0); }; window.addEventListener("hashchange", change); return () => window.removeEventListener("hashchange", change); }, []);
   const id = Number(route.split("/")[2]);
   const task = tasks.find(t => t.id === id);
   const scoped = tasks.filter(t => project === "全部项目" || t.project === project);
@@ -53,7 +54,7 @@ export default function WorkbenchPrototype() {
   const active = scoped.filter(t => !needsAttention(t.state) && t.state !== "completed");
   const completed = scoped.filter(t => t.state === "completed");
   const rows = scoped.filter(t => (filter === "all" || (filter === "attention" ? needsAttention(t.state) : filter === "active" ? !needsAttention(t.state) && t.state !== "completed" : t.state === "completed")) && `${t.title} ${t.project} ${t.id}`.includes(query.trim()));
-  function changeState(state: State, message: string) { if (!task) return; setTasks(ts => ts.map(t => t.id === task.id ? { ...t, state, message, resumeState: state === "paused" ? t.state : t.resumeState, updated: "刚刚" } : t)); setNotice(`预览已更新：${message}`); setDialog(""); }
+  function changeState(state: State, message: string) { if (!task) return; setTasks(ts => ts.map(t => t.id === task.id ? { ...t, state, message, resumeState: state === "paused" ? t.state : t.resumeState, updated: "刚刚" } : t)); toast.success(`预览已更新：${message}`); setDialog(""); }
   function chooseProject(name: string) { setProject(name); location.hash = "/tasks"; }
   return <div className="workbench-prototype">
     <a className="wb-skip" href="#wb-main" onClick={e => { e.preventDefault(); document.getElementById("wb-main")?.focus(); }}>跳至主要内容</a>
@@ -67,7 +68,6 @@ export default function WorkbenchPrototype() {
     </aside>
     <div className="wb-body"><header className="wb-topbar"><div>工作空间<Icon name="chevron" size={12} /><a href="#/tasks">任务中心</a>{task && <><Icon name="chevron" size={12} /><span>#{task.id}</span></>}</div><span className="wb-mode">交互原型 · 第一版</span></header>
     <main id="wb-main" tabIndex={-1}>
-      {notice && <div className="wb-notice" role="status"><Icon name="check" />{notice}<button aria-label="关闭提示" onClick={() => setNotice("")}><Icon name="close" size={14} /></button></div>}
       {!task ? <>
         <div className="wb-page-head"><div><h1>任务中心<span className="wb-heading-dot" /></h1><p>掌握进展，把注意力留给需要你的地方。</p></div><button className="wb-primary" onClick={() => setDialog("create")}><Icon name="plus" size={16} />创建任务</button></div>
         <div className="wb-overview"><div><span className="wb-live-dot" /><strong>{active.length}</strong> 项任务正在推进</div><span className="wb-overview-separator" /><div><Icon name="check" size={15} /><strong>{completed.length}</strong> 项已完成</div><span className="wb-overview-scope">{project} · {scoped.length} 项任务</span></div>
@@ -86,11 +86,11 @@ export default function WorkbenchPrototype() {
           <div className="wb-detail-tabs wb-tabs" aria-label="任务详情视图">{[["overview", "交付结果"], ["execution", "执行记录"], ["context", "需求与说明"]].map(([v, label]) => <button aria-pressed={detailTab === v} className={detailTab === v ? "wb-tab-active" : ""} onClick={() => setDetailTab(v)} key={v}>{label}</button>)}</div>
           {detailTab === "overview" && <><section className="wb-detail-section"><div className="wb-section-title"><h2>代码变更</h2><span>{task.files} 个文件</span></div>{(task.files ? task.repo.split(" / ") : []).map((repo, i) => <article className="wb-repository" key={repo}><div className="wb-repo-name"><span className="wb-repo-icon"><Icon name="branch" /></span><div><h3>{repo}</h3><p><code>swarmjet/issue-{task.id}</code><Icon name="arrow" size={12} /><code>main</code></p></div><span className="wb-mr">{task.state === "completed" ? "已合并" : "合并请求"} !{83 + i}</span></div><details><summary>查看变更摘要</summary><p>更新 {repo} 中的业务实现，补充边界条件测试与错误处理。</p><code>7a81c92 → b4e29d1</code></details></article>)}</section><section className="wb-detail-section"><div className="wb-section-title"><h2>验证结果</h2><span>{task.checks} 项已通过</span></div>{(task.checks ? ["类型检查与静态分析", "业务单元测试", "跨服务集成测试"] : []).map((name, i) => <div className="wb-check-row" key={name}><Icon name={task.state === "blocked" && i === 2 ? "alert" : "check"} size={16} /><span>{name}</span><small>必需</small><strong className={task.state === "blocked" && i === 2 ? "wb-failed" : ""}>{task.state === "blocked" && i === 2 ? "未通过" : "通过"}</strong></div>)}{!task.checks && <p className="wb-muted">开发完成后将在此展示验证结果。</p>}</section></>}
           {detailTab === "execution" && <section className="wb-detail-section"><div className="wb-section-title"><h2>Agent 执行记录</h2><button onClick={() => setDialog("logs")}><Icon name="terminal" size={15} />查看日志</button></div><div className="wb-agent"><span className="wb-agent-icon"><Icon name="terminal" size={22} /></span><div><h3>开发 Agent</h3><p>分析相关模块，完成实现并补充测试。</p><small>OpenCode · 独立开发工作区</small></div></div><div className="wb-agent"><span className="wb-agent-icon"><Icon name="check" size={22} /></span><div><h3>独立审查 Agent</h3><p>{phase[task.state] >= 4 ? "已检查改动范围与测试结果，没有待处理的审查意见。" : "开发和验证完成后，检查整组仓库的变更。"}</p><small>OpenCode · 独立审查会话</small></div></div></section>}
-          {detailTab === "context" && <section className="wb-detail-section"><div className="wb-section-title"><h2>需求与补充说明</h2></div><p>在现有实现上完成「{task.title}」，保留已有接口行为，并为边界场景补充测试。</p>{(notes[task.id] || []).map((n, i) => <div className="wb-note" key={i}>{n}</div>)}<form onSubmit={e => { e.preventDefault(); const form = e.currentTarget; const value = String(new FormData(form).get("note")).trim(); if (!value) return; setNotes(n => ({ ...n, [task.id]: [...(n[task.id] || []), value] })); form.reset(); setNotice("说明已添加到当前预览，未发送给 Agent。"); }}><label className="wb-field">补充说明<textarea name="note" required rows={4} placeholder="补充约束、验收要求或需要注意的边界…" /></label><button className="wb-primary">添加说明</button></form></section>}
+          {detailTab === "context" && <section className="wb-detail-section"><div className="wb-section-title"><h2>需求与补充说明</h2></div><p>在现有实现上完成「{task.title}」，保留已有接口行为，并为边界场景补充测试。</p>{(notes[task.id] || []).map((n, i) => <div className="wb-note" key={i}>{n}</div>)}<form onSubmit={e => { e.preventDefault(); const form = e.currentTarget; const value = String(new FormData(form).get("note")).trim(); if (!value) return; setNotes(n => ({ ...n, [task.id]: [...(n[task.id] || []), value] })); form.reset(); toast.success("说明已添加到当前预览，未发送给 Agent。"); }}><label className="wb-field">补充说明<textarea name="note" required rows={4} placeholder="补充约束、验收要求或需要注意的边界…" /></label><button className="wb-primary">添加说明</button></form></section>}
         </div><aside className="wb-detail-aside"><section><h2>任务操作</h2><p>控制任务，保留当前工作现场。</p><div className="wb-side-actions"><button disabled={task.state === "completed"} onClick={() => changeState(task.state === "paused" ? task.resumeState || "developing" : "paused", task.state === "paused" ? "任务已恢复到暂停前的阶段。" : "已暂停执行，工作现场已保留。")}>{task.state === "paused" ? "继续任务" : "暂停任务"}</button><button onClick={() => setDialog("logs")}><Icon name="terminal" size={14} />查看日志</button></div></section><section><h2>任务信息</h2><dl><dt>来源</dt><dd>GitLab Issue #{task.id}</dd><dt>目标分支</dt><dd><Icon name="branch" size={13} />main</dd><dt>合并策略</dt><dd>审查后人工批准</dd><dt>前置依赖</dt><dd>无</dd><dt>项目版本</dt><dd>v3</dd></dl></section><section><h2>最近活动</h2><ol className="wb-activity"><li><time>现在</time><strong>{labels[task.state]}</strong><p>{task.message}</p></li>{phase[task.state] >= 3 && <li><time>10:48</time><strong>验证完成</strong><p>必需检查全部通过。</p></li>}<li><time>10:24</time><strong>任务已创建</strong><p>已固定仓库基线与项目配置。</p></li></ol></section></aside></div>
       </>}
     </main><footer className="wb-footer"><span>SwarmJet</span><span>从 Issue 到交付，保持掌控。</span></footer></div>
-    <div className="wb-prototype-bar"><span className="wb-prototype-dot" />设计预览<span className="wb-bar-divider" />工作台方向<button onClick={() => { setTasks(initial); setNotes({}); setFilter("all"); setProject("全部项目"); setQuery(""); setNotice("示例状态已重置。"); location.hash = "/tasks"; }}>重置示例</button></div>
+    <div className="wb-prototype-bar"><span className="wb-prototype-dot" />设计预览<span className="wb-bar-divider" />工作台方向<button onClick={() => { setTasks(initial); setNotes({}); setFilter("all"); setProject("全部项目"); setQuery(""); toast.success("示例状态已重置。"); location.hash = "/tasks"; }}>重置示例</button></div>
     {dialog && <Dialog title={dialog === "logs" ? "运行日志" : dialog === "approve" ? "批准当前审查版本" : dialog === "reject" ? "退回修改" : "创建任务"} close={() => setDialog("")}>
       <p className="wb-dialog-note">交互演示：所有操作只更新本页示例。</p>
       {dialog === "logs" ? <pre className="wb-log">{task?.state === "blocked" ? "[10:42:08] Starting integration checks\n[10:42:10] Connecting to payment sandbox…\n[10:42:40] Connection timed out\n[10:42:40] Required check failed: payment-integration\n\n请检查支付沙箱地址与网络配置。" : `[10:24:01] Workspace prepared\n[10:26:12] Development agent started\n${task && phase[task.state] >= 3 ? "[10:48:20] Required checks passed\n" : ""}[当前状态] ${task ? labels[task.state] : "就绪"}\n${task?.message || ""}`}</pre>

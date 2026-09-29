@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import MihomoSettings from "./MihomoSettings";
 import { api } from "./api";
 import { ConfirmDialog, ErrorBox, Field } from "./ui";
+import { useToast } from "./ToastProvider";
 import type { NetworkProfile } from "./NetworkSelect";
 import "./settings-page.css";
 import "./network-settings.css";
@@ -17,6 +18,7 @@ const blank = (): NetworkProfile => ({
   revoked: false,
 });
 export default function NetworkSettings({ embedded = false }: { embedded?: boolean }) {
+  const toast = useToast();
   const profileRef = useRef<HTMLDialogElement>(null);
   const mihomoRef = useRef<HTMLDialogElement>(null);
   const editorGeneration = useRef(0);
@@ -27,8 +29,6 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
     [password, setPassword] = useState(""),
     [pageError, setPageError] = useState(""),
     [profileError, setProfileError] = useState(""),
-    [pageNotice, setPageNotice] = useState(""),
-    [profileNotice, setProfileNotice] = useState(""),
     [confirmDiscard, setConfirmDiscard] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false),
     [showMihomo, setShowMihomo] = useState(false),
@@ -75,7 +75,6 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
     setBaseline({ ...profile });
     setPassword("");
     setProfileError("");
-    setProfileNotice("");
     setConfirmDiscard(false);
     setConfirmDelete(false);
   }
@@ -92,7 +91,6 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
     setBaseline(null);
     setPassword("");
     setProfileError("");
-    setProfileNotice("");
     setConfirmDiscard(false);
     setConfirmDelete(false);
   }
@@ -101,7 +99,6 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
     const generation = editorGeneration.current;
     setBusy(true);
     setProfileError("");
-    setProfileNotice("");
     try {
       const p = await api<NetworkProfile>("/networks", "PUT", {
         ...draft,
@@ -115,7 +112,7 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
       }
       await load();
       if (editorGeneration.current === generation)
-        setProfileNotice("已保存，新任务使用新版本。");
+        toast.success("已保存，新任务使用新版本。");
     } catch (e) {
       if (editorGeneration.current === generation)
         setProfileError((e as Error).message);
@@ -134,7 +131,7 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
       if (editorGeneration.current === generation) {
         setConfirmDelete(false);
         profileRef.current?.close();
-        setPageNotice("网络配置已删除。");
+        toast.success("网络配置已删除。");
       }
     } catch (e) {
       if (editorGeneration.current === generation)
@@ -162,7 +159,6 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
         <button className="primary" onClick={() => openProfile(blank())}>新增配置</button>
       </div>
       <ErrorBox error={pageError} />
-      {pageNotice && <p role="status">{pageNotice}</p>}
       <section className="panel network-default" aria-labelledby="network-default-heading">
         <div className="panel-body">
           <div>
@@ -177,7 +173,7 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
                   setPageError("");
                   await api("/networks/default", "PUT", { id: e.target.value });
                   await load();
-                  setPageNotice("平台默认已更新，后续任务将使用新配置。");
+                  toast.success("平台默认已更新，后续任务将使用新配置。");
                 } catch (err) {
                   setPageError((err as Error).message);
                 }
@@ -244,7 +240,6 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
             </div>
             <div className="network-dialog-body">
               <ErrorBox error={profileError} />
-              {profileNotice && <p role="status">{profileNotice}</p>}
               <div className="network-fields">
                 <Field label="名称">
                   <input value={draft.name} placeholder="例如：构建出口" onChange={(e) => setDraft({ ...draft, name: e.target.value })} />

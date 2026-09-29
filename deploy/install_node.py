@@ -188,6 +188,7 @@ def install(config):
         "NODE_DATA_DIR": config["dataDir"], "NODE_ADVERTISE_URL": config["advertiseUrl"],
         "CONTROL_PLANE_URL": config["controlPlaneUrl"], "NODE_CAPACITY": str(config.get("capacity", 2)),
         "NODE_LISTEN_HOST": config.get("listenHost", "0.0.0.0"), "NODE_PORT": str(config.get("port", 8092)),
+        "NODE_BUNDLE_DIR": str(HERE),
     }
     env_file = HERE / "node.env"
     write_private(env_file, "".join(f"{key}={value}\n" for key, value in values.items()))
@@ -210,7 +211,7 @@ def main():
     parser.add_argument("--check", action="store_true", help="只检查部署包、系统和网络，不修改主机")
     args = parser.parse_args()
     config = read_config(HERE / "node.json")
-    if not (HERE / "registry-ca.crt").is_file() or not (HERE / "compose.node.yaml").is_file():
+    if any(not (HERE / name).is_file() for name in ("registry-ca.crt", "compose.node.yaml", "upgrade_host.py", "Dockerfile.updater")):
         raise RuntimeError("部署包不完整")
     if platform.system() != "Linux":
         raise RuntimeError("Node 仅支持 Linux 主机")

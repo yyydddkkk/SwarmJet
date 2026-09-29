@@ -23,6 +23,8 @@ type memoryStore struct {
 	init    domain.Initialization
 }
 
+func (s *memoryStore) UpgradeMaintenance(context.Context) (bool, error) { return false, nil }
+
 func (s *memoryStore) Project(context.Context, string) (domain.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

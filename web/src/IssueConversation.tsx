@@ -110,7 +110,7 @@ function ConversationEntry({ entry, issue, path, active }: { entry: Entry; issue
   </article>;
 }
 
-export default function IssueConversation({ issue, path, note, setNote, busy, canOperate, canRequestNextRound, hasActiveTask, hasPreviousTask, submitNote }: {
+export default function IssueConversation({ issue, path, note, setNote, busy, canOperate, canRequestNextRound, hasActiveTask, hasPreviousTask, submitNote, requestCloseIssue }: {
   issue: WorkbenchIssue;
   path: string;
   note: string;
@@ -121,6 +121,7 @@ export default function IssueConversation({ issue, path, note, setNote, busy, ca
   hasActiveTask: boolean;
   hasPreviousTask: boolean;
   submitNote: (startNextRound: boolean) => void;
+  requestCloseIssue: () => void;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const entries = useMemo(() => [...(issue.notes || [])].map(note => {
@@ -141,7 +142,7 @@ export default function IssueConversation({ issue, path, note, setNote, busy, ca
   return <section className="panel workbench-comments"><div className="panel-head workbench-discussion-head"><div><h2>讨论与流转记录</h2><p>补充需求、任务进展和系统活动集中在这里。</p></div></div>
     <div className="workbench-pad"><div className="issue-conversation-width">
       {canOperate && <div className="issue-comment-composer"><MarkdownEditor value={note} onChange={setNote} uploadPath={path} baseUrl={issue.webUrl} label="评论内容或补充需求" rows={4} />
-        <div className="form-actions"><button disabled={busy || !note.trim()} onClick={() => submitNote(false)}>发表评论</button><button className="primary" disabled={busy || !note.trim() || !canRequestNextRound} onClick={() => submitNote(true)}>评论并发起下一轮</button></div>
+        <div className="form-actions"><button disabled={busy || !note.trim()} onClick={() => submitNote(false)}>发表评论</button>{issue.state !== "closed" && <button className="danger" disabled={busy || hasActiveTask} title={hasActiveTask ? "关联任务仍在进行中" : undefined} onClick={requestCloseIssue}>关闭 Issue</button>}<button className="primary" disabled={busy || !note.trim() || !canRequestNextRound} onClick={() => submitNote(true)}>评论并发起下一轮</button></div>
         {hasActiveTask && canRequestNextRound && <small>当前轮仍在运行，补充需求会排队等待本轮结束后创建下一轮任务。</small>}
         {!hasPreviousTask && <small>首次任务请先点击“开始任务”；完成后可评论并发起下一轮。</small>}
         {issue.state === "closed" && <small>请先重开 Issue，再评论并发起下一轮。</small>}

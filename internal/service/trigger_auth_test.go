@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -49,5 +52,55 @@ func TestGitHubAutoIntakeRequiresExplicitProjectSwitch(t *testing.T) {
 	allowed, err = svc.authorizeInitialTrigger(context.Background(), nil, project, domain.Issue{})
 	if err != nil || !allowed {
 		t.Fatalf("enabled policy rejected GitHub issue: allowed=%v err=%v", allowed, err)
+	}
+}
+
+func TestGitLabAllModeAdmitsOnlyAutonomousIssuesWithoutActorLookup(t *testing.T) {
+	svc := &Service{}
+	project := domain.Project{Provider: domain.ProviderGitLab, GitLabTriggerMode: "all"}
+	for _, tc := range []struct {
+		name    string
+		labels  []string
+		allowed bool
+	}{
+		{"autonomous", []string{"autonomous"}, true},
+		{"other labels", []string{"bug", "autonomous"}, true},
+		{"unlabeled", nil, false},
+		{"unrelated label", []string{"bug"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A nil forge client confirms that all mode does not require a label
+			// event reader or a resolvable label actor.
+			allowed, err := svc.authorizeInitialTrigger(context.Background(), nil, project, domain.Issue{Labels: tc.labels})
+			if err != nil || allowed != tc.allowed {
+				t.Fatalf("allowed=%v err=%v, want allowed=%v", allowed, err, tc.allowed)
+			}
+		})
+	}
+}
+
+func TestScanAllModeClaimsAutonomousIssueWithoutLabelEvent(t *testing.T) {
+	s := scanTestStore(t)
+	ctx := context.Background()
+	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"project_id": 7, "iid": 1, "title": "labeled", "state": "opened", "labels": []string{"autonomous"}},
+			{"project_id": 7, "iid": 2, "title": "other", "state": "opened", "labels": []string{"bug"}},
+		})
+	}))
+	defer gitlab.Close()
+	project := scanProject(gitlab.URL)
+	project.GitLabTriggerMode = "all"
+	if _, err := s.SaveProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }, RequireNode: true}
+	if err := svc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := s.Tasks(ctx)
+	if err != nil || len(tasks) != 1 || tasks[0].Issue.IID != 1 {
+		t.Fatalf("tasks=%+v err=%v", tasks, err)
 	}
 }

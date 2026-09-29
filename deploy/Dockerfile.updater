@@ -1,0 +1,5 @@
+FROM docker:29.8.1-cli
+RUN apk add --no-cache python3
+COPY upgrade_host.py /usr/local/bin/upgrade_host.py
+ENTRYPOINT ["python3", "/usr/local/bin/upgrade_host.py"]
+CMD ["serve"]

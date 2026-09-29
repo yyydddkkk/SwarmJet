@@ -8,6 +8,7 @@
   .environment-columns { grid-template-columns: 1fr; }
   .environment-row { align-items: flex-start; flex-direction: column; }
 }
+.settings-page .node-add-dialog,
 .settings-page .node-detail-dialog {
   width: min(780px, calc(100vw - 32px));
   max-height: min(90dvh, 900px);
@@ -31,11 +32,13 @@
 .node-detail-head small { color: var(--muted); overflow-wrap: anywhere; }
 .node-detail-body { padding: 20px 24px 24px; }
 .node-detail-body > p { font-size: 13px; line-height: 1.7; color: var(--muted); }
+.node-add-dialog pre { overflow-x: auto; }
 .node-image-picker { min-width: 0; }
 .node-image-picker .field { margin-bottom: 8px; }
 .node-image-picker small { display: block; color: var(--muted); overflow-wrap: anywhere; margin-bottom: 8px; }
 .node-image-picker > button { margin-bottom: 12px; }
 @media (max-width: 680px) {
+  .settings-page .node-add-dialog,
   .settings-page .node-detail-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
   .node-detail-head { padding: 14px 16px; }
   .node-detail-body { padding: 16px; }

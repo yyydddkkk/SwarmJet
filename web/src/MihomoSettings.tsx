@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { ErrorBox, Field } from "./ui";
+import { useToast } from "./ToastProvider";
 import "./mihomo-settings.css";
 
 type Revision = {
@@ -45,6 +46,7 @@ export default function MihomoSettings({
   onStatusChange?: (status: { enabled: boolean; running?: boolean; active?: string }) => void;
   onNetworkCreated: () => void;
 }) {
+  const toast = useToast();
   const [noProxy, setNoProxy] = useState("localhost,127.0.0.1,::1");
   const [view, setView] = useState<View | null>(null),
     [groups, setGroups] = useState<Group[]>([]),
@@ -57,7 +59,6 @@ export default function MihomoSettings({
     [endpoint, setEndpoint] = useState(""),
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
-    [notice, setNotice] = useState(""),
     [showImport, setShowImport] = useState(false),
     [choices, setChoices] = useState<Record<string, string>>({});
   const refresh = useCallback(async () => {
@@ -98,7 +99,6 @@ export default function MihomoSettings({
   async function act(action: string, fn: () => Promise<void>) {
     setBusy(action);
     setError("");
-    setNotice("");
     try {
       await fn();
       await refresh();
@@ -146,11 +146,6 @@ export default function MihomoSettings({
         </div>
       </div>
       <ErrorBox error={error} />
-      {notice && (
-        <p role="status" className="notice">
-          {notice}
-        </p>
-      )}
       {view?.error && <p role="alert">{view.error}</p>}
       {!view?.enabled ? (
         <p>
@@ -217,7 +212,7 @@ export default function MihomoSettings({
                       else setProxy("");
                       setContent("");
                       setShowImport(false);
-                      setNotice("已保存为新版本，尚未应用。请校验并运行探针。");
+                      toast.success("已保存为新版本，尚未应用。请校验并运行探针。");
                     })
                   }
                 >
@@ -303,7 +298,7 @@ export default function MihomoSettings({
                           await api("/mihomo/validate", "POST", {
                             id: selected,
                           });
-                          setNotice(
+                          toast.success(
                             "内核配置校验通过。连接是否可用请继续运行探针。",
                           );
                         })
@@ -322,7 +317,7 @@ export default function MihomoSettings({
                           setContent(v.yaml);
                           setName(revision.name + "（修改）");
                           setShowImport(true);
-                          setNotice("配置已载入编辑器，保存会创建新版本。");
+                          toast.success("配置已载入编辑器，保存会创建新版本。");
                         })
                       }
                     >
@@ -394,7 +389,7 @@ export default function MihomoSettings({
                       onClick={() =>
                         void act("apply", async () => {
                           await api("/mihomo/apply", "POST", { id: selected });
-                          setNotice("已应用到代理入口。");
+                          toast.success("已应用到代理入口。");
                         })
                       }
                     >
@@ -409,7 +404,7 @@ export default function MihomoSettings({
                               url: target,
                               proxy: "",
                             });
-                            setNotice("探针通过，已回滚到上一版本。");
+                            toast.success("探针通过，已回滚到上一版本。");
                           })
                         }
                       >
@@ -464,7 +459,7 @@ export default function MihomoSettings({
                               (await api<{ groups: Group[] }>("/mihomo/groups"))
                                 .groups,
                             );
-                            setNotice(
+                            toast.success(
                               "出口选择已保存。可再次运行探针检查链路。",
                             );
                           })
@@ -507,7 +502,7 @@ export default function MihomoSettings({
                         noProxy,
                       });
                       onNetworkCreated();
-                      setNotice(
+                      toast.success(
                         "网络配置已创建，入口认证已安全保存；请在对应节点或构建配置中选择。",
                       );
                     })

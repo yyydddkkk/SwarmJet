@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { useToast } from "./ToastProvider";
 import "./runtime-settings.css";
 
 type ConnectionState = "disconnected" | "connecting" | "connected";
@@ -31,16 +32,13 @@ export function TerminalPanel({
   available: boolean;
   onConnected?: (connected: boolean) => void;
 }) {
+  const toast = useToast();
   const [connection, setConnection] = useState<ConnectionState>("disconnected");
   const [terminalError, setTerminalError] = useState("");
   const [notice, setNotice] = useState("");
   const [selection, setSelection] = useState(false);
-  const [copyNotice, setCopyNotice] = useState("");
   const host = useRef<HTMLDivElement>(null);
   const session = useRef<Session | null>(null);
-  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
 
   const dispose = useCallback(() => {
     const current = session.current;
@@ -60,7 +58,6 @@ export function TerminalPanel({
   }, []);
 
   useEffect(() => () => {
-    clearTimeout(noticeTimer.current);
     dispose();
   }, [dispose]);
 
@@ -206,12 +203,10 @@ export function TerminalPanel({
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
-      setCopyNotice("已复制所选终端文字。");
+      toast.success("已复制所选终端文字。");
     } catch {
-      setCopyNotice("浏览器未允许复制，请选中文字后使用系统复制快捷键。");
+      toast.error("浏览器未允许复制，请选中文字后使用系统复制快捷键。");
     }
-    clearTimeout(noticeTimer.current);
-    noticeTimer.current = setTimeout(() => setCopyNotice(""), 4000);
   }
 
   return (
@@ -312,9 +307,6 @@ export function TerminalPanel({
         >
           复制选中内容
         </button>
-      </div>
-      <div className="runtime-copy-notice" role="status" aria-live="polite">
-        {copyNotice}
       </div>
     </div>
     </TerminalWindow>

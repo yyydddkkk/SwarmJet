@@ -77,7 +77,7 @@ type Project struct {
 	// AutoMerge is a project-level switch. A nil value means the legacy default
 	// (enabled) so existing projects keep their behavior across upgrades.
 	AutoMerge *bool `json:"autoMerge,omitempty"`
-	// GitLabTriggerMode controls autonomous admission: off, owner, or operator.
+	// GitLabTriggerMode controls autonomous admission: off, owner, operator, or all.
 	// An empty value is off so upgraded projects cannot admit work implicitly.
 	GitLabTriggerMode string `json:"gitlabTriggerMode,omitempty"`
 	// GitHubAutoIntake is an explicit administrator-only legacy intake switch.
@@ -288,12 +288,13 @@ type Event struct {
 // Node is one registered execution host. Running work is derived from tasks
 // pinned to the node; LastSeen drives liveness.
 type Node struct {
-	Readiness NodeReadiness `json:"readiness"`
-	ID        string        `json:"id"`
-	Address   string        `json:"address"`
-	Capacity  int           `json:"capacity"`
-	Version   string        `json:"version"`
-	LastSeen  time.Time     `json:"lastSeen"`
+	Readiness       NodeReadiness `json:"readiness"`
+	ID              string        `json:"id"`
+	Address         string        `json:"address"`
+	Capacity        int           `json:"capacity"`
+	Version         string        `json:"version"`
+	ProtocolVersion int           `json:"protocolVersion,omitempty"`
+	LastSeen        time.Time     `json:"lastSeen"`
 }
 
 // NodeStatus combines a node with its current load for the console and the

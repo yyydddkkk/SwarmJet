@@ -4,6 +4,7 @@ import type { AgentSpec } from "./agents";
 import { NetworkSelect, type NetworkChoice } from "./NetworkSelect";
 import type { NodeView } from "./NodeSettings";
 import { ConfirmDialog, Field } from "./ui";
+import { useToast } from "./ToastProvider";
 import "./settings-page.css";
 import "./image-settings.css";
 
@@ -50,6 +51,7 @@ const running = (b: Build) =>
   b.status === "building" || b.status === "cancelling";
 
 export default function ImageSettings() {
+  const toast = useToast();
   const requestedPlatform = new URLSearchParams(location.hash.split("?")[1]).get("tab") === "platform";
   const [tab, setTab] = useState<"images" | "build" | "platform">(requestedPlatform ? "platform" : "build");
   const [platformManagement, setPlatformManagement] = useState(false);
@@ -71,7 +73,6 @@ export default function ImageSettings() {
   const [config, setConfig] = useState<ImageConfig | null>(null);
   const [extraPackages, setExtraPackages] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [pending, setPending] = useState("");
   const [existingImage, setExistingImage] = useState("");
   const [logID, setLogID] = useState("");
@@ -143,7 +144,6 @@ export default function ImageSettings() {
   async function action(name: string, work: () => Promise<void>) {
     setPending(name);
     setError("");
-    setNotice("");
     try {
       await work();
     } catch (e) {
@@ -198,11 +198,6 @@ export default function ImageSettings() {
             重新检查
           </button>
         </div>
-      )}
-      {notice && (
-        <p className="notice" role="status">
-          {notice}
-        </p>
       )}
       {!view && !error && tab === "build" && <p className="loading">正在读取镜像配置…</p>}
       {tab === "build" && view && config && (
@@ -351,7 +346,7 @@ export default function ImageSettings() {
                         currentConfig(),
                       );
                       setConfig(saved);
-                      setNotice("构建配置已保存，当前镜像未切换。");
+                      toast.success("构建配置已保存，当前镜像未切换。");
                     })
                   }
                 >
@@ -369,7 +364,7 @@ export default function ImageSettings() {
                       );
                       setLogID(build.id);
                       await refresh();
-                      setNotice("镜像开始构建，成功后可单独应用。");
+                      toast.success("镜像开始构建，成功后可单独应用。");
                     })
                   }
                 >
@@ -406,7 +401,7 @@ export default function ImageSettings() {
                         reference: existingImage.trim(),
                       });
                       await refresh();
-                      setNotice("镜像检查通过，可在记录中应用。");
+                      toast.success("镜像检查通过，可在记录中应用。");
                     })
                   }
                 >
@@ -549,7 +544,7 @@ export default function ImageSettings() {
                               throw new Error(
                                 `部分节点分发失败：${failed.join("；")}`,
                               );
-                            setNotice(
+                            toast.success(
                               "已提交分发，请在执行节点页面查看拉取与就绪状态。",
                             );
                           })
@@ -574,7 +569,7 @@ export default function ImageSettings() {
                               "POST",
                             );
                             await refresh();
-                            setNotice(
+                            toast.success(
                               "镜像已应用。新任务和下次打开的配置终端使用此版本，已有任务不受影响。",
                             );
                           })
@@ -614,6 +609,7 @@ function RegistryInventory({ builds, nodes, reloadNodes, onBuild }: {
   reloadNodes: () => Promise<unknown>;
   onBuild: () => void;
 }) {
+  const toast = useToast();
   const [list, setList] = useState<RegistryList | null>(null);
   const [selected, setSelected] = useState("");
   const [targets, setTargets] = useState<string[]>([]);
@@ -621,7 +617,6 @@ function RegistryInventory({ builds, nodes, reloadNodes, onBuild }: {
   const [usage, setUsage] = useState<string[]>([]);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const refresh = useCallback(async () => {
     const result = await api<RegistryList>("/registry/images");
     setList(result);
@@ -629,7 +624,7 @@ function RegistryInventory({ builds, nodes, reloadNodes, onBuild }: {
   }, [reloadNodes]);
   useEffect(() => { void refresh().catch((e) => setError(e.message)); }, [refresh]);
   async function run(name: string, work: () => Promise<void>) {
-    setBusy(name); setError(""); setNotice("");
+    setBusy(name); setError("");
     try { await work(); } catch (e) { setError((e as Error).message); }
     finally { setBusy(""); }
   }
@@ -649,7 +644,7 @@ function RegistryInventory({ builds, nodes, reloadNodes, onBuild }: {
     }
     await reloadNodes();
     if (failures.length) throw new Error(`部分节点分发失败：${failures.join("；")}`);
-    setNotice("已提交分发；节点会拉取并验证镜像，准备完成后才会用于新任务。");
+    toast.success("已提交分发；节点会拉取并验证镜像，准备完成后才会用于新任务。");
     setSelected(""); setTargets([]);
   }
   const nodeStatus = (node: NodeView, image: RegistryImage) => {
@@ -666,7 +661,6 @@ function RegistryInventory({ builds, nodes, reloadNodes, onBuild }: {
       <button disabled={!!busy} onClick={() => void run("refresh", refresh)}>刷新清单</button>
     </div>
     {error && <p className="error" role="alert">{error}</p>}
-    {notice && <p className="notice" role="status">{notice}</p>}
     {!list && !error && <p className="image-empty">正在读取仓库镜像…</p>}
     {list && !list.repository && <p className="image-empty">尚未配置镜像仓库。请先在“仓库设置”保存地址与凭据。</p>}
     {list?.repository && list.images.length === 0 && <div className="image-empty">仓库中还没有镜像版本。<button onClick={onBuild}>前往镜像构建</button></div>}
@@ -710,7 +704,7 @@ function RegistryInventory({ builds, nodes, reloadNodes, onBuild }: {
       onConfirm={() => void run("delete", async () => {
         await api(`/registry/images/${encodeURIComponent(deleteTarget.digest)}`, "DELETE", { expectedTags: deleteTarget.tags });
         setDeleteTarget(null); setSelected(""); await refresh();
-        setNotice("镜像版本已从仓库删除；磁盘空间将在维护时回收。");
+        toast.success("镜像版本已从仓库删除；磁盘空间将在维护时回收。");
       })}
     >
         <p>将从仓库删除摘要 <code>{deleteTarget.digest}</code> 及其所有标签：{deleteTarget.tags.join("、")}。删除后无法从仓库拉取；磁盘空间需在维护时单独回收。</p>
@@ -722,6 +716,7 @@ function RegistryInventory({ builds, nodes, reloadNodes, onBuild }: {
 type PlatformBuildView = { builds: Build[]; available: boolean };
 
 function PlatformInventory() {
+  const toast = useToast();
   const [list, setList] = useState<RegistryList | null>(null);
   const [buildView, setBuildView] = useState<PlatformBuildView | null>(null);
   const [tag, setTag] = useState("");
@@ -731,7 +726,6 @@ function PlatformInventory() {
   const [usage, setUsage] = useState<string[]>([]);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const refresh = useCallback(async () => {
     const results = await Promise.allSettled([
       api<RegistryList>("/registry/platform-images"),
@@ -759,7 +753,7 @@ function PlatformInventory() {
     return () => clearInterval(timer);
   }, [logID, active]);
   async function run(name: string, work: () => Promise<void>) {
-    setBusy(name); setError(""); setNotice("");
+    setBusy(name); setError("");
     try { await work(); } catch (cause) { setError((cause as Error).message); }
     finally { setBusy(""); }
   }
@@ -774,7 +768,7 @@ function PlatformInventory() {
           const build = await api<Build>("/runtime/images/platform/builds", "POST", { tag: tag.trim() });
           setLogID(build.id); setLog(""); setTag("");
           await refresh();
-          setNotice("已开始构建并发布。完成后可在下方选择镜像摘要。 ");
+          toast.success("已开始构建并发布。完成后可在下方选择镜像摘要。");
         })}>构建并发布</button>
         {buildView && !buildView.available && <p className="image-help">构建服务尚未配置平台源码；请检查构建服务部署。</p>}
       </div>
@@ -782,7 +776,6 @@ function PlatformInventory() {
     <section className="panel image-inventory" aria-label="平台镜像版本">
       <div className="panel-head"><div><h2>平台镜像版本</h2><p>{list?.repository || "内置仓库的 swarmjet/platform 路径"}</p></div><button disabled={!!busy} onClick={() => void run("refresh", refresh)}>刷新清单</button></div>
       {error && <p className="error" role="alert">{error}</p>}
-      {notice && <p className="notice" role="status">{notice}</p>}
       {!list && !error && <p className="image-empty">正在读取平台镜像…</p>}
       {list?.images.length === 0 && <p className="image-empty">仓库中还没有平台镜像版本。</p>}
       {list?.images.map((image) => <article className="image-build-row" key={image.digest} aria-label={`平台镜像 ${image.digest}`}>
@@ -792,7 +785,7 @@ function PlatformInventory() {
           <p>固定摘要可用于新 Node 的部署包；已运行的 Node 不会自动升级。</p>
         </div>
         <div className="image-actions">
-          <button disabled={!!busy} onClick={() => void run("copy", async () => { await navigator.clipboard.writeText(image.reference); setNotice("镜像摘要已复制。"); })}>复制摘要</button>
+          <button disabled={!!busy} onClick={() => void run("copy", async () => { await navigator.clipboard.writeText(image.reference); toast.success("镜像摘要已复制。"); })}>复制摘要</button>
           <button disabled={!!busy} onClick={() => void run("usage", async () => {
             const result = await api<{ references: string[] }>(`/registry/platform-images/${encodeURIComponent(image.digest)}/usage`);
             setUsage(result.references); setDeleteTarget(image);
@@ -811,7 +804,7 @@ function PlatformInventory() {
     </section>
     {deleteTarget && <ConfirmDialog title="确认删除平台镜像版本" confirmLabel="确认删除" danger busy={!!busy} disabled={usage.length > 0} error={error} onCancel={() => setDeleteTarget(null)} onConfirm={() => void run("delete", async () => {
       await api(`/registry/platform-images/${encodeURIComponent(deleteTarget.digest)}`, "DELETE", { expectedTags: deleteTarget.tags });
-      setDeleteTarget(null); await refresh(); setNotice("平台镜像版本已从仓库删除。");
+      setDeleteTarget(null); await refresh(); toast.success("平台镜像版本已从仓库删除。");
     })}>
       <p>将删除摘要 <code>{deleteTarget.digest}</code> 及其标签：{deleteTarget.tags.join("、")}。已下载但尚未安装的部署包可能引用该摘要。</p>
       {usage.length > 0 && <p className="confirm-dialog-warning">仍在使用：{usage.join("、")}。请先更新引用。</p>}

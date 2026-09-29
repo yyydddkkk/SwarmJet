@@ -24,7 +24,7 @@ sudo python3 deploy/install.py
 
 初始化验证默认使用 `swarmjet-agent:local`。如果业务项目需要额外工具链或离线依赖，应准备相应镜像并修改 `INIT_VERIFY_IMAGE`；服务启动成功不代表项目验收已通过。
 
-失败后可以重新运行脚本；已有 `.env` 不会被覆盖或补写，仓库密码和 CA 也不会轮换。`--data-dir` 和 `--agent-clis` 仅用于首次生成配置，之后直接编辑 `.env`。脚本会重新构建并更新服务，不删除数据；升级前仍应备份 PostgreSQL、数据目录、`.env.registry` 和主密钥。已发布镜像的更新使用下文的 `update.sh`。
+失败后可以重新运行脚本；已有 `.env` 不会被覆盖，只会补齐缺失的升级器配置，仓库密码和 CA 也不会轮换。`--data-dir` 和 `--agent-clis` 仅用于首次生成配置，之后直接编辑 `.env`。脚本会重新构建并更新服务，不删除数据；升级前仍应备份 PostgreSQL、数据目录、`.env.registry` 和主密钥。已发布镜像的更新使用下文的 `update.sh`。
 
 ## 手动本地构建
 
@@ -85,6 +85,14 @@ chmod 600 .env
 ```
 
 脚本拉取镜像，先执行 Temporal schema 更新和 namespace 初始化、再执行应用 migration，最后更新 API、Worker、builder、BuildKit、本地节点和内置仓库。它不会执行 `compose down` 或删除数据卷。已有执行容器和 Temporal 历史不会因为替换 Worker 而删除。
+
+### 控制台升级引导
+
+安装包含升级功能的首个发布版时，先按上面的 `update.sh` 流程更新控制面。脚本为控制面生成独立 `UPDATER_SECRET`、保存部署目录，并启动与 API 分离的 `updater`。将 `UPDATER_STATE_DIR` 配置为**独立挂载的备份文件系统**；控制台升级的预检会检查挂载位置和剩余空间。
+
+已部署的远程 Node 需要一次人工引导：把此发布版的 `compose.node.yaml`、`install_node.py`、`upgrade_host.py` 和 `Dockerfile.updater` 复制到该 Node 原有的私密部署包目录，保留其中的 `node.json`、`node.env` 与仓库 CA，然后在 Node 主机执行 `python3 install_node.py --check` 和 `sudo python3 install_node.py`。确认 Node 恢复心跳并上报协议版本 2 后，后续程序升级可从“系统设置 → 平台升级”发起。
+
+控制台先从固定 GitHub 仓库的 `vX.Y.Z` 标签取得源码，由本集群 BuildKit 构建并发布到内置 Registry。管理员查看构建与预检结果后启动升级；系统停止新接单、等待实际执行结束、自动备份，再更新控制面并逐台升级已启用的 Node。待审批或待回复任务保留；启用但离线的 Node 会阻断启动。Runner 镜像继续在镜像管理中独立更新。升级器接口、备份内容及失败恢复见 [宿主机升级器说明](UPGRADE.md)。
 
 首次初始化由 PostgreSQL 建立 `swarmjet`、`temporal`、`temporal_visibility` 三个数据库，随后对应工具建立 schema。升级已有数据库前先备份；不要给新版 Temporal 强行降级数据库 schema。更换主版本应遵循官方升级路径，不能仅修改镜像 tag 跳过中间升级要求。`TEMPORAL_NAMESPACE` 默认 `swarmjet`，历史保留 7 天。
 
@@ -186,7 +194,7 @@ Webhook 的 PostgreSQL `(provider, delivery ID)` 收据用于确认丢失后的�
 
 ### 内网快速添加 Node
 
-内置 Distribution 同时存放程序镜像与 Agent 镜像。程序镜像使用独立路径 `swarmjet/platform`，Agent 镜像继续使用 `swarmjet/agent`。首选在 **系统设置 → 开发者选项**启用“管理平台程序镜像”，然后在 **镜像管理 → 平台镜像**填写新的版本标签，点击“构建并发布”。构建服务使用与当前部署打包的同版本源码；本机原生开发使用当前工作区源码。发布不会自动替换运行中的 API、Worker 或 Node，升级仍按部署流程进行。
+内置 Distribution 同时存放程序镜像与 Agent 镜像。程序镜像使用独立路径 `swarmjet/platform`，Agent 镜像继续使用 `swarmjet/agent`。**系统设置 → 平台升级**从发布标签构建新版并协调已安装升级器的控制面与 Node 更新。开发者也可在 **系统设置 → 开发者选项**启用“管理平台程序镜像”，然后在 **镜像管理 → 平台镜像**为当前源码构建镜像；这个开发者构建操作本身不会更新运行中的服务。
 
 也可在**运行控制面 API 容器的主机**使用 CLI 发布当前程序镜像（tag 使用本次发布的唯一版本号）：
 
@@ -214,7 +222,7 @@ sudo python3 install_node.py
 
 部署包包含 Node 专属注册凭据、仓库只读凭据和 CA 公钥证书。脚本先检查 Linux、程序镜像引用、控制面和仓库连通性；目标机缺少 Docker 时，在 Ubuntu/Debian 上从 Docker 官方 apt 仓库安装 Engine 与 Compose 插件。已有 Docker 只补齐缺失的 Compose 插件或启动 daemon，不清理旧容器、镜像或卷。随后脚本安装仓库 CA、用临时 Docker 配置拉取指定摘要的程序镜像、创建独立数据目录并启动 Node。重复运行保留数据目录；`node.env` 保存 Node 注册凭据，权限为 `0600`。部署包自身含明文凭据，也必须保存在受限目录。
 
-Node 容器启动后，回到 Node 管理页确认“在线”，选择默认 Agent 镜像并等待“镜像就绪”，在该 Node 的 Runner 环境中完成登录，最后启用“接收新任务”。安装脚本验证容器启动；跨机器回连、Agent 镜像准备和可调度状态仍以页面显示为准。首次下载部署包会生成注册凭据，已注册的 ID 不可重复下载部署包。程序镜像升级可发布新 tag 和摘要，再按维护安排更新节点的 `node.json` 并重跑安装脚本；当前页面尚不提供程序镜像一键升级。
+Node 容器启动后，回到 Node 管理页确认“在线”，选择默认 Agent 镜像并等待“镜像就绪”，在该 Node 的 Runner 环境中完成登录，最后启用“接收新任务”。安装脚本验证容器启动；跨机器回连、Agent 镜像准备和可调度状态仍以页面显示为准。首次下载部署包会生成注册凭据，已注册的 ID 不可重复下载部署包。Node 完成上述升级器引导后，程序版本由“系统设置 → 平台升级”逐台更新并核对心跳。
 
 控制面把 `EXECUTION_MODE` 设为 `distributed`；在执行节点页面为每个 Node 创建独立注册凭据，作为该节点的 `NODE_SECRET`。旧部署的共享 `NODE_SECRET` 保留兼容入口。`local` 是默认的单机回退：没有注册节点时任务在本机 Worker 执行。
 

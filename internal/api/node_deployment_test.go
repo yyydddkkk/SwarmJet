@@ -51,6 +51,7 @@ func TestNodeBundleKeepsCredentialsInPrivateFile(t *testing.T) {
 	}
 	archive, err := makeNodeBundle(map[string][]byte{
 		"install_node.py": []byte("print('hello')\n"), "compose.node.yaml": []byte("services: {}\n"),
+		"upgrade_host.py": []byte("print('upgrade')\n"), "Dockerfile.updater": []byte("FROM scratch\n"),
 		"registry-ca.crt": []byte("certificate"), "node.json": config, "README.txt": []byte("instructions"),
 	})
 	if err != nil {
@@ -86,7 +87,7 @@ func TestNodeBundleKeepsCredentialsInPrivateFile(t *testing.T) {
 		}
 		seen[h.Name] = true
 	}
-	if len(seen) != 5 {
+	if len(seen) != 7 {
 		t.Fatalf("bundle files = %v", seen)
 	}
 }

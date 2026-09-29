@@ -105,6 +105,13 @@ func runBuilder(ctx context.Context, s *store.Store, box *secretbox.Box) error {
 			proxy.Use(vars)
 			return imagebuild.Prepared{Env: vars, Registry: access}, reg.Address + "/swarmjet/platform", nil
 		}
+		m.ReleaseEnv = func(cctx context.Context) (map[string]string, error) {
+			ref, err := s.ResolveNetwork(cctx, domain.NetworkChoice{Mode: "default"})
+			if err != nil {
+				return nil, err
+			}
+			return networkconfig.Resolve(cctx, s, box, ref)
+		}
 		return nil
 	}
 	secret := required("RUNTIME_ADMIN_SECRET")

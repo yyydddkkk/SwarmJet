@@ -29,16 +29,17 @@ const logLimit = 4 << 20
 type Runner func(context.Context, []string, io.Writer) error
 
 type Build struct {
-	Reference  string     `json:"reference,omitempty"`
-	ID         string     `json:"id"`
-	Tag        string     `json:"tag"`
-	ImageID    string     `json:"imageId,omitempty"`
-	Status     string     `json:"status"`
-	Source     string     `json:"source"`
-	Config     Config     `json:"config"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
-	Error      string     `json:"error,omitempty"`
+	Reference  string           `json:"reference,omitempty"`
+	ID         string           `json:"id"`
+	Tag        string           `json:"tag"`
+	ImageID    string           `json:"imageId,omitempty"`
+	Status     string           `json:"status"`
+	Source     string           `json:"source"`
+	Config     Config           `json:"config"`
+	CreatedAt  time.Time        `json:"createdAt"`
+	FinishedAt *time.Time       `json:"finishedAt,omitempty"`
+	Error      string           `json:"error,omitempty"`
+	Release    *ReleaseManifest `json:"release,omitempty"`
 }
 
 type Active struct {
@@ -56,14 +57,16 @@ type State struct {
 type Manager struct {
 	Resolve         func(context.Context, *Config) (Prepared, error)
 	ResolvePlatform func(context.Context, string) (Prepared, string, error)
+	ReleaseEnv      func(context.Context) (map[string]string, error)
 	SaveState       func(State) error
 
-	mu      sync.Mutex
-	dir     string
-	run     Runner
-	state   State
-	cancel  context.CancelFunc
-	running string
+	mu               sync.Mutex
+	dir              string
+	run              Runner
+	state            State
+	cancel           context.CancelFunc
+	running          string
+	releaseSourceURL string
 }
 
 var platformTag = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
@@ -71,6 +74,10 @@ var platformTag = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 // BuildPlatform uses the same serialized BuildKit queue and durable history as
 // Agent images, while leaving the Agent build recipe untouched.
 func (m *Manager) BuildPlatform(tag, sourceDir string) (Build, error) {
+	return m.buildPlatform(tag, sourceDir, nil)
+}
+
+func (m *Manager) buildPlatform(tag, sourceDir string, release *ReleaseManifest) (Build, error) {
 	if !platformTag.MatchString(tag) {
 		return Build{}, errors.New("平台镜像版本标签无效")
 	}
@@ -86,6 +93,13 @@ func (m *Manager) BuildPlatform(tag, sourceDir string) (Build, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if release != nil {
+		for _, existing := range m.state.Builds {
+			if existing.Release != nil && existing.Release.Version == tag && (existing.Status == "building" || existing.Status == "cancelling" || existing.Status == "succeeded") {
+				return existing, nil
+			}
+		}
+	}
 	if m.running != "" {
 		return Build{}, errors.New("已有镜像正在构建，请等待完成或取消")
 	}
@@ -106,7 +120,7 @@ func (m *Manager) BuildPlatform(tag, sourceDir string) (Build, error) {
 	if err = os.MkdirAll(buildDir, 0700); err != nil {
 		return Build{}, err
 	}
-	b := Build{ID: id, Tag: repository + ":" + tag, Status: "building", Source: "platform", Config: Config{Repository: repository, Platform: "linux/" + runtime.GOARCH}, CreatedAt: time.Now().UTC()}
+	b := Build{ID: id, Tag: repository + ":" + tag, Status: "building", Source: "platform", Config: Config{Repository: repository, Platform: "linux/" + runtime.GOARCH}, CreatedAt: time.Now().UTC(), Release: release}
 	m.state.Builds = append([]Build{b}, m.state.Builds...)
 	if err = m.save(); err != nil {
 		m.state.Builds = m.state.Builds[1:]
@@ -357,6 +371,9 @@ func (m *Manager) Build(c Config) (Build, error) {
 
 func (m *Manager) build(ctx context.Context, cancel context.CancelFunc, b Build, dir string) {
 	defer cancel()
+	if b.Release != nil {
+		defer os.RemoveAll(dir)
+	}
 	path := filepath.Join(m.dir, "builds", b.ID, "build.log")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err == nil {
@@ -377,6 +394,9 @@ func (m *Manager) build(ctx context.Context, cancel context.CancelFunc, b Build,
 		values := map[string]string{}
 		if b.Source != "platform" {
 			values = b.Config.args()
+		} else if b.Release != nil {
+			values["RELEASE_VERSION"] = b.Release.Version
+			values["RELEASE_COMMIT"] = b.Release.CommitSHA
 		}
 		keys := []string{}
 		for key := range values {
@@ -427,6 +447,10 @@ func (m *Manager) build(ctx context.Context, cancel context.CancelFunc, b Build,
 			result.Status = "succeeded"
 			result.ImageID = imageID
 			result.Reference = reference
+			if result.Release != nil {
+				result.Release.Reference = reference
+				result.Release.Digest = strings.TrimPrefix(reference, result.Config.Repository+"@")
+			}
 		}
 		break
 	}

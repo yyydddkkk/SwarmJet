@@ -3,9 +3,11 @@ import { api } from "./api";
 import type { Project } from "./types";
 import { canManageProject, canOperateProject } from "./permissions";
 import { Empty, ErrorBox, Field, Modal } from "./ui";
+import { AsyncCollectionView, useAsyncCollection } from "./AsyncCollection";
 import MarkdownEditor, { MarkdownContent } from "./MarkdownEditor";
 import { detailHash, getProjects, normalizeDiffPage, normalizeMR, workbenchPath, type Assignee, type DiffPage, type Discussion, type MRDiff, type Page, type WorkbenchMR } from "./workbench-api";
 import { AssigneeSelector, LabelSelector, type WorkbenchLabel } from "./WorkbenchSelectors";
+import { useToast } from "./ToastProvider";
 import "./workbench-pages.css";
 
 const date = (value?: string) => value ? new Date(value).toLocaleString("zh-CN") : "—";
@@ -20,23 +22,29 @@ function MRList({ initialProjectId, onProjectChange, platformAdmin }: { initialP
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState(initialProjectId); const [repositoryId, setRepositoryId] = useState(""); const [state, setState] = useState("opened"); const [search, setSearch] = useState("");
   const [cursor, setCursor] = useState(""); const [history, setHistory] = useState<string[]>([]);
-  const [page, setPage] = useState<Page<WorkbenchMR>>({ items: [] }); const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [creating, setCreating] = useState(false);
+  const [projectsError, setProjectsError] = useState(""); const [creating, setCreating] = useState(false);
   useEffect(() => { setProjectId(initialProjectId); setRepositoryId(""); setCursor(""); setHistory([]); }, [initialProjectId]);
-  useEffect(() => { void getProjects().then(setProjects).catch(cause => setError((cause as Error).message)); }, []);
+  const loadProjects = useCallback(async () => {
+    try { setProjects(await getProjects()); setProjectsError(""); }
+    catch (cause) { setProjectsError((cause as Error).message); }
+  }, []);
+  useEffect(() => { void loadProjects(); }, [loadProjects]);
   const repositories = useMemo(() => projects.find(p => p.id === projectId)?.repositories || [], [projects, projectId]);
   const reset = () => { setCursor(""); setHistory([]); };
-  const load = useCallback(async () => {
-    setLoading(true); setError(""); const params = new URLSearchParams({ state });
+  const load = useCallback(async (signal: AbortSignal) => {
+    const params = new URLSearchParams({ state });
     if (projectId) params.set("projectId", projectId); if (repositoryId) params.set("repositoryId", repositoryId); if (search.trim()) params.set("search", search.trim()); if (cursor) params.set("cursor", cursor);
-    try { const result = await api<Page<WorkbenchMR>>(`/workbench/merge-requests?${params}`); setPage({ ...result, items: (result.items || []).map(normalizeMR) }); } catch (cause) { setError((cause as Error).message); } finally { setLoading(false); }
+    const result = await api<Page<WorkbenchMR>>(`/workbench/merge-requests?${params}`, "GET", undefined, signal);
+    return { ...result, items: (result.items || []).map(normalizeMR) };
   }, [projectId, repositoryId, state, search, cursor]);
-  useEffect(() => { void load(); }, [load]);
+  const { state: list, nextCursor, retry } = useAsyncCollection(load);
+  const loading = list.status === "loading";
   const writableProjects = projects.filter(project => canOperateProject(project.myRole, platformAdmin));
   return <div className="workbench-page"><div className="page-head"><div><h1>MR 工作台</h1><p>在一个地方查看变更、CI、讨论与合并状态。</p></div>{writableProjects.length > 0 && <button className="primary" onClick={() => setCreating(true)}>创建 MR</button>}</div><section className="panel workbench-list">
     <div className="workbench-filters"><label>项目<select value={projectId} onChange={e => { setProjectId(e.target.value); setRepositoryId(""); reset(); onProjectChange?.(e.target.value); }}><option value="">全部项目</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>仓库<select value={repositoryId} disabled={!projectId} onChange={e => { setRepositoryId(e.target.value); reset(); }}><option value="">全部仓库</option>{repositories.map(r => <option key={r.id} value={r.id}>{r.path || r.id}</option>)}</select></label><label>状态<select value={state} onChange={e => { setState(e.target.value); reset(); }}><option value="opened">未合并</option><option value="merged">已合并</option><option value="closed">已关闭</option><option value="all">全部</option></select></label><label>搜索<input type="search" value={search} onChange={e => { setSearch(e.target.value); reset(); }} placeholder="标题或内容" /></label></div>
-    <ErrorBox error={error} retry={() => void load()} />
-    {loading ? <p className="workbench-muted">正在读取 MR…</p> : page.items.length ? <div className="workbench-rows">{page.items.map(mr => <a className="workbench-row" key={`${mr.projectId}/${mr.repositoryId}/${mr.iid}`} href={detailHash("merge-requests", mr.projectId, mr.repositoryId, mr.iid)}><div><span className="workbench-number">!{mr.iid}</span><strong>{mr.title}</strong><span className="workbench-state">{mr.state === "merged" ? "已合并" : mr.state === "closed" ? "已关闭" : "待审查"}</span></div><p>{projects.find(p => p.id === mr.projectId)?.name || mr.projectId} / {mr.repositoryId} · {mr.sourceBranch} → {mr.targetBranch}</p><small>{mr.taskId ? "托管任务 · " : ""}更新于 {date(mr.updatedAt)}</small></a>)}</div> : <Empty>{state === "opened" ? "当前没有符合条件的未合并 MR。可将状态切换为“全部”查看历史记录。" : "没有符合条件的 MR。"}</Empty>}
-    <div className="workbench-pager"><button disabled={!history.length || loading} onClick={() => { setCursor(history.at(-1) || ""); setHistory(h => h.slice(0, -1)); }}>上一页</button><button disabled={!page.nextCursor || loading} onClick={() => { setHistory(h => [...h, cursor]); setCursor(page.nextCursor || ""); }}>下一页</button></div>
+    <ErrorBox error={projectsError} retry={() => void loadProjects()} />
+    <AsyncCollectionView state={list} retry={retry} loadingText="正在读取 MR…" empty={state === "opened" ? "当前没有符合条件的未合并 MR。可将状态切换为“全部”查看历史记录。" : "没有符合条件的 MR。"}>{items => <div className="workbench-rows">{items.map(mr => <a className="workbench-row" key={`${mr.projectId}/${mr.repositoryId}/${mr.iid}`} href={detailHash("merge-requests", mr.projectId, mr.repositoryId, mr.iid)}><div><span className="workbench-number">!{mr.iid}</span><strong>{mr.title}</strong><span className="workbench-state">{mr.state === "merged" ? "已合并" : mr.state === "closed" ? "已关闭" : "待审查"}</span></div><p>{projects.find(p => p.id === mr.projectId)?.name || mr.projectId} / {mr.repositoryId} · {mr.sourceBranch} → {mr.targetBranch}</p><small>{mr.taskId ? "托管任务 · " : ""}更新于 {date(mr.updatedAt)}</small></a>)}</div>}</AsyncCollectionView>
+    <div className="workbench-pager"><button disabled={!history.length || loading} onClick={() => { setCursor(history.at(-1) || ""); setHistory(h => h.slice(0, -1)); }}>上一页</button><button disabled={!nextCursor || loading} onClick={() => { setHistory(h => [...h, cursor]); setCursor(nextCursor); }}>下一页</button></div>
   </section>{creating && <CreateMR projects={writableProjects} close={() => setCreating(false)} />}</div>;
 }
 
@@ -48,13 +56,14 @@ function CreateMR({ projects, close }: { projects: Project[]; close: () => void 
 }
 
 function MRDetail({ projectId, repositoryId, iid, canOperate, canManage }: { projectId: string; repositoryId: string; iid: number; canOperate: boolean; canManage: boolean }) {
+  const toast = useToast();
   const path = workbenchPath("merge-requests", projectId, repositoryId, iid);
-  const [mr, setMR] = useState<WorkbenchMR | null>(null); const [title, setTitle] = useState(""); const [description, setDescription] = useState(""); const [selectedLabels, setSelectedLabels] = useState<WorkbenchLabel[]>([]); const [selectedAssignees, setSelectedAssignees] = useState<Assignee[]>([]); const [note, setNote] = useState(""); const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false); const [diffPage, setDiffPage] = useState(1); const [diffs, setDiffs] = useState<DiffPage | null>(null); const [diffError, setDiffError] = useState("");
+  const [mr, setMR] = useState<WorkbenchMR | null>(null); const [title, setTitle] = useState(""); const [description, setDescription] = useState(""); const [selectedLabels, setSelectedLabels] = useState<WorkbenchLabel[]>([]); const [selectedAssignees, setSelectedAssignees] = useState<Assignee[]>([]); const [note, setNote] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [diffPage, setDiffPage] = useState(1); const [diffs, setDiffs] = useState<DiffPage | null>(null); const [diffError, setDiffError] = useState("");
   const load = useCallback(async () => { try { const item = normalizeMR(await api<WorkbenchMR>(path)); setMR(item); setTitle(item.title); setDescription(item.description || ""); setSelectedLabels((item.labels || []).map(name => ({ name }))); setSelectedAssignees(item.assignees || []); setError(""); } catch (cause) { setError((cause as Error).message); } }, [path]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { api<DiffPage>(`${path}/diffs?page=${diffPage}`).then(result => { setDiffs(normalizeDiffPage(result)); setDiffError(""); }).catch(cause => setDiffError((cause as Error).message)); }, [path, diffPage]);
-  const act = async (action: () => Promise<unknown>, message: string) => { setBusy(true); setError(""); setNotice(""); try { await action(); await load(); setNotice(message); } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); } };
-  return <div className="workbench-page workbench-detail"><a href="#/merge-requests" className="workbench-back">← MR 列表</a><ErrorBox error={error} retry={() => void load()} />{notice && <p role="status" className="notice">{notice}</p>}{!mr ? <p>正在读取 MR…</p> : <>
+  const act = async (action: () => Promise<unknown>, message: string) => { setBusy(true); setError(""); try { await action(); await load(); toast.success(message); } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); } };
+  return <div className="workbench-page workbench-detail"><a href="#/merge-requests" className="workbench-back">← MR 列表</a><ErrorBox error={error} retry={() => void load()} />{!mr ? <p>正在读取 MR…</p> : <>
     <div className="page-head"><div><span className="workbench-number">MR !{iid} · {mr.state}</span><h1>{mr.title}</h1><p>{mr.sourceBranch} → {mr.targetBranch} · 更新于 {date(mr.updatedAt)} · <a href={mr.webUrl} target="_blank" rel="noreferrer">在 GitLab 查看</a></p></div></div>
     <section className="panel workbench-managed workbench-pad"><h2>{mr.taskId ? "托管任务的合并请求" : "审查与合并"}</h2><p>当前 HEAD：<code>{mr.sha || "未知"}</code> · GitLab 状态：{mr.mergeStatus || "待检查"}</p>{mr.taskId && <p>合并此 MR 需要完成整轮任务的审查与验收，并由工作流依次合并各仓库。</p>}{canManage && <div className="actions"><button disabled={busy || mr.state !== "opened" || mr.approved || !mr.sha} onClick={() => void act(() => api(`${path}/approve`, "POST", { sha: mr.sha }), "已批准当前版本。")}>批准当前版本</button><button disabled={busy || mr.state !== "opened" || !mr.approved || !mr.sha} onClick={() => void act(() => api(`${path}/unapprove`, "POST", { sha: mr.sha }), "已撤销批准。")}>撤销批准</button>{mr.taskId ? <a className="button" href={`#/tasks/${encodeURIComponent(mr.taskId)}`}>前往任务审查与合并</a> : <button className="primary" disabled={busy || mr.state !== "opened" || !mr.sha} onClick={() => void act(() => api(`${path}/merge`, "POST", { sha: mr.sha }), "MR 已合并。")}>合并 MR</button>}</div>}</section>
     <div className="workbench-columns"><section className="panel workbench-main"><div className="panel-head"><h2>描述</h2></div><div className="workbench-pad">{canOperate ? <><Field label="标题"><input value={title} onChange={e => setTitle(e.target.value)} /></Field><MarkdownEditor value={description} onChange={setDescription} baseUrl={mr.webUrl} imageProxyPath={path} initialPreview /><div className="form-grid"><LabelSelector kind="merge-requests" projectId={projectId} repositoryId={repositoryId} selected={selectedLabels} onChange={setSelectedLabels} /><AssigneeSelector kind="merge-requests" projectId={projectId} repositoryId={repositoryId} selected={selectedAssignees} onChange={setSelectedAssignees} /></div><div className="form-actions"><button className="primary" disabled={busy || !title.trim()} onClick={() => void act(() => api(path, "PUT", { title, description, labels: selectedLabels.map(label => label.name), assigneeIds: selectedAssignees.map(user => user.id) }), "MR 已保存。")}>保存更改</button></div></> : <MarkdownContent value={mr.description || ""} baseUrl={mr.webUrl} />}</div></section><aside className="workbench-side"><section className="panel workbench-pad"><h2>CI 与批准</h2><p>批准：{mr.approved ? "已有批准" : "尚无批准"}</p>{(mr.pipelines || []).length ? <ul className="workbench-pipelines">{mr.pipelines!.map(p => <li key={p.id}>{p.webUrl ? <a href={p.webUrl} target="_blank" rel="noreferrer">流水线 #{p.id}</a> : `流水线 #${p.id}`} · {p.status}</li>)}</ul> : <p className="workbench-muted">暂无 CI 记录。</p>}</section></aside></div>

@@ -6,6 +6,7 @@ import { useAgentCatalog } from "./agents";
 import { ProjectLabels } from "./ProjectLabels";
 import { AddRepository } from "./AddRepository";
 import { ErrorBox, Field } from "./ui";
+import { useToast } from "./ToastProvider";
 import { formatCommand, parseCommand } from "./commands";
 import type { Account } from "./AccessSettings";
 import "./wizard.css";
@@ -74,6 +75,7 @@ export function ProjectEditor({
   onSaved: (p: Project) => void;
   platformAdmin?: boolean;
 }) {
+  const toast = useToast();
   const [p, setP] = useState<Project>(() => structuredClone(initial));
   const [activeUsers, setActiveUsers] = useState<Account[]>([]);
   const [initialOwnerUserId, setInitialOwnerUserId] = useState("");
@@ -113,7 +115,7 @@ export function ProjectEditor({
   const {catalog:agentCatalog,error:agentCatalogError} = useAgentCatalog();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState("");
+  const [guidance, setGuidance] = useState("");
   const [discovering, setDiscovering] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [branches, setBranches] = useState<Record<string, string[]>>({});
@@ -177,7 +179,7 @@ export function ProjectEditor({
   }, [initial.version]);
   function set<K extends keyof Project>(key: K, value: Project[K]) {
     setP((old) => ({ ...old, [key]: value }));
-    setSaved("");
+    setGuidance("");
   }
   function updateRepo(index: number, patch: Partial<Repository>) {
     setP((old) => ({
@@ -186,7 +188,7 @@ export function ProjectEditor({
         i === index ? { ...r, ...patch } : r,
       ),
     }));
-    setSaved("");
+    setGuidance("");
   }
   function updateAgent(
     role: "development" | "review",
@@ -203,7 +205,7 @@ export function ProjectEditor({
           : {}),
       };
     });
-    setSaved("");
+    setGuidance("");
   }
   function updateCheck(index: number, patch: Partial<Check>) {
     set("integration", {
@@ -226,7 +228,7 @@ export function ProjectEditor({
         ? { gitlabUrl: inferOrigin(value) }
         : {}),
     }));
-    setSaved("");
+    setGuidance("");
     setWarnings([]);
     if ((p.repositories || []).length) setSourceChanged(true);
   }
@@ -240,7 +242,7 @@ export function ProjectEditor({
     }));
     if (p.repositories?.length) setSourceChanged(true);
     setWarnings([]);
-    setSaved("");
+    setGuidance("");
   }
   async function createConnection() {
     setError("");
@@ -273,7 +275,8 @@ export function ProjectEditor({
         mergeCredentialRef: "",
       }));
       if (p.repositories?.length) setSourceChanged(true);
-      setSaved("GitLab 连接已保存，请读取 Meta-Repo 清单。");
+      toast.success("GitLab 连接已保存。");
+      setGuidance("请读取 Meta-Repo 清单。");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -283,7 +286,7 @@ export function ProjectEditor({
   async function discover() {
     setDiscovering(true);
     setError("");
-    setSaved("");
+    setGuidance("");
     setWarnings([]);
     try {
       const d = await api<Discovery>("/projects/discover", "POST", {
@@ -335,9 +338,8 @@ export function ProjectEditor({
       setWarnings(d.warnings || []);
       setSourceChanged(false);
       setManual(false);
-      setSaved(
-        `已读取 ${d.repositories.length} 个仓库。已有目标分支设置已保留，保存后生效。`,
-      );
+      toast.success(`已读取 ${d.repositories.length} 个仓库。`);
+      setGuidance("已有目标分支设置已保留，保存后生效。");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -408,7 +410,7 @@ export function ProjectEditor({
   async function save(enabled: boolean) {
     if (!existing && !initialOwnerUserId) { setError("请选择初始负责人。"); return; }
     setError("");
-    setSaved("");
+    setGuidance("");
     if (!p.name.trim() || (!managed && !p.metaUrl.trim())) {
       setError(
         managed
@@ -455,9 +457,7 @@ export function ProjectEditor({
         existing ? projectBody : { ...projectBody, initialOwnerUserId },
       );
       setP(result);
-      setSaved(
-        enabled ? "项目配置已保存并启用。" : "草稿已保存，自动任务未启用。",
-      );
+      toast.success(enabled ? "项目配置已保存并启用。" : "草稿已保存，自动任务未启用。");
       onSaved(result);
     } catch (e) {
       setError((e as Error).message);
@@ -493,9 +493,9 @@ export function ProjectEditor({
         }}
       >
         <ErrorBox error={error} />
-        {saved && (
+        {guidance && (
           <div className="notice" role="status">
-            {saved}
+            {guidance}
           </div>
         )}
         {!existing && <div className="panel panel-padding"><Field label="初始负责人" hint="项目创建后，此成员可管理项目配置和成员。"><select required value={initialOwnerUserId} onChange={event => setInitialOwnerUserId(event.target.value)}><option value="">选择已启用成员</option>{activeUsers.map(user => <option key={user.id} value={user.id}>{user.displayName || user.email}</option>)}</select></Field></div>}
@@ -1202,7 +1202,7 @@ export function ProjectEditor({
                               idx === i ? e.target.value : v,
                             ),
                           );
-                          setSaved("");
+                          setGuidance("");
                         }}
                       />
                     </Field>

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
+import { useToast } from "./ToastProvider";
 import type { NodeView } from "./NodeSettings";
 import NetworkSettings from "./NetworkSettings";
 import RegistrySettings from "./RegistrySettings";
 import GitLabIdentitySettings from "./GitLabIdentitySettings";
+import PlatformUpgrade from "./PlatformUpgrade";
 import { ErrorBox } from "./ui";
 import "./settings-page.css";
 import "./system-settings.css";
@@ -44,7 +46,7 @@ const statusLabel: Record<Check["status"], string> = {
 };
 
 export default function SystemSettings({ section }: { section: string }) {
-  const current = section === "network" || section === "registry" || section === "developer" || section === "gitlab" ? section : "overview";
+  const current = section === "network" || section === "registry" || section === "developer" || section === "gitlab" || section === "upgrade" ? section : "overview";
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [registry, setRegistry] = useState<Registry | null>(null);
   const [proxy, setProxy] = useState<Proxy | null>(null);
@@ -107,6 +109,7 @@ export default function SystemSettings({ section }: { section: string }) {
         <a href="#/settings" aria-current={current === "overview" ? "page" : undefined}>概览与服务地址</a>
         <a href="#/settings/network" aria-current={current === "network" ? "page" : undefined}>网络与代理</a>
         <a href="#/settings/registry" aria-current={current === "registry" ? "page" : undefined}>镜像仓库</a>
+        <a href="#/settings/upgrade" aria-current={current === "upgrade" ? "page" : undefined}>平台升级</a>
         <a href="#/settings/gitlab" aria-current={current === "gitlab" ? "page" : undefined}>GitLab 身份</a>
         <a href="#/settings/developer" aria-current={current === "developer" ? "page" : undefined}>开发者选项</a>
       </nav>
@@ -120,6 +123,7 @@ export default function SystemSettings({ section }: { section: string }) {
         <RegistrySettings expanded />
         <a className="button" href="#/images">查看仓库镜像与构建</a>
       </div>}
+      {current === "upgrade" && <PlatformUpgrade />}
       {current === "developer" && <DeveloperSettings />}
       {current === "overview" && <>
         <ErrorBox error={[loadError, checkError].filter(Boolean).join(" ")} retry={() => { void load(); void runChecks(); }} />
@@ -176,11 +180,11 @@ export default function SystemSettings({ section }: { section: string }) {
 }
 
 function DeveloperSettings() {
+  const toast = useToast();
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   useEffect(() => {
     api<{ platformImages: boolean }>("/system/developer-options")
       .then((options) => setEnabled(options.platformImages))
@@ -191,16 +195,15 @@ function DeveloperSettings() {
     <div className="panel-head"><div><h2 id="developer-heading">开发者选项</h2><p>控制平台程序镜像的维护入口。</p></div></div>
     <div className="panel-body">
       <ErrorBox error={error} />
-      {notice && <p role="status" className="notice">{notice}</p>}
       <label className="environment-check">
         <input type="checkbox" checked={enabled} disabled={loading || saving} onChange={async (event) => {
           const next = event.target.checked;
           setEnabled(next);
-          setSaving(true); setError(""); setNotice("");
+          setSaving(true); setError("");
           try {
             const saved = await api<{ platformImages: boolean }>("/system/developer-options", "PUT", { platformImages: next });
             setEnabled(saved.platformImages);
-            setNotice(saved.platformImages ? "已显示平台镜像管理入口。" : "已隐藏平台镜像管理入口。");
+            toast.success(saved.platformImages ? "已显示平台镜像管理入口。" : "已隐藏平台镜像管理入口。");
           } catch (cause) { setEnabled(!next); setError((cause as Error).message); }
           finally { setSaving(false); }
         }} />

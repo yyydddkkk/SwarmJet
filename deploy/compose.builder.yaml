@@ -1,7 +1,27 @@
 # Combine with compose.yaml. The builder is the only owner of build metadata.
 services:
+  updater:
+    build:
+      context: .
+      dockerfile: Dockerfile.updater
+    image: swarmjet-updater:local
+    command: [--kind, control, serve]
+    restart: unless-stopped
+    environment:
+      UPDATER_SECRET: ${UPDATER_SECRET:-}
+      UPDATER_DEPLOY_DIR: ${UPDATER_DEPLOY_DIR:-${PWD}}
+      UPDATER_STATE_DIR: ${UPDATER_STATE_DIR:-/srv/swarmjet/upgrades}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/docker/certs.d:/etc/docker/certs.d:ro
+      - ${UPDATER_DEPLOY_DIR:-${PWD}}:${UPDATER_DEPLOY_DIR:-${PWD}}
+      - ${UPDATER_STATE_DIR:-/srv/swarmjet/upgrades}:${UPDATER_STATE_DIR:-/srv/swarmjet/upgrades}
+      - ${DATA_DIR:?Set DATA_DIR}:${DATA_DIR:?Set DATA_DIR}:ro
+    expose: ['8095']
   api:
     environment:
+      UPDATER_ADMIN_URL: http://updater:8095
+      UPDATER_SECRET: ${UPDATER_SECRET:-}
       BUILDER_ADMIN_URL: http://builder:8093
       NODE_SECRET: ${NODE_SECRET:-${RUNTIME_ADMIN_SECRET}}
       SWARMJET_BUILTIN_REGISTRY_ADDRESS: ${REGISTRY_BIND_HOST}:${REGISTRY_PORT:-5443}

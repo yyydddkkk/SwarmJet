@@ -240,14 +240,6 @@
   color: var(--muted);
   font-size: 11px;
 }
-.runtime-copy-notice {
-  font-size: 12px;
-  color: var(--accent);
-  min-height: 0;
-}
-.runtime-copy-notice:not(:empty) {
-  padding: 10px 0 16px;
-}
 .runtime-advanced {
   border: 1px solid var(--line);
   border-radius: var(--runtime-radius);
@@ -406,7 +398,6 @@
 .terminal-window .runtime-terminal-stage { flex: 1; min-height: 180px; padding: 16px; display: flex; }
 .terminal-window .runtime-terminal-host { height: auto; min-height: 0; flex: 1; }
 .terminal-window .runtime-terminal-footer { flex: 0 0 auto; padding: 10px 20px; }
-.terminal-window .runtime-copy-notice:empty { display: none; }
 @media (max-width: 640px) {
   .terminal-launcher { flex-direction: column; align-items: flex-start; padding: 20px; }
   .terminal-window { width: 100%; height: 100dvh; border: 0; border-radius: 0; }
