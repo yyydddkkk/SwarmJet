@@ -73,7 +73,7 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
 
 ## 服务器使用发布镜像
 
-发布流水线将主镜像推送为 `ghcr.io/yyydddkkk/swarmjet:<tag>`，执行器镜像为 `ghcr.io/yyydddkkk/swarmjet/agent:<tag>`；main 分支使用 `main` 标签，版本标签使用对应 Git tag。私有仓库需先执行 `docker login`。
+发布流水线在 `vX.Y.Z` 标签通过检查后，将主镜像推送为 `ghcr.io/yyydddkkk/swarmjet:<tag>`，执行器镜像为 `ghcr.io/yyydddkkk/swarmjet/agent:<tag>`。私有仓库需先执行 `docker login`。
 
 将 `deploy/` 目录复制到服务器，进入该目录，复制其中的 `.env.example` 为 `.env`，填写发布流水线产生的完整 `IMAGE` 和 `AGENT_IMAGE` 地址。创建绝对 `DATA_DIR` 后执行：
 
