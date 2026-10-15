@@ -593,13 +593,14 @@ func (a *server) saveProject(w http.ResponseWriter, r *http.Request, p domain.Pr
 	}
 	// Managed projects can only be enabled after initialization has verified the
 	// analysis; this gate is enforced server-side, not only in the console.
+	// Direct single-repo projects have no Meta-Repo and skip both init and Meta checks.
 	if p.Enabled && p.ManagedMeta() {
 		if a.cfg.Initializer == nil || !a.cfg.Initializer.ReadyForTasks(r.Context(), p.ID) {
 			problem(w, 409, "Meta 仓库尚未初始化完成，不能启用项目。请先完成初始化。")
 			return
 		}
 	}
-	if p.Enabled && !p.ManagedMeta() {
+	if p.Enabled && !p.ManagedMeta() && !p.DirectRepo() {
 		checkRemote := p.Version == 0
 		if p.Version > 0 {
 			previous, err := a.s.Project(r.Context(), p.ID)

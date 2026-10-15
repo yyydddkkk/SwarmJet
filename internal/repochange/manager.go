@@ -78,6 +78,9 @@ func (m *Manager) Start(ctx context.Context, projectID string, req AddRequest) (
 	if p.Version < 1 || req.GitLabProjectID <= 0 {
 		return domain.RepositoryChange{}, errors.New("请选择有效的 GitLab 仓库")
 	}
+	if p.DirectRepo() {
+		return domain.RepositoryChange{}, errors.New("单仓库项目不支持增加子仓库")
+	}
 	if p.ManagedMeta() {
 		init, initErr := m.Store.Initialization(ctx, "init-"+p.ID)
 		if initErr != nil || init.Status != domain.InitReady || !init.ReadyForTasks {

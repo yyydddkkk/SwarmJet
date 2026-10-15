@@ -37,6 +37,11 @@ func TestAdmissionReadiness(t *testing.T) {
 	if !ReadyForTasks(ctx, p, nil) {
 		t.Fatal("imported Meta unexpectedly requires initialization")
 	}
+	p.MetaMode = domain.MetaModeDirect
+	p.Enabled = true
+	if !ReadyForTasks(ctx, p, nil) {
+		t.Fatal("direct single-repo unexpectedly requires initialization")
+	}
 	p.Enabled = false
 	if ReadyForTasks(ctx, p, ready(true)) {
 		t.Fatal("disabled project accepted")

@@ -50,6 +50,7 @@ async function setupWizard(page: Page, options?: { verifyFails?: boolean; branch
   const verifyFails = options?.verifyFails ?? false;
   let branchFails = options?.branchFailsOnce ?? false;
   const saves: Project[] = [];
+  const inits: string[] = [];
   let initId = "";
   let answered = false;
   await page.route("**/api/**", async (route) => {
@@ -196,8 +197,10 @@ async function setupWizard(page: Page, options?: { verifyFails?: boolean; branch
       return route.fulfill({ json: { ...payload, version: 1 } });
     }
     if (initId && pathname === "/api/projects/" + initId + "/initialization") {
-      if (method === "POST")
+      if (method === "POST") {
+        inits.push(initId);
         return route.fulfill({ status: 202, json: initRecord(initId, "running") });
+      }
       return route.fulfill({
         json: initRecord(initId, answered ? "ready" : "needs_input"),
       });
@@ -212,7 +215,7 @@ async function setupWizard(page: Page, options?: { verifyFails?: boolean; branch
       });
     return route.fulfill({ status: 404, json: { error: "not found" } });
   });
-  return { saves };
+  return { saves, inits };
 }
 
 async function advanceToOpenCode(page: Page) {
@@ -383,38 +386,43 @@ test("wizard terminal opens in a floating window and releases the session on clo
   await expect(page.locator(".xterm")).toHaveCount(0);
 });
 
-test("GitHub installation creates a managed project with platform checks", async ({ page }) => {
+test("GitHub installation creates a direct single-repo project with platform checks", async ({ page }) => {
   const state = await setupWizard(page);
   await page.route("**/api/github/installations", route => route.fulfill({json:[{id:42,account:{login:"team"}},{id:43,account:{login:"suspended"},suspended_at:"2026-01-01"}]}));
   await page.route("**/api/github/installations/42/connections", route => route.fulfill({json:{id:"gh1",provider:"github",githubInstallationId:42,name:"team",username:"team",gitlabUrl:"",version:1}}));
-  await page.route("**/api/connections/gh1/repositories?*", route => route.fulfill({json:{projects:[{id:501,name:"Core",pathWithNamespace:"team/core",defaultBranch:"main",httpUrlToRepo:"https://github.com/team/core.git",webUrl:"https://github.com/team/core",archived:false}],page:1,hasNext:false}}));
+  await page.route("**/api/connections/gh1/repositories?*", route => route.fulfill({json:{projects:[{id:501,name:"Core",pathWithNamespace:"team/core",defaultBranch:"main",httpUrlToRepo:"https://github.com/team/core.git",webUrl:"https://github.com/team/core",archived:false},{id:502,name:"Other",pathWithNamespace:"team/other",defaultBranch:"main",httpUrlToRepo:"https://github.com/team/other.git",webUrl:"https://github.com/team/other",archived:false}],page:1,hasNext:false}}));
   await page.route("**/api/connections/gh1/repositories/501/branches", route => route.fulfill({json:["main","develop"]}));
+  await page.route("**/api/connections/gh1/repositories/502/branches", route => route.fulfill({json:["main"]}));
   await page.goto("/#/projects/new");
   await page.getByLabel("代码平台",{exact:true}).selectOption("github");
   await expect(page.getByLabel("GitHub App 安装")).toHaveValue("42");
   await expect(page.getByLabel("GitHub App 安装")).not.toContainText("suspended");
   await expect(page.getByLabel("Access Token",{exact:true})).toHaveCount(0);
   await page.getByRole("button",{name:"验证并继续"}).click();
+  await expect(page.getByRole("heading",{name:"选择代码仓库"})).toBeVisible();
+  await page.getByLabel("选择仓库 team/core",{exact:true}).check();
+  await page.getByLabel("选择仓库 team/other",{exact:true}).check();
+  await expect(page.getByLabel("选择仓库 team/core",{exact:true})).not.toBeChecked();
+  await expect(page.getByLabel("选择仓库 team/other",{exact:true})).toBeChecked();
+  await expect(page.getByLabel("Other 的目标分支")).toHaveValue("main");
   await page.getByLabel("选择仓库 team/core",{exact:true}).check();
   await expect(page.getByLabel("Core 的目标分支")).toHaveValue("main");
   await page.getByRole("button",{name:"下一步",exact:true}).click();
-  await page.getByLabel("GitHub 合并方式").selectOption("squash");
-  await page.getByLabel("验收策略",{exact:true}).selectOption("platform_ci");
+  await expect(page.getByLabel("GitHub 合并方式")).toHaveValue("squash");
+  await expect(page.getByLabel("验收策略",{exact:true})).toHaveValue("platform_ci");
+  await expect(page.getByLabel("Meta 分支")).toHaveCount(0);
   await page.getByRole("button",{name:"下一步：配置 OpenCode"}).click();
   await page.getByRole("button",{name:"检查并继续"}).click();
   await page.getByLabel("项目默认 Agent",{exact:true}).selectOption("opencode");
   await page.getByRole("button",{name:"验证模型"}).click();
   await expect(page.getByText("模型验证通过")).toBeVisible();
   await expect(page.getByLabel("初始负责人（可选）", { exact: true })).toHaveValue("");
-  await expect(page.getByRole("button",{name:"创建项目并开始初始化"})).toBeEnabled();
-  await page.getByRole("button",{name:"创建项目并开始初始化"}).click();
-  await expect(page.getByRole("heading",{name:"需要补充信息"})).toBeVisible();
-  expect(state.saves[0]).toMatchObject({provider:"github",connectionId:"gh1",metaMode:"managed",gitlabUrl:"",mergeMethod:"squash",acceptanceStrategy:"platform_ci",requireCI:true,initialOwnerUserId:""});
-  expect(state.saves[0].repositories?.[0]).toMatchObject({projectId:501,url:"https://github.com/team/core.git",targetBranch:"main"});
-  await page.getByLabel("请提供本地联调方式。").fill("go test ./...");
-  await page.getByRole("button",{name:"提交并继续"}).click();
-  await expect(page.getByText("初始化完成",{exact:false})).toBeVisible();
-  await expect(page.getByRole("button",{name:"发布到 GitLab",exact:true})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"创建项目",exact:true})).toBeEnabled();
+  await page.getByRole("button",{name:"创建项目",exact:true}).click();
+  await expect.poll(() => state.saves.length).toBe(1);
+  expect(state.saves[0]).toMatchObject({provider:"github",connectionId:"gh1",metaMode:"direct",metaUrl:"",metaRef:"",gitlabUrl:"",mergeMethod:"squash",acceptanceStrategy:"platform_ci",requireCI:true,initialOwnerUserId:""});
+  expect(state.saves[0].repositories?.[0]).toMatchObject({projectId:501,url:"https://github.com/team/core.git",path:".",targetBranch:"main"});
+  expect(state.inits).toHaveLength(0);
 });
 
 test("GitHub repository picker blocks archived repositories and explains App authorization", async ({ page }) => {

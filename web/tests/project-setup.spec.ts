@@ -645,12 +645,15 @@ test("custom command acceptance preserves argv without requiring Compose", async
 });
 
 test("GitHub editor uses installation connection and GitHub label management", async ({ page }) => {
-  await setupAPI(page, {...configuredProject(),provider:"github",metaMode:"managed",connectionId:"gh1",gitlabUrl:"",enabled:true,acceptanceStrategy:"platform_ci",mergeMethod:"squash"});
+  await setupAPI(page, {...configuredProject(),provider:"github",metaMode:"direct",metaUrl:"",metaRef:"",connectionId:"gh1",gitlabUrl:"",enabled:true,acceptanceStrategy:"platform_ci",mergeMethod:"squash",repositories:[{id:"core",projectId:12,url:"https://github.com/team/core.git",path:".",targetBranch:"dev",createFrom:"",dependsOn:[],sensitivePaths:[]}]});
   await page.goto("/#/projects/custom-project");
+  await expect(page.getByText("GitHub 单仓库项目",{exact:false})).toBeVisible();
+  await expect(page.getByLabel("Meta 分支")).toHaveCount(0);
+  await expect(page.getByRole("link",{name:"查看初始化进度"})).toHaveCount(0);
   const labels = page.getByRole("region",{name:"GitHub 标签管理"});
   await expect(labels.getByRole("heading",{name:"GitHub 标签",exact:true})).toBeVisible();
   await labels.getByRole("button",{name:"检查并补齐"}).click();
-  await expect(labels.getByText("标签已就绪")).toHaveCount(2);
+  await expect(labels.getByText("标签已就绪")).toHaveCount(1);
   await page.getByText("连接与凭据设置",{exact:false}).click();
   await expect(page.getByLabel("GitHub 连接",{exact:true})).toHaveValue("gh1");
   await expect(page.getByLabel("GitLab 地址",{exact:true})).toHaveCount(0);

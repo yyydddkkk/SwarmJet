@@ -69,6 +69,9 @@ export default function Projects({
     return (
       <Suspense fallback={<div className="loading">正在加载配置向导…</div>}>
         <ProjectWizard
+          onSaved={(project) =>
+            setProjects((old) => [...old.filter((item) => item.id !== project.id), { ...project, myRole: project.myRole || "owner" }])
+          }
           onOpenProject={(project) =>
             go(`/projects/${encodeURIComponent(project)}`)
           }
@@ -118,7 +121,7 @@ export default function Projects({
         <div>
           <div className="eyebrow">CONFIGURATION</div>
           <h1>项目配置</h1>
-          <p>连接 Meta-Repo，定义仓库目标、Agent 和交付检查。</p>
+          <p>连接 GitLab Meta-Repo 或 GitHub 单仓库，定义目标分支、Agent 和交付检查。</p>
         </div>
         {platformAdmin && <a className="button primary" href="#/projects/new">
           ＋ 新建项目
@@ -145,7 +148,7 @@ export default function Projects({
               <p className="mono muted">
                 {p.id} · v{p.version}
               </p>
-              <p className="project-url">{p.metaUrl}</p>
+              <p className="project-url">{p.metaMode === "direct" ? (p.repositories?.[0]?.url || "单仓库") : p.metaUrl}</p>
               <div className="project-stats">
                 <span>{p.repositories?.length || 0} 个仓库</span>
                 <span>{p.integration?.checks?.length || 0} 项检查</span>

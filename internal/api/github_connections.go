@@ -93,6 +93,9 @@ func (a *server) validateGitHubProject(ctx context.Context, p domain.Project, c 
 	if p.HostingProvider() != domain.ProviderGitHub || c.HostingProvider() != domain.ProviderGitHub {
 		return fmt.Errorf("GitHub 项目需要 GitHub App 连接")
 	}
+	if p.DirectRepo() && len(p.Repositories) != 1 {
+		return fmt.Errorf("GitHub 单仓库项目必须恰好选择一个仓库")
+	}
 	client, err := a.githubClient(c, nil)
 	if err != nil {
 		return err

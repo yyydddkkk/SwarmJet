@@ -48,7 +48,9 @@ func (a *server) check(w http.ResponseWriter, r *http.Request, p domain.Project)
 				appendCheck("target:"+repo.ID, nil, "target branch readable")
 			}
 		}
-		if p.ManagedMeta() {
+		if p.DirectRepo() {
+			appendCheck("meta", nil, "Direct single-repo project has no Meta-Repo")
+		} else if p.ManagedMeta() {
 			appendCheck("meta", a.checkManagedMeta(p), "Managed Meta-Repo manifest and compose file match registered configuration")
 		} else {
 			token, err := a.projectCredential(p)

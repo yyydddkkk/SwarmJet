@@ -6,6 +6,9 @@ import "time"
 const (
 	MetaModeManaged  = "managed"
 	MetaModeImported = "imported"
+	// MetaModeDirect is a single code repository with no Meta-Repo. Used for
+	// GitHub single-repo projects: Issue, changes, and PR all target that repo.
+	MetaModeDirect = "direct"
 )
 
 // Connection is the persisted metadata for a hosting connection. The token
@@ -27,6 +30,14 @@ type Connection struct {
 
 // ManagedMeta reports whether the Meta-Repo is created and owned by SwarmJet.
 func (p Project) ManagedMeta() bool { return p.MetaMode == MetaModeManaged }
+
+// DirectRepo reports whether the project uses a single code repository with no
+// Meta-Repo. Direct projects do not run managed-Meta initialization.
+func (p Project) DirectRepo() bool { return p.MetaMode == MetaModeDirect }
+
+// UsesMetaRepo reports whether workspace preparation depends on a Meta-Repo
+// (managed or imported). Direct single-repo projects return false.
+func (p Project) UsesMetaRepo() bool { return !p.DirectRepo() }
 
 // AutoMergeEnabled resolves the project-level switch. nil preserves the legacy
 // enabled behavior so existing projects do not silently change after upgrade.

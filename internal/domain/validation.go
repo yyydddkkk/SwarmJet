@@ -37,20 +37,22 @@ func ValidateProjectForSave(p Project) error {
 	if p.Version < 0 {
 		return fmt.Errorf("project version must not be negative")
 	}
-	if p.MetaMode != "" && p.MetaMode != MetaModeManaged && p.MetaMode != MetaModeImported {
+	if p.MetaMode != "" && p.MetaMode != MetaModeManaged && p.MetaMode != MetaModeImported && p.MetaMode != MetaModeDirect {
 		return fmt.Errorf("unknown metaMode")
 	}
-	if p.ManagedMeta() {
-		// Managed Meta-Repos are created and owned by the system from the
-		// selected repositories; accepting a caller URL here would bypass the
-		// existing file:// and host validation.
+	if p.ManagedMeta() || p.DirectRepo() {
+		// Managed and direct projects never accept a caller Meta URL: managed
+		// Meta is system-owned, and direct mode has no Meta-Repo at all.
 		if p.MetaURL != "" {
-			return fmt.Errorf("managed projects must not set metaUrl")
+			return fmt.Errorf("managed and direct projects must not set metaUrl")
 		}
 	} else if !safeRepositoryURL(p.MetaURL) {
 		return fmt.Errorf("metaUrl must be a valid remote repository URL without credentials, query or fragment")
 	} else if p.GitLabURL != "" && !sameGitLabAuthority(p.HostingURL(), p.MetaURL) {
 		return fmt.Errorf("metaUrl must use the configured GitLab host")
+	}
+	if p.DirectRepo() && len(p.Repositories) > 1 {
+		return fmt.Errorf("direct projects support exactly one repository")
 	}
 	if p.ConnectionID != "" && !IDPattern.MatchString(p.ConnectionID) {
 		return fmt.Errorf("invalid connection reference")
@@ -239,17 +241,27 @@ func ValidateProject(p Project) error {
 	if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 		return fmt.Errorf("invalid GitLab URL")
 	}
-	if p.MetaMode != "" && p.MetaMode != MetaModeManaged && p.MetaMode != MetaModeImported {
+	if p.MetaMode != "" && p.MetaMode != MetaModeManaged && p.MetaMode != MetaModeImported && p.MetaMode != MetaModeDirect {
 		return fmt.Errorf("unknown metaMode")
 	}
-	if p.ManagedMeta() {
+	if p.DirectRepo() {
+		if p.MetaURL != "" {
+			return fmt.Errorf("direct projects must not set metaUrl")
+		}
+		if len(p.Repositories) != 1 {
+			return fmt.Errorf("direct projects require exactly one repository")
+		}
+		if p.Repositories[0].Path != "." {
+			return fmt.Errorf("direct project repository path must be \".\"")
+		}
+	} else if p.ManagedMeta() {
 		if p.MetaURL != "" {
 			return fmt.Errorf("managed projects must not set metaUrl")
 		}
 	} else if p.MetaURL == "" {
 		return fmt.Errorf("metaUrl, metaRef and repositories are required")
 	}
-	if p.MetaRef == "" || len(p.Repositories) == 0 {
+	if !p.DirectRepo() && (p.MetaRef == "" || len(p.Repositories) == 0) {
 		return fmt.Errorf("metaUrl, metaRef and repositories are required")
 	}
 	if p.MetaURL != "" && !sameGitLabAuthority(p.HostingURL(), p.MetaURL) {
