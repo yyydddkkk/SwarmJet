@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/execution"
-	"swarmjet/internal/gitlab"
-	"swarmjet/internal/workspace"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/workspace"
 )
 
 type failingPublishNode struct {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func TestRunCommentRequiresExactCommand(t *testing.T) {

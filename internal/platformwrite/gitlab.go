@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"swarmjet/internal/forge"
-	"swarmjet/internal/gitlab"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 // FixedSHAPusher is implemented by a control-plane Git transport. Its

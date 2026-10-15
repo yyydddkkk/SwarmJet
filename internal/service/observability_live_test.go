@@ -24,10 +24,10 @@ import (
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 	"google.golang.org/protobuf/proto"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/mq"
-	"swarmjet/internal/observability"
-	"swarmjet/internal/pipeline"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/mq"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/pipeline"
 )
 
 type fixtureLogBuffer struct {

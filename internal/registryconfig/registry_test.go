@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func TestBuiltinDefaultAndCustomOverride(t *testing.T) {

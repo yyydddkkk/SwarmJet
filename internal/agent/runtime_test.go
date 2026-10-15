@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 type fakeDocker struct {

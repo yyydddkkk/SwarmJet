@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/integration"
-	"swarmjet/internal/managedmeta"
-	"swarmjet/internal/workspace"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/integration"
+	"github.com/yyydddkkk/SwarmJet/internal/managedmeta"
+	"github.com/yyydddkkk/SwarmJet/internal/workspace"
 )
 
 // IntegrationRunner runs the task-scoped verification stack on an execution host.

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // This smoke test uses a local fake-agent image and real Docker process/lifecycle

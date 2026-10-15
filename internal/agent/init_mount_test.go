@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // The init role must read business sources through a read-only mount and write

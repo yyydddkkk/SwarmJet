@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func TestUpgradePlanSurvivesBuildAndControlSwitch(t *testing.T) {

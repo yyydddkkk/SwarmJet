@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
 )
 
 func TestLatestAutonomousAddUsesEffectiveEventAndActor(t *testing.T) {

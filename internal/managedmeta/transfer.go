@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // maxBundle bounds a managed Meta-Repo transfer. It must stay below the node

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"swarmjet/internal/credentials"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/gitlab"
-	"swarmjet/internal/secretbox"
+	"github.com/yyydddkkk/SwarmJet/internal/credentials"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
 )
 
 // connectionStore is the persistence subset the console needs for saved GitLab

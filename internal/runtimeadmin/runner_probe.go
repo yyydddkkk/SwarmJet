@@ -3,7 +3,7 @@ package runtimeadmin
 import (
 	"net/http"
 	"strings"
-	"swarmjet/internal/agentcli"
+	"github.com/yyydddkkk/SwarmJet/internal/agentcli"
 )
 
 // testRunner starts the selected image as a short-lived, restricted container.

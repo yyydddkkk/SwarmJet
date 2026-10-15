@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // publishProfile copies only the adapter's allowlisted files, atomically. An

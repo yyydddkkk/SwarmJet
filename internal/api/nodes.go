@@ -4,14 +4,14 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"swarmjet/internal/networkconfig"
-	"swarmjet/internal/nodeenvironment"
-	"swarmjet/internal/registryconfig"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/networkconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/nodeenvironment"
+	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 	"time"
 	"unicode"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // nodeHeartbeat lets an execution node register or refresh itself. It uses the

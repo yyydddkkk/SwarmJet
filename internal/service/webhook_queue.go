@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 // WebhookMessage is the stable payload of the durable webhook queue.

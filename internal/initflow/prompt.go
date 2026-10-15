@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 const initPromptIntro = `你是 SwarmJet 的初始化 Agent。你只读取静态文件并生成 Meta 仓库文档，不要修改、推送或合并任何业务仓库。禁止执行业务代码、命令脚本、依赖安装、构建、测试或启动服务；不得调用 shell、bash 或委派其他 Agent 执行这些操作。使用文件读取、搜索和编辑工具完成任务。

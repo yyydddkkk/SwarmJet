@@ -17,11 +17,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
-	"swarmjet/internal/artifacts"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/k8srunner"
-	"swarmjet/internal/observability"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/artifacts"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/k8srunner"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func TestKubernetesActivityFailuresAreObserved(t *testing.T) {

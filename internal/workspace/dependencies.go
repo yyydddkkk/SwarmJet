@@ -5,7 +5,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"sort"
 	"strings"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // validateManifestDependencies keeps the console's persisted merge-order IDs in

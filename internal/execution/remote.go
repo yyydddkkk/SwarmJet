@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/workspace"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/workspace"
 )
 
 // Wire headers for the authenticated control-plane to node protocol.

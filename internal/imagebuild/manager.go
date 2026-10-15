@@ -20,8 +20,8 @@ import (
 	"syscall"
 	"time"
 
-	assets "swarmjet"
-	"swarmjet/internal/domain"
+	assets "github.com/yyydddkkk/SwarmJet"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 const logLimit = 4 << 20

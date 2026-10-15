@@ -8,7 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"swarmjet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
 )
 
 func (a *server) workbenchImage(w http.ResponseWriter, r *http.Request, client *gitlab.Client, projectID int64, secret, filename string) {

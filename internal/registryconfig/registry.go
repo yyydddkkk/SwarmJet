@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"swarmjet/internal/secretbox"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 type Config struct {

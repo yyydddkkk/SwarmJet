@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func TestCommandPublicationResendAndStartGate(t *testing.T) {

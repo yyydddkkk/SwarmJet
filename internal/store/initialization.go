@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // SaveInitialization upserts durable initialization state with optimistic

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func TestWorkbenchIdentityAssociationAndManualMergeEvidence(t *testing.T) {

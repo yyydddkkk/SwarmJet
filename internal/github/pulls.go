@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
 )
 
 type apiBranch struct {

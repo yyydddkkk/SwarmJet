@@ -72,4 +72,4 @@ npm ci --prefix web
 
 ## 贡献与许可证
 
-欢迎按[贡献指南](CONTRIBUTING.md)提交改动。项目目前尚未指定开源许可证；公开使用和再分发的授权范围有待明确。
+欢迎按[贡献指南](CONTRIBUTING.md)提交改动。本项目以 [MIT 许可证](LICENSE) 发布。

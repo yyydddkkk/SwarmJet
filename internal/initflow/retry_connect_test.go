@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
 )
 
 // A connect-step failure must resume at connect, not skip to analysis without

@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"swarmjet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
 )
 
 func TestEnsurePreservesExistingAndCreatesOnlyMissing(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/argon2"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 // SMTPConfig requires STARTTLS and certificate validation. PublicURL is the

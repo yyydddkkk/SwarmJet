@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/gitlab"
-	"swarmjet/internal/service"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/service"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func TestWorkbenchNoteSubmission(t *testing.T) {

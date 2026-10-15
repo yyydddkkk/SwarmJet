@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"swarmjet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"sync"
 	"time"
 )

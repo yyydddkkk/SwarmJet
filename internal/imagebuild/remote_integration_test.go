@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"swarmjet/internal/registryconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
 	"testing"
 	"time"
 )

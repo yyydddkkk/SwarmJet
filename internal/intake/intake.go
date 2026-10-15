@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/imagebuild"
-	"swarmjet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/imagebuild"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
 )
 
 // Readiness is supplied by the persisted managed Meta initialization.

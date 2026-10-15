@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 type developerOptions struct {

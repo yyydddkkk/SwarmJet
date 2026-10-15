@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func (s *Store) SaveRepositoryChange(ctx context.Context, change domain.RepositoryChange) error {

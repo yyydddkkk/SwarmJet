@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/client"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 type commandTemporal struct {

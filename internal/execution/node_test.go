@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func TestReportPathConfinement(t *testing.T) {

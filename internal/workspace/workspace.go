@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/managedmeta"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/managedmeta"
 	"syscall"
 )
 

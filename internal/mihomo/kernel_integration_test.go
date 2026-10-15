@@ -22,7 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"swarmjet/internal/secretbox"
+	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
 	"testing"
 	"time"
 )

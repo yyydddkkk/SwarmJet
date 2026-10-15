@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"swarmjet/internal/agentcli"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/agentcli"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // cliAdapter owns command, environment and event differences. The Runtime owns

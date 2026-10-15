@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/execution"
-	"swarmjet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
 )
 
 func acceptanceConfig(t domain.Task) (domain.IntegrationConfig, error) {

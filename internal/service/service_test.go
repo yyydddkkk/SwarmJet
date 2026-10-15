@@ -23,11 +23,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/imagebuild"
-	"swarmjet/internal/observability"
-	"swarmjet/internal/pipeline"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/imagebuild"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/pipeline"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func TestTaskScheduledLogLinksWebhookDelivery(t *testing.T) {

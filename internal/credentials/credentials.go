@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/secretbox"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
 )
 
 // Secrets reads connection metadata and the sealed payload. Connection metadata

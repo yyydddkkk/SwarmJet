@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func (a *server) networks(w http.ResponseWriter, r *http.Request) {

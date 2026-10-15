@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"slices"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
 )
 
 const deniedTriggerMessage = "无法接单：触发者未通过项目权限验证。请由已绑定 GitLab 身份的项目成员重新移除并添加 autonomous 标签，或发表新的 /swarmjet run 评论。"

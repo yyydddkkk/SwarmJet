@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/execution"
-	"swarmjet/internal/forge"
-	"swarmjet/internal/github"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/github"
 )
 
 type githubFlow interface {

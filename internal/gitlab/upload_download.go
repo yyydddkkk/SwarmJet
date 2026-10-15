@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"swarmjet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
 )
 
 var ErrUnsupportedUploadImage = errors.New("GitLab upload is not a supported image")

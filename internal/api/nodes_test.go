@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func TestNodeHeartbeatRejectsBadSecret(t *testing.T) {

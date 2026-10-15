@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/registrycatalog"
-	"swarmjet/internal/registryconfig"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/registrycatalog"
+	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func (a *server) registryImages(w http.ResponseWriter, r *http.Request) {

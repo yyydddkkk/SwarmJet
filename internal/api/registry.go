@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"swarmjet/internal/registryconfig"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func (a *server) registry(w http.ResponseWriter, r *http.Request) {

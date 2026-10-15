@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func writeProfileFixture(t *testing.T, path, content string) {

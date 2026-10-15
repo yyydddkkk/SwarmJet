@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/managedmeta"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/managedmeta"
 )
 
 func TestCheckManagedMeta(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func writeFixture(t *testing.T) (*Store, KubernetesWriteIntent) {

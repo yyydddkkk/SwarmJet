@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // Opt-in: makes a real, minimal model call using an explicitly supplied auth file.

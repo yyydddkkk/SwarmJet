@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
 )
 
 // AnalyzeAtNode reuses the restricted static analysis preparation and artifact

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"swarmjet/internal/initflow"
+	"github.com/yyydddkkk/SwarmJet/internal/initflow"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 // Initializer is the durable initialization state machine exposed to the

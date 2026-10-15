@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/repochange"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/repochange"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func (a *server) repositoryChanges(w http.ResponseWriter, r *http.Request, id string, tail []string) {

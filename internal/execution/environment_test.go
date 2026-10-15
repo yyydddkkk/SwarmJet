@@ -2,7 +2,7 @@ package execution
 
 import (
 	"context"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"testing"
 )
 

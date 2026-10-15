@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/gitlab"
-	"swarmjet/internal/managedmeta"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/managedmeta"
 )
 
 type Store interface {

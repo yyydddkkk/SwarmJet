@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"swarmjet/internal/observability"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func observeState(ctx context.Context, s *store.Store, metrics *observability.Metrics) {

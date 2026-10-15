@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"swarmjet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
 )
 
 // Workbench records intentionally mirror GitLab's live response. No issue or MR

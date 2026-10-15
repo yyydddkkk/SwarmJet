@@ -14,9 +14,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/forge"
-	"swarmjet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"sync"
 	"time"
 )

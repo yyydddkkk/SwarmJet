@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"swarmjet/internal/credentials"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/credentials"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 type discoveryFixture struct {

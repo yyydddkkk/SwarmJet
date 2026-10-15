@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/mock"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func autoMerge(value bool) *bool { return &value }

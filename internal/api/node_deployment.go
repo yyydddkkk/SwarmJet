@@ -17,11 +17,11 @@ import (
 	"strings"
 	"time"
 
-	"swarmjet"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/registrycatalog"
-	"swarmjet/internal/registryconfig"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/registrycatalog"
+	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 const platformRepository = "swarmjet/platform"

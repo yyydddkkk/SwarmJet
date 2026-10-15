@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/workspace"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/workspace"
 )
 
 type staticLookup map[string]string

@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/gitlab"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 type workbenchRepository struct {

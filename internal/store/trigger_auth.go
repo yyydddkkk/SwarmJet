@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func (s *Store) RecordExternalTriggerAudit(ctx context.Context, projectID, provider, source, kind string, eventID, externalID int64, decision, reason string) error {

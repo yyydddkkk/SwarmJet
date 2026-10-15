@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // A manually configured integration must satisfy readiness even when the agent

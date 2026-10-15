@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // SyncRemote imports the remote ref into a temporary bare repo before installing

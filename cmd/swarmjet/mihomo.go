@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"swarmjet/internal/mihomo"
-	"swarmjet/internal/secretbox"
+	"github.com/yyydddkkk/SwarmJet/internal/mihomo"
+	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
 	"time"
 )
 

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"strings"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func (s *Store) NetworkProfiles(ctx context.Context) ([]domain.NetworkProfile, error) {

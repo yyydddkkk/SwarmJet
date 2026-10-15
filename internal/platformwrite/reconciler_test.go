@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"swarmjet/internal/forge"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 type fakeIntents struct {

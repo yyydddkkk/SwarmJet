@@ -3,7 +3,7 @@ package execution
 import (
 	"context"
 	"fmt"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // AnalysisParams is an authenticated transient RPC payload, not workflow state.

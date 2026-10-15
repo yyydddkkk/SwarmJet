@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	assets "swarmjet"
-	"swarmjet/internal/domain"
+	assets "github.com/yyydddkkk/SwarmJet"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 type Config struct {

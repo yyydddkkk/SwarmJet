@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/imagebuild"
-	"swarmjet/internal/networkconfig"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/imagebuild"
+	"github.com/yyydddkkk/SwarmJet/internal/networkconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 type upgradeTarget struct {

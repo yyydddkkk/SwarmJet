@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 
-	"swarmjet/internal/forge"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 var ErrRemoteConflict = errors.New("remote state differs from fixed write intent")

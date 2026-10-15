@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // Push publishes the inspected commits without allowing Git to resolve a moving

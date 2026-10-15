@@ -9,8 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/registryconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
 	"syscall"
 )
 

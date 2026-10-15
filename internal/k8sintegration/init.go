@@ -3,7 +3,7 @@ package k8sintegration
 import (
 	"errors"
 
-	"swarmjet/internal/k8srunner"
+	"github.com/yyydddkkk/SwarmJet/internal/k8srunner"
 )
 
 // ManagedInitContract uses the same one-attempt, fenced Job shape as agent

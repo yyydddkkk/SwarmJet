@@ -16,7 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"swarmjet/internal/networkconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/networkconfig"
 	"sync"
 	"sync/atomic"
 	"syscall"

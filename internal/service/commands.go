@@ -11,11 +11,11 @@ import (
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/mq"
-	"swarmjet/internal/observability"
-	"swarmjet/internal/pipeline"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/mq"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/pipeline"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 const CommandQueue = mq.CommandQueue

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/execution"
-	"swarmjet/internal/managedmeta"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/managedmeta"
 )
 
 type captureNode struct {

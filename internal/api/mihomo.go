@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/mihomo"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/mihomo"
 	"time"
 )
 

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/networkconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/networkconfig"
 	"time"
 )
 

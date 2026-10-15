@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func TestMigrateRepairsVersionTwoNodesWithoutProtocolVersion(t *testing.T) {

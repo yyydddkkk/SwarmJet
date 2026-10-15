@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/managedmeta"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/managedmeta"
 )
 
 type memoryStore struct {

@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/execution"
-	"swarmjet/internal/managedmeta"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/managedmeta"
 )
 
 const maxGeneratedFile = 256 << 10

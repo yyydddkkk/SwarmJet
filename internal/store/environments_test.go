@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"testing"
 )
 

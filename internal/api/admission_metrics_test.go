@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
 )
 
 func TestManualSchedulingCountsOnlyImmediateAdmission(t *testing.T) {

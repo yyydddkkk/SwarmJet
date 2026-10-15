@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func TestAddManifestEntryPreservesOtherContentAndUsesManifestAliases(t *testing.T) {

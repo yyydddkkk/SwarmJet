@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"swarmjet/internal/registryconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
 )
 
 const acceptManifest = "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json"

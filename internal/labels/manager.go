@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"swarmjet/internal/forge"
-	"swarmjet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
 )
 
 type Status struct {

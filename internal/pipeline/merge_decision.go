@@ -5,8 +5,8 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
 )
 
 // mergeEvidence owns the review evidence used by both automatic and manual

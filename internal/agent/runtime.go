@@ -20,8 +20,8 @@ import (
 	"syscall"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
 )
 
 // TaskExecutions enumerates supervisor-owned records, never agent-owned artifacts.

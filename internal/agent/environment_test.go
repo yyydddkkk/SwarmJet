@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarmjet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
 )
 
 func TestBackendPreparesPrivateGitLabConfigAndAdoptsRetry(t *testing.T) {

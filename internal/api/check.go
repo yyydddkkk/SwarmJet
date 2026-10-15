@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/managedmeta"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/managedmeta"
 )
 
 type checkResult struct {

@@ -17,6 +17,6 @@ Compose 验证需要 Docker Compose。浏览器测试使用独立端口 5274，�
 
 ## 发布
 
-GitLab CI 使用项目自带的 Container Registry。镜像发布 job 需要支持 privileged Docker-in-Docker 的 runner，并共享 `/certs/client`；普通检查无需公司特定 runner 标签。main 和版本标签触发镜像发布，不自动部署服务器。
+GitHub Actions 在推送到 `main`、`dev` 和拉取请求时运行 Go 测试、控制台构建与浏览器测试，以及 Compose 配置检查。推送到 `main` 或 `vX.Y.Z` 标签时，把程序镜像发布到 `ghcr.io/yyydddkkk/swarmjet`，把执行器镜像发布到 `ghcr.io/yyydddkkk/swarmjet/agent`。流水线不部署服务器。`.gitlab-ci.yml` 保留等价的 GitLab CI 配置。
 
-尚未选择开源许可证，公共仓库地址也尚未确定。目前 Go module 为 `swarmjet`；确定仓库地址后可统一更改模块路径。公开发布前应明确代码归属、保留所需署名并加入适用许可证。
+代码以 [MIT 许可证](LICENSE) 发布。Go module 路径是 `github.com/yyydddkkk/SwarmJet`。

@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 // TrustedRepo is a control-plane checkout containing the exact commit. Dir

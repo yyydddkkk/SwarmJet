@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 // Polling must not restart an agent that is waiting for an operator answer or

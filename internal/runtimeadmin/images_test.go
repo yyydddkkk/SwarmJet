@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarmjet/internal/imagebuild"
+	"github.com/yyydddkkk/SwarmJet/internal/imagebuild"
 )
 
 func TestImageRoutesAuthenticatedAndNoImplicitBuild(t *testing.T) {

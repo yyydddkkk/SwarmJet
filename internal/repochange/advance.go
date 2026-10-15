@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
 )
 
 func (m *Manager) applyLocal(ctx context.Context, change *domain.RepositoryChange, p domain.Project) error {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"swarmjet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
 )
 
 func TestManualMergeEvidenceKeepsIncompleteAcceptanceForHumanDecision(t *testing.T) {

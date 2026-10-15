@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http/httptest"
 	"os/exec"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/workspace"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/workspace"
 	"testing"
 )
 

@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"swarmjet/internal/agentcli"
-	"swarmjet/internal/imagebuild"
+	"github.com/yyydddkkk/SwarmJet/internal/agentcli"
+	"github.com/yyydddkkk/SwarmJet/internal/imagebuild"
 )
 
 func decodeImageRequest(w http.ResponseWriter, r *http.Request, v any) bool {

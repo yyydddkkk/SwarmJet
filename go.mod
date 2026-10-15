@@ -1,4 +1,4 @@
-module swarmjet
+module github.com/yyydddkkk/SwarmJet
 
 go 1.25.0
 

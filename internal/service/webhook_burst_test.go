@@ -14,7 +14,7 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	"swarmjet/internal/mq"
+	"github.com/yyydddkkk/SwarmJet/internal/mq"
 )
 
 // This is an opt-in load acceptance test. Its PostgreSQL schema is isolated and

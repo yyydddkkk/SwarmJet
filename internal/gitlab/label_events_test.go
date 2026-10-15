@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func TestListIssueLabelEventsPaginatesAndDecodesActor(t *testing.T) {

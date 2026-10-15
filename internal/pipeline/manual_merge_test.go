@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 func TestManualMergeReconcilesLostResponseAndPartialRound(t *testing.T) {

@@ -5,9 +5,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/execution"
-	"swarmjet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
 	"testing"
 )
 

@@ -3,7 +3,7 @@ package domain
 import (
 	"fmt"
 	"strings"
-	"swarmjet/internal/agentcli"
+	"github.com/yyydddkkk/SwarmJet/internal/agentcli"
 )
 
 func ValidateEnabledAgents(ids []string) error {

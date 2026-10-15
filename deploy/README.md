@@ -73,7 +73,7 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
 
 ## 服务器使用发布镜像
 
-发布流水线将主镜像推送为 `$CI_REGISTRY_IMAGE:<tag>`，执行器镜像为 `$CI_REGISTRY_IMAGE/agent:<tag>`；main 分支使用 `main` 标签，版本标签使用对应 Git tag。私有仓库需先执行 `docker login`。
+发布流水线将主镜像推送为 `ghcr.io/yyydddkkk/swarmjet:<tag>`，执行器镜像为 `ghcr.io/yyydddkkk/swarmjet/agent:<tag>`；main 分支使用 `main` 标签，版本标签使用对应 Git tag。私有仓库需先执行 `docker login`。
 
 将 `deploy/` 目录复制到服务器，进入该目录，复制其中的 `.env.example` 为 `.env`，填写发布流水线产生的完整 `IMAGE` 和 `AGENT_IMAGE` 地址。创建绝对 `DATA_DIR` 后执行：
 
@@ -81,7 +81,7 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
 chmod 600 .env
 ./update.sh
 # 或仅本次覆盖镜像；要持久保存版本仍应编辑 .env。
-./update.sh registry.example/swarmjet:v1 registry.example/swarmjet-agent:v1
+./update.sh ghcr.io/yyydddkkk/swarmjet:v1 ghcr.io/yyydddkkk/swarmjet/agent:v1
 ```
 
 脚本拉取镜像，先执行 Temporal schema 更新和 namespace 初始化、再执行应用 migration，最后更新 API、Worker、builder、BuildKit、本地节点和内置仓库。它不会执行 `compose down` 或删除数据卷。已有执行容器和 Temporal 历史不会因为替换 Worker 而删除。

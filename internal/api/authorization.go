@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 type auditResponseWriter struct {

@@ -2,8 +2,8 @@ package initflow
 
 import (
 	"context"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
 	"testing"
 )
 

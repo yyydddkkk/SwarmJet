@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"testing"
 )
 

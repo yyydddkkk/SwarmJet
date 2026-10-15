@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
-	"swarmjet/internal/agentcli"
+	"github.com/yyydddkkk/SwarmJet/internal/agentcli"
 )
 
 func TestCLIAdaptersLifecycle(t *testing.T) {

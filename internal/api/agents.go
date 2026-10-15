@@ -2,8 +2,8 @@ package api
 
 import (
 	"net/http"
-	"swarmjet/internal/agentcli"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/agentcli"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func (a *server) agents(w http.ResponseWriter, r *http.Request) {

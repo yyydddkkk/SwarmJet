@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 func TestBundleInstallRoundTrip(t *testing.T) {

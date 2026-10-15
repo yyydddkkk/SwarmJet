@@ -11,9 +11,9 @@ import (
 	"os"
 	"time"
 
-	"swarmjet/internal/registrycatalog"
-	"swarmjet/internal/registryconfig"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/registrycatalog"
+	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 type systemCheck struct {

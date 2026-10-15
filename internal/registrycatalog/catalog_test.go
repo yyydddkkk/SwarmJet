@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarmjet/internal/registryconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
 )
 
 func TestListGroupsTagsByDigestAndDeletesManifest(t *testing.T) {

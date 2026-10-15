@@ -11,9 +11,9 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"swarmjet/internal/agentcli"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/registryconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/agentcli"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
 	"sync"
 	"time"
 )

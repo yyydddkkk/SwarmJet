@@ -15,15 +15,15 @@ import (
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/execution"
-	"swarmjet/internal/forge"
-	"swarmjet/internal/gitlab"
-	"swarmjet/internal/labels"
-	"swarmjet/internal/managedmeta"
-	"swarmjet/internal/observability"
-	"swarmjet/internal/store"
-	"swarmjet/internal/workspace"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
+	"github.com/yyydddkkk/SwarmJet/internal/labels"
+	"github.com/yyydddkkk/SwarmJet/internal/managedmeta"
+	"github.com/yyydddkkk/SwarmJet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/workspace"
 )
 
 type IntegrationRunner interface {

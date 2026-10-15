@@ -9,9 +9,9 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/secretbox"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 	"time"
 )
 

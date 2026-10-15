@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"swarmjet/internal/domain"
-	"swarmjet/internal/execution"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/execution"
 )
 
 // A backend with no Docker client or filesystem demonstrates that recovery uses

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"swarmjet/internal/k8srunner"
+	"github.com/yyydddkkk/SwarmJet/internal/k8srunner"
 )
 
 func main() {

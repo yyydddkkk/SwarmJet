@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"testing"
 	"time"
 )

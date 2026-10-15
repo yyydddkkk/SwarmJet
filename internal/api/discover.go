@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
-	"swarmjet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
 type discoverRequest struct {

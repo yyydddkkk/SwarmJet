@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"swarmjet/internal/credentials"
-	"swarmjet/internal/domain"
-	"swarmjet/internal/secretbox"
-	"swarmjet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/credentials"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 type fakeConnections struct {

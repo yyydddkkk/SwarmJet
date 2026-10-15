@@ -3,7 +3,7 @@ package runtimeadmin
 import (
 	"net/http"
 	"strings"
-	"swarmjet/internal/networkconfig"
+	"github.com/yyydddkkk/SwarmJet/internal/networkconfig"
 )
 
 func (s *server) checkNetwork(w http.ResponseWriter, r *http.Request) {
