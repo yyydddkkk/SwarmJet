@@ -270,7 +270,7 @@ test("wizard connects, paginates repos, verifies a model and completes initializ
   await expect(page.locator("select").filter({has:page.locator('option[value="example/development"]')})).toHaveValue("example/development");
   await page.getByRole("button", { name: "验证模型" }).click();
   await expect(page.getByText("模型验证通过")).toBeVisible();
-  await page.getByLabel("初始负责人", { exact: true }).selectOption("11111111-1111-4111-8111-111111111111");
+  await page.getByLabel("初始负责人（可选）", { exact: true }).selectOption("11111111-1111-4111-8111-111111111111");
   await page.getByRole("button", { name: "创建项目并开始初始化" }).click();
   await expect(
     page.getByRole("heading", { name: "需要补充信息" }),
@@ -283,6 +283,7 @@ test("wizard connects, paginates repos, verifies a model and completes initializ
   await page.reload();
   await expect(page.getByText("初始化完成", { exact: false })).toBeVisible();
   await page.getByRole("link", { name: "返回项目配置" }).click();
+  await page.getByRole("button", { name: "Core 工作区 的更多操作" }).click();
   await page.getByRole("link", { name: "查看初始化进度" }).click();
   await expect(page.getByText("初始化完成", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "返回项目设置" }).click();
@@ -404,10 +405,11 @@ test("GitHub installation creates a managed project with platform checks", async
   await page.getByLabel("项目默认 Agent",{exact:true}).selectOption("opencode");
   await page.getByRole("button",{name:"验证模型"}).click();
   await expect(page.getByText("模型验证通过")).toBeVisible();
-  await page.getByLabel("初始负责人", { exact: true }).selectOption("11111111-1111-4111-8111-111111111111");
+  await expect(page.getByLabel("初始负责人（可选）", { exact: true })).toHaveValue("");
+  await expect(page.getByRole("button",{name:"创建项目并开始初始化"})).toBeEnabled();
   await page.getByRole("button",{name:"创建项目并开始初始化"}).click();
   await expect(page.getByRole("heading",{name:"需要补充信息"})).toBeVisible();
-  expect(state.saves[0]).toMatchObject({provider:"github",connectionId:"gh1",metaMode:"managed",gitlabUrl:"",mergeMethod:"squash",acceptanceStrategy:"platform_ci",requireCI:true});
+  expect(state.saves[0]).toMatchObject({provider:"github",connectionId:"gh1",metaMode:"managed",gitlabUrl:"",mergeMethod:"squash",acceptanceStrategy:"platform_ci",requireCI:true,initialOwnerUserId:""});
   expect(state.saves[0].repositories?.[0]).toMatchObject({projectId:501,url:"https://github.com/team/core.git",targetBranch:"main"});
   await page.getByLabel("请提供本地联调方式。").fill("go test ./...");
   await page.getByRole("button",{name:"提交并继续"}).click();

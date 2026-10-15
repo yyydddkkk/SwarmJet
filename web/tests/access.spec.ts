@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("email owner sets credentials before approval", async ({ page }) => {
+test("email owner enters a six-digit code and sets credentials before approval", async ({ page }) => {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
   await page.route("**/api/**", route => {
     const request = route.request();
@@ -14,16 +14,50 @@ test("email owner sets credentials before approval", async ({ page }) => {
   });
   await page.goto("/#/register");
   await page.getByLabel("邮箱", { exact: true }).fill("member@example.test");
-  await page.getByRole("button", { name: "发送验证邮件" }).click();
+  await page.getByRole("button", { name: "发送验证码" }).click();
   await expect(page.getByRole("heading", { name: "验证邮箱" })).toBeVisible();
-  await page.getByLabel("邮件中的验证令牌").fill("a".repeat(64));
+  await expect(page.getByText("验证码已发送至 member@example.test，10 分钟内有效。")).toBeVisible();
+  await page.getByLabel("6 位验证码").fill("123456");
   await page.getByLabel("姓名", { exact: true }).fill("Member");
   await page.getByLabel("设置密码").fill("a suitably long password");
   await page.getByRole("button", { name: "验证并提交申请" }).click();
   await expect(page.getByRole("heading", { name: "等待审批" })).toBeVisible();
   expect(requests).toEqual([
     { path: "/api/register", body: { email: "member@example.test" } },
-    { path: "/api/register/verify", body: { token: "a".repeat(64), displayName: "Member", password: "a suitably long password" } },
+    { path: "/api/register/verify", body: { email: "member@example.test", code: "123456", displayName: "Member", password: "a suitably long password" } },
+  ]);
+});
+
+test("registration can resend a code or change the email", async ({ page }) => {
+  await page.clock.install();
+  const requests: Record<string, unknown>[] = [];
+  await page.route("**/api/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/session") return route.fulfill({ status: 401, json: { error: "authentication required" } });
+    if (path === "/api/register") {
+      requests.push(route.request().postDataJSON());
+      return route.fulfill({ status: 202, json: { status: "pending_email" } });
+    }
+    return route.fulfill({ status: 404, json: { error: "not found" } });
+  });
+  await page.goto("/#/register");
+  await page.getByLabel("邮箱", { exact: true }).fill("old@example.test");
+  await page.getByRole("button", { name: "发送验证码" }).click();
+  await expect(page.getByRole("button", { name: /秒后可重发/ })).toBeDisabled();
+  expect(requests).toEqual([{ email: "old@example.test" }]);
+  await page.clock.fastForward(60_000);
+  await page.getByRole("button", { name: "重新发送验证码" }).click();
+  await expect(page.getByRole("status")).toContainText("验证码已重新发送");
+  await expect(page.getByRole("button", { name: /秒后可重发/ })).toBeDisabled();
+  await page.getByRole("button", { name: "修改邮箱" }).click();
+  await expect(page.getByLabel("邮箱", { exact: true })).toHaveValue("old@example.test");
+  await page.getByLabel("邮箱", { exact: true }).fill("new@example.test");
+  await page.getByRole("button", { name: "发送验证码" }).click();
+  await expect(page.getByText("验证码已发送至 new@example.test")).toBeVisible();
+  expect(requests).toEqual([
+    { email: "old@example.test" },
+    { email: "old@example.test" },
+    { email: "new@example.test" },
   ]);
 });
 

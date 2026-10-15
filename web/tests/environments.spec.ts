@@ -160,6 +160,16 @@ test("network editor creates versioned profile without placing password in the l
   await expect(savedEditor).not.toBeVisible();
 });
 
+test("network editor opens when randomUUID is unavailable on an HTTP LAN origin", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Crypto.prototype, "randomUUID", { value: undefined, configurable: true });
+  });
+  await mock(page);
+  await page.goto("/#/networks");
+  await page.getByRole("button", { name: "新增配置" }).click();
+  await expect(page.getByRole("dialog", { name: "新增网络配置" })).toBeVisible();
+});
+
 test("node deployment bundle uses a published platform image and private LAN addresses", async ({ page }) => {
   await mock(page);
   const platformRef = "10.0.0.20:5443/swarmjet/platform@sha256:" + "c".repeat(64);

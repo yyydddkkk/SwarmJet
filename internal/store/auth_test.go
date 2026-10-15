@@ -86,6 +86,41 @@ func TestAccountLifecycleAndSessionRevocation(t *testing.T) {
 	}
 }
 
+func TestEmailCodeAttemptsAndResend(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	u := User{ID: "11111111-1111-4111-8111-111111111112", Email: "code@example.com"}
+	if err := s.RegisterUser(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.IssueEmailToken(ctx, u.ID, "verify", "first-hash", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		if err := s.VerifyEmailCode(ctx, u.Email, "wrong-hash", "password-hash", "Member"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("incorrect code attempt: %v", err)
+		}
+	}
+	if err := s.VerifyEmailCode(ctx, u.Email, "first-hash", "password-hash", "Member"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("code accepted after five failed attempts: %v", err)
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE email_tokens SET created_at=now()-interval '2 minutes' WHERE token_hash='first-hash'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.IssueEmailToken(ctx, u.ID, "verify", "second-hash", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.VerifyEmailCode(ctx, "other@example.com", "second-hash", "password-hash", "Member"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("code accepted for another email: %v", err)
+	}
+	if err := s.VerifyEmailCode(ctx, u.Email, "second-hash", "password-hash", "Member"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.VerifyEmailCode(ctx, u.Email, "second-hash", "password-hash", "Member"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("code reused: %v", err)
+	}
+}
+
 func TestBreakglassSessionAndLegacyRevocation(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

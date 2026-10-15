@@ -2,13 +2,17 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/mail"
@@ -17,8 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/argon2"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
+	"golang.org/x/crypto/argon2"
 )
 
 // SMTPConfig requires STARTTLS and certificate validation. PublicURL is the
@@ -86,9 +90,23 @@ func normalizeAccountEmail(value string) (string, error) {
 
 func validAccountPassword(password string) bool { return len(password) >= 12 && len(password) <= 1024 }
 
+func registrationCode() (string, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%06d", n.Int64()), nil
+}
+
+func registrationCodeHash(secret, email, code string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte("swarmjet-email-verify\x00" + email + "\x00" + code))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 func (a *server) sendAccountEmail(ctx context.Context, to, subject, body string) error {
 	cfg := a.cfg.SMTP
-	if cfg.Addr == "" || cfg.From == "" || cfg.PublicURL == "" {
+	if cfg.Addr == "" || cfg.From == "" {
 		return errors.New("SMTP not configured")
 	}
 	from, err := mail.ParseAddress(cfg.From)
@@ -163,8 +181,14 @@ func (a *server) identityPublic(w http.ResponseWriter, r *http.Request) bool {
 			problem(w, 405, "method not allowed")
 			return true
 		}
+		if !a.loginAllowed(r.RemoteAddr) {
+			w.Header().Set("Retry-After", "60")
+			problem(w, 429, "too many account requests")
+			return true
+		}
 		var req struct {
-			Token       string `json:"token"`
+			Email       string `json:"email"`
+			Code        string `json:"code"`
 			DisplayName string `json:"displayName"`
 			Password    string `json:"password"`
 		}
@@ -172,7 +196,8 @@ func (a *server) identityPublic(w http.ResponseWriter, r *http.Request) bool {
 			return true
 		}
 		name := strings.TrimSpace(req.DisplayName)
-		if len(req.Token) != 64 || len(name) < 1 || len(name) > 100 || strings.ContainsAny(name, "\r\n") || !validAccountPassword(req.Password) {
+		email, emailErr := normalizeAccountEmail(req.Email)
+		if emailErr != nil || len(req.Code) != 6 || strings.Trim(req.Code, "0123456789") != "" || len(name) < 1 || len(name) > 100 || strings.ContainsAny(name, "\r\n") || !validAccountPassword(req.Password) {
 			problem(w, 400, "invalid verification details")
 			return true
 		}
@@ -181,8 +206,8 @@ func (a *server) identityPublic(w http.ResponseWriter, r *http.Request) bool {
 			failure(w, err)
 			return true
 		}
-		if err := a.s.VerifyEmailToken(r.Context(), tokenHash(req.Token), passwordHash, name); err != nil {
-			problem(w, 400, "invalid or expired token")
+		if err := a.s.VerifyEmailCode(r.Context(), email, registrationCodeHash(a.cfg.Password, email, req.Code), passwordHash, name); err != nil {
+			problem(w, 400, "invalid or expired code")
 			return true
 		}
 		w.WriteHeader(204)
@@ -231,7 +256,7 @@ func (a *server) registerAccount(w http.ResponseWriter, r *http.Request) {
 		problem(w, 429, "too many account requests")
 		return
 	}
-	if a.s == nil || a.cfg.SMTP.Addr == "" || a.cfg.SMTP.PublicURL == "" {
+	if a.s == nil || a.cfg.SMTP.Addr == "" || a.cfg.SMTP.From == "" {
 		problem(w, 503, "account registration unavailable")
 		return
 	}
@@ -266,7 +291,7 @@ func (a *server) registerAccount(w http.ResponseWriter, r *http.Request) {
 		id = existing.ID
 		newUser = false
 	}
-	token, err := opaqueToken()
+	code, err := registrationCode()
 	if err != nil {
 		if newUser {
 			_ = a.s.DeleteUnverifiedUser(r.Context(), id)
@@ -274,7 +299,8 @@ func (a *server) registerAccount(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	if err = a.s.IssueEmailToken(r.Context(), id, "verify", tokenHash(token), time.Now().Add(24*time.Hour)); err != nil {
+	codeHash := registrationCodeHash(a.cfg.Password, email, code)
+	if err = a.s.IssueEmailToken(r.Context(), id, "verify", codeHash, time.Now().Add(10*time.Minute)); err != nil {
 		if errors.Is(err, store.ErrEmailCooldown) {
 			respond(w, 202, map[string]string{"status": "pending_email"})
 			return
@@ -285,10 +311,11 @@ func (a *server) registerAccount(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	link := strings.TrimRight(a.cfg.SMTP.PublicURL, "/") + "/#/verify?token=" + url.QueryEscape(token)
-	if err = a.sendAccountEmail(r.Context(), email, "Verify your SwarmJet account", "Open this link to verify your email address:\n"+link+"\n\nThis link expires in 24 hours."); err != nil {
+	if err = a.sendAccountEmail(r.Context(), email, "SwarmJet verification code", "Your SwarmJet verification code is: "+code+"\n\nThis code expires in 10 minutes. If you did not request it, ignore this email."); err != nil {
 		if newUser {
 			_ = a.s.DeleteUnverifiedUser(r.Context(), id)
+		} else {
+			_ = a.s.DeleteEmailToken(r.Context(), id, "verify", codeHash)
 		}
 		problem(w, 503, "verification email unavailable")
 		return
@@ -302,7 +329,7 @@ func (a *server) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 		problem(w, 429, "too many account requests")
 		return
 	}
-	if a.s == nil || a.cfg.SMTP.Addr == "" || a.cfg.SMTP.PublicURL == "" {
+	if a.s == nil || a.cfg.SMTP.Addr == "" || a.cfg.SMTP.From == "" || a.cfg.SMTP.PublicURL == "" {
 		problem(w, 503, "password reset unavailable")
 		return
 	}

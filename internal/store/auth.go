@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"time"
@@ -101,6 +102,11 @@ func (s *Store) IssueEmailToken(ctx context.Context, userID, kind, hash string, 
 	return tx.Commit(ctx)
 }
 
+func (s *Store) DeleteEmailToken(ctx context.Context, userID, kind, hash string) error {
+	_, err := s.Pool.Exec(ctx, `DELETE FROM email_tokens WHERE user_id=$1 AND kind=$2 AND token_hash=$3`, userID, kind, hash)
+	return err
+}
+
 func (s *Store) VerifyEmailToken(ctx context.Context, hash, passwordHash, displayName string) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -111,6 +117,41 @@ func (s *Store) VerifyEmailToken(ctx context.Context, hash, passwordHash, displa
 	err = tx.QueryRow(ctx, `UPDATE email_tokens SET consumed_at=now() WHERE token_hash=$1 AND kind='verify' AND consumed_at IS NULL AND expires_at>now() RETURNING user_id`, hash).Scan(&userID)
 	if err != nil {
 		return mapErr(err)
+	}
+	tag, err := tx.Exec(ctx, `UPDATE users SET status='pending_approval',password_hash=$2,display_name=$3,updated_at=now() WHERE id=$1 AND status='pending_email'`, userID, passwordHash, displayName)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrConflict
+	}
+	return tx.Commit(ctx)
+}
+
+// VerifyEmailCode limits guesses on one issued code across API instances. A
+// resend replaces the row and resets the attempt counter.
+func (s *Store) VerifyEmailCode(ctx context.Context, email, hash, passwordHash, displayName string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var userID, issuedHash string
+	err = tx.QueryRow(ctx, `UPDATE email_tokens t SET attempts=t.attempts+1
+		FROM users u WHERE t.user_id=u.id AND u.email=$1 AND u.status='pending_email'
+		AND t.kind='verify' AND t.consumed_at IS NULL AND t.expires_at>now() AND t.attempts<5
+		RETURNING t.user_id,t.token_hash`, email).Scan(&userID, &issuedHash)
+	if err != nil {
+		return mapErr(err)
+	}
+	if subtle.ConstantTimeCompare([]byte(hash), []byte(issuedHash)) != 1 {
+		if err = tx.Commit(ctx); err != nil {
+			return err
+		}
+		return ErrNotFound
+	}
+	if _, err = tx.Exec(ctx, `UPDATE email_tokens SET consumed_at=now() WHERE token_hash=$1`, issuedHash); err != nil {
+		return err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE users SET status='pending_approval',password_hash=$2,display_name=$3,updated_at=now() WHERE id=$1 AND status='pending_email'`, userID, passwordHash, displayName)
 	if err != nil {

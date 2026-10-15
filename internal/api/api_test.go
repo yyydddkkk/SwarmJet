@@ -375,6 +375,47 @@ func TestLoginPostgres(t *testing.T) {
 	if configuredDefaults.Code != 200 || json.Unmarshal(configuredDefaults.Body.Bytes(), &defaults) != nil || defaults.AgentImage != "registry.example/agent:configured" {
 		t.Fatalf("configured image ignored: %d %s", configuredDefaults.Code, configuredDefaults.Body)
 	}
+	breakglassDraft := domain.Project{ID: "default-breakglass", Name: "Breakglass draft", MetaURL: remote.URL + "/group/breakglass-meta.git"}
+	withoutOwner := call("POST", "/api/projects", breakglassDraft)
+	if withoutOwner.Code != 200 {
+		t.Fatalf("breakglass admin could not create an unassigned draft: %d %s", withoutOwner.Code, withoutOwner.Body)
+	}
+	var grantCount int
+	if err = isolated.Pool.QueryRow(context.Background(), `SELECT count(*) FROM project_grants WHERE project_id=$1`, breakglassDraft.ID).Scan(&grantCount); err != nil || grantCount != 0 {
+		t.Fatalf("breakglass admin should manage by platform role without a member grant: count=%d err=%v", grantCount, err)
+	}
+	if visible := call("GET", "/api/projects", nil); visible.Code != 200 || !strings.Contains(visible.Body.String(), breakglassDraft.ID) {
+		t.Fatalf("breakglass admin lost access to unassigned draft: %d %s", visible.Code, visible.Body)
+	}
+	memberAdminID, err := newID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = isolated.Pool.Exec(context.Background(), `INSERT INTO users(id,email,display_name,password_hash,status,platform_admin) VALUES($1,'admin@example.test','Member Admin','hash','active',true)`, memberAdminID); err != nil {
+		t.Fatal(err)
+	}
+	memberToken, err := opaqueToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = isolated.AddUserSession(context.Background(), tokenHash(memberToken), memberAdminID); err != nil {
+		t.Fatal(err)
+	}
+	memberDraft := domain.Project{ID: "default-member-admin", Name: "Member admin draft", MetaURL: remote.URL + "/group/member-meta.git"}
+	memberBody, _ := json.Marshal(memberDraft)
+	memberRequest := httptest.NewRequest("POST", "https://console.test/api/projects", bytes.NewReader(memberBody))
+	memberRequest.AddCookie(&http.Cookie{Name: "swarmjet_session", Value: memberToken})
+	memberRequest.Header.Set("Origin", "https://console.test")
+	memberRequest.Header.Set("X-Requested-With", "swarmjet")
+	memberResponse := httptest.NewRecorder()
+	h.ServeHTTP(memberResponse, memberRequest)
+	if memberResponse.Code != 200 {
+		t.Fatalf("member admin could not create draft without selecting an owner: %d %s", memberResponse.Code, memberResponse.Body)
+	}
+	var ownerRole string
+	if err = isolated.Pool.QueryRow(context.Background(), `SELECT role FROM project_grants WHERE project_id=$1 AND user_id=$2`, memberDraft.ID, memberAdminID).Scan(&ownerRole); err != nil || ownerRole != "owner" {
+		t.Fatalf("current member admin was not granted ownership: role=%q err=%v", ownerRole, err)
+	}
 	draft := domain.Project{ID: "draft", Name: "Meta draft", MetaURL: remote.URL + "/group/draft-meta.git"}
 	draftResponse := call("POST", "/api/projects", struct {
 		domain.Project

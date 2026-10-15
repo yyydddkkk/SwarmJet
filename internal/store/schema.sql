@@ -28,8 +28,10 @@ CREATE INDEX IF NOT EXISTS sessions_by_user ON sessions(user_id);
 CREATE TABLE IF NOT EXISTS email_tokens (
  token_hash text PRIMARY KEY, user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  kind text NOT NULL CHECK (kind IN ('verify','reset')), expires_at timestamptz NOT NULL,
- consumed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+ consumed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(),
+ attempts integer NOT NULL DEFAULT 0
 );
+ALTER TABLE email_tokens ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS email_tokens_by_user ON email_tokens(user_id,kind) WHERE consumed_at IS NULL;
 CREATE TABLE IF NOT EXISTS teams (id text PRIMARY KEY, name text NOT NULL UNIQUE, created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS team_members (team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE, user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY(team_id,user_id));

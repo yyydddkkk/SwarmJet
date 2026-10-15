@@ -3,6 +3,7 @@ import { api } from "./api";
 import type { Task } from "./types";
 import { ErrorBox } from "./ui";
 import { useToast } from "./ToastProvider";
+import { randomId } from "./ids";
 import "./workbench-pages.css";
 
 type Record = { digest: string; expectedDigest: string; checks: { index: number; confirmed: boolean }[]; note: string };
@@ -25,7 +26,7 @@ export default function ManualMergePanel({ task, refresh }: { task: Task; refres
   }, [path, task.reviewDigest, task.updatedAt]);
   useEffect(() => { void load(); }, [load]);
   const save = async () => { if (!record) return; setBusy(true); setError(""); try { const result = await api<Record>(`${path}/manual-acceptance`, "PUT", { digest: record.expectedDigest, checks: items.map((_, index) => ({ index, confirmed: checked[index] || false })), note }); setRecord({ ...result, expectedDigest: record.expectedDigest }); await refresh(); toast.success("人工验收已保存，并绑定当前审查与提交版本。"); } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); } };
-  const merge = async () => { setBusy(true); setError(""); try { await api(`${path}/commands`, "POST", { id: crypto.randomUUID(), kind: "merge_round" }); await refresh(); toast.success("整轮合并命令已提交，任务将逐仓库记录结果。"); } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); } };
+  const merge = async () => { setBusy(true); setError(""); try { await api(`${path}/commands`, "POST", { id: randomId("command"), kind: "merge_round" }); await refresh(); toast.success("整轮合并命令已提交，任务将逐仓库记录结果。"); } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); } };
   const current = !!record && record.digest === record.expectedDigest && record.digest !== "";
   const ready = current && checked.every(Boolean) && !!note.trim();
   return <section className="panel workbench-manual-merge"><div className="panel-head"><div><h2>人工验收与整轮合并</h2><p>验收记录绑定审查摘要和每个仓库的提交 SHA。版本变化后需要重新确认。</p></div></div><div className="workbench-pad"><ErrorBox error={error} retry={() => void load()} />{!record ? <p>正在读取验收记录…</p> : <>

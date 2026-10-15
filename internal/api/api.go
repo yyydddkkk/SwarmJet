@@ -512,16 +512,19 @@ func (a *server) projects(w http.ResponseWriter, r *http.Request) {
 			problem(w, 400, "new project version must be zero")
 			return
 		}
-		if req.InitialOwnerUserID == "" {
-			problem(w, 400, "active initial project owner required")
-			return
+		ownerID := req.InitialOwnerUserID
+		if ownerID == "" {
+			// Breakglass admins have no users row; their platform role still manages the project.
+			ownerID = requestPrincipal(r).UserID
 		}
-		user, err := a.s.UserByID(r.Context(), req.InitialOwnerUserID)
-		if err != nil || user.Status != "active" {
-			problem(w, 400, "active initial project owner required")
-			return
+		if ownerID != "" {
+			user, err := a.s.UserByID(r.Context(), ownerID)
+			if err != nil || user.Status != "active" {
+				problem(w, 400, "active initial project owner required")
+				return
+			}
+			r = r.WithContext(context.WithValue(r.Context(), initialOwnerKey{}, ownerID))
 		}
-		r = r.WithContext(context.WithValue(r.Context(), initialOwnerKey{}, req.InitialOwnerUserID))
 		a.saveProject(w, r, p)
 	default:
 		problem(w, 405, "method not allowed")

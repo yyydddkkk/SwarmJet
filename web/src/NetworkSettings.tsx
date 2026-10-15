@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import MihomoSettings from "./MihomoSettings";
 import { api } from "./api";
+import { randomId } from "./ids";
 import { ConfirmDialog, ErrorBox, Field } from "./ui";
 import { useToast } from "./ToastProvider";
 import type { NetworkChoice, NetworkProfile } from "./NetworkSelect";
 import "./settings-page.css";
 import "./network-settings.css";
 const blank = (): NetworkProfile => ({
-  id: `network-${crypto.randomUUID().slice(0, 8)}`,
+  id: randomId("network"),
   name: "",
   version: 0,
   httpProxy: "",

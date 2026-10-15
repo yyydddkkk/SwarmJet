@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, APIError } from "./api";
 import { useAgentCatalog } from "./agents";
 import { ErrorBox, Field } from "./ui";
+import { useToast } from "./ToastProvider";
 import { MetaPublication } from "./MetaPublication";
 import { TerminalPanel } from "./TerminalPanel";
 import type {
@@ -99,6 +100,7 @@ export default function ProjectWizard({
   onSaved?: (p: Project) => void;
   onOpenProject: (id: string) => void;
 }) {
+  const toast = useToast();
   const [step, setStep] = useState(initialProject ? 4 : 0);
   const [error, setError] = useState("");
   const [defaultImage, setDefaultImage] = useState("swarmjet-agent:local");
@@ -469,7 +471,6 @@ export default function ProjectWizard({
   }
 
   async function startInitialization() {
-    if (!projectId && !initialOwnerUserId) { setError("请选择初始负责人。"); return; }
     setSaving(true);
     setError("");
     try {
@@ -497,7 +498,7 @@ export default function ProjectWizard({
       setStep(4);
       window.location.hash = `/projects/${encodeURIComponent(saved.id)}/initialization`;
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1057,7 +1058,7 @@ export default function ProjectWizard({
             <p className="runtime-model-help">
               检测到配置文件或模型名称不代表凭据有效；只有实际调用成功才算验证通过。
             </p>
-            {!projectId && <Field label="初始负责人" hint="该成员将管理项目配置、直接成员与交付决策。"><select required value={initialOwnerUserId} onChange={event => setInitialOwnerUserId(event.target.value)}><option value="">选择已启用成员</option>{activeUsers.map(user => <option key={user.id} value={user.id}>{user.displayName || user.email}</option>)}</select></Field>}
+            {!projectId && <Field label="初始负责人（可选）" hint="留空由当前平台管理员管理；以后可在项目成员中指定负责人。"><select value={initialOwnerUserId} onChange={event => setInitialOwnerUserId(event.target.value)}><option value="">默认：当前平台管理员</option>{activeUsers.map(user => <option key={user.id} value={user.id}>{user.displayName || user.email}</option>)}</select></Field>}
             <div className="actions wizard-actions">
               <button type="button" onClick={() => setStep(2)}>
                 上一步
@@ -1065,7 +1066,7 @@ export default function ProjectWizard({
               <button
                 type="button"
                 className="primary"
-                disabled={saving || !modelVerified || !agentCatalog.enabled.includes(defaultAgent) || (!projectId && !initialOwnerUserId)}
+                disabled={saving || !modelVerified || !agentCatalog.enabled.includes(defaultAgent)}
                 onClick={() => void startInitialization()}
               >
                 {saving ? "正在创建项目…" : "创建项目并开始初始化"}

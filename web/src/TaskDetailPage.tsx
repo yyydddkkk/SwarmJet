@@ -9,6 +9,7 @@ import { stageLabel, date, Status } from "./TaskStatus";
 import { ConfirmDialog, Empty, ErrorBox, Field, Modal, Panel } from "./ui";
 import ManualMergePanel from "./ManualMergePanel";
 import { useToast } from "./ToastProvider";
+import { randomId } from "./ids";
 
 export default function TaskDetail({ id, platformAdmin = false }: { id: string; platformAdmin?: boolean }) {
   const toast = useToast();
@@ -63,7 +64,7 @@ export default function TaskDetail({ id, platformAdmin = false }: { id: string; 
     setError("");
     try {
       await api(`/tasks/${encodeURIComponent(id)}/commands`, "POST", {
-        id: crypto.randomUUID(),
+        id: randomId("command"),
         kind,
         text: message,
         digest: kind === "approve" ? task.reviewDigest : "",
@@ -84,7 +85,7 @@ export default function TaskDetail({ id, platformAdmin = false }: { id: string; 
     setError("");
     try {
       await api(`/tasks/${encodeURIComponent(id)}/commands`, "POST", {
-        id: crypto.randomUUID(),
+        id: randomId("command"),
         kind: "set_auto_merge",
         autoMerge: value,
       });

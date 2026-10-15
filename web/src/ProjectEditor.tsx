@@ -8,6 +8,7 @@ import { AddRepository } from "./AddRepository";
 import { ErrorBox, Field } from "./ui";
 import { useToast } from "./ToastProvider";
 import { formatCommand, parseCommand } from "./commands";
+import { randomId } from "./ids";
 import type { Account } from "./AccessSettings";
 import "./wizard.css";
 
@@ -18,7 +19,7 @@ const agent = (): AgentConfig => ({
   timeoutSeconds: 5400,
 });
 export const newProject = (): Project => ({
-  id: `project-${crypto.randomUUID().slice(0, 8)}`,
+  id: randomId("project"),
   nodes:{mode:"auto"},
   name: "",
   acceptanceStrategy: "none",
@@ -408,11 +409,10 @@ export function ProjectEditor({
   const ready = readiness.every((r) => r.ok);
   const saving = busy || discovering;
   async function save(enabled: boolean) {
-    if (!existing && !initialOwnerUserId) { setError("请选择初始负责人。"); return; }
     setError("");
     setGuidance("");
     if (!p.name.trim() || (!managed && !p.metaUrl.trim())) {
-      setError(
+      toast.error(
         managed
           ? "请填写项目名称，再保存草稿。"
           : "请填写项目名称和 Meta-Repo 地址，再保存草稿。",
@@ -420,7 +420,7 @@ export function ProjectEditor({
       return;
     }
     if (enabled && !ready) {
-      setError(
+      toast.error(
         "启用前还需完成：" +
           readiness
             .filter((v) => !v.ok)
@@ -460,7 +460,7 @@ export function ProjectEditor({
       toast.success(enabled ? "项目配置已保存并启用。" : "草稿已保存，自动任务未启用。");
       onSaved(result);
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -498,7 +498,7 @@ export function ProjectEditor({
             {guidance}
           </div>
         )}
-        {!existing && <div className="panel panel-padding"><Field label="初始负责人" hint="项目创建后，此成员可管理项目配置和成员。"><select required value={initialOwnerUserId} onChange={event => setInitialOwnerUserId(event.target.value)}><option value="">选择已启用成员</option>{activeUsers.map(user => <option key={user.id} value={user.id}>{user.displayName || user.email}</option>)}</select></Field></div>}
+        {!existing && <div className="panel panel-padding"><Field label="初始负责人（可选）" hint="留空由当前平台管理员管理；以后可在项目成员中指定负责人。"><select value={initialOwnerUserId} onChange={event => setInitialOwnerUserId(event.target.value)}><option value="">默认：当前平台管理员</option>{activeUsers.map(user => <option key={user.id} value={user.id}>{user.displayName || user.email}</option>)}</select></Field></div>}
         <nav className="setup-steps" aria-label="配置步骤">
           {platformAdmin && <>
           <a

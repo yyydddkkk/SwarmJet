@@ -247,12 +247,40 @@ test("new project can import an existing Meta-Repo with a saved GitLab connectio
   await page.getByLabel("Meta-Repo 地址", { exact: true }).fill(discovery.metaUrl);
   await page.getByRole("button", { name: "读取仓库清单" }).click();
   await expect(page.getByLabel("项目名称", { exact: true })).toHaveValue(discovery.name);
-  await page.getByLabel("初始负责人", { exact: true }).selectOption("11111111-1111-4111-8111-111111111111");
+  await page.getByLabel("初始负责人（可选）", { exact: true }).selectOption("11111111-1111-4111-8111-111111111111");
   await page.getByRole("button", { name: "保存草稿" }).click();
   await expect.poll(() => state.saves.length).toBe(1);
   expect(state.imports[0]).toMatchObject({ connectionId: "c1", metaUrl: discovery.metaUrl });
   expect(state.saves[0]).toMatchObject({ metaMode: "imported", connectionId: "c1", mergeCredentialRef: "", enabled: false, metaRef: "trunk" });
   await expect(page).toHaveURL(/#\/projects\/workspace$/);
+});
+
+test("Meta-Repo import renders when randomUUID is unavailable on internal HTTP", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Crypto.prototype, "randomUUID", { configurable: true, value: undefined });
+  });
+  await setupAPI(page);
+  await page.goto("/#/projects/new");
+  await page.getByRole("link", { name: "导入已有 Meta-Repo" }).click();
+  await expect(page.getByLabel("Meta-Repo 地址", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("项目标识", { exact: true })).toHaveValue(/^project-[a-f0-9]{32}$/);
+});
+
+test("new import defaults to the current administrator and uses shared notifications", async ({ page }) => {
+  const state = await setupAPI(page);
+  await page.goto("/#/projects/new/import");
+  const owner = page.getByLabel("初始负责人（可选）", { exact: true });
+  await expect(owner).toHaveValue("");
+  await expect(owner).not.toHaveAttribute("required");
+
+  await page.getByRole("button", { name: "保存草稿" }).click();
+  await expect(page.locator('[aria-label="通知消息"] [role="alert"]')).toContainText("请填写项目名称和 Meta-Repo 地址");
+
+  await page.getByLabel("项目名称", { exact: true }).fill("测试工作区");
+  await page.getByLabel("Meta-Repo 地址", { exact: true }).fill(discovery.metaUrl);
+  await page.getByRole("button", { name: "保存草稿" }).click();
+  await expect.poll(() => state.saves.length).toBe(1);
+  expect(state.saves[0]).toMatchObject({ initialOwnerUserId: "" });
 });
 
 test("new import can verify and save a GitLab connection before reading the manifest", async ({ page }) => {
