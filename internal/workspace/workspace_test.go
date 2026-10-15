@@ -478,3 +478,43 @@ func TestNestedDeploymentAndCIFilesRequireApproval(t *testing.T) {
 		}
 	}
 }
+
+func TestPrepareDirectSingleRepo(t *testing.T) {
+	m := New(t.TempDir(), "")
+	m.Env = map[string]string{"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.invalid", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
+	repo := filepath.Join(t.TempDir(), "code")
+	if err := os.MkdirAll(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, m, repo, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("direct"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, m, repo, "add", ".")
+	gitTest(t, m, repo, "commit", "-m", "initial")
+	expected := gitTest(t, m, repo, "rev-parse", "main")
+	p := domain.Project{
+		ID: "direct", Provider: domain.ProviderGitHub, MetaMode: domain.MetaModeDirect,
+		Repositories: []domain.Repository{{ID: "code", ProjectID: 42, URL: repo, Path: ".", TargetBranch: "main"}},
+	}
+	ws, err := m.Prepare(context.Background(), "task-direct", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ws.Revisions) != 1 || ws.Revisions[0].Path != "." || ws.Revisions[0].BaseSHA != expected {
+		t.Fatalf("unexpected workspace: %+v", ws)
+	}
+	if _, err = os.Stat(filepath.Join(ws.Root, "README")); err != nil {
+		t.Fatal("code root not checked out:", err)
+	}
+	if _, err = os.Stat(filepath.Join(ws.Root, ".meta.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("direct prepare must not require a Meta manifest")
+	}
+	resumed, err := m.Prepare(context.Background(), "task-direct", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Revisions[0].BaseSHA != expected {
+		t.Fatal("resume changed baseline")
+	}
+}

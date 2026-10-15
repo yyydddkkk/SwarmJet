@@ -63,8 +63,16 @@ func validateProviderProject(p Project) error {
 	if p.AcceptanceStrategy == "gitlab_ci" {
 		return fmt.Errorf("GitHub projects must use platform_ci for hosting checks")
 	}
-	if !p.ManagedMeta() {
-		return fmt.Errorf("GitHub projects require managed Meta-Repo")
+	if !p.ManagedMeta() && !p.DirectRepo() {
+		return fmt.Errorf("GitHub projects require managed Meta-Repo or direct single-repo mode")
+	}
+	if p.DirectRepo() {
+		if len(p.Repositories) > 1 {
+			return fmt.Errorf("GitHub direct projects support exactly one repository")
+		}
+		if p.MetaURL != "" {
+			return fmt.Errorf("GitHub direct projects must not set metaUrl")
+		}
 	}
 	if p.ConnectionID == "" {
 		return fmt.Errorf("GitHub projects require an App installation connection")

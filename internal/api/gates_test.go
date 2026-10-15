@@ -75,6 +75,28 @@ func TestEnableManagedProjectRequiresReadyInitialization(t *testing.T) {
 	}
 }
 
+func TestDirectGitHubEnableSkipsMetaGates(t *testing.T) {
+	p := domain.Project{
+		ID: "gh-direct", Name: "Direct", Enabled: true,
+		Provider: domain.ProviderGitHub, MetaMode: domain.MetaModeDirect, ConnectionID: "gh1",
+		MergeMethod: "squash", AcceptanceStrategy: "platform_ci", RequireCI: true, ReviewMode: "none", MaxReworks: 3,
+		Repositories: []domain.Repository{{ID: "core", ProjectID: 501, URL: "https://github.com/team/core.git", Path: ".", TargetBranch: "main"}},
+		Development:  domain.AgentConfig{Adapter: "dst", Image: "agent:test", TimeoutSeconds: 300},
+	}
+	if err := domain.ValidateProjectForSave(p); err != nil {
+		t.Fatal(err)
+	}
+	init := &fakeInitializer{ready: false}
+	// Mirror saveProject enable gates: direct projects must not require ready init
+	// and must not run imported Meta remote checks.
+	if p.Enabled && p.ManagedMeta() && !init.ReadyForTasks(context.Background(), p.ID) {
+		t.Fatal("direct project incorrectly treated as managed Meta")
+	}
+	if p.Enabled && !p.ManagedMeta() && !p.DirectRepo() {
+		t.Fatal("direct project incorrectly treated as imported Meta")
+	}
+}
+
 func managedEnabledProject() domain.Project {
 	return domain.Project{
 		ID: "p1", Name: "P", Version: 1, Enabled: true, MetaMode: domain.MetaModeManaged, MetaRef: "main",

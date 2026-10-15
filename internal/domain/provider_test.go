@@ -42,6 +42,10 @@ func TestGitHubDraftValidation(t *testing.T) {
 	if err := ValidateProjectForSave(valid); err != nil {
 		t.Fatal(err)
 	}
+	direct := Project{ID: "direct", Name: "GitHub Direct", Provider: ProviderGitHub, MetaMode: MetaModeDirect, ConnectionID: "app", MergeMethod: "squash", RequireCI: true, AcceptanceStrategy: "platform_ci", Repositories: []Repository{{ID: "repo", ProjectID: 1, URL: "https://github.com/acme/repo.git", Path: ".", TargetBranch: "main"}}}
+	if err := ValidateProjectForSave(direct); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name   string
 		change func(*Project)
@@ -53,6 +57,14 @@ func TestGitHubDraftValidation(t *testing.T) {
 		{"foreign host", func(p *Project) { p.Repositories = []Repository{{URL: "https://github.com.evil/repo.git"}} }},
 		{"unknown provider", func(p *Project) { p.Provider = "unknown" }},
 		{"merge method", func(p *Project) { p.MergeMethod = "fast" }},
+		{"direct with metaUrl", func(p *Project) { p.MetaMode = MetaModeDirect; p.MetaURL = "https://github.com/acme/meta.git" }},
+		{"direct multi-repo", func(p *Project) {
+			p.MetaMode = MetaModeDirect
+			p.Repositories = []Repository{
+				{ID: "a", ProjectID: 1, URL: "https://github.com/acme/a.git", Path: "."},
+				{ID: "b", ProjectID: 2, URL: "https://github.com/acme/b.git", Path: "b"},
+			}
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := valid
@@ -61,6 +73,23 @@ func TestGitHubDraftValidation(t *testing.T) {
 				t.Fatal("accepted invalid project")
 			}
 		})
+	}
+}
+
+func TestGitHubDirectEnabledValidation(t *testing.T) {
+	p := Project{
+		ID: "direct", Name: "GitHub Direct", Provider: ProviderGitHub, MetaMode: MetaModeDirect,
+		ConnectionID: "app", Enabled: true, MergeMethod: "squash", RequireCI: true,
+		AcceptanceStrategy: "platform_ci", ReviewMode: "none", MaxReworks: 3,
+		Development:  AgentConfig{Adapter: "dst", Image: "agent:test", TimeoutSeconds: 300},
+		Repositories: []Repository{{ID: "repo", ProjectID: 1, URL: "https://github.com/acme/repo.git", Path: ".", TargetBranch: "main"}},
+	}
+	if err := ValidateProject(p); err != nil {
+		t.Fatal(err)
+	}
+	p.Repositories[0].Path = "repo"
+	if ValidateProject(p) == nil {
+		t.Fatal("accepted non-root path")
 	}
 }
 

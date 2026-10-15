@@ -35,7 +35,7 @@ Webhook、命令与死信分别使用持久化 RabbitMQ 4.3 quorum 队列。主�
 
 ## 项目接入、连接与初始化
 
-普通用户不需要理解 Meta-Repo。项目有两种来源：`managed` 由系统创建并托管的内部 Git 仓库；`imported`（旧项目的空值）指向已有远程 Meta-Repo。受管模式不接受调用方提供的 MetaURL，也不暴露任意服务器路径：Workspace 只用校验过的项目 ID 推导内部仓库位置，因此没有绕过既有 `file://` 校验的入口。执行节点上的受管仓库由控制面在任务准备阶段以 git bundle 传输，节点用确定性路径 `<node DATA_DIR>/managed-meta/<projectID>/work` 物化；因此受管项目不依赖创建它的那台机器的本地目录，可被调度到任意在线节点。
+普通用户不需要理解 Meta-Repo。项目有三种来源：`managed` 由系统创建并托管的内部 Git 仓库；`imported`（旧项目的空值）指向已有远程 Meta-Repo；`direct` 为单代码仓库且无 Meta-Repo（GitHub 新建项目默认）。受管模式不接受调用方提供的 MetaURL，也不暴露任意服务器路径：Workspace 只用校验过的项目 ID 推导内部仓库位置，因此没有绕过既有 `file://` 校验的入口。执行节点上的受管仓库由控制面在任务准备阶段以 git bundle 传输，节点用确定性路径 `<node DATA_DIR>/managed-meta/<projectID>/work` 物化；因此受管项目不依赖创建它的那台机器的本地目录，可被调度到任意在线节点。`direct` 项目跳过受管 Meta 初始化与 bundle 传输，Workspace 直接检出唯一代码仓库，Issue 与 PR 均在该仓。
 
 GitLab 连接以 `Connection` 保存：地址、验证过的用户名、Token 指纹和加密后的密文。`internal/secretbox` 用 AES-256-GCM 加密，密钥只来自部署配置 `SWARMJET_MASTER_KEY`，与数据库分开管理。密钥必须稳定并单独备份：更换或丢失后旧密文无法解密，需要重新录入 Token。项目与任务快照只保存 `connectionId`（或环境变量名），Token 不进入 URL、日志、错误正文、Temporal 历史或浏览器持久存储。服务端校验 Token 适用的 GitLab 地址，客户端不跟随重定向；更换连接地址必须重新提供并验证 Token。默认一个连接 Token 同时用于开发与合并；可选的独立合并 Token 在高级设置中单独验证。单 Token 模式不具备独立 Token 的权限隔离。保留环境变量凭证方式，兼容已有项目。
 

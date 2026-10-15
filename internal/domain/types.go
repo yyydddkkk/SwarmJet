@@ -72,7 +72,8 @@ type Project struct {
 	// encrypted outside the project snapshot; only the reference is persisted.
 	ConnectionID string `json:"connectionId,omitempty"`
 	// MetaMode is "managed" for a system-created Meta-Repo, "imported" (or empty
-	// for legacy projects) when MetaURL points at an existing remote repository.
+	// for legacy projects) when MetaURL points at an existing remote repository,
+	// or "direct" for a single code repository with no Meta-Repo.
 	MetaMode string `json:"metaMode,omitempty"`
 	// AutoMerge is a project-level switch. A nil value means the legacy default
 	// (enabled) so existing projects keep their behavior across upgrades.

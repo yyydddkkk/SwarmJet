@@ -138,15 +138,16 @@ export function ProjectEditor({
   );
   const existing = p.version > 0;
   const managed = p.metaMode === "managed";
+  const direct = p.metaMode === "direct";
   const github = p.provider === "github";
   const platformName = github ? "GitHub" : "GitLab";
   const changeName = github ? "PR" : "MR";
   useEffect(() => {
-    if (managed || !platformAdmin) return;
+    if (managed || direct || !platformAdmin) return;
     api<Connection[] | null>("/connections")
       .then((list) => setConnections(list || []))
       .catch(() => setConnections([]));
-  }, [managed]);
+  }, [managed, direct]);
   useEffect(() => {
     if (initial.version > 0) return;
     let live = true;
@@ -398,10 +399,10 @@ export function ProjectEditor({
     p.name.trim() &&
     p.metaRef.trim() &&
     (github ? p.connectionId : p.gitlabUrl.trim()) &&
-    (managed || p.metaUrl.trim())
+    (managed || direct || p.metaUrl.trim())
   );
   const readiness = [
-    { id: "connection", label: "Meta-Repo 信息", ok: connectionReady },
+    { id: "connection", label: direct ? "仓库连接" : "Meta-Repo 信息", ok: connectionReady },
     { id: "repositories", label: "仓库与目标分支", ok: repoReady },
     { id: "execution", label: "执行器与运行环境", ok: agentsReady },
     { id: "verification", label: "额外验收（可选）", ok: checksReady },
@@ -411,9 +412,9 @@ export function ProjectEditor({
   async function save(enabled: boolean) {
     setError("");
     setGuidance("");
-    if (!p.name.trim() || (!managed && !p.metaUrl.trim())) {
+    if (!p.name.trim() || (!managed && !direct && !p.metaUrl.trim())) {
       toast.error(
-        managed
+        managed || direct
           ? "请填写项目名称，再保存草稿。"
           : "请填写项目名称和 Meta-Repo 地址，再保存草稿。",
       );
@@ -478,7 +479,7 @@ export function ProjectEditor({
         <div>
           <div className="eyebrow">WORKSPACE SETUP</div>
           <h1>{existing ? p.name : "连接你的开发工作区"}</h1>
-          <p>{managed ? "管理参与开发的仓库；系统维护 Meta 清单。" : "从已有 Meta-Repo 读取仓库信息。先保存，准备好后再开启自动开发。"}</p>
+          <p>{direct ? "单仓库项目：Issue、改动与 PR 都在同一代码仓库，无需 Meta-Repo。" : managed ? "管理参与开发的仓库；系统维护 Meta 清单。" : "从已有 Meta-Repo 读取仓库信息。先保存，准备好后再开启自动开发。"}</p>
         </div>
         <span className={`status ${p.enabled ? "completed" : "paused"}`}>
           {p.enabled ? "已启用" : "草稿 · 未启用"}
@@ -510,7 +511,7 @@ export function ProjectEditor({
                 ?.scrollIntoView({ behavior: "smooth" });
             }}
           >
-            <span>01</span>连接 Meta-Repo
+            <span>01</span>{direct ? "仓库连接" : "连接 Meta-Repo"}
           </a>
           <a
             href="#repositories"
@@ -543,8 +544,8 @@ export function ProjectEditor({
             <section className="panel setup-section" id="connection">
               <div className="setup-section-head">
                 <div>
-                  <h2>连接 Meta-Repo</h2>
-                  <p>提供仓库地址，其余信息交给系统读取。</p>
+                  <h2>{direct ? "仓库连接" : "连接 Meta-Repo"}</h2>
+                  <p>{direct ? "GitHub App 已绑定所选代码仓库。" : "提供仓库地址，其余信息交给系统读取。"}</p>
                 </div>
                 <span className="setup-label">必填</span>
               </div>
@@ -555,7 +556,12 @@ export function ProjectEditor({
                     Meta-Repo 地址。
                   </div>
                 )}
-                {!managed && (
+                {direct && (
+                  <div className="setup-warning" role="status">
+                    这是 GitHub 单仓库项目：不创建、不依赖 Meta-Repo。目标分支与验收策略可在下方调整。
+                  </div>
+                )}
+                {!managed && !direct && (
                   <>
                     <div className="form-grid">
                       <Field
@@ -652,14 +658,16 @@ export function ProjectEditor({
                       placeholder="例如：数字员工"
                     />
                   </Field>
-                  <Field label="Meta 分支" hint="留空时读取该仓库的默认分支。">
-                    <input
-                      value={p.metaRef}
-                      disabled={discovering}
-                      onChange={(e) => changeSource("metaRef", e.target.value)}
-                      placeholder="自动识别"
-                    />
-                  </Field>
+                  {!direct && (
+                    <Field label="Meta 分支" hint="留空时读取该仓库的默认分支。">
+                      <input
+                        value={p.metaRef}
+                        disabled={discovering}
+                        onChange={(e) => changeSource("metaRef", e.target.value)}
+                        placeholder="自动识别"
+                      />
+                    </Field>
+                  )}
                 </div>
                 <details className="setup-advanced">
                   <summary>
@@ -708,12 +716,14 @@ export function ProjectEditor({
                   <h2>仓库与目标分支</h2>
                   <p>
                     {repositories.length
-                      ? `${repositories.length} 个仓库。通常只需确认 ${changeName} 合并到哪里。`
+                      ? direct
+                        ? `单仓库项目。确认 ${changeName} 合并到的目标分支即可。`
+                        : `${repositories.length} 个仓库。通常只需确认 ${changeName} 合并到哪里。`
                       : "读取清单后，仓库 ID、地址、路径和依赖会自动填入。"}
                   </p>
                 </div>
                 {repositories.length > 0 && (
-                  <span className="setup-label">来自 Meta-Repo</span>
+                  <span className="setup-label">{direct ? "单仓库" : "来自 Meta-Repo"}</span>
                 )}
               </div>
               <div className="panel-padding">
@@ -953,7 +963,7 @@ export function ProjectEditor({
                       ↳
                     </span>
                     <strong>不需要逐项填写仓库信息</strong>
-                    <p>{managed ? "初始化完成后，已选择的仓库会在这里显示。" : "在上方读取 Meta-Repo 清单，即可批量导入所有仓库。"}</p>
+                    <p>{direct ? "向导创建的单仓库项目会在这里显示所选仓库。" : managed ? "初始化完成后，已选择的仓库会在这里显示。" : "在上方读取 Meta-Repo 清单，即可批量导入所有仓库。"}</p>
                   </div>
                 )}
                 <details className="setup-advanced">

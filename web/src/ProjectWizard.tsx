@@ -23,6 +23,13 @@ const stepList = [
   { key: "initialize", label: "自动初始化" },
 ];
 
+const githubStepList = [
+  { key: "connection", label: "连接代码平台" },
+  { key: "repositories", label: "选择仓库" },
+  { key: "confirm", label: "确认项目" },
+  { key: "opencode", label: "配置 OpenCode" },
+];
+
 type RepositoryResponse = Partial<ConnectionRepository> & {
   id: number;
   name: string;
@@ -110,10 +117,16 @@ export default function ProjectWizard({
   const [installations, setInstallations] = useState<{id:number;account:{login:string};suspended_at?:string|null}[]>([]);
   const [installationId, setInstallationId] = useState("");
   const [loadingInstallations, setLoadingInstallations] = useState(false);
-  const [mergeMethod, setMergeMethod] = useState<"merge" | "squash" | "rebase">("merge");
-  const [acceptanceStrategy, setAcceptanceStrategy] = useState<"none" | "platform_ci">("none");
+  const [mergeMethod, setMergeMethod] = useState<"merge" | "squash" | "rebase">(
+    initialProject?.provider === "github" ? "squash" : "merge",
+  );
+  const [acceptanceStrategy, setAcceptanceStrategy] = useState<"none" | "platform_ci">(
+    initialProject?.provider === "github" ? "platform_ci" : "none",
+  );
   const platformName = provider === "github" ? "GitHub" : "GitLab";
   const changeName = provider === "github" ? "PR" : "MR";
+  const visibleSteps = provider === "github" ? githubStepList : stepList;
+  const githubSingleRepo = provider === "github";
   async function loadInstallations() {
     setLoadingInstallations(true); setError("");
     try {
@@ -301,11 +314,12 @@ export default function ProjectWizard({
     if (!selected.includes(repo.id) && branchOptions[repo.id] === undefined) {
       void loadBranches(connectionId, repo.id);
     }
-    setSelected((old) =>
-      old.includes(repo.id)
-        ? old.filter((id) => id !== repo.id)
-        : [...old, repo.id],
-    );
+    setSelected((old) => {
+      if (old.includes(repo.id)) return old.filter((id) => id !== repo.id);
+      // GitHub defaults to a single code repository (no Meta-Repo).
+      if (githubSingleRepo) return [repo.id];
+      return [...old, repo.id];
+    });
     setTargets((old) =>
       Object.hasOwn(old, repo.id)
         ? old
@@ -356,7 +370,8 @@ export default function ProjectWizard({
       id: layout.ids[repo.id],
       projectId: repo.id,
       url: repo.httpUrlToRepo,
-      path: layout.paths[repo.id],
+      // GitHub single-repo: the code repo is the workspace root (no Meta-Repo).
+      path: githubSingleRepo ? "." : layout.paths[repo.id],
       targetBranch: targetFor(repo).trim(),
       createFrom: "",
       dependsOn: [],
@@ -369,10 +384,10 @@ export default function ProjectWizard({
       id: projectId || slug(name),
       name: name.trim(),
       metaUrl: "",
-      metaRef: metaRef.trim() || "main",
+      metaRef: githubSingleRepo ? "" : metaRef.trim() || "main",
       version: 0,
       enabled: false,
-      metaMode: "managed",
+      metaMode: githubSingleRepo ? "direct" : "managed",
       connectionId,
       autoMerge,
       provider,
@@ -490,6 +505,12 @@ export default function ProjectWizard({
       }
       setProjectId(saved.id);
       onSaved?.(saved);
+      // GitHub single-repo has no Meta-Repo and skips managed initialization.
+      if (githubSingleRepo) {
+        toast.success("项目已创建。可在项目设置中启用后接单。");
+        onOpenProject(saved.id);
+        return;
+      }
       const started = await api<Initialization>(
         "/projects/" + encodeURIComponent(saved.id) + "/initialization",
         "POST",
@@ -577,7 +598,7 @@ export default function ProjectWizard({
   const canLeaveConnection = !!connectionId;
   const canLeaveRepos = selectedRepos.length > 0 && selectedRepos.every((repo) => !!targetFor(repo).trim());
   const canLeaveConfirm =
-    !!name.trim() && !!metaRef.trim() && selected.length > 0;
+    !!name.trim() && (githubSingleRepo || !!metaRef.trim()) && selected.length > 0;
 
   return (
     <div className="project-setup wizard">
@@ -587,9 +608,9 @@ export default function ProjectWizard({
       <header className="page-head setup-heading">
         <div>
           <div className="eyebrow">{initialProject ? "PROJECT INITIALIZATION" : "NEW PROJECT"}</div>
-          <h1>{initialProject ? initialProject.name + " · 初始化" : "连接仓库，配置 OpenCode，自动初始化"}</h1>
+          <h1>{initialProject ? initialProject.name + " · 初始化" : githubSingleRepo ? "连接 GitHub 仓库，配置 OpenCode" : "连接仓库，配置 OpenCode，自动初始化"}</h1>
           <p>
-            {initialProject ? "离开页面不会中断初始化；可随时从项目列表或编辑页返回，查看进度并继续处理。" : "连接 GitLab 或 GitHub App；系统会读取已授权的仓库并托管 Meta-Repo。"}
+            {initialProject ? "离开页面不会中断初始化；可随时从项目列表或编辑页返回，查看进度并继续处理。" : githubSingleRepo ? "选择一个 GitHub 仓库与目标分支即可；Issue、改动与 PR 都在同一仓库，无需 Meta-Repo。" : "连接 GitLab 或 GitHub App；系统会读取已授权的仓库并托管 Meta-Repo。"}
           </p>
         </div>
         <span className="status paused">{initialProject ? "进度已保存" : "未保存"}</span>
@@ -600,7 +621,7 @@ export default function ProjectWizard({
         </div>
       )}
       {!initialProject && <nav className="setup-steps" aria-label="配置步骤">
-        {stepList.map((item, index) => (
+        {visibleSteps.map((item, index) => (
           <button
             type="button"
             key={item.key}
@@ -648,7 +669,23 @@ export default function ProjectWizard({
               </div>
             )}
             <Field label="代码平台">
-              <select value={provider} onChange={e => { const value = e.target.value as "gitlab" | "github"; setProvider(value); setConnectionId(""); setVerifyResult(null); setToken(""); setMergeToken(""); if (value === "github") void loadInstallations(); }}>
+              <select value={provider} onChange={e => {
+                const value = e.target.value as "gitlab" | "github";
+                setProvider(value);
+                setConnectionId("");
+                setVerifyResult(null);
+                setToken("");
+                setMergeToken("");
+                setSelected([]);
+                if (value === "github") {
+                  setMergeMethod("squash");
+                  setAcceptanceStrategy("platform_ci");
+                  void loadInstallations();
+                } else {
+                  setMergeMethod("merge");
+                  setAcceptanceStrategy("none");
+                }
+              }}>
                 <option value="gitlab">GitLab</option><option value="github">GitHub</option>
               </select>
             </Field>
@@ -727,8 +764,8 @@ export default function ProjectWizard({
         <section className="panel setup-section" id="repositories">
           <div className="setup-section-head">
             <div>
-              <h2>选择需要一起开发的子仓库</h2>
-              <p>来自 {platformName} 的真实项目 ID、地址和默认分支，可搜索和翻页。</p>
+              <h2>{githubSingleRepo ? "选择代码仓库" : "选择需要一起开发的子仓库"}</h2>
+              <p>{githubSingleRepo ? "GitHub 项目默认单仓库：选一个仓库和目标分支即可，Issue 与 PR 都在该仓。" : `来自 ${platformName} 的真实项目 ID、地址和默认分支，可搜索和翻页。`}</p>
             </div>
             <span className="setup-label">
               {selected.length > 0 ? "已选 " + selected.length + " 个" : "必选"}
@@ -749,7 +786,7 @@ export default function ProjectWizard({
                 {loadingRepos ? "搜索中…" : "搜索"}
               </button>
             </form>
-            <p className="wizard-selection-hint" role="status">已选 {selected.length} 个仓库 · 点击整行勾选，翻页和搜索会保留选择</p>
+            <p className="wizard-selection-hint" role="status">{githubSingleRepo ? (selected.length > 0 ? "已选 1 个仓库 · 再选会替换当前选择" : "请选择一个仓库") : `已选 ${selected.length} 个仓库 · 点击整行勾选，翻页和搜索会保留选择`}</p>
             {repos.length === 0 && !loadingRepos && (
               <div className="repository-empty">
                 <strong>没有匹配的仓库</strong>
@@ -833,7 +870,7 @@ export default function ProjectWizard({
                           onChange={(e) => setTargets((old) => ({ ...old, [repo.id]: e.target.value }))}
                         />
                       )}
-                      <small>将作为 {layout.paths[repo.id]} 的工作目录</small>
+                      <small>{githubSingleRepo ? "将作为仓库根目录检出" : `将作为 ${layout.paths[repo.id]} 的工作目录`}</small>
                       {loadingBranches[repo.id] && <small role="status">正在读取 {platformName} 分支…</small>}
                       {branchOptions[repo.id] !== undefined && !loadingBranches[repo.id] && (
                         <small role="status">已读取 {branchOptions[repo.id].length} 个 {platformName} 分支</small>
@@ -879,7 +916,7 @@ export default function ProjectWizard({
           <div className="setup-section-head">
             <div>
               <h2>确认项目与合并策略</h2>
-              <p>系统会自动创建并托管 Meta-Repo，不会在 {platformName} 新建远程项目。</p>
+              <p>{githubSingleRepo ? "单仓库模式：不创建 Meta-Repo；接单、开发与 PR 都针对所选仓库。" : `系统会自动创建并托管 Meta-Repo，不会在 ${platformName} 新建远程项目。`}</p>
             </div>
             <span className="setup-label">必填</span>
           </div>
@@ -892,19 +929,21 @@ export default function ProjectWizard({
                   placeholder="例如：数字员工"
                 />
               </Field>
-              <Field
-                label="Meta 分支"
-                hint="受管 Meta-Repo 的内部分支，通常保持 main。"
-              >
-                <input
-                  value={metaRef}
-                  onChange={(e) => setMetaRef(e.target.value)}
-                />
-              </Field>
+              {!githubSingleRepo && (
+                <Field
+                  label="Meta 分支"
+                  hint="受管 Meta-Repo 的内部分支，通常保持 main。"
+                >
+                  <input
+                    value={metaRef}
+                    onChange={(e) => setMetaRef(e.target.value)}
+                  />
+                </Field>
+              )}
             </div>
             {provider === "github" && <div className="form-grid">
-              <Field label="GitHub 合并方式"><select value={mergeMethod} onChange={e => setMergeMethod(e.target.value as typeof mergeMethod)}><option value="merge">Merge commit</option><option value="squash">Squash</option><option value="rebase">Rebase</option></select></Field>
-              <Field label="验收策略"><select value={acceptanceStrategy} onChange={e => setAcceptanceStrategy(e.target.value as typeof acceptanceStrategy)}><option value="none">关闭额外验收</option><option value="platform_ci">目标分支必需检查</option></select></Field>
+              <Field label="GitHub 合并方式"><select value={mergeMethod} onChange={e => setMergeMethod(e.target.value as typeof mergeMethod)} aria-label="GitHub 合并方式"><option value="merge">Merge commit</option><option value="squash">Squash</option><option value="rebase">Rebase</option></select></Field>
+              <Field label="验收策略"><select value={acceptanceStrategy} onChange={e => setAcceptanceStrategy(e.target.value as typeof acceptanceStrategy)} aria-label="验收策略"><option value="none">关闭额外验收</option><option value="platform_ci">目标分支必需检查</option></select></Field>
             </div>}
             <div className="wizard-toggle">
               <label>
@@ -928,11 +967,11 @@ export default function ProjectWizard({
               </p>
             </div>
             <div className="wizard-summary">
-              <h3>将托管 {selectedRepos.length} 个仓库</h3>
+              <h3>{githubSingleRepo ? "代码仓库" : `将托管 ${selectedRepos.length} 个仓库`}</h3>
               <ul>
                 {selectedRepos.map((repo) => (
                   <li key={repo.id}>
-                    <code>{layout.paths[repo.id]}</code>
+                    <code>{githubSingleRepo ? "." : layout.paths[repo.id]}</code>
                     <span>{repo.pathWithNamespace}</span>
                     <span className="tag">
                       目标 {targetFor(repo)}
@@ -1069,7 +1108,7 @@ export default function ProjectWizard({
                 disabled={saving || !modelVerified || !agentCatalog.enabled.includes(defaultAgent)}
                 onClick={() => void startInitialization()}
               >
-                {saving ? "正在创建项目…" : "创建项目并开始初始化"}
+                {saving ? "正在创建项目…" : githubSingleRepo ? "创建项目" : "创建项目并开始初始化"}
               </button>
             </div>
           </div>

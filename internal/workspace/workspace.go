@@ -209,8 +209,19 @@ func validURL(url string) error {
 
 // metaURL resolves the Meta-Repo location. Managed repositories are derived
 // from the validated project ID and are never a caller-supplied path, so the
-// existing file:// restriction for user input is not bypassed here.
+// existing file:// restriction for user input is not bypassed here. Direct
+// single-repo projects have no Meta-Repo: the sole code repository URL is used
+// as the primary checkout.
 func (m *Manager) metaURL(p domain.Project) (string, error) {
+	if p.DirectRepo() {
+		if len(p.Repositories) != 1 {
+			return "", errors.New("direct projects require exactly one repository")
+		}
+		if p.Repositories[0].URL == "" {
+			return "", errors.New("direct project repository URL is required")
+		}
+		return p.Repositories[0].URL, nil
+	}
 	if p.ManagedMeta() {
 		root, err := managedmeta.New(m.DataDir).Root(p.ID)
 		if err != nil {
@@ -462,67 +473,82 @@ func (m *Manager) Prepare(ctx context.Context, taskID string, p domain.Project) 
 		if e = m.clone(ctx, metaURL, primary); e != nil {
 			return empty, e
 		}
-		sha, err := m.fetch(ctx, primary, metaURL, p.MetaRef)
-		if err != nil {
-			return empty, err
-		}
-		var data string
-		for _, name := range []string{".meta.yaml", ".meta.yml", ".meta"} {
-			data, err = m.git(ctx, primary, "show", sha+":"+name)
-			if err == nil {
-				break
+		if p.DirectRepo() {
+			if len(p.Repositories) != 1 || p.Repositories[0].Path != "." {
+				return empty, errors.New("direct projects require exactly one repository at path \".\"")
 			}
-		}
-		if err != nil {
-			return empty, errors.New("meta ref has no manifest")
-		}
-		if err = validateManifestDependencies([]byte(data), p.Repositories); err != nil {
-			return empty, err
-		}
-		entries, err := manifest([]byte(data))
-		if err != nil {
-			return empty, err
-		}
-
-		var raw struct {
-			Projects map[string]any `yaml:"projects"`
-		}
-		if err = yaml.Unmarshal([]byte(data), &raw); err != nil {
-			return empty, err
-		}
-		aliases := map[string]string{}
-		for alias, value := range raw.Projects {
-			dest := alias
-			if v, ok := value.(map[string]any); ok {
-				if x, ok := v["path"].(string); ok && x != "" {
-					dest = x
-				}
-			}
-			if err = validPath(alias); err != nil {
-				return empty, fmt.Errorf("unsafe meta alias: %w", err)
-			}
-			aliases[dest] = alias
-		}
-		s = state{Source: m.taskSource(taskID), Aliases: aliases, Project: p, MetaBranch: "bot/" + taskID, MetaHead: sha, Workspace: domain.Workspace{TaskID: taskID, Root: filepath.Join(m.taskSource(taskID), ".worktrees", taskID), MetaSHA: sha}}
-		for _, r := range p.Repositories {
-			if (r.Path != "." && entries[r.Path] != r.URL) || (r.Path == "." && r.URL != metaURL) {
-				return empty, fmt.Errorf("manifest URL/path mismatch for %s", r.ID)
-			}
-			dir := filepath.Join(primary, r.Path)
-			if e = m.clone(ctx, r.URL, dir); e != nil {
-				return empty, e
-			}
-			base, err := m.fetch(ctx, dir, r.URL, r.TargetBranch)
+			r := p.Repositories[0]
+			sha, err := m.fetch(ctx, primary, metaURL, r.TargetBranch)
 			if err != nil {
 				return empty, err
 			}
-			if r.Path == "." && base != sha {
-				return empty, errors.New("registered root target must resolve to configured MetaRef")
+			s = state{Source: m.taskSource(taskID), Aliases: map[string]string{".": "."}, Project: p, MetaBranch: "bot/" + taskID, MetaHead: sha, Workspace: domain.Workspace{TaskID: taskID, Root: filepath.Join(m.taskSource(taskID), ".worktrees", taskID), MetaSHA: sha, Revisions: []domain.Revision{{RepositoryID: r.ID, ProjectID: r.ProjectID, Path: ".", InitialSHA: sha, BaseSHA: sha, HeadSHA: sha, TargetBranch: r.TargetBranch, Branch: "bot/" + taskID}}}}
+			if e = m.save(s); e != nil {
+				return empty, e
 			}
-			s.Workspace.Revisions = append(s.Workspace.Revisions, domain.Revision{RepositoryID: r.ID, ProjectID: r.ProjectID, Path: r.Path, InitialSHA: base, BaseSHA: base, HeadSHA: base, TargetBranch: r.TargetBranch, Branch: s.MetaBranch})
-		}
-		if e = m.save(s); e != nil {
-			return empty, e
+		} else {
+			sha, err := m.fetch(ctx, primary, metaURL, p.MetaRef)
+			if err != nil {
+				return empty, err
+			}
+			var data string
+			for _, name := range []string{".meta.yaml", ".meta.yml", ".meta"} {
+				data, err = m.git(ctx, primary, "show", sha+":"+name)
+				if err == nil {
+					break
+				}
+			}
+			if err != nil {
+				return empty, errors.New("meta ref has no manifest")
+			}
+			if err = validateManifestDependencies([]byte(data), p.Repositories); err != nil {
+				return empty, err
+			}
+			entries, err := manifest([]byte(data))
+			if err != nil {
+				return empty, err
+			}
+
+			var raw struct {
+				Projects map[string]any `yaml:"projects"`
+			}
+			if err = yaml.Unmarshal([]byte(data), &raw); err != nil {
+				return empty, err
+			}
+			aliases := map[string]string{}
+			for alias, value := range raw.Projects {
+				dest := alias
+				if v, ok := value.(map[string]any); ok {
+					if x, ok := v["path"].(string); ok && x != "" {
+						dest = x
+					}
+				}
+				if err = validPath(alias); err != nil {
+					return empty, fmt.Errorf("unsafe meta alias: %w", err)
+				}
+				aliases[dest] = alias
+			}
+			s = state{Source: m.taskSource(taskID), Aliases: aliases, Project: p, MetaBranch: "bot/" + taskID, MetaHead: sha, Workspace: domain.Workspace{TaskID: taskID, Root: filepath.Join(m.taskSource(taskID), ".worktrees", taskID), MetaSHA: sha}}
+			for _, r := range p.Repositories {
+				if (r.Path != "." && entries[r.Path] != r.URL) || (r.Path == "." && r.URL != metaURL) {
+					return empty, fmt.Errorf("manifest URL/path mismatch for %s", r.ID)
+				}
+				dir := filepath.Join(primary, r.Path)
+				if e = m.clone(ctx, r.URL, dir); e != nil {
+					return empty, e
+				}
+				base, err := m.fetch(ctx, dir, r.URL, r.TargetBranch)
+				if err != nil {
+					return empty, err
+				}
+				if r.Path == "." && base != sha {
+					return empty, errors.New("registered root target must resolve to configured MetaRef")
+				}
+				s.Workspace.Revisions = append(s.Workspace.Revisions, domain.Revision{RepositoryID: r.ID, ProjectID: r.ProjectID, Path: r.Path, InitialSHA: base, BaseSHA: base, HeadSHA: base, TargetBranch: r.TargetBranch, Branch: s.MetaBranch})
+			}
+			if e = m.save(s); e != nil {
+				return empty, e
+			}
 		}
 	} else {
 		if s.Project.ID != p.ID {
@@ -559,7 +585,8 @@ func (m *Manager) Prepare(ctx context.Context, taskID string, p domain.Project) 
 			}
 		}
 	}
-	if !s.MetaStarted && m.MetaCommand != "" { // meta reads the primary checkout manifest; create it at the pinned root ref first.
+	// Direct single-repo projects have no Meta manifest; use plain Git worktrees.
+	if !s.MetaStarted && m.MetaCommand != "" && !p.DirectRepo() { // meta reads the primary checkout manifest; create it at the pinned root ref first.
 		if _, e = m.git(ctx, primary, "checkout", "--detach", s.Workspace.MetaSHA); e != nil {
 			return s.Workspace, e
 		}
