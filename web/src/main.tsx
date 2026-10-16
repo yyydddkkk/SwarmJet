@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import React, { lazy, Suspense } from "react";
+import React, { lazy, Suspense, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ToastProvider } from "./ToastProvider";
@@ -13,6 +13,26 @@ const Prototype =
   new URLSearchParams(location.search).get("prototype") === "workbench"
     ? lazy(() => import("./WorkbenchPrototype"))
     : null;
+// New Hive console ("honey garden"). Serves #/hives routes from fake fixtures only;
+// the existing console keeps its own routes and pages.
+const HiveConsole = lazy(() => import("./hive/HiveConsoleApp"));
+
+function Root() {
+  const [hash, setHash] = useState(location.hash);
+  useEffect(() => {
+    const onHash = () => setHash(location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  if (hash.startsWith("#/hives"))
+    return (
+      <Suspense fallback={<div className="loading">正在打开 Hive 控制台…</div>}>
+        <HiveConsole />
+      </Suspense>
+    );
+  return <App />;
+}
+
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ToastProvider>
@@ -21,7 +41,7 @@ createRoot(document.getElementById("root")!).render(
         <Prototype />
       </Suspense>
     ) : (
-      <App />
+      <Root />
     )}
     </ToastProvider>
   </React.StrictMode>,
