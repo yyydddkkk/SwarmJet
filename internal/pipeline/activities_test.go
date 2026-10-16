@@ -40,7 +40,7 @@ func TestPublishingKeepsWorkspaceWhenRemoteSyncFails(t *testing.T) {
 			}
 			a := Activities{Nodes: fixedNodeResolver{node: &failingPublishNode{prepared: ws}}, ProjectCredential: func(domain.Project, bool) (string, error) { return "token", nil }}
 			task := domain.Task{ID: "task", NodeID: "node", Project: domain.Project{ID: "project", GitLabURL: "http://gitlab.invalid"}, Workspace: original}
-			result, err := a.Step(context.Background(), StepInput{Phase: "publishing", Task: task, ExecutionID: "publish"})
+			result, err := a.Step(context.Background(), StepInput{Phase: domain.StagePublishing, Task: task, ExecutionID: "publish"})
 			if err != nil || !result.Rework || result.Task.Workspace.Root != ws.Root || !strings.Contains(result.Task.Message, "client") {
 				t.Fatalf("remote sync lost workspace: %+v %v", result, err)
 			}
@@ -50,7 +50,7 @@ func TestPublishingKeepsWorkspaceWhenRemoteSyncFails(t *testing.T) {
 
 func TestResultRecoveryRunsOnceInFreshReadOnlyExecution(t *testing.T) {
 	task := domain.Task{ID: "task", Executions: map[string]domain.Execution{}}
-	in := StepInput{Phase: "developing", ExecutionID: "task-developing-3"}
+	in := StepInput{Phase: domain.StageDeveloping, ExecutionID: "task-developing-3"}
 	calls := 0
 	run := func(_ context.Context, step StepInput, got domain.Task, repair bool) (domain.Execution, error) {
 		calls++
@@ -80,7 +80,7 @@ func TestResultRecoveryResumesBlockedHandoffWithoutRepeatingWork(t *testing.T) {
 	} {
 		task := domain.Task{Executions: map[string]domain.Execution{"dev": previous}}
 		calls := 0
-		ex, err := withResultRecovery(context.Background(), StepInput{Phase: "developing", ExecutionID: "retry"}, task, "dev", func(_ context.Context, step StepInput, _ domain.Task, repair bool) (domain.Execution, error) {
+		ex, err := withResultRecovery(context.Background(), StepInput{Phase: domain.StageDeveloping, ExecutionID: "retry"}, task, "dev", func(_ context.Context, step StepInput, _ domain.Task, repair bool) (domain.Execution, error) {
 			calls++
 			if !repair || step.ExecutionID != "retry-result" {
 				t.Fatalf("repeated development: %+v repair=%v", step, repair)
@@ -109,7 +109,7 @@ func TestResultRecoveryIgnoresOtherExecutionFailures(t *testing.T) {
 
 func TestResultRecoveryPromptOnlyDescribesExistingWork(t *testing.T) {
 	task := domain.Task{Issue: domain.Issue{Title: "show two decimal places"}}
-	prompt := resultRecoveryPrompt(task, "developing", nil, domain.Execution{ID: "first"})
+	prompt := resultRecoveryPrompt(task, domain.StageDeveloping, nil, domain.Execution{ID: "first"})
 	for _, want := range []string{"read-only", "Do not edit files", "acceptanceCommands", "show two decimal places", "first", `"steps":[{"action":`, "When outcome is blocked, omit humanAcceptance"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing %q from repair prompt", want)
@@ -166,7 +166,7 @@ func TestWorkspaceManagerPreservesNativeAskpass(t *testing.T) {
 
 func reviewedGateTask() domain.Task {
 	revisions := []domain.Revision{{RepositoryID: "api", ProjectID: 12, BaseSHA: "base-sha", HeadSHA: "reviewed-sha", TargetBranch: "release", Branch: "swarmjet/task", Changed: true, MRIID: 42}}
-	task := domain.Task{ID: "task", Stage: "merging", Project: domain.Project{ID: "project", RequireCI: true, Repositories: []domain.Repository{{ID: "api", ProjectID: 12, TargetBranch: "release"}}}, Workspace: domain.Workspace{Revisions: revisions}}
+	task := domain.Task{ID: "task", Stage: domain.StageMerging, Project: domain.Project{ID: "project", RequireCI: true, Repositories: []domain.Repository{{ID: "api", ProjectID: 12, TargetBranch: "release"}}}, Workspace: domain.Workspace{Revisions: revisions}}
 	task.ReviewDigest = domain.Digest(revisions)
 	task.Verification = []domain.Verification{{Name: "integration", Required: true, Passed: true, RevisionDigest: task.ReviewDigest}}
 	return task
@@ -279,14 +279,14 @@ func TestGatesAllowOptedOutAcceptanceAfterIndependentReview(t *testing.T) {
 }
 
 func TestMergeActivityStopsBeforeAgentWhenTaskAutoMergeIsOff(t *testing.T) {
-	for _, phase := range []string{"acquiring_merge", "merging"} {
+	for _, phase := range []string{domain.StageAcquiringMerge, domain.StageMerging} {
 		t.Run(phase, func(t *testing.T) {
 			task := reviewedGateTask()
 			task.Stage = phase
 			off := false
 			task.AutoMergeOverride = &off
 			result, err := (&Activities{}).Step(context.Background(), StepInput{Phase: phase, Task: task, ExecutionID: "merge"})
-			if err != nil || result.Ready || result.Task.Stage != "waiting_manual_merge" || result.Task.AutoMergeEnabled() {
+			if err != nil || result.Ready || result.Task.Stage != domain.StageWaitingManualMerge || result.Task.AutoMergeEnabled() {
 				t.Fatalf("automatic merge continued after task switch: %+v err=%v", result, err)
 			}
 		})
@@ -297,7 +297,7 @@ func TestMergeActivityReturnsReworkWhenTargetAdvanced(t *testing.T) {
 	_, url, _ := gateServer(t, func(int) gitlab.MergeRequest { return reviewedMR() }, "concurrent-target-sha")
 	task.Project.GitLabURL = url
 	activities := &Activities{Credential: func(string) (string, error) { return "fake-token", nil }}
-	result, err := activities.Step(context.Background(), StepInput{Phase: "merging", Task: task, ExecutionID: "execution"})
+	result, err := activities.Step(context.Background(), StepInput{Phase: domain.StageMerging, Task: task, ExecutionID: "execution"})
 	if err != nil || result.Ready || !result.Rework || !strings.Contains(result.Task.Message, "target branch advanced") {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -340,7 +340,7 @@ func TestMergeActivityRejectsUnreviewedAlreadyMergedMR(t *testing.T) {
 	_, url, _ := gateServer(t, func(int) gitlab.MergeRequest { return mr }, "base-sha")
 	task.Project.GitLabURL = url
 	a := &Activities{Credential: func(string) (string, error) { return "fake-token", nil }}
-	if _, err := a.Step(context.Background(), StepInput{Phase: "partial_merge", Task: task, ExecutionID: "execution"}); err == nil {
+	if _, err := a.Step(context.Background(), StepInput{Phase: domain.StagePartialMerge, Task: task, ExecutionID: "execution"}); err == nil {
 		t.Fatal("unreviewed merged MR accepted")
 	}
 }

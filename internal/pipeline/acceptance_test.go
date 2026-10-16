@@ -152,28 +152,28 @@ func TestNewStrategyPublishesBeforeVerification(t *testing.T) {
 	task.Project.AutoMerge = autoMerge(true)
 	h.step = func(_ context.Context, in StepInput, _ int) (StepResult, error) {
 		out := successfulStep(in)
-		if in.Phase == "verifying" {
+		if in.Phase == domain.StageVerifying {
 			out.Task.AcceptanceIncomplete = true
 		}
 		return out, nil
 	}
 	final := h.run(t, task)
-	if final.Stage != "completed" {
+	if final.Stage != domain.StageCompleted {
 		t.Fatal(final.Stage)
 	}
 	pub, verify := -1, -1
 	for i, p := range h.phases {
-		if p == "publishing" && pub < 0 {
+		if p == domain.StagePublishing && pub < 0 {
 			pub = i
 		}
-		if p == "verifying" && verify < 0 {
+		if p == domain.StageVerifying && verify < 0 {
 			verify = i
 		}
-		if p == "merging" || p == "acquiring_merge" {
+		if p == domain.StageMerging || p == domain.StageAcquiringMerge {
 			t.Fatal("incomplete verification allowed automatic merge")
 		}
 	}
-	if pub < 0 || verify < pub || h.counts["waiting_manual_merge"] == 0 {
+	if pub < 0 || verify < pub || h.counts[domain.StageWaitingManualMerge] == 0 {
 		t.Fatalf("wrong strategy phases: %v", h.phases)
 	}
 }

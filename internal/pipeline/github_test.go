@@ -20,18 +20,18 @@ func TestGitHubWorkflowWaitsForQueuedMerge(t *testing.T) {
 	task.Issue.Provider = domain.ProviderGitHub
 	h.step = func(_ context.Context, input StepInput, _ int) (StepResult, error) {
 		out := successfulStep(input)
-		if input.Phase == "merging" {
+		if input.Phase == domain.StageMerging {
 			out.Ready = false
 			out.Task.Message = "等待 GitHub merge queue 完成"
 			out.Task.Workspace.Revisions[0].MergeQueueEntryID = "entry-1"
 		}
-		if input.Phase == "partial_merge" {
+		if input.Phase == domain.StagePartialMerge {
 			out.Task.Workspace.Revisions[0].Merged = true
 		}
 		return out, nil
 	}
 	final := h.run(t, task)
-	if final.Stage != "completed" || h.counts["merging"] != 1 || h.counts["partial_merge"] != 1 {
+	if final.Stage != domain.StageCompleted || h.counts[domain.StageMerging] != 1 || h.counts[domain.StagePartialMerge] != 1 {
 		t.Fatalf("queue was not awaited: stage=%s phases=%v", final.Stage, h.phases)
 	}
 }

@@ -92,12 +92,12 @@ func TestEvergreenFinalizationLeavesIssueOpen(t *testing.T) {
 	defer server.Close()
 	node := &cleanupOnlyNode{}
 	a := &Activities{Store: s, Nodes: fixedNodeResolver{node: node}, ProjectCredential: func(domain.Project, bool) (string, error) { return "token", nil }}
-	task := domain.Task{ID: "task", Round: 1, NodeID: "node", Stage: "finalizing", Project: domain.Project{GitLabURL: server.URL}, Issue: domain.Issue{ProjectID: 1, IID: 1, State: "opened"}, Workspace: domain.Workspace{Revisions: []domain.Revision{{RepositoryID: "api", ProjectID: 1, MRIID: 1, HeadSHA: "head", Branch: "branch", TargetBranch: "main", Changed: true, Merged: true, Sensitive: true}}}}
-	result, err := a.Step(ctx, StepInput{Phase: "finalizing", Task: task})
+	task := domain.Task{ID: "task", Round: 1, NodeID: "node", Stage: domain.StageFinalizing, Project: domain.Project{GitLabURL: server.URL}, Issue: domain.Issue{ProjectID: 1, IID: 1, State: "opened"}, Workspace: domain.Workspace{Revisions: []domain.Revision{{RepositoryID: "api", ProjectID: 1, MRIID: 1, HeadSHA: "head", Branch: "branch", TargetBranch: "main", Changed: true, Merged: true, Sensitive: true}}}}
+	result, err := a.Step(ctx, StepInput{Phase: domain.StageFinalizing, Task: task})
 	if err != nil || closed || !node.cleaned || result.Task.Issue.State != "opened" {
 		t.Fatalf("result=%+v closed=%v cleaned=%v err=%v", result, closed, node.cleaned, err)
 	}
-	upstream := domain.Task{ID: "upstream", Stage: "completed", Issue: domain.Issue{ProjectID: 1, IID: 2}, CreatedAt: time.Now().UTC()}
+	upstream := domain.Task{ID: "upstream", Stage: domain.StageCompleted, Issue: domain.Issue{ProjectID: 1, IID: 2}, CreatedAt: time.Now().UTC()}
 	upstreamBody, _ := json.Marshal(upstream)
 	if _, err := s.Pool.Exec(ctx, `INSERT INTO projects(id,version,body) VALUES('project',1,'{}')`); err != nil {
 		t.Fatal(err)
@@ -105,16 +105,16 @@ func TestEvergreenFinalizationLeavesIssueOpen(t *testing.T) {
 	if _, err := s.Pool.Exec(ctx, `INSERT INTO tasks(id,project_id,source,stage,terminal,body) VALUES($1,'project',$2,'completed',true,$3)`, upstream.ID, domain.GitLabIdentity(server.URL)+"/1/2", upstreamBody); err != nil {
 		t.Fatal(err)
 	}
-	downstream := domain.Task{ID: "downstream", Round: 1, Project: domain.Project{GitLabURL: server.URL}, Issue: domain.Issue{ProjectID: 1, IID: 1}, Dependencies: []domain.IssueRef{{ProjectID: 1, IID: 2}}, Stage: "waiting_dependencies"}
-	ready, err := a.Step(ctx, StepInput{Phase: "waiting_dependencies", Task: downstream})
+	downstream := domain.Task{ID: "downstream", Round: 1, Project: domain.Project{GitLabURL: server.URL}, Issue: domain.Issue{ProjectID: 1, IID: 1}, Dependencies: []domain.IssueRef{{ProjectID: 1, IID: 2}}, Stage: domain.StageWaitingDependencies}
+	ready, err := a.Step(ctx, StepInput{Phase: domain.StageWaitingDependencies, Task: downstream})
 	if err != nil || !ready.Ready || ready.Task.DependencyTasks["1/2"] != "upstream" {
 		t.Fatalf("open upstream issue did not satisfy completed task dependency: %+v %v", ready, err)
 	}
-	old := domain.Task{ID: "old", Stage: "completed", Project: domain.Project{GitLabURL: server.URL}, Issue: domain.Issue{ProjectID: 1, IID: 1}, CreatedAt: time.Now().UTC().Add(-time.Minute)}
-	newer := domain.Task{ID: "newer", Stage: "queued", Project: old.Project, Issue: old.Issue, CreatedAt: time.Now().UTC()}
+	old := domain.Task{ID: "old", Stage: domain.StageCompleted, Project: domain.Project{GitLabURL: server.URL}, Issue: domain.Issue{ProjectID: 1, IID: 1}, CreatedAt: time.Now().UTC().Add(-time.Minute)}
+	newer := domain.Task{ID: "newer", Stage: domain.StageQueued, Project: old.Project, Issue: old.Issue, CreatedAt: time.Now().UTC()}
 	for _, item := range []domain.Task{old, newer} {
 		body, _ := json.Marshal(item)
-		if _, err := s.Pool.Exec(ctx, `INSERT INTO tasks(id,project_id,source,stage,terminal,body) VALUES($1,'project',$2,$3,$4,$5)`, item.ID, domain.GitLabIdentity(server.URL)+"/1/1", item.Stage, item.Stage == "completed", body); err != nil {
+		if _, err := s.Pool.Exec(ctx, `INSERT INTO tasks(id,project_id,source,stage,terminal,body) VALUES($1,'project',$2,$3,$4,$5)`, item.ID, domain.GitLabIdentity(server.URL)+"/1/1", item.Stage, item.Stage == domain.StageCompleted, body); err != nil {
 			t.Fatal(err)
 		}
 	}

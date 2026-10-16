@@ -210,7 +210,7 @@ func (a *Activities) mergeGitHub(ctx context.Context, t domain.Task, c forge.Cli
 			}
 			if !allowed {
 				out.Ready = false
-				t.Stage = "waiting_manual_merge"
+				t.Stage = domain.StageWaitingManualMerge
 				t.Message = "已关闭自动合并，等待人工合并 PR"
 				out.Task = t
 				return out, nil
