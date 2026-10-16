@@ -29,6 +29,9 @@ var schemaUpgrade3 string
 
 //go:embed schema_upgrade_4.sql
 var schemaUpgrade4 string
+
+//go:embed schema_upgrade_5.sql
+var schemaUpgrade5 string
 var ErrConflict = errors.New("conflict: stale version or active task already exists")
 var ErrNotFound = errors.New("not found")
 
@@ -53,6 +56,11 @@ const activeProjectTask = `NOT terminal AND NOT COALESCE((body->>'paused')::bool
 type Store struct {
 	Pool *pgxpool.Pool
 	Jobs jobs.Inserter
+	// MessageSink is the extension point for pushing a delivered Inbox message
+	// into the target CLI session. This round only flips the message state and
+	// wakes waiters; the Cell runtime installs a sink here next round. A nil
+	// sink leaves delivery at the database boundary.
+	MessageSink func(context.Context, domain.Message) error
 }
 
 func (s *Store) HasSource(ctx context.Context, base string, issue domain.Issue) (bool, error) {
@@ -126,7 +134,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err = tx.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil {
 		return err
 	}
-	if version > 4 {
+	if version > 5 {
 		return fmt.Errorf("database schema version %d is newer than this application supports", version)
 	}
 	if version < 2 {
@@ -150,6 +158,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO schema_version(version) VALUES(4) ON CONFLICT DO NOTHING`); err != nil {
+			return err
+		}
+	}
+	if version < 5 {
+		if _, err = tx.Exec(ctx, schemaUpgrade5); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO schema_version(version) VALUES(5) ON CONFLICT DO NOTHING`); err != nil {
 			return err
 		}
 	}
