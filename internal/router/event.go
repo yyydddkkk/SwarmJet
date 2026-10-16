@@ -1,5 +1,5 @@
 // Package router turns external GitHub events into deterministic routing
-// decisions: deliver to the Drone that owns the issue or PR, start a new Drone
+// decisions: deliver to the Forager that owns the issue or PR, start a new Forager
 // for a matching trigger rule, or file the event in the Hive Inbox. The Router
 // never calls a model and never interprets free text as instructions.
 package router

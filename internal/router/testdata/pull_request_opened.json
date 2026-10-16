@@ -24,8 +24,8 @@
     "author_association": "MEMBER",
     "labels": [],
     "head": {
-      "label": "acme:swarm/acme-hive/drone-1",
-      "ref": "swarm/acme-hive/drone-1",
+      "label": "acme:swarm/acme-hive/forager-1",
+      "ref": "swarm/acme-hive/forager-1",
       "sha": "6dcb09b5b57875f334f61aebed695e2e4193db5e"
     },
     "base": {

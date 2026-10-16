@@ -59,12 +59,12 @@ func (m *MemoryBackend) AddHive(h domain.Hive) domain.Hive {
 	return h
 }
 
-// AddDrone seeds a Drone without applying creation limits. Generated fields
-// match CreateDrone so tests can build fixtures quickly.
-func (m *MemoryBackend) AddDrone(a domain.Agent) domain.Agent {
+// AddForager seeds a Forager without applying creation limits. Generated fields
+// match CreateForager so tests can build fixtures quickly.
+func (m *MemoryBackend) AddForager(a domain.Agent) domain.Agent {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.addDroneLocked(a)
+	return m.addForagerLocked(a)
 }
 
 // Hive returns a stored Hive by ID.
@@ -75,8 +75,8 @@ func (m *MemoryBackend) Hive(id string) (domain.Hive, bool) {
 	return h, ok
 }
 
-// Drones returns every Drone of a Hive in insertion order.
-func (m *MemoryBackend) Drones(hiveID string) []domain.Agent {
+// Foragers returns every Forager of a Hive in insertion order.
+func (m *MemoryBackend) Foragers(hiveID string) []domain.Agent {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := []domain.Agent{}
@@ -124,30 +124,30 @@ func (m *MemoryBackend) HiveByRepository(ctx context.Context, repository string)
 	return h, nil
 }
 
-// DroneByIssue implements Backend: newest non-terminal Drone for the Issue.
-func (m *MemoryBackend) DroneByIssue(ctx context.Context, hiveID string, issue int64) (domain.Agent, error) {
+// ForagerByIssue implements Backend: newest non-terminal Forager for the Issue.
+func (m *MemoryBackend) ForagerByIssue(ctx context.Context, hiveID string, issue int64) (domain.Agent, error) {
 	return m.newestNonTerminal(func(a domain.Agent) bool {
-		return a.HiveID == hiveID && a.Role == domain.RoleDrone && a.IssueNumber == issue
+		return a.HiveID == hiveID && a.Role == domain.RoleForager && a.IssueNumber == issue
 	})
 }
 
-// DroneByPR implements Backend: newest non-terminal Drone for the PR.
-func (m *MemoryBackend) DroneByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error) {
+// ForagerByPR implements Backend: newest non-terminal Forager for the PR.
+func (m *MemoryBackend) ForagerByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error) {
 	return m.newestNonTerminal(func(a domain.Agent) bool {
-		return a.HiveID == hiveID && a.Role == domain.RoleDrone && a.PRNumber == pr
+		return a.HiveID == hiveID && a.Role == domain.RoleForager && a.PRNumber == pr
 	})
 }
 
-// DroneByBranch implements Backend: newest non-terminal Drone for the branch.
-func (m *MemoryBackend) DroneByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error) {
+// ForagerByBranch implements Backend: newest non-terminal Forager for the branch.
+func (m *MemoryBackend) ForagerByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error) {
 	return m.newestNonTerminal(func(a domain.Agent) bool {
-		return a.HiveID == hiveID && a.Role == domain.RoleDrone && a.Branch == branch
+		return a.HiveID == hiveID && a.Role == domain.RoleForager && a.Branch == branch
 	})
 }
 
-// CreateDrone implements Backend. It enforces the Hive concurrency and chain
+// CreateForager implements Backend. It enforces the Hive concurrency and chain
 // limits and fills the generated ID and branch.
-func (m *MemoryBackend) CreateDrone(ctx context.Context, a domain.Agent) (domain.Agent, error) {
+func (m *MemoryBackend) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	hive, ok := m.hives[a.HiveID]
@@ -156,29 +156,29 @@ func (m *MemoryBackend) CreateDrone(ctx context.Context, a domain.Agent) (domain
 	}
 	cfg := resolveConfig(hive.Config)
 	active := 0
-	for _, drone := range m.agents {
-		if drone.HiveID != a.HiveID || drone.Role != domain.RoleDrone {
+	for _, forager := range m.agents {
+		if forager.HiveID != a.HiveID || forager.Role != domain.RoleForager {
 			continue
 		}
-		if drone.State == domain.AgentCreating || drone.State == domain.AgentActive || drone.State == domain.AgentParked {
+		if forager.State == domain.AgentCreating || forager.State == domain.AgentActive || forager.State == domain.AgentParked {
 			active++
 		}
 	}
-	if active >= cfg.MaxConcurrentDrones {
+	if active >= cfg.MaxConcurrentForagers {
 		return domain.Agent{}, domain.ErrHiveLimit
 	}
 	if a.ChainID != "" {
 		chained := 0
-		for _, drone := range m.agents {
-			if drone.HiveID == a.HiveID && drone.Role == domain.RoleDrone && drone.ChainID == a.ChainID {
+		for _, forager := range m.agents {
+			if forager.HiveID == a.HiveID && forager.Role == domain.RoleForager && forager.ChainID == a.ChainID {
 				chained++
 			}
 		}
-		if chained >= cfg.MaxDronesPerChain {
+		if chained >= cfg.MaxForagersPerChain {
 			return domain.Agent{}, domain.ErrChainLimit
 		}
 	}
-	return m.addDroneLocked(a), nil
+	return m.addForagerLocked(a), nil
 }
 
 // SendMessage implements Backend: validate, dedupe by ID, then append. A
@@ -212,7 +212,7 @@ func (m *MemoryBackend) SendMessage(ctx context.Context, msg domain.Message) (do
 }
 
 func (m *MemoryBackend) validateLocked(msg domain.Message) error {
-	if isDroneAddress(msg.From) && isDroneAddress(msg.To) {
+	if isForagerAddress(msg.From) && isForagerAddress(msg.To) {
 		return domain.ErrPeerMessage
 	}
 	maxHops := resolveConfig(domain.HiveConfig{}).MaxHops
@@ -228,13 +228,13 @@ func (m *MemoryBackend) validateLocked(msg domain.Message) error {
 	return nil
 }
 
-func (m *MemoryBackend) addDroneLocked(a domain.Agent) domain.Agent {
+func (m *MemoryBackend) addForagerLocked(a domain.Agent) domain.Agent {
 	if a.ID == "" {
 		m.seq++
-		a.ID = fmt.Sprintf("drone-%d", m.seq)
+		a.ID = fmt.Sprintf("forager-%d", m.seq)
 	}
 	if a.Role == "" {
-		a.Role = domain.RoleDrone
+		a.Role = domain.RoleForager
 	}
 	if a.State == "" {
 		a.State = domain.AgentCreating
@@ -284,8 +284,8 @@ func (m *MemoryBackend) newestNonTerminal(match func(domain.Agent) bool) (domain
 	return candidates[0], nil
 }
 
-func isDroneAddress(a domain.Address) bool {
-	return len(a) > len("drone:") && string(a[:len("drone:")]) == "drone:"
+func isForagerAddress(a domain.Address) bool {
+	return len(a) > len("forager:") && string(a[:len("forager:")]) == "forager:"
 }
 
 // sameMessageContent compares the semantic payload of two messages, ignoring

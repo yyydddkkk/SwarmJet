@@ -3,7 +3,7 @@
   "check_suite": {
     "id": 55001,
     "node_id": "CS_kwDOAAABc55001",
-    "head_branch": "swarm/acme-hive/drone-1",
+    "head_branch": "swarm/acme-hive/forager-1",
     "head_sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567",
     "status": "completed",
     "conclusion": "failure",
@@ -14,7 +14,7 @@
         "id": 30034,
         "number": 34,
         "head": {
-          "ref": "swarm/acme-hive/drone-1",
+          "ref": "swarm/acme-hive/forager-1",
           "sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567"
         },
         "base": {

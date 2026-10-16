@@ -1,8 +1,8 @@
 // Package mcp implements SwarmJet's Model Context Protocol (MCP) server.
 //
 // Local agents (Claude Code, Codex, ...) connect to this server to select a
-// Hive, talk to its Queen, and spawn or inspect Drones. The tool set follows
-// docs/claude/adr-hive-queen-drone.md section 12; the domain types come from
+// Hive, talk to its Queen, and spawn or inspect Foragers. The tool set follows
+// docs/claude/adr-hive-queen-forager.md section 12; the domain types come from
 // the shared contract in docs/claude/round1-prompts.md.
 //
 // This round the tools are wired to an in-memory fake backend (MemoryBackend).
@@ -30,10 +30,10 @@ type Backend interface {
 	Hives(ctx context.Context) ([]domain.Hive, error)
 	UpdateHive(ctx context.Context, h domain.Hive) (domain.Hive, error)
 
-	CreateDrone(ctx context.Context, a domain.Agent) (domain.Agent, error)
+	CreateForager(ctx context.Context, a domain.Agent) (domain.Agent, error)
 	Agent(ctx context.Context, id string) (domain.Agent, error)
 	Queen(ctx context.Context, hiveID string) (domain.Agent, error)
-	Drones(ctx context.Context, hiveID string, states ...domain.AgentState) ([]domain.Agent, error)
+	Foragers(ctx context.Context, hiveID string, states ...domain.AgentState) ([]domain.Agent, error)
 	TransitionAgent(ctx context.Context, id string, from, to domain.AgentState) error
 
 	SendMessage(ctx context.Context, m domain.Message) (domain.Message, error)

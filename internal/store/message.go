@@ -51,8 +51,8 @@ func scanMessage(row pgx.Row) (domain.Message, error) {
 	return m, nil
 }
 
-func isDroneAddress(address domain.Address) bool {
-	return len(address) > len("drone:") && string(address[:len("drone:")]) == "drone:"
+func isForagerAddress(address domain.Address) bool {
+	return len(address) > len("forager:") && string(address[:len("forager:")]) == "forager:"
 }
 
 // sameMessageContent compares the immutable part of a message. State and
@@ -72,7 +72,7 @@ func notifyPayload(hiveID string, to domain.Address) string {
 // content returns the stored message, while the same ID with different content
 // is a conflict.
 func (s *Store) SendMessage(ctx context.Context, m domain.Message) (domain.Message, error) {
-	if isDroneAddress(m.From) && isDroneAddress(m.To) {
+	if isForagerAddress(m.From) && isForagerAddress(m.To) {
 		return domain.Message{}, domain.ErrPeerMessage
 	}
 	if utf8.RuneCountInString(m.Body) > domain.MaxMessageBody {

@@ -1,6 +1,8 @@
 # 第一轮并行任务提示词
 
-对应 ADR（`docs/claude/adr-hive-queen-drone.md`）第 20 节。开工前请先把 PR #9 合并进 dev，这样每个 worktree 都能读到 ADR。
+> **术语更新**：Drone 已改名为 Forager，见[新 ADR](adr-hive-queen-forager.md)。本文是历史记录，正文保留原术语。
+
+对应 ADR（`docs/claude/adr-hive-queen-forager.md`）第 20 节。开工前请先把 PR #9 合并进 dev，这样每个 worktree 都能读到 ADR。
 
 | 任务 | 内容 | 主要改动区域 | 依赖 |
 |---|---|---|---|
@@ -238,7 +240,7 @@ TokenByPlaintext(ctx context.Context, plaintext string) (domain.Token, error)
 # 任务：验证如何在 Docker 中长期运行并驱动 OpenCode
 
 ## 背景
-SwarmJet 是一个自托管的云端 Agent 集群（Go + PostgreSQL + React），正在按 docs/claude/adr-hive-queen-drone.md 重构。新架构里，每个云端 Agent（称为 Drone）是一个在 Docker 容器（称为 Cell）里**长期运行**的 CLI Agent，平台通过**结构化协议**和它进行多轮对话，而不是模拟终端，也不是"每一步起一次容器、等结果文件"。第一个支持的 CLI 是 OpenCode。
+SwarmJet 是一个自托管的云端 Agent 集群（Go + PostgreSQL + React），正在按 docs/claude/adr-hive-queen-forager.md 重构。新架构里，每个云端 Agent（称为 Drone）是一个在 Docker 容器（称为 Cell）里**长期运行**的 CLI Agent，平台通过**结构化协议**和它进行多轮对话，而不是模拟终端，也不是"每一步起一次容器、等结果文件"。第一个支持的 CLI 是 OpenCode。
 
 ADR 第 8 节倾向使用 ACP（Agent Client Protocol，Zed 发起，stdio 上的 JSON-RPC，有 initialize、session/new、session/prompt、session/cancel、session/load 等方法），后备是 CLI 自带的长连接协议。资料显示 OpenCode 支持 ACP，也有自己的服务模式。本任务就是动手验证，给出选型结论和一个最小原型。
 
@@ -285,7 +287,7 @@ ADR 第 8 节倾向使用 ACP（Agent Client Protocol，Zed 发起，stdio 上�
 # 任务：实现 Hive / Agent / Message / Token 的数据层与 Inbox 投递
 
 ## 背景
-SwarmJet 是一个自托管的云端 Agent 集群（Go 1.26+、PostgreSQL 18、River 任务队列、React），正在按 docs/claude/adr-hive-queen-drone.md 重构。请先读 ADR 第 3、4、6、8、9、12、16 节。
+SwarmJet 是一个自托管的云端 Agent 集群（Go 1.26+、PostgreSQL 18、River 任务队列、React），正在按 docs/claude/adr-hive-queen-forager.md 重构。请先读 ADR 第 3、4、6、8、9、12、16 节。
 
 本任务实现新架构的数据层。另有两个任务在并行开发 MCP 服务（internal/mcp）和事件路由（internal/router），它们会按下面的"公共契约"调用你的存储方法，所以**契约里的类型和方法签名必须逐字实现，不得改名或改参数**。如果确实需要扩展，只能新增，不能修改已有定义，并在 PR 里说明。
 
@@ -344,7 +346,7 @@ SwarmJet 是一个自托管的云端 Agent 集群（Go 1.26+、PostgreSQL 18、R
 # 任务：实现 SwarmJet 的 MCP 服务（先接内存假后端）
 
 ## 背景
-SwarmJet 是一个自托管的云端 Agent 集群（Go 1.26+）。用户本地的 Claude Code、Codex 等 Agent 通过 MCP 连接 SwarmJet，选择一个项目（称为 Hive），默认和项目的协调者（称为 Queen）对话，也可以直接派出和查看云端 Agent（称为 Drone）。请先读 docs/claude/adr-hive-queen-drone.md 第 3、4、7、9、12、13 节。
+SwarmJet 是一个自托管的云端 Agent 集群（Go 1.26+）。用户本地的 Claude Code、Codex 等 Agent 通过 MCP 连接 SwarmJet，选择一个项目（称为 Hive），默认和项目的协调者（称为 Queen）对话，也可以直接派出和查看云端 Agent（称为 Drone）。请先读 docs/claude/adr-hive-queen-forager.md 第 3、4、7、9、12、13 节。
 
 另有一个任务在并行实现数据层（*store.Store 上的方法）。本任务**不接真实存储**：在 internal/mcp 包里按需定义一个后端接口（方法签名必须与下方契约中的存储方法一致，以便下一轮直接用 *store.Store 接上），并提供一个内存假实现用于测试。
 
@@ -399,7 +401,7 @@ SwarmJet 是一个自托管的云端 Agent 集群（Go 1.26+）。用户本地�
 # 任务：实现事件 Router，把 GitHub 事件确定性地分发给 Drone、新建 Drone 或进入 Hive Inbox
 
 ## 背景
-SwarmJet 是一个自托管的云端 Agent 集群（Go 1.26+）。每个项目称为 Hive（对应一个 GitHub 仓库），里面有一个可选的协调者 Queen 和多个云端 Agent（称为 Drone，每个 Drone 拥有一个分支、对应一个 Issue 或 PR）。外部事件先经过确定性的 Router，不经过 LLM。请先读 docs/claude/adr-hive-queen-drone.md 第 6、9、13 节。
+SwarmJet 是一个自托管的云端 Agent 集群（Go 1.26+）。每个项目称为 Hive（对应一个 GitHub 仓库），里面有一个可选的协调者 Queen 和多个云端 Agent（称为 Drone，每个 Drone 拥有一个分支、对应一个 Issue 或 PR）。外部事件先经过确定性的 Router，不经过 LLM。请先读 docs/claude/adr-hive-queen-forager.md 第 6、9、13 节。
 
 现有代码里有 GitHub webhook 的签名校验和接单逻辑（internal/service 的 GitHubWebhook、webhook_queue.go，以及 internal/github），可以参考，但本任务**不修改它们**：新写一个独立的 internal/router 包，下一轮再把 webhook 入口接过来。
 
@@ -462,7 +464,7 @@ SwarmJet 是一个自托管的云端 Agent 集群（Go 1.26+）。每个项目�
 # 任务：按"蜂蜜花园"风格搭建网页控制台的视觉体系，并用假数据做出新页面
 
 ## 背景
-SwarmJet 是一个自托管的云端 Agent 集群，前端是 React + Vite + TypeScript（web/ 目录）。新架构的术语：项目叫 Hive，每个 Hive 有一个协调者 Queen 和多个云端 Agent（Drone）。网页控制台的设计见 docs/claude/adr-hive-queen-drone.md 第 18 节，请先完整阅读，尤其是页面结构和视觉风格两部分。
+SwarmJet 是一个自托管的云端 Agent 集群，前端是 React + Vite + TypeScript（web/ 目录）。新架构的术语：项目叫 Hive，每个 Hive 有一个协调者 Queen 和多个云端 Agent（Drone）。网页控制台的设计见 docs/claude/adr-hive-queen-forager.md 第 18 节，请先完整阅读，尤其是页面结构和视觉风格两部分。
 
 后端接口本轮还没定，所以本任务**只用本地假数据**做出页面和组件，验证视觉风格和交互。旧页面（任务、Issue 工作台、MR 工作台）由后续任务删除，本任务不要动它们。
 

@@ -12,7 +12,7 @@
   },
   "branches": [
     {
-      "name": "swarm/acme-hive/drone-1",
+      "name": "swarm/acme-hive/forager-1",
       "commit": {
         "sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567"
       }

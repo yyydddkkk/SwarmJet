@@ -15,7 +15,7 @@ func TestSendMessageValidation(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	h := newTestHive(t, s, "acme/a")
-	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.DroneAddress("a"), To: domain.DroneAddress("b"), Kind: domain.MessageEvent}); !errors.Is(err, domain.ErrPeerMessage) {
+	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.ForagerAddress("a"), To: domain.ForagerAddress("b"), Kind: domain.MessageEvent}); !errors.Is(err, domain.ErrPeerMessage) {
 		t.Fatalf("peer message accepted: %v", err)
 	}
 	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.AddressSystem, To: domain.AddressHive, Kind: domain.MessageEvent, Hop: 11}); !errors.Is(err, domain.ErrHopLimit) {
@@ -223,7 +223,7 @@ func TestWaitInboxFastPathAndWake(t *testing.T) {
 	shortCtx, cancelShort := context.WithTimeout(ctx, 300*time.Millisecond)
 	defer cancelShort()
 	start := time.Now()
-	err := s.WaitInbox(shortCtx, h.ID, domain.DroneAddress("nobody"), "")
+	err := s.WaitInbox(shortCtx, h.ID, domain.ForagerAddress("nobody"), "")
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected deadline error, got %v", err)
 	}

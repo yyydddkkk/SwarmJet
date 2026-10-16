@@ -30,15 +30,15 @@ func TestCreateHiveCreatesDisabledQueenAndDefaults(t *testing.T) {
 		t.Fatalf("unexpected hive: %+v", h)
 	}
 	cfg := h.Config
-	if cfg.CLI != "opencode" || cfg.MaxConcurrentDrones != 4 || cfg.MaxHops != 10 || cfg.MaxDronesPerChain != 10 ||
-		cfg.IdleParkMinutes != 30 || cfg.HibernateHours != 24 || cfg.TurnTimeoutMinutes != 120 || cfg.DroneMaxLifetimeHours != 168 {
+	if cfg.CLI != "opencode" || cfg.MaxConcurrentForagers != 4 || cfg.MaxHops != 10 || cfg.MaxForagersPerChain != 10 ||
+		cfg.IdleParkMinutes != 30 || cfg.HibernateHours != 24 || cfg.TurnTimeoutMinutes != 120 || cfg.ForagerMaxLifetimeHours != 168 {
 		t.Fatalf("defaults not applied on create: %+v", cfg)
 	}
 	got, err := s.Hive(ctx, h.ID)
 	if err != nil || got.Repository != "acme/widgets" {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if got.Config.MaxConcurrentDrones != 4 || got.Config.MaxHops != 10 {
+	if got.Config.MaxConcurrentForagers != 4 || got.Config.MaxHops != 10 {
 		t.Fatalf("defaults not applied on read: %+v", got.Config)
 	}
 	byRepo, err := s.HiveByRepository(ctx, "acme/widgets")
@@ -70,9 +70,9 @@ func TestUpdateHiveVersionConflict(t *testing.T) {
 	h := newTestHive(t, s, "acme/a")
 	stale := h
 	h.Name = "Renamed"
-	h.Config.MaxConcurrentDrones = 7
+	h.Config.MaxConcurrentForagers = 7
 	saved, err := s.UpdateHive(ctx, h)
-	if err != nil || saved.Version != 2 || saved.Config.MaxConcurrentDrones != 7 {
+	if err != nil || saved.Version != 2 || saved.Config.MaxConcurrentForagers != 7 {
 		t.Fatalf("%+v %v", saved, err)
 	}
 	stale.Name = "Stale"
@@ -88,7 +88,7 @@ func TestUpdateHiveVersionConflict(t *testing.T) {
 	}
 }
 
-func TestCreateDroneConcurrencyLimit(t *testing.T) {
+func TestCreateForagerConcurrencyLimit(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	h := newTestHive(t, s, "acme/a")
@@ -100,7 +100,7 @@ func TestCreateDroneConcurrencyLimit(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			// Distinct chains so only the Hive concurrency limit can trigger.
-			_, err := s.CreateDrone(ctx, domain.Agent{HiveID: h.ID, ChainID: fmt.Sprintf("chain-%d", i)})
+			_, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, ChainID: fmt.Sprintf("chain-%d", i)})
 			results[i] = err
 		}(i)
 	}
@@ -119,19 +119,19 @@ func TestCreateDroneConcurrencyLimit(t *testing.T) {
 	if ok != 4 || limited != attempts-4 {
 		t.Fatalf("ok=%d limited=%d", ok, limited)
 	}
-	drones, err := s.Drones(ctx, h.ID)
-	if err != nil || len(drones) != 4 {
-		t.Fatalf("drones=%d err=%v", len(drones), err)
+	foragers, err := s.Foragers(ctx, h.ID)
+	if err != nil || len(foragers) != 4 {
+		t.Fatalf("foragers=%d err=%v", len(foragers), err)
 	}
 }
 
-func TestCreateDroneChainLimitAndBranch(t *testing.T) {
+func TestCreateForagerChainLimitAndBranch(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	h := newTestHive(t, s, "acme/a")
 	chain := "chain-shared"
 	for i := 0; i < 10; i++ {
-		a, err := s.CreateDrone(ctx, domain.Agent{HiveID: h.ID, ChainID: chain})
+		a, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, ChainID: chain})
 		if err != nil {
 			t.Fatalf("create %d: %v", i+1, err)
 		}
@@ -143,10 +143,10 @@ func TestCreateDroneChainLimitAndBranch(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.CreateDrone(ctx, domain.Agent{HiveID: h.ID, ChainID: chain}); !errors.Is(err, domain.ErrChainLimit) {
+	if _, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, ChainID: chain}); !errors.Is(err, domain.ErrChainLimit) {
 		t.Fatalf("chain limit not enforced: %v", err)
 	}
-	if _, err := s.CreateDrone(ctx, domain.Agent{HiveID: h.ID, ChainID: "other"}); err != nil {
+	if _, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, ChainID: "other"}); err != nil {
 		t.Fatalf("different chain rejected: %v", err)
 	}
 }
@@ -155,7 +155,7 @@ func TestTransitionAgentCompareAndSwap(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	h := newTestHive(t, s, "acme/a")
-	a, err := s.CreateDrone(ctx, domain.Agent{HiveID: h.ID})
+	a, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,41 +177,41 @@ func TestTransitionAgentCompareAndSwap(t *testing.T) {
 	}
 }
 
-func TestDroneLookupsAndHandoff(t *testing.T) {
+func TestForagerLookupsAndHandoff(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	h := newTestHive(t, s, "acme/a")
-	first, err := s.CreateDrone(ctx, domain.Agent{HiveID: h.ID, IssueNumber: 7, ChainID: "c1"})
+	first, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, IssueNumber: 7, ChainID: "c1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	byIssue, err := s.DroneByIssue(ctx, h.ID, 7)
+	byIssue, err := s.ForagerByIssue(ctx, h.ID, 7)
 	if err != nil || byIssue.ID != first.ID {
 		t.Fatalf("%+v %v", byIssue, err)
 	}
 	if err = s.TransitionAgent(ctx, first.ID, domain.AgentCreating, domain.AgentCompleted); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.DroneByIssue(ctx, h.ID, 7); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("terminal drone returned for issue: %v", err)
+	if _, err = s.ForagerByIssue(ctx, h.ID, 7); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("terminal forager returned for issue: %v", err)
 	}
-	second, err := s.CreateDrone(ctx, domain.Agent{HiveID: h.ID, PRNumber: 42, Branch: "swarm/x/y"})
+	second, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, PRNumber: 42, Branch: "swarm/x/y"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	byPR, err := s.DroneByPR(ctx, h.ID, 42)
+	byPR, err := s.ForagerByPR(ctx, h.ID, 42)
 	if err != nil || byPR.ID != second.ID {
 		t.Fatalf("%+v %v", byPR, err)
 	}
-	byBranch, err := s.DroneByBranch(ctx, h.ID, "swarm/x/y")
+	byBranch, err := s.ForagerByBranch(ctx, h.ID, "swarm/x/y")
 	if err != nil || byBranch.ID != second.ID {
 		t.Fatalf("%+v %v", byBranch, err)
 	}
-	creating, err := s.Drones(ctx, h.ID, domain.AgentCreating)
+	creating, err := s.Foragers(ctx, h.ID, domain.AgentCreating)
 	if err != nil || len(creating) != 1 || creating[0].ID != second.ID {
 		t.Fatalf("%+v %v", creating, err)
 	}
-	all, err := s.Drones(ctx, h.ID)
+	all, err := s.Foragers(ctx, h.ID)
 	if err != nil || len(all) != 2 {
 		t.Fatalf("%+v %v", all, err)
 	}
