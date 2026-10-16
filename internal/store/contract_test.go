@@ -17,13 +17,13 @@ type hiveStoreContract interface {
 	Hives(ctx context.Context) ([]domain.Hive, error)
 	UpdateHive(ctx context.Context, h domain.Hive) (domain.Hive, error)
 
-	CreateDrone(ctx context.Context, a domain.Agent) (domain.Agent, error)
+	CreateForager(ctx context.Context, a domain.Agent) (domain.Agent, error)
 	Agent(ctx context.Context, id string) (domain.Agent, error)
 	Queen(ctx context.Context, hiveID string) (domain.Agent, error)
-	Drones(ctx context.Context, hiveID string, states ...domain.AgentState) ([]domain.Agent, error)
-	DroneByIssue(ctx context.Context, hiveID string, issue int64) (domain.Agent, error)
-	DroneByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error)
-	DroneByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error)
+	Foragers(ctx context.Context, hiveID string, states ...domain.AgentState) ([]domain.Agent, error)
+	ForagerByIssue(ctx context.Context, hiveID string, issue int64) (domain.Agent, error)
+	ForagerByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error)
+	ForagerByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error)
 	TransitionAgent(ctx context.Context, id string, from, to domain.AgentState) error
 	UpdateHandoff(ctx context.Context, id string, h domain.Handoff) error
 

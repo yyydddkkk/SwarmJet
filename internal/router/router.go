@@ -17,10 +17,10 @@ import (
 // it in a later round.
 type Backend interface {
 	HiveByRepository(ctx context.Context, repository string) (domain.Hive, error)
-	DroneByIssue(ctx context.Context, hiveID string, issue int64) (domain.Agent, error)
-	DroneByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error)
-	DroneByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error)
-	CreateDrone(ctx context.Context, a domain.Agent) (domain.Agent, error)
+	ForagerByIssue(ctx context.Context, hiveID string, issue int64) (domain.Agent, error)
+	ForagerByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error)
+	ForagerByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error)
+	CreateForager(ctx context.Context, a domain.Agent) (domain.Agent, error)
 	SendMessage(ctx context.Context, m domain.Message) (domain.Message, error)
 }
 
@@ -30,10 +30,10 @@ type Action string
 const (
 	// ActionIgnored means the event was dropped without side effects.
 	ActionIgnored Action = "ignored"
-	// ActionDelivered means a message was written to a Drone Inbox.
+	// ActionDelivered means a message was written to a Forager Inbox.
 	ActionDelivered Action = "delivered"
-	// ActionDroneCreated means a trigger rule started a new Drone.
-	ActionDroneCreated Action = "drone_created"
+	// ActionForagerCreated means a trigger rule started a new Forager.
+	ActionForagerCreated Action = "forager_created"
 	// ActionInbox means the event was filed in the Hive Inbox.
 	ActionInbox Action = "inbox"
 )
@@ -45,7 +45,7 @@ type Decision struct {
 	Reason     string         `json:"reason,omitempty"`
 	Repository string         `json:"repository,omitempty"`
 	HiveID     string         `json:"hiveId,omitempty"`
-	DroneID    string         `json:"droneId,omitempty"`
+	ForagerID  string         `json:"foragerId,omitempty"`
 	Target     domain.Address `json:"target,omitempty"`
 	MessageID  string         `json:"messageId,omitempty"`
 }
@@ -64,8 +64,8 @@ func New(backend Backend) *Router {
 // Route applies the deterministic routing rules from ADR section 9:
 //
 //  1. find the Hive for the repository (ignore unknown repositories);
-//  2. a matching trigger rule starts a Drone (or reuses the Issue's Drone);
-//  3. an event that belongs to an existing non-terminal Drone is delivered to it;
+//  2. a matching trigger rule starts a Forager (or reuses the Issue's Forager);
+//  3. an event that belongs to an existing non-terminal Forager is delivered to it;
 //  4. everything else goes to the Hive Inbox.
 func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
 	repository := strings.TrimSpace(e.Repository)
@@ -85,18 +85,18 @@ func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
 		return r.routeTrigger(ctx, hive, cfg, e, rule)
 	}
 
-	drone, found, err := r.owningDrone(ctx, hive.ID, e)
+	forager, found, err := r.owningForager(ctx, hive.ID, e)
 	if err != nil {
 		return Decision{}, err
 	}
 	if found {
-		return r.deliverToDrone(ctx, hive, e, drone, domain.MessageEvent, "")
+		return r.deliverToForager(ctx, hive, e, forager, domain.MessageEvent, "")
 	}
 	return r.toInbox(ctx, hive, e, "")
 }
 
 // routeTrigger handles an event that matched a trigger rule. Authorization is
-// checked first: a denied trigger never starts a Drone and is filed in the Hive
+// checked first: a denied trigger never starts a Forager and is filed in the Hive
 // Inbox with the reason attached.
 func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.HiveConfig, e Event, rule domain.TriggerRule) (Decision, error) {
 	if !triggerAuthorized(e.AuthorAssociation) {
@@ -104,19 +104,19 @@ func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.
 		return r.toInbox(ctx, hive, e, reason)
 	}
 	if e.Number > 0 {
-		drone, found, err := r.droneByIssue(ctx, hive.ID, e.Number)
+		forager, found, err := r.foragerByIssue(ctx, hive.ID, e.Number)
 		if err != nil {
 			return Decision{}, err
 		}
 		if found {
-			return r.deliverToDrone(ctx, hive, e, drone, domain.MessageTask, "reused existing Drone for issue")
+			return r.deliverToForager(ctx, hive, e, forager, domain.MessageTask, "reused existing Forager for issue")
 		}
 	}
 
 	task := Digest(e)
 	agent := domain.Agent{
 		HiveID:      hive.ID,
-		Role:        domain.RoleDrone,
+		Role:        domain.RoleForager,
 		State:       domain.AgentCreating,
 		Preset:      rule.Preset,
 		CLI:         cfg.CLI,
@@ -124,19 +124,19 @@ func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.
 		IssueNumber: e.Number,
 		ChainID:     chainIDFor(e),
 	}
-	created, err := r.backend.CreateDrone(ctx, agent)
+	created, err := r.backend.CreateForager(ctx, agent)
 	if errors.Is(err, domain.ErrHiveLimit) || errors.Is(err, domain.ErrChainLimit) {
-		return r.toInbox(ctx, hive, e, "cannot start Drone: "+err.Error())
+		return r.toInbox(ctx, hive, e, "cannot start Forager: "+err.Error())
 	}
 	if err != nil {
 		return Decision{}, err
 	}
 
 	message := domain.Message{
-		ID:        messageID(e, domain.DroneAddress(created.ID)),
+		ID:        messageID(e, domain.ForagerAddress(created.ID)),
 		HiveID:    hive.ID,
 		From:      domain.AddressSystem,
-		To:        domain.DroneAddress(created.ID),
+		To:        domain.ForagerAddress(created.ID),
 		Kind:      domain.MessageTask,
 		ChainID:   created.ChainID,
 		Body:      task,
@@ -148,92 +148,92 @@ func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.
 		return Decision{}, err
 	}
 	return Decision{
-		Action:     ActionDroneCreated,
+		Action:     ActionForagerCreated,
 		Reason:     "trigger " + rule.Event + " matched",
 		Repository: e.Repository,
 		HiveID:     hive.ID,
-		DroneID:    created.ID,
+		ForagerID:  created.ID,
 		Target:     sent.To,
 		MessageID:  sent.ID,
 	}, nil
 }
 
-// owningDrone looks up a non-terminal Drone for the event, in the order the ADR
+// owningForager looks up a non-terminal Forager for the event, in the order the ADR
 // gives: PR number, then branch, then Issue number. The number is interpreted
 // according to the event family so an Issue number is never compared against
 // PR numbers.
-func (r *Router) owningDrone(ctx context.Context, hiveID string, e Event) (domain.Agent, bool, error) {
+func (r *Router) owningForager(ctx context.Context, hiveID string, e Event) (domain.Agent, bool, error) {
 	if pr := prReference(e); pr > 0 {
-		drone, found, err := r.droneByPR(ctx, hiveID, pr)
+		forager, found, err := r.foragerByPR(ctx, hiveID, pr)
 		if err != nil || found {
-			return drone, found, err
+			return forager, found, err
 		}
 	}
 	if branch := strings.TrimSpace(e.Branch); branch != "" {
-		drone, found, err := r.droneByBranch(ctx, hiveID, branch)
+		forager, found, err := r.foragerByBranch(ctx, hiveID, branch)
 		if err != nil || found {
-			return drone, found, err
+			return forager, found, err
 		}
 	}
 	if issue := issueReference(e); issue > 0 {
-		drone, found, err := r.droneByIssue(ctx, hiveID, issue)
+		forager, found, err := r.foragerByIssue(ctx, hiveID, issue)
 		if err != nil || found {
-			return drone, found, err
+			return forager, found, err
 		}
 	}
 	return domain.Agent{}, false, nil
 }
 
-func (r *Router) droneByIssue(ctx context.Context, hiveID string, issue int64) (domain.Agent, bool, error) {
-	drone, err := r.backend.DroneByIssue(ctx, hiveID, issue)
+func (r *Router) foragerByIssue(ctx context.Context, hiveID string, issue int64) (domain.Agent, bool, error) {
+	forager, err := r.backend.ForagerByIssue(ctx, hiveID, issue)
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.Agent{}, false, nil
 	}
 	if err != nil {
 		return domain.Agent{}, false, err
 	}
-	if isTerminal(drone.State) {
+	if isTerminal(forager.State) {
 		return domain.Agent{}, false, nil
 	}
-	return drone, true, nil
+	return forager, true, nil
 }
 
-func (r *Router) droneByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, bool, error) {
-	drone, err := r.backend.DroneByPR(ctx, hiveID, pr)
+func (r *Router) foragerByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, bool, error) {
+	forager, err := r.backend.ForagerByPR(ctx, hiveID, pr)
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.Agent{}, false, nil
 	}
 	if err != nil {
 		return domain.Agent{}, false, err
 	}
-	if isTerminal(drone.State) {
+	if isTerminal(forager.State) {
 		return domain.Agent{}, false, nil
 	}
-	return drone, true, nil
+	return forager, true, nil
 }
 
-func (r *Router) droneByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, bool, error) {
-	drone, err := r.backend.DroneByBranch(ctx, hiveID, branch)
+func (r *Router) foragerByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, bool, error) {
+	forager, err := r.backend.ForagerByBranch(ctx, hiveID, branch)
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.Agent{}, false, nil
 	}
 	if err != nil {
 		return domain.Agent{}, false, err
 	}
-	if isTerminal(drone.State) {
+	if isTerminal(forager.State) {
 		return domain.Agent{}, false, nil
 	}
-	return drone, true, nil
+	return forager, true, nil
 }
 
-func (r *Router) deliverToDrone(ctx context.Context, hive domain.Hive, e Event, drone domain.Agent, kind domain.MessageKind, reason string) (Decision, error) {
+func (r *Router) deliverToForager(ctx context.Context, hive domain.Hive, e Event, forager domain.Agent, kind domain.MessageKind, reason string) (Decision, error) {
 	message := domain.Message{
-		ID:      messageID(e, domain.DroneAddress(drone.ID)),
+		ID:      messageID(e, domain.ForagerAddress(forager.ID)),
 		HiveID:  hive.ID,
 		From:    domain.AddressSystem,
-		To:      domain.DroneAddress(drone.ID),
+		To:      domain.ForagerAddress(forager.ID),
 		Kind:    kind,
-		ChainID: drone.ChainID,
+		ChainID: forager.ChainID,
 		Body:    Digest(e),
 		State:   domain.MessagePending,
 	}
@@ -246,7 +246,7 @@ func (r *Router) deliverToDrone(ctx context.Context, hive domain.Hive, e Event, 
 		Reason:     reason,
 		Repository: e.Repository,
 		HiveID:     hive.ID,
-		DroneID:    drone.ID,
+		ForagerID:  forager.ID,
 		Target:     sent.To,
 		MessageID:  sent.ID,
 	}, nil
@@ -380,14 +380,14 @@ func resolveConfig(c domain.HiveConfig) domain.HiveConfig {
 	if c.CLI == "" {
 		c.CLI = "opencode"
 	}
-	if c.MaxConcurrentDrones <= 0 {
-		c.MaxConcurrentDrones = 4
+	if c.MaxConcurrentForagers <= 0 {
+		c.MaxConcurrentForagers = 4
 	}
 	if c.MaxHops <= 0 {
 		c.MaxHops = 10
 	}
-	if c.MaxDronesPerChain <= 0 {
-		c.MaxDronesPerChain = 10
+	if c.MaxForagersPerChain <= 0 {
+		c.MaxForagersPerChain = 10
 	}
 	if c.IdleParkMinutes <= 0 {
 		c.IdleParkMinutes = 30
@@ -398,8 +398,8 @@ func resolveConfig(c domain.HiveConfig) domain.HiveConfig {
 	if c.TurnTimeoutMinutes <= 0 {
 		c.TurnTimeoutMinutes = 120
 	}
-	if c.DroneMaxLifetimeHours <= 0 {
-		c.DroneMaxLifetimeHours = 168
+	if c.ForagerMaxLifetimeHours <= 0 {
+		c.ForagerMaxLifetimeHours = 168
 	}
 	return c
 }

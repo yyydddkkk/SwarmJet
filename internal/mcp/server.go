@@ -47,7 +47,7 @@ func newServer(backend Backend, opts Options, tok domain.Token) *mcpsdk.Server {
 	s := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:        opts.Name,
 		Version:     opts.Version,
-		Description: "SwarmJet Hive control plane: talk to a Queen, spawn and inspect Drones.",
+		Description: "SwarmJet Hive control plane: talk to a Queen, spawn and inspect Foragers.",
 	}, &mcpsdk.ServerOptions{Logger: opts.Logger})
 	ts := &toolset{backend: backend, opts: opts, token: tok}
 	ts.register(s)

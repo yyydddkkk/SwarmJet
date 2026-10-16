@@ -172,7 +172,7 @@ func TestToolListContainsEveryContractTool(t *testing.T) {
 	}
 	want := []string{
 		"list_hives", "get_hive", "create_hive", "update_hive", "send", "wait",
-		"spawn_drone", "cancel_drone", "get_drone", "read_drone_detail",
+		"spawn_forager", "cancel_forager", "get_forager", "read_forager_detail",
 		"inbox", "claim", "offline_digest",
 	}
 	for _, name := range want {
@@ -382,64 +382,64 @@ func TestWaitTimesOutAndWakes(t *testing.T) {
 	}
 }
 
-func TestSpawnDroneDeliversTaskMessage(t *testing.T) {
+func TestSpawnForagerDeliversTaskMessage(t *testing.T) {
 	env := newTestEnv(t, Options{})
 	h := env.seedHive("alpha", "acme/alpha")
 	session := env.connect(env.userToken)
 
-	out := decode[spawnDroneOutput](t, callTool(t, session, "spawn_drone", map[string]any{
+	out := decode[spawnForagerOutput](t, callTool(t, session, "spawn_forager", map[string]any{
 		"hiveId": h.ID, "task": "fix the flaky test",
 	}))
-	if out.Drone.ID == "" || out.Drone.State != string(domain.AgentCreating) {
-		t.Fatalf("drone = %+v", out.Drone)
+	if out.Forager.ID == "" || out.Forager.State != string(domain.AgentCreating) {
+		t.Fatalf("forager = %+v", out.Forager)
 	}
-	if !strings.HasPrefix(out.Drone.Branch, "swarm/") {
-		t.Fatalf("branch = %q", out.Drone.Branch)
+	if !strings.HasPrefix(out.Forager.Branch, "swarm/") {
+		t.Fatalf("branch = %q", out.Forager.Branch)
 	}
-	if out.Message.Kind != string(domain.MessageTask) || out.Message.To != string(domain.DroneAddress(out.Drone.ID)) {
+	if out.Message.Kind != string(domain.MessageTask) || out.Message.To != string(domain.ForagerAddress(out.Forager.ID)) {
 		t.Fatalf("task message = %+v", out.Message)
 	}
 
-	inbox, err := env.backend.Inbox(context.Background(), h.ID, domain.DroneAddress(out.Drone.ID), "", 10)
+	inbox, err := env.backend.Inbox(context.Background(), h.ID, domain.ForagerAddress(out.Forager.ID), "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(inbox) != 1 || inbox[0].Body != "fix the flaky test" {
-		t.Fatalf("drone inbox = %+v", inbox)
+		t.Fatalf("forager inbox = %+v", inbox)
 	}
 }
 
-func TestGetReadAndCancelDrone(t *testing.T) {
+func TestGetReadAndCancelForager(t *testing.T) {
 	env := newTestEnv(t, Options{})
 	h := env.seedHive("alpha", "acme/alpha")
 	session := env.connect(env.userToken)
 
-	spawned := decode[spawnDroneOutput](t, callTool(t, session, "spawn_drone", map[string]any{
+	spawned := decode[spawnForagerOutput](t, callTool(t, session, "spawn_forager", map[string]any{
 		"hiveId": h.ID, "task": "do a thing",
 	}))
 
-	got := decode[getDroneOutput](t, callTool(t, session, "get_drone", map[string]any{"agentId": spawned.Drone.ID}))
-	if got.Drone.ID != spawned.Drone.ID || got.Drone.Task != "do a thing" {
-		t.Fatalf("get_drone = %+v", got.Drone)
+	got := decode[getForagerOutput](t, callTool(t, session, "get_forager", map[string]any{"agentId": spawned.Forager.ID}))
+	if got.Forager.ID != spawned.Forager.ID || got.Forager.Task != "do a thing" {
+		t.Fatalf("get_forager = %+v", got.Forager)
 	}
 
-	detail := decode[readDroneDetailOutput](t, callTool(t, session, "read_drone_detail", map[string]any{
-		"agentId": spawned.Drone.ID,
+	detail := decode[readForagerDetailOutput](t, callTool(t, session, "read_forager_detail", map[string]any{
+		"agentId": spawned.Forager.ID,
 	}))
 	if len(detail.Messages) != 1 || detail.Messages[0].Body != "do a thing" {
-		t.Fatalf("read_drone_detail = %+v", detail)
+		t.Fatalf("read_forager_detail = %+v", detail)
 	}
 	if detail.Cursor == "" {
 		t.Fatalf("expected a cursor")
 	}
 
-	cancelled := decode[cancelDroneOutput](t, callTool(t, session, "cancel_drone", map[string]any{
-		"agentId": spawned.Drone.ID,
+	cancelled := decode[cancelForagerOutput](t, callTool(t, session, "cancel_forager", map[string]any{
+		"agentId": spawned.Forager.ID,
 	}))
-	if cancelled.Drone.State != string(domain.AgentCancelled) {
-		t.Fatalf("cancel_drone = %+v", cancelled.Drone)
+	if cancelled.Forager.State != string(domain.AgentCancelled) {
+		t.Fatalf("cancel_forager = %+v", cancelled.Forager)
 	}
-	again := callTool(t, session, "cancel_drone", map[string]any{"agentId": spawned.Drone.ID})
+	again := callTool(t, session, "cancel_forager", map[string]any{"agentId": spawned.Forager.ID})
 	if !again.IsError || !strings.Contains(toolErrorText(again), "terminal") {
 		t.Fatalf("second cancel: isError=%v text=%q", again.IsError, toolErrorText(again))
 	}
@@ -493,14 +493,14 @@ func TestOfflineDigestCursorIsForwardConsistent(t *testing.T) {
 	if first.Cursor == "" {
 		t.Fatalf("first digest returned no cursor")
 	}
-	if len(first.Messages) != 0 || len(first.Drones) != 0 {
+	if len(first.Messages) != 0 || len(first.Foragers) != 0 {
 		t.Fatalf("first digest should be empty: %+v", first)
 	}
 
 	second := decode[offlineDigestOutput](t, callTool(t, session, "offline_digest", map[string]any{
 		"cursor": first.Cursor,
 	}))
-	if len(second.Messages) != 0 || len(second.Drones) != 0 {
+	if len(second.Messages) != 0 || len(second.Foragers) != 0 {
 		t.Fatalf("second digest should stay empty: %+v", second)
 	}
 	if second.Cursor == "" {
@@ -508,12 +508,12 @@ func TestOfflineDigestCursorIsForwardConsistent(t *testing.T) {
 	}
 
 	// New activity after the first cursor must show up.
-	spawned := decode[spawnDroneOutput](t, callTool(t, session, "spawn_drone", map[string]any{
+	spawned := decode[spawnForagerOutput](t, callTool(t, session, "spawn_forager", map[string]any{
 		"hiveId": h.ID, "task": "digest me",
 	}))
 	if _, err := env.backend.SendMessage(context.Background(), domain.Message{
 		HiveID: h.ID, From: domain.AddressQueen, To: domain.LocalAddress(env.user.ID),
-		Kind: domain.MessageReport, Body: "drone started",
+		Kind: domain.MessageReport, Body: "forager started",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -521,13 +521,13 @@ func TestOfflineDigestCursorIsForwardConsistent(t *testing.T) {
 	third := decode[offlineDigestOutput](t, callTool(t, session, "offline_digest", map[string]any{
 		"cursor": first.Cursor,
 	}))
-	if len(third.Messages) != 1 || third.Messages[0].Body != "drone started" {
+	if len(third.Messages) != 1 || third.Messages[0].Body != "forager started" {
 		t.Fatalf("messages = %+v", third.Messages)
 	}
-	if len(third.Drones) != 1 || third.Drones[0].ID != spawned.Drone.ID {
-		t.Fatalf("drones = %+v", third.Drones)
+	if len(third.Foragers) != 1 || third.Foragers[0].ID != spawned.Forager.ID {
+		t.Fatalf("foragers = %+v", third.Foragers)
 	}
-	if third.Counts.Messages != 1 || third.Counts.Drones != 1 {
+	if third.Counts.Messages != 1 || third.Counts.Foragers != 1 {
 		t.Fatalf("counts = %+v", third.Counts)
 	}
 }

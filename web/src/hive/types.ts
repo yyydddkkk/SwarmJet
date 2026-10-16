@@ -1,4 +1,4 @@
-// Domain types for the Hive / Queen / Forager console (ADR docs/claude/adr-hive-queen-drone.md).
+// Domain types for the Hive / Queen / Forager console (ADR docs/claude/adr-hive-queen-forager.md).
 // Field names mirror the Go contract in docs/claude/round1-prompts.md as camelCase JSON.
 // This round is front-end only: the pages below read the fake fixtures in web/src/fixtures.
 

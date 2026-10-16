@@ -32,7 +32,7 @@ func TestRouteIgnoresRepositoryWithoutHive(t *testing.T) {
 	}
 }
 
-func TestRouteLabelTriggerStartsDroneWithTaskMessage(t *testing.T) {
+func TestRouteLabelTriggerStartsForagerWithTaskMessage(t *testing.T) {
 	b := NewMemoryBackend()
 	hive := newTestHive(t, b, labelTrigger("fixer"))
 	r := New(b)
@@ -43,55 +43,55 @@ func TestRouteLabelTriggerStartsDroneWithTaskMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}
-	if decision.Action != ActionDroneCreated {
-		t.Fatalf("action = %q, want %q (reason %q)", decision.Action, ActionDroneCreated, decision.Reason)
+	if decision.Action != ActionForagerCreated {
+		t.Fatalf("action = %q, want %q (reason %q)", decision.Action, ActionForagerCreated, decision.Reason)
 	}
-	if decision.DroneID == "" || decision.Target != domain.DroneAddress(decision.DroneID) {
-		t.Fatalf("decision did not target the new Drone: %+v", decision)
-	}
-
-	drones := b.Drones(hive.ID)
-	if len(drones) != 1 {
-		t.Fatalf("drone count = %d, want 1", len(drones))
-	}
-	drone := drones[0]
-	if drone.IssueNumber != 12 {
-		t.Fatalf("IssueNumber = %d, want 12", drone.IssueNumber)
-	}
-	if drone.Preset != "fixer" {
-		t.Fatalf("Preset = %q, want fixer", drone.Preset)
-	}
-	if drone.ChainID == "" {
-		t.Fatal("new Drone must have a ChainID")
-	}
-	if !strings.HasPrefix(drone.Branch, "swarm/hive-1/") {
-		t.Fatalf("Branch = %q, want generated swarm/<hive>/<drone>", drone.Branch)
-	}
-	if !strings.Contains(drone.Task, "acme/hive") || !strings.Contains(drone.Task, "Flaky checkout test") {
-		t.Fatalf("Task = %q, want embedded digest", drone.Task)
+	if decision.ForagerID == "" || decision.Target != domain.ForagerAddress(decision.ForagerID) {
+		t.Fatalf("decision did not target the new Forager: %+v", decision)
 	}
 
-	messages := b.MessagesTo(hive.ID, domain.DroneAddress(drone.ID))
+	foragers := b.Foragers(hive.ID)
+	if len(foragers) != 1 {
+		t.Fatalf("forager count = %d, want 1", len(foragers))
+	}
+	forager := foragers[0]
+	if forager.IssueNumber != 12 {
+		t.Fatalf("IssueNumber = %d, want 12", forager.IssueNumber)
+	}
+	if forager.Preset != "fixer" {
+		t.Fatalf("Preset = %q, want fixer", forager.Preset)
+	}
+	if forager.ChainID == "" {
+		t.Fatal("new Forager must have a ChainID")
+	}
+	if !strings.HasPrefix(forager.Branch, "swarm/hive-1/") {
+		t.Fatalf("Branch = %q, want generated swarm/<hive>/<forager>", forager.Branch)
+	}
+	if !strings.Contains(forager.Task, "acme/hive") || !strings.Contains(forager.Task, "Flaky checkout test") {
+		t.Fatalf("Task = %q, want embedded digest", forager.Task)
+	}
+
+	messages := b.MessagesTo(hive.ID, domain.ForagerAddress(forager.ID))
 	if len(messages) != 1 {
 		t.Fatalf("task messages = %d, want 1", len(messages))
 	}
 	if messages[0].Kind != domain.MessageTask {
 		t.Fatalf("message kind = %q, want task", messages[0].Kind)
 	}
-	if messages[0].ChainID != drone.ChainID {
-		t.Fatalf("message chain = %q, want %q", messages[0].ChainID, drone.ChainID)
+	if messages[0].ChainID != forager.ChainID {
+		t.Fatalf("message chain = %q, want %q", messages[0].ChainID, forager.ChainID)
 	}
 }
 
-func TestRouteLabelTriggerReusesIssueDrone(t *testing.T) {
+func TestRouteLabelTriggerReusesIssueForager(t *testing.T) {
 	b := NewMemoryBackend()
 	hive := newTestHive(t, b, labelTrigger("fixer"))
-	existing := b.AddDrone(domain.Agent{
+	existing := b.AddForager(domain.Agent{
 		HiveID:      hive.ID,
-		Role:        domain.RoleDrone,
+		Role:        domain.RoleForager,
 		State:       domain.AgentActive,
 		IssueNumber: 12,
-		Branch:      "swarm/hive-1/drone-existing",
+		Branch:      "swarm/hive-1/forager-existing",
 		ChainID:     "chain-existing",
 	})
 	r := New(b)
@@ -105,19 +105,19 @@ func TestRouteLabelTriggerReusesIssueDrone(t *testing.T) {
 	if decision.Action != ActionDelivered {
 		t.Fatalf("action = %q, want %q (reason %q)", decision.Action, ActionDelivered, decision.Reason)
 	}
-	if decision.DroneID != existing.ID {
-		t.Fatalf("drone = %q, want existing %q", decision.DroneID, existing.ID)
+	if decision.ForagerID != existing.ID {
+		t.Fatalf("forager = %q, want existing %q", decision.ForagerID, existing.ID)
 	}
-	if got := len(b.Drones(hive.ID)); got != 1 {
-		t.Fatalf("drone count = %d, want 1", got)
+	if got := len(b.Foragers(hive.ID)); got != 1 {
+		t.Fatalf("forager count = %d, want 1", got)
 	}
-	messages := b.MessagesTo(hive.ID, domain.DroneAddress(existing.ID))
+	messages := b.MessagesTo(hive.ID, domain.ForagerAddress(existing.ID))
 	if len(messages) != 1 || messages[0].Kind != domain.MessageTask {
 		t.Fatalf("want one task message, got %+v", messages)
 	}
 }
 
-func TestRouteSameIssueDoesNotStartSecondDrone(t *testing.T) {
+func TestRouteSameIssueDoesNotStartSecondForager(t *testing.T) {
 	b := NewMemoryBackend()
 	hive := newTestHive(t, b, labelTrigger("fixer"))
 	r := New(b)
@@ -136,8 +136,8 @@ func TestRouteSameIssueDoesNotStartSecondDrone(t *testing.T) {
 	if decision.Action != ActionDelivered {
 		t.Fatalf("second action = %q, want %q", decision.Action, ActionDelivered)
 	}
-	if got := len(b.Drones(hive.ID)); got != 1 {
-		t.Fatalf("drone count = %d, want 1", got)
+	if got := len(b.Foragers(hive.ID)); got != 1 {
+		t.Fatalf("forager count = %d, want 1", got)
 	}
 }
 
@@ -159,8 +159,8 @@ func TestRouteUnauthorizedTriggerGoesToHiveInbox(t *testing.T) {
 	if !strings.Contains(decision.Reason, "association") {
 		t.Fatalf("reason = %q, want association explanation", decision.Reason)
 	}
-	if got := len(b.Drones(hive.ID)); got != 0 {
-		t.Fatalf("drone count = %d, want 0", got)
+	if got := len(b.Foragers(hive.ID)); got != 0 {
+		t.Fatalf("forager count = %d, want 0", got)
 	}
 	messages := b.MessagesTo(hive.ID, domain.AddressHive)
 	if len(messages) != 1 {
@@ -171,7 +171,7 @@ func TestRouteUnauthorizedTriggerGoesToHiveInbox(t *testing.T) {
 	}
 }
 
-func TestRouteIssueCommentRunCommandStartsDrone(t *testing.T) {
+func TestRouteIssueCommentRunCommandStartsForager(t *testing.T) {
 	b := NewMemoryBackend()
 	hive := newTestHive(t, b, domain.HiveConfig{Triggers: []domain.TriggerRule{{Event: "issue_comment", CommentPrefix: "/swarmjet run", Preset: "fixer"}}})
 	r := New(b)
@@ -182,23 +182,23 @@ func TestRouteIssueCommentRunCommandStartsDrone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}
-	if decision.Action != ActionDroneCreated {
-		t.Fatalf("action = %q, want %q (reason %q)", decision.Action, ActionDroneCreated, decision.Reason)
+	if decision.Action != ActionForagerCreated {
+		t.Fatalf("action = %q, want %q (reason %q)", decision.Action, ActionForagerCreated, decision.Reason)
 	}
-	if got := len(b.Drones(hive.ID)); got != 1 {
-		t.Fatalf("drone count = %d, want 1", got)
+	if got := len(b.Foragers(hive.ID)); got != 1 {
+		t.Fatalf("forager count = %d, want 1", got)
 	}
 }
 
-func TestRouteDeliversCIToOwningDrone(t *testing.T) {
+func TestRouteDeliversCIToOwningForager(t *testing.T) {
 	b := NewMemoryBackend()
 	hive := newTestHive(t, b, domain.HiveConfig{})
-	drone := b.AddDrone(domain.Agent{
+	forager := b.AddForager(domain.Agent{
 		HiveID:   hive.ID,
-		Role:     domain.RoleDrone,
+		Role:     domain.RoleForager,
 		State:    domain.AgentActive,
 		PRNumber: 34,
-		Branch:   "swarm/acme-hive/drone-1",
+		Branch:   "swarm/acme-hive/forager-1",
 		ChainID:  "chain-34",
 	})
 	r := New(b)
@@ -209,10 +209,10 @@ func TestRouteDeliversCIToOwningDrone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}
-	if decision.Action != ActionDelivered || decision.DroneID != drone.ID {
-		t.Fatalf("decision = %+v, want delivery to %q", decision, drone.ID)
+	if decision.Action != ActionDelivered || decision.ForagerID != forager.ID {
+		t.Fatalf("decision = %+v, want delivery to %q", decision, forager.ID)
 	}
-	messages := b.MessagesTo(hive.ID, domain.DroneAddress(drone.ID))
+	messages := b.MessagesTo(hive.ID, domain.ForagerAddress(forager.ID))
 	if len(messages) != 1 || messages[0].Kind != domain.MessageEvent {
 		t.Fatalf("want one event message, got %+v", messages)
 	}
@@ -221,15 +221,15 @@ func TestRouteDeliversCIToOwningDrone(t *testing.T) {
 	}
 }
 
-func TestRouteDeliversReviewToOwningDrone(t *testing.T) {
+func TestRouteDeliversReviewToOwningForager(t *testing.T) {
 	b := NewMemoryBackend()
 	hive := newTestHive(t, b, domain.HiveConfig{})
-	drone := b.AddDrone(domain.Agent{
+	forager := b.AddForager(domain.Agent{
 		HiveID:   hive.ID,
-		Role:     domain.RoleDrone,
+		Role:     domain.RoleForager,
 		State:    domain.AgentParked,
 		PRNumber: 34,
-		Branch:   "swarm/acme-hive/drone-1",
+		Branch:   "swarm/acme-hive/forager-1",
 	})
 	r := New(b)
 	event := loadEvent(t, EventPullRequestReview, "testdata/pull_request_review_submitted.json")
@@ -239,10 +239,10 @@ func TestRouteDeliversReviewToOwningDrone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}
-	if decision.Action != ActionDelivered || decision.DroneID != drone.ID {
-		t.Fatalf("decision = %+v, want delivery to %q", decision, drone.ID)
+	if decision.Action != ActionDelivered || decision.ForagerID != forager.ID {
+		t.Fatalf("decision = %+v, want delivery to %q", decision, forager.ID)
 	}
-	messages := b.MessagesTo(hive.ID, domain.DroneAddress(drone.ID))
+	messages := b.MessagesTo(hive.ID, domain.ForagerAddress(forager.ID))
 	if len(messages) != 1 || !strings.Contains(messages[0].Body, "changes_requested") {
 		t.Fatalf("review message missing: %+v", messages)
 	}
@@ -251,11 +251,11 @@ func TestRouteDeliversReviewToOwningDrone(t *testing.T) {
 func TestRouteFallsBackToBranch(t *testing.T) {
 	b := NewMemoryBackend()
 	hive := newTestHive(t, b, domain.HiveConfig{})
-	drone := b.AddDrone(domain.Agent{
+	forager := b.AddForager(domain.Agent{
 		HiveID:  hive.ID,
-		Role:    domain.RoleDrone,
+		Role:    domain.RoleForager,
 		State:   domain.AgentActive,
-		Branch:  "swarm/acme-hive/drone-1",
+		Branch:  "swarm/acme-hive/forager-1",
 		ChainID: "chain-1",
 	})
 	r := New(b)
@@ -267,20 +267,20 @@ func TestRouteFallsBackToBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}
-	if decision.Action != ActionDelivered || decision.DroneID != drone.ID {
-		t.Fatalf("decision = %+v, want branch delivery to %q", decision, drone.ID)
+	if decision.Action != ActionDelivered || decision.ForagerID != forager.ID {
+		t.Fatalf("decision = %+v, want branch delivery to %q", decision, forager.ID)
 	}
 }
 
-func TestRouteIgnoresTerminalDrone(t *testing.T) {
+func TestRouteIgnoresTerminalForager(t *testing.T) {
 	b := NewMemoryBackend()
 	hive := newTestHive(t, b, domain.HiveConfig{})
-	b.AddDrone(domain.Agent{
+	b.AddForager(domain.Agent{
 		HiveID:   hive.ID,
-		Role:     domain.RoleDrone,
+		Role:     domain.RoleForager,
 		State:    domain.AgentCompleted,
 		PRNumber: 34,
-		Branch:   "swarm/acme-hive/drone-1",
+		Branch:   "swarm/acme-hive/forager-1",
 	})
 	r := New(b)
 	event := loadEvent(t, EventCheckSuite, "testdata/check_suite_completed.json")
@@ -321,15 +321,15 @@ func TestRouteUnmatchedEventGoesToHiveInbox(t *testing.T) {
 func TestRouteConcurrencyLimitGoesToHiveInbox(t *testing.T) {
 	b := NewMemoryBackend()
 	hive := newTestHive(t, b, domain.HiveConfig{
-		MaxConcurrentDrones: 1,
-		Triggers:            []domain.TriggerRule{{Event: "issue_labeled", Label: "autonomous"}},
+		MaxConcurrentForagers: 1,
+		Triggers:              []domain.TriggerRule{{Event: "issue_labeled", Label: "autonomous"}},
 	})
-	b.AddDrone(domain.Agent{
+	b.AddForager(domain.Agent{
 		HiveID:      hive.ID,
-		Role:        domain.RoleDrone,
+		Role:        domain.RoleForager,
 		State:       domain.AgentActive,
 		IssueNumber: 99,
-		Branch:      "swarm/hive-1/drone-busy",
+		Branch:      "swarm/hive-1/forager-busy",
 	})
 	r := New(b)
 	event := loadEvent(t, EventIssues, "testdata/issues_labeled.json")
@@ -345,25 +345,25 @@ func TestRouteConcurrencyLimitGoesToHiveInbox(t *testing.T) {
 	if !strings.Contains(decision.Reason, "limit") {
 		t.Fatalf("reason = %q, want limit explanation", decision.Reason)
 	}
-	if got := len(b.Drones(hive.ID)); got != 1 {
-		t.Fatalf("drone count = %d, want 1", got)
+	if got := len(b.Foragers(hive.ID)); got != 1 {
+		t.Fatalf("forager count = %d, want 1", got)
 	}
 }
 
 func TestRouteChainLimitGoesToHiveInbox(t *testing.T) {
 	b := NewMemoryBackend()
 	hive := newTestHive(t, b, domain.HiveConfig{
-		MaxDronesPerChain: 1,
-		Triggers:          []domain.TriggerRule{{Event: "issue_labeled", Label: "autonomous"}},
+		MaxForagersPerChain: 1,
+		Triggers:            []domain.TriggerRule{{Event: "issue_labeled", Label: "autonomous"}},
 	})
 	event := loadEvent(t, EventIssues, "testdata/issues_labeled.json")
 	event.DeliveryID = "delivery-chain"
-	b.AddDrone(domain.Agent{
+	b.AddForager(domain.Agent{
 		HiveID:      hive.ID,
-		Role:        domain.RoleDrone,
+		Role:        domain.RoleForager,
 		State:       domain.AgentActive,
 		IssueNumber: 99,
-		Branch:      "swarm/hive-1/drone-other",
+		Branch:      "swarm/hive-1/forager-other",
 		ChainID:     chainIDFor(event),
 	})
 	r := New(b)
@@ -402,8 +402,8 @@ func TestRouteRedeliveryIsIdempotent(t *testing.T) {
 	if got := len(b.Messages()); got != messagesAfterFirst {
 		t.Fatalf("message count = %d after redelivery, want %d", got, messagesAfterFirst)
 	}
-	if got := len(b.Drones(hive.ID)); got != 1 {
-		t.Fatalf("drone count = %d after redelivery, want 1", got)
+	if got := len(b.Foragers(hive.ID)); got != 1 {
+		t.Fatalf("forager count = %d after redelivery, want 1", got)
 	}
 }
 
@@ -424,8 +424,8 @@ func TestRouteInstructionTextCannotStartWork(t *testing.T) {
 	if decision.Action != ActionInbox {
 		t.Fatalf("action = %q, want %q; only a leading command may trigger", decision.Action, ActionInbox)
 	}
-	if got := len(b.Drones(hive.ID)); got != 0 {
-		t.Fatalf("drone count = %d, want 0", got)
+	if got := len(b.Foragers(hive.ID)); got != 0 {
+		t.Fatalf("forager count = %d, want 0", got)
 	}
 }
 
@@ -444,16 +444,16 @@ type failingBackend struct{}
 func (failingBackend) HiveByRepository(context.Context, string) (domain.Hive, error) {
 	return domain.Hive{}, errBackend
 }
-func (failingBackend) DroneByIssue(context.Context, string, int64) (domain.Agent, error) {
+func (failingBackend) ForagerByIssue(context.Context, string, int64) (domain.Agent, error) {
 	return domain.Agent{}, domain.ErrNotFound
 }
-func (failingBackend) DroneByPR(context.Context, string, int64) (domain.Agent, error) {
+func (failingBackend) ForagerByPR(context.Context, string, int64) (domain.Agent, error) {
 	return domain.Agent{}, domain.ErrNotFound
 }
-func (failingBackend) DroneByBranch(context.Context, string, string) (domain.Agent, error) {
+func (failingBackend) ForagerByBranch(context.Context, string, string) (domain.Agent, error) {
 	return domain.Agent{}, domain.ErrNotFound
 }
-func (failingBackend) CreateDrone(context.Context, domain.Agent) (domain.Agent, error) {
+func (failingBackend) CreateForager(context.Context, domain.Agent) (domain.Agent, error) {
 	return domain.Agent{}, errBackend
 }
 func (failingBackend) SendMessage(context.Context, domain.Message) (domain.Message, error) {

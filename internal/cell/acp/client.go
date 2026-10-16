@@ -2,7 +2,7 @@
 // (ACP).
 //
 // It exists to validate how SwarmJet should drive a long-running OpenCode
-// process inside a Cell container (docs/claude/adr-hive-queen-drone.md,
+// process inside a Cell container (docs/claude/adr-hive-queen-forager.md,
 // section 8). Nothing here is wired into the runtime yet and the API may change
 // without notice; see docs/claude/spikes/opencode-driver.md for the findings.
 //
@@ -30,7 +30,7 @@ type UpdateSink func(SessionNotification) error
 type PermissionHandler func(context.Context, PermissionRequest) (PermissionOutcome, error)
 
 // Client drives one ACP agent process. Only one prompt turn may be active at a
-// time, which matches a Cell driving a single Drone.
+// time, which matches a Cell driving a single Forager.
 type Client struct {
 	conn       *rpcConn
 	caps       ClientCapabilities

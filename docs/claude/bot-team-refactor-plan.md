@@ -1,6 +1,8 @@
 # SwarmJet Bot 团队重构方案（讨论稿）
 
-> **2026-10-16 更新**：本文中的"总管 Bot、Bot 角色与生命周期、WorkItem、Session、流水线、Temporal 保留"等设计已被 [Hive / Queen / Drone 架构](adr-hive-queen-drone.md) 取代。第 5 节的组件盘点和第 6 节阶段 0 的进度记录仍然有效（阶段 0 已全部合入 dev）。
+> **术语更新**：Drone 已改名为 Forager，见[新 ADR](adr-hive-queen-forager.md)。本文是历史记录，正文保留原术语。
+
+> **2026-10-16 更新**：本文中的"总管 Bot、Bot 角色与生命周期、WorkItem、Session、流水线、Temporal 保留"等设计已被 [Hive / Queen / Drone 架构](adr-hive-queen-forager.md) 取代。第 5 节的组件盘点和第 6 节阶段 0 的进度记录仍然有效（阶段 0 已全部合入 dev）。
 
 日期：2026-10-15。本文整理重构讨论中已达成的决策、核心抽象、组件取舍与迁移顺序，供后续实施对照。它不是已交付功能的说明；正式落地时再拆成 ADR。
 

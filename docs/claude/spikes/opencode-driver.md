@@ -2,20 +2,20 @@
 
 - 状态：验证完成，结论可用于第二轮 Cell 运行时设计
 - 日期：2026-10-16
-- 对应：`docs/claude/adr-hive-queen-drone.md` 第 8 节、第 19 节"ACP 与各 CLI 适配器的成熟度"
+- 对应：`docs/claude/adr-hive-queen-forager.md` 第 8 节、第 19 节"ACP 与各 CLI 适配器的成熟度"
 - 任务：`docs/claude/round1-prompts.md` 任务 A
 - 原型：`internal/cell/acp`（实验性，包注释已标注）
 
 ## 1. 结论摘要
 
-**推荐用 ACP（`opencode acp`，stdio 上的 JSON-RPC）作为 Cell 驱动 Drone 的主协议；`opencode serve`（自带 HTTP/SSE 服务）作为后备，以及网页端人工接管时的入口。**
+**推荐用 ACP（`opencode acp`，stdio 上的 JSON-RPC）作为 Cell 驱动 Forager 的主协议；`opencode serve`（自带 HTTP/SSE 服务）作为后备，以及网页端人工接管时的入口。**
 
 理由：
 
 - ACP 只有一条 stdio 通道，正好套进"长期容器 + `docker exec -i`"的 Cell 模型：不占端口、不暴露 HTTP、不需要额外的服务鉴权；
 - ACP 是 Zed 发起的跨 CLI 协议，initialize 里声明了 `loadSession`、权限回调、MCP 注入，本次要求验证的四种能力（多轮、重启续聊、中途取消、权限）全部原生支持；
 - 以后接 Claude Code、Codex 时可以复用同一个客户端，而不是每个 CLI 写一套 HTTP 客户端；
-- `serve` 的 HTTP/SSE 面更宽（会话、消息、模型、事件都能单独访问），但它同时存在 `/session/*` 旧版与 `/api/*` 新版两套 API，稳定性和版本归属不明确，适合"人要看、要插话"的场景，不适合作为平台与 Drone 之间的唯一控制面。
+- `serve` 的 HTTP/SSE 面更宽（会话、消息、模型、事件都能单独访问），但它同时存在 `/session/*` 旧版与 `/api/*` 新版两套 API，稳定性和版本归属不明确，适合"人要看、要插话"的场景，不适合作为平台与 Forager 之间的唯一控制面。
 
 需要注意的硬事实（第 4 节详述）：
 
@@ -263,7 +263,7 @@ session/new with MCP server: ok
 mcp text="`MCP_PONG_FROM_SWARMJET`" tools=2
 ```
 
-工具被命名空间化为 `swarmjet_swarmjet_ping`（`<server-name>_<tool-name>`）。平台后续用 MCP 给 Drone 提供"读 Inbox、汇报、请求 Approval"的工具时，**推荐按 `type:"http"` 挂 SwarmJet 的 Streamable HTTP MCP 服务**（正好对应任务 C）；stdio 也验证可用，但需要把 MCP server 的字节带进容器。
+工具被命名空间化为 `swarmjet_swarmjet_ping`（`<server-name>_<tool-name>`）。平台后续用 MCP 给 Forager 提供"读 Inbox、汇报、请求 Approval"的工具时，**推荐按 `type:"http"` 挂 SwarmJet 的 Streamable HTTP MCP 服务**（正好对应任务 C）；stdio 也验证可用，但需要把 MCP server 的字节带进容器。
 
 ### 4.6 模型凭证如何注入；能否避免写进镜像
 
@@ -317,7 +317,7 @@ CPU=1.54% MEM=543.3MiB / 30.33GiB PIDS=44
 
 结论与建议：
 
-- 单只 Drone 的内存量级 ~300–400 MB，Node 基线本身不小；Hive 并发上限 4 时要有约 1.5 GB 的余量意识；
+- 单只 Forager 的内存量级 ~300–400 MB，Node 基线本身不小；Hive 并发上限 4 时要有约 1.5 GB 的余量意识；
 - **ACP 空闲仍有约 9% 单核 CPU**（文件监听/内部循环），不能把"空闲"当作零成本。ADR 第 8 节的 parked 状态应在超过阈值后**停掉 CLI 进程**（甚至停容器），唤醒时重新 `docker exec` + `session/load`。本次已验证重启后 load 可行，这条路径有支撑。
 
 ## 5. `opencode serve` 自带服务的对比

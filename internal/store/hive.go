@@ -55,14 +55,14 @@ func applyHiveDefaults(c *domain.HiveConfig) {
 	if c.CLI == "" {
 		c.CLI = "opencode"
 	}
-	if c.MaxConcurrentDrones == 0 {
-		c.MaxConcurrentDrones = 4
+	if c.MaxConcurrentForagers == 0 {
+		c.MaxConcurrentForagers = 4
 	}
 	if c.MaxHops == 0 {
 		c.MaxHops = 10
 	}
-	if c.MaxDronesPerChain == 0 {
-		c.MaxDronesPerChain = 10
+	if c.MaxForagersPerChain == 0 {
+		c.MaxForagersPerChain = 10
 	}
 	if c.IdleParkMinutes == 0 {
 		c.IdleParkMinutes = 30
@@ -73,8 +73,8 @@ func applyHiveDefaults(c *domain.HiveConfig) {
 	if c.TurnTimeoutMinutes == 0 {
 		c.TurnTimeoutMinutes = 120
 	}
-	if c.DroneMaxLifetimeHours == 0 {
-		c.DroneMaxLifetimeHours = 168
+	if c.ForagerMaxLifetimeHours == 0 {
+		c.ForagerMaxLifetimeHours = 168
 	}
 }
 
@@ -218,9 +218,9 @@ func scanAgent(row pgx.Row) (domain.Agent, error) {
 	return a, nil
 }
 
-// CreateDrone inserts a Drone after checking the Hive's concurrency and chain
+// CreateForager inserts a Forager after checking the Hive's concurrency and chain
 // limits. It locks the Hive row so concurrent creators cannot overshoot.
-func (s *Store) CreateDrone(ctx context.Context, a domain.Agent) (domain.Agent, error) {
+func (s *Store) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent, error) {
 	now := time.Now().UTC()
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -239,10 +239,10 @@ func (s *Store) CreateDrone(ctx context.Context, a domain.Agent) (domain.Agent, 
 	}
 	applyHiveDefaults(&cfg)
 	var active int
-	if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND role='drone' AND state IN ('creating','active','parked')`, a.HiveID).Scan(&active); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND role='forager' AND state IN ('creating','active','parked')`, a.HiveID).Scan(&active); err != nil {
 		return domain.Agent{}, err
 	}
-	if active >= cfg.MaxConcurrentDrones {
+	if active >= cfg.MaxConcurrentForagers {
 		return domain.Agent{}, domain.ErrHiveLimit
 	}
 	if a.ChainID != "" {
@@ -250,7 +250,7 @@ func (s *Store) CreateDrone(ctx context.Context, a domain.Agent) (domain.Agent, 
 		if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND chain_id=$2`, a.HiveID, a.ChainID).Scan(&chained); err != nil {
 			return domain.Agent{}, err
 		}
-		if chained >= cfg.MaxDronesPerChain {
+		if chained >= cfg.MaxForagersPerChain {
 			return domain.Agent{}, domain.ErrChainLimit
 		}
 	}
@@ -262,7 +262,7 @@ func (s *Store) CreateDrone(ctx context.Context, a domain.Agent) (domain.Agent, 
 		a.ID = id
 	}
 	if a.Role == "" {
-		a.Role = domain.RoleDrone
+		a.Role = domain.RoleForager
 	}
 	if a.State == "" {
 		a.State = domain.AgentCreating
@@ -302,10 +302,10 @@ func (s *Store) Queen(ctx context.Context, hiveID string) (domain.Agent, error) 
 	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='queen'`, hiveID))
 }
 
-// Drones returns a Hive's Drones, optionally filtered by state. The Queen is
+// Foragers returns a Hive's Foragers, optionally filtered by state. The Queen is
 // never included.
-func (s *Store) Drones(ctx context.Context, hiveID string, states ...domain.AgentState) ([]domain.Agent, error) {
-	query := `SELECT ` + agentColumns + ` FROM agents WHERE hive_id=$1 AND role='drone'`
+func (s *Store) Foragers(ctx context.Context, hiveID string, states ...domain.AgentState) ([]domain.Agent, error) {
+	query := `SELECT ` + agentColumns + ` FROM agents WHERE hive_id=$1 AND role='forager'`
 	args := []any{hiveID}
 	if len(states) > 0 {
 		values := make([]string, len(states))
@@ -321,31 +321,31 @@ func (s *Store) Drones(ctx context.Context, hiveID string, states ...domain.Agen
 		return nil, err
 	}
 	defer rows.Close()
-	var drones []domain.Agent
+	var foragers []domain.Agent
 	for rows.Next() {
 		a, err := scanAgent(rows)
 		if err != nil {
 			return nil, err
 		}
-		drones = append(drones, a)
+		foragers = append(foragers, a)
 	}
-	return drones, rows.Err()
+	return foragers, rows.Err()
 }
 
-// liveDrone returns the newest non-terminal Drone matching a predicate. Events
-// for finished Drones fall through to the Hive Inbox instead of a dead Agent.
-const liveDrone = ` AND state NOT IN ('completed','failed','cancelled')`
+// liveForager returns the newest non-terminal Forager matching a predicate. Events
+// for finished Foragers fall through to the Hive Inbox instead of a dead Agent.
+const liveForager = ` AND state NOT IN ('completed','failed','cancelled')`
 
-func (s *Store) DroneByIssue(ctx context.Context, hiveID string, issue int64) (domain.Agent, error) {
-	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='drone' AND issue_number=$2`+liveDrone+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, issue))
+func (s *Store) ForagerByIssue(ctx context.Context, hiveID string, issue int64) (domain.Agent, error) {
+	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND issue_number=$2`+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, issue))
 }
 
-func (s *Store) DroneByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error) {
-	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='drone' AND pr_number=$2`+liveDrone+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, pr))
+func (s *Store) ForagerByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error) {
+	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND pr_number=$2`+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, pr))
 }
 
-func (s *Store) DroneByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error) {
-	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='drone' AND branch=$2`+liveDrone+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, branch))
+func (s *Store) ForagerByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error) {
+	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND branch=$2`+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, branch))
 }
 
 // TransitionAgent is a compare-and-swap on the Agent state.

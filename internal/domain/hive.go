@@ -10,10 +10,10 @@ import (
 var (
 	ErrNotFound        = errors.New("not found")
 	ErrConflict        = errors.New("conflict")
-	ErrHiveLimit       = errors.New("hive concurrent drone limit reached")
-	ErrChainLimit      = errors.New("chain drone limit reached")
+	ErrHiveLimit       = errors.New("hive concurrent forager limit reached")
+	ErrChainLimit      = errors.New("chain forager limit reached")
 	ErrHopLimit        = errors.New("message hop limit reached")
-	ErrPeerMessage     = errors.New("drones cannot message other drones")
+	ErrPeerMessage     = errors.New("foragers cannot message other foragers")
 	ErrMessageTooLarge = errors.New("message body too large")
 )
 
@@ -36,18 +36,18 @@ type Hive struct {
 
 // HiveConfig holds per-Hive limits. Zero values mean "use the default".
 type HiveConfig struct {
-	CLI                   string        `json:"cli"`                   // default "opencode"
-	MaxConcurrentDrones   int           `json:"maxConcurrentDrones"`   // default 4
-	MaxHops               int           `json:"maxHops"`               // default 10
-	MaxDronesPerChain     int           `json:"maxDronesPerChain"`     // default 10
-	IdleParkMinutes       int           `json:"idleParkMinutes"`       // default 30
-	HibernateHours        int           `json:"hibernateHours"`        // default 24
-	TurnTimeoutMinutes    int           `json:"turnTimeoutMinutes"`    // default 120
-	DroneMaxLifetimeHours int           `json:"droneMaxLifetimeHours"` // default 168
-	Triggers              []TriggerRule `json:"triggers"`
+	CLI                     string        `json:"cli"`                     // default "opencode"
+	MaxConcurrentForagers   int           `json:"maxConcurrentForagers"`   // default 4
+	MaxHops                 int           `json:"maxHops"`                 // default 10
+	MaxForagersPerChain     int           `json:"maxForagersPerChain"`     // default 10
+	IdleParkMinutes         int           `json:"idleParkMinutes"`         // default 30
+	HibernateHours          int           `json:"hibernateHours"`          // default 24
+	TurnTimeoutMinutes      int           `json:"turnTimeoutMinutes"`      // default 120
+	ForagerMaxLifetimeHours int           `json:"foragerMaxLifetimeHours"` // default 168
+	Triggers                []TriggerRule `json:"triggers"`
 }
 
-// TriggerRule starts a Drone for a matching GitHub event.
+// TriggerRule starts a Forager for a matching GitHub event.
 type TriggerRule struct {
 	Event         string `json:"event"`                   // "issue_labeled" or "issue_comment"
 	Label         string `json:"label,omitempty"`         // for issue_labeled
@@ -58,8 +58,8 @@ type TriggerRule struct {
 type AgentRole string
 
 const (
-	RoleQueen AgentRole = "queen"
-	RoleDrone AgentRole = "drone"
+	RoleQueen   AgentRole = "queen"
+	RoleForager AgentRole = "forager"
 )
 
 type AgentState string
@@ -75,7 +75,7 @@ const (
 	AgentDisabled   AgentState = "disabled" // Queen only: not enabled
 )
 
-// Agent is a Queen or a Drone.
+// Agent is a Queen or a Forager.
 type Agent struct {
 	ID          string     `json:"id"`
 	HiveID      string     `json:"hiveId"`
@@ -83,7 +83,7 @@ type Agent struct {
 	State       AgentState `json:"state"`
 	Preset      string     `json:"preset,omitempty"`
 	CLI         string     `json:"cli"`
-	Task        string     `json:"task,omitempty"` // Drone only
+	Task        string     `json:"task,omitempty"` // Forager only
 	Branch      string     `json:"branch,omitempty"`
 	IssueNumber int64      `json:"issueNumber,omitempty"`
 	PRNumber    int64      `json:"prNumber,omitempty"`
@@ -94,7 +94,7 @@ type Agent struct {
 	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
-// Handoff is the fixed-field summary a Drone updates after each turn.
+// Handoff is the fixed-field summary a Forager updates after each turn.
 type Handoff struct {
 	Goal      string        `json:"goal"`
 	Done      string        `json:"done"`
@@ -120,7 +120,7 @@ const (
 	MessageControl  MessageKind = "control"
 )
 
-// Address is "queen", "drone:<agentID>", "hive", "local:<tokenID>" or "system".
+// Address is "queen", "forager:<agentID>", "hive", "local:<tokenID>" or "system".
 type Address string
 
 const (
@@ -129,7 +129,7 @@ const (
 	AddressSystem Address = "system"
 )
 
-func DroneAddress(id string) Address { return Address("drone:" + id) }
+func ForagerAddress(id string) Address    { return Address("forager:" + id) }
 func LocalAddress(tokenID string) Address { return Address("local:" + tokenID) }
 
 type MessageState string

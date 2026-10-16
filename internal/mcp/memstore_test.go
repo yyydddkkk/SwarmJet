@@ -23,13 +23,13 @@ func newHive(t *testing.T, config domain.HiveConfig) (*MemoryBackend, domain.Hiv
 	return backend, h
 }
 
-func newDrone(t *testing.T, backend *MemoryBackend, hiveID, chainID string) domain.Agent {
+func newForager(t *testing.T, backend *MemoryBackend, hiveID, chainID string) domain.Agent {
 	t.Helper()
-	a, err := backend.CreateDrone(context.Background(), domain.Agent{
-		HiveID: hiveID, Role: domain.RoleDrone, ChainID: chainID,
+	a, err := backend.CreateForager(context.Background(), domain.Agent{
+		HiveID: hiveID, Role: domain.RoleForager, ChainID: chainID,
 	})
 	if err != nil {
-		t.Fatalf("CreateDrone: %v", err)
+		t.Fatalf("CreateForager: %v", err)
 	}
 	return a
 }
@@ -37,12 +37,12 @@ func newDrone(t *testing.T, backend *MemoryBackend, hiveID, chainID string) doma
 func TestMemoryBackendMessageValidation(t *testing.T) {
 	backend, h := newHive(t, domain.HiveConfig{})
 	ctx := context.Background()
-	droneA := newDrone(t, backend, h.ID, "chain-1")
-	droneB := newDrone(t, backend, h.ID, "chain-1")
+	foragerA := newForager(t, backend, h.ID, "chain-1")
+	foragerB := newForager(t, backend, h.ID, "chain-1")
 
 	t.Run("peer message", func(t *testing.T) {
 		_, err := backend.SendMessage(ctx, domain.Message{
-			HiveID: h.ID, From: domain.DroneAddress(droneA.ID), To: domain.DroneAddress(droneB.ID),
+			HiveID: h.ID, From: domain.ForagerAddress(foragerA.ID), To: domain.ForagerAddress(foragerB.ID),
 			Kind: domain.MessageReport, Body: "hi peer",
 		})
 		if !errors.Is(err, domain.ErrPeerMessage) {
@@ -52,7 +52,7 @@ func TestMemoryBackendMessageValidation(t *testing.T) {
 
 	t.Run("hop limit", func(t *testing.T) {
 		_, err := backend.SendMessage(ctx, domain.Message{
-			HiveID: h.ID, From: domain.AddressQueen, To: domain.DroneAddress(droneA.ID),
+			HiveID: h.ID, From: domain.AddressQueen, To: domain.ForagerAddress(foragerA.ID),
 			Kind: domain.MessageTask, Body: "deep", Hop: 11,
 		})
 		if !errors.Is(err, domain.ErrHopLimit) {
@@ -79,9 +79,9 @@ func TestMemoryBackendMessageValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("queen to drone is allowed", func(t *testing.T) {
+	t.Run("queen to forager is allowed", func(t *testing.T) {
 		if _, err := backend.SendMessage(ctx, domain.Message{
-			HiveID: h.ID, From: domain.AddressQueen, To: domain.DroneAddress(droneA.ID),
+			HiveID: h.ID, From: domain.AddressQueen, To: domain.ForagerAddress(foragerA.ID),
 			Kind: domain.MessageTask, Body: "go",
 		}); err != nil {
 			t.Fatalf("SendMessage: %v", err)
@@ -122,8 +122,8 @@ func TestMemoryBackendIdempotency(t *testing.T) {
 	}
 }
 
-func TestMemoryBackendConcurrentDroneLimit(t *testing.T) {
-	backend, h := newHive(t, domain.HiveConfig{MaxConcurrentDrones: 2})
+func TestMemoryBackendConcurrentForagerLimit(t *testing.T) {
+	backend, h := newHive(t, domain.HiveConfig{MaxConcurrentForagers: 2})
 
 	var (
 		wg        sync.WaitGroup
@@ -135,8 +135,8 @@ func TestMemoryBackendConcurrentDroneLimit(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := backend.CreateDrone(context.Background(), domain.Agent{
-				HiveID: h.ID, Role: domain.RoleDrone,
+			_, err := backend.CreateForager(context.Background(), domain.Agent{
+				HiveID: h.ID, Role: domain.RoleForager,
 			})
 			mu.Lock()
 			defer mu.Unlock()
@@ -152,40 +152,40 @@ func TestMemoryBackendConcurrentDroneLimit(t *testing.T) {
 	}
 	wg.Wait()
 	if succeeded != 2 {
-		t.Fatalf("created %d drones, want 2", succeeded)
+		t.Fatalf("created %d foragers, want 2", succeeded)
 	}
 	if limited != 6 {
-		t.Fatalf("limited %d drones, want 6", limited)
+		t.Fatalf("limited %d foragers, want 6", limited)
 	}
 }
 
-func TestMemoryBackendChainDroneLimit(t *testing.T) {
-	backend, h := newHive(t, domain.HiveConfig{MaxConcurrentDrones: 50, MaxDronesPerChain: 2})
+func TestMemoryBackendChainForagerLimit(t *testing.T) {
+	backend, h := newHive(t, domain.HiveConfig{MaxConcurrentForagers: 50, MaxForagersPerChain: 2})
 	for i := 0; i < 5; i++ {
-		_, err := backend.CreateDrone(context.Background(), domain.Agent{
-			HiveID: h.ID, Role: domain.RoleDrone, ChainID: "chain-same",
+		_, err := backend.CreateForager(context.Background(), domain.Agent{
+			HiveID: h.ID, Role: domain.RoleForager, ChainID: "chain-same",
 		})
 		if i < 2 && err != nil {
-			t.Fatalf("drone %d: %v", i, err)
+			t.Fatalf("forager %d: %v", i, err)
 		}
 		if i >= 2 && !errors.Is(err, domain.ErrChainLimit) {
-			t.Fatalf("drone %d err = %v, want ErrChainLimit", i, err)
+			t.Fatalf("forager %d err = %v, want ErrChainLimit", i, err)
 		}
 	}
 }
 
 func TestMemoryBackendTransitionIsCompareAndSet(t *testing.T) {
 	backend, h := newHive(t, domain.HiveConfig{})
-	drone := newDrone(t, backend, h.ID, "")
+	forager := newForager(t, backend, h.ID, "")
 	ctx := context.Background()
 
-	if err := backend.TransitionAgent(ctx, drone.ID, domain.AgentActive, domain.AgentParked); !errors.Is(err, domain.ErrConflict) {
+	if err := backend.TransitionAgent(ctx, forager.ID, domain.AgentActive, domain.AgentParked); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
 	}
-	if err := backend.TransitionAgent(ctx, drone.ID, domain.AgentCreating, domain.AgentActive); err != nil {
+	if err := backend.TransitionAgent(ctx, forager.ID, domain.AgentCreating, domain.AgentActive); err != nil {
 		t.Fatalf("TransitionAgent: %v", err)
 	}
-	got, err := backend.Agent(ctx, drone.ID)
+	got, err := backend.Agent(ctx, forager.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,23 +298,23 @@ func TestHiveConfigDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := domain.HiveConfig{
-		CLI:                   "opencode",
-		MaxConcurrentDrones:   4,
-		MaxHops:               10,
-		MaxDronesPerChain:     10,
-		IdleParkMinutes:       30,
-		HibernateHours:        24,
-		TurnTimeoutMinutes:    120,
-		DroneMaxLifetimeHours: 168,
+		CLI:                     "opencode",
+		MaxConcurrentForagers:   4,
+		MaxHops:                 10,
+		MaxForagersPerChain:     10,
+		IdleParkMinutes:         30,
+		HibernateHours:          24,
+		TurnTimeoutMinutes:      120,
+		ForagerMaxLifetimeHours: 168,
 	}
 	if got.Config.CLI != want.CLI ||
-		got.Config.MaxConcurrentDrones != want.MaxConcurrentDrones ||
+		got.Config.MaxConcurrentForagers != want.MaxConcurrentForagers ||
 		got.Config.MaxHops != want.MaxHops ||
-		got.Config.MaxDronesPerChain != want.MaxDronesPerChain ||
+		got.Config.MaxForagersPerChain != want.MaxForagersPerChain ||
 		got.Config.IdleParkMinutes != want.IdleParkMinutes ||
 		got.Config.HibernateHours != want.HibernateHours ||
 		got.Config.TurnTimeoutMinutes != want.TurnTimeoutMinutes ||
-		got.Config.DroneMaxLifetimeHours != want.DroneMaxLifetimeHours {
+		got.Config.ForagerMaxLifetimeHours != want.ForagerMaxLifetimeHours {
 		t.Fatalf("config = %+v, want %+v", got.Config, want)
 	}
 }

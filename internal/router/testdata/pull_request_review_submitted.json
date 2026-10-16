@@ -34,8 +34,8 @@
     "merged": false,
     "labels": [],
     "head": {
-      "label": "acme:swarm/acme-hive/drone-1",
-      "ref": "swarm/acme-hive/drone-1",
+      "label": "acme:swarm/acme-hive/forager-1",
+      "ref": "swarm/acme-hive/forager-1",
       "sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567"
     },
     "base": {

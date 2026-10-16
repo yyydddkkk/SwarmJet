@@ -1,4 +1,4 @@
--- Hive / Queen / Drone data layer (ADR docs/claude/adr-hive-queen-drone.md §16).
+-- Hive / Queen / Forager data layer (ADR docs/claude/adr-hive-queen-forager.md §16).
 -- Old pipeline tables stay untouched; this migration only adds the new tables.
 
 CREATE TABLE IF NOT EXISTS hives(
@@ -12,12 +12,12 @@ CREATE TABLE IF NOT EXISTS hives(
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Queen and Drone share this table; role separates them. Every Hive has one
+-- Queen and Forager share this table; role separates them. Every Hive has one
 -- Queen record whose state is disabled until the user enables it.
 CREATE TABLE IF NOT EXISTS agents(
   id text PRIMARY KEY,
   hive_id text NOT NULL REFERENCES hives(id) ON DELETE CASCADE,
-  role text NOT NULL CHECK (role IN ('queen','drone')),
+  role text NOT NULL CHECK (role IN ('queen','forager')),
   state text NOT NULL,
   preset text NOT NULL DEFAULT '',
   cli text NOT NULL DEFAULT '',

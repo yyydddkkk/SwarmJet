@@ -19,12 +19,12 @@ import (
 // the MCP service. It enforces the same message validation rules as the real
 // store contract:
 //
-//   - drone:* -> drone:*                returns domain.ErrPeerMessage
+//   - forager:* -> forager:*                returns domain.ErrPeerMessage
 //   - Hop > hive MaxHops                returns domain.ErrHopLimit
 //   - Body longer than MaxMessageBody   returns domain.ErrMessageTooLarge
 //   - same ID, same content             returns the stored message
 //   - same ID, different content        returns domain.ErrConflict
-//   - CreateDrone over the concurrent or per-chain limit returns
+//   - CreateForager over the concurrent or per-chain limit returns
 //     domain.ErrHiveLimit / domain.ErrChainLimit
 //
 // It is safe for concurrent use.
@@ -181,8 +181,8 @@ func (m *MemoryBackend) UpdateHive(ctx context.Context, h domain.Hive) (domain.H
 	return h, nil
 }
 
-// CreateDrone enforces the concurrent and per-chain drone limits.
-func (m *MemoryBackend) CreateDrone(ctx context.Context, a domain.Agent) (domain.Agent, error) {
+// CreateForager enforces the concurrent and per-chain forager limits.
+func (m *MemoryBackend) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.Agent{}, err
 	}
@@ -195,13 +195,13 @@ func (m *MemoryBackend) CreateDrone(ctx context.Context, a domain.Agent) (domain
 	cfg := withConfigDefaults(h.Config)
 
 	if a.ID == "" {
-		a.ID = m.newID("drone")
+		a.ID = m.newID("forager")
 	}
 	if a.Role == "" {
-		a.Role = domain.RoleDrone
+		a.Role = domain.RoleForager
 	}
-	if a.Role != domain.RoleDrone {
-		return domain.Agent{}, fmt.Errorf("mcp: CreateDrone called with role %q", a.Role)
+	if a.Role != domain.RoleForager {
+		return domain.Agent{}, fmt.Errorf("mcp: CreateForager called with role %q", a.Role)
 	}
 	if a.State == "" {
 		a.State = domain.AgentCreating
@@ -218,20 +218,20 @@ func (m *MemoryBackend) CreateDrone(ctx context.Context, a domain.Agent) (domain
 
 	active, chained := 0, 0
 	for _, existing := range m.agents {
-		if existing.HiveID != a.HiveID || existing.Role != domain.RoleDrone {
+		if existing.HiveID != a.HiveID || existing.Role != domain.RoleForager {
 			continue
 		}
-		if droneCountsTowardsLimit(existing.State) {
+		if foragerCountsTowardsLimit(existing.State) {
 			active++
 		}
 		if existing.ChainID == a.ChainID {
 			chained++
 		}
 	}
-	if active >= cfg.MaxConcurrentDrones {
+	if active >= cfg.MaxConcurrentForagers {
 		return domain.Agent{}, domain.ErrHiveLimit
 	}
-	if chained >= cfg.MaxDronesPerChain {
+	if chained >= cfg.MaxForagersPerChain {
 		return domain.Agent{}, domain.ErrChainLimit
 	}
 
@@ -243,7 +243,7 @@ func (m *MemoryBackend) CreateDrone(ctx context.Context, a domain.Agent) (domain
 	return a, nil
 }
 
-// Agent returns any Queen or Drone by ID.
+// Agent returns any Queen or Forager by ID.
 func (m *MemoryBackend) Agent(ctx context.Context, id string) (domain.Agent, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.Agent{}, err
@@ -273,8 +273,8 @@ func (m *MemoryBackend) Queen(ctx context.Context, hiveID string) (domain.Agent,
 	return domain.Agent{}, domain.ErrNotFound
 }
 
-// Drones lists a hive's drones, optionally filtered by state.
-func (m *MemoryBackend) Drones(ctx context.Context, hiveID string, states ...domain.AgentState) ([]domain.Agent, error) {
+// Foragers lists a hive's foragers, optionally filtered by state.
+func (m *MemoryBackend) Foragers(ctx context.Context, hiveID string, states ...domain.AgentState) ([]domain.Agent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -283,7 +283,7 @@ func (m *MemoryBackend) Drones(ctx context.Context, hiveID string, states ...dom
 	out := []domain.Agent{}
 	for _, id := range m.agentOrder {
 		a := m.agents[id]
-		if a.HiveID != hiveID || a.Role != domain.RoleDrone {
+		if a.HiveID != hiveID || a.Role != domain.RoleForager {
 			continue
 		}
 		if len(states) > 0 && !slices.Contains(states, a.State) {
@@ -336,7 +336,7 @@ func (m *MemoryBackend) SendMessage(ctx context.Context, msg domain.Message) (do
 	if msg.Hop > cfg.MaxHops {
 		return domain.Message{}, domain.ErrHopLimit
 	}
-	if isDroneAddress(msg.From) && isDroneAddress(msg.To) {
+	if isForagerAddress(msg.From) && isForagerAddress(msg.To) {
 		return domain.Message{}, domain.ErrPeerMessage
 	}
 
@@ -501,13 +501,13 @@ func inboxKey(hiveID string, to domain.Address) string {
 	return hiveID + "\x00" + string(to)
 }
 
-func isDroneAddress(a domain.Address) bool {
-	return strings.HasPrefix(string(a), "drone:")
+func isForagerAddress(a domain.Address) bool {
+	return strings.HasPrefix(string(a), "forager:")
 }
 
-// droneCountsTowardsLimit reports the states the contract counts against the
-// per-hive concurrent drone limit.
-func droneCountsTowardsLimit(s domain.AgentState) bool {
+// foragerCountsTowardsLimit reports the states the contract counts against the
+// per-hive concurrent forager limit.
+func foragerCountsTowardsLimit(s domain.AgentState) bool {
 	switch s {
 	case domain.AgentCreating, domain.AgentActive, domain.AgentParked:
 		return true
@@ -532,14 +532,14 @@ func withConfigDefaults(c domain.HiveConfig) domain.HiveConfig {
 	if c.CLI == "" {
 		c.CLI = "opencode"
 	}
-	if c.MaxConcurrentDrones <= 0 {
-		c.MaxConcurrentDrones = 4
+	if c.MaxConcurrentForagers <= 0 {
+		c.MaxConcurrentForagers = 4
 	}
 	if c.MaxHops <= 0 {
 		c.MaxHops = 10
 	}
-	if c.MaxDronesPerChain <= 0 {
-		c.MaxDronesPerChain = 10
+	if c.MaxForagersPerChain <= 0 {
+		c.MaxForagersPerChain = 10
 	}
 	if c.IdleParkMinutes <= 0 {
 		c.IdleParkMinutes = 30
@@ -550,8 +550,8 @@ func withConfigDefaults(c domain.HiveConfig) domain.HiveConfig {
 	if c.TurnTimeoutMinutes <= 0 {
 		c.TurnTimeoutMinutes = 120
 	}
-	if c.DroneMaxLifetimeHours <= 0 {
-		c.DroneMaxLifetimeHours = 168
+	if c.ForagerMaxLifetimeHours <= 0 {
+		c.ForagerMaxLifetimeHours = 168
 	}
 	return c
 }

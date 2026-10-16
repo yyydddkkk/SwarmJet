@@ -97,7 +97,7 @@ func TestNormalizeSupportedEvents(t *testing.T) {
 			check: func(t *testing.T, e Event) {
 				assertEqual(t, "action", e.Action, "opened")
 				assertEqual(t, "number", e.Number, int64(34))
-				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/drone-1")
+				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/forager-1")
 				assertEqual(t, "title", e.Title, "Make the retry helper deterministic")
 				if e.Merged {
 					t.Fatal("opened PR must not be merged")
@@ -111,7 +111,7 @@ func TestNormalizeSupportedEvents(t *testing.T) {
 			check: func(t *testing.T, e Event) {
 				assertEqual(t, "action", e.Action, "synchronize")
 				assertEqual(t, "number", e.Number, int64(34))
-				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/drone-1")
+				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/forager-1")
 			},
 		},
 		{
@@ -143,7 +143,7 @@ func TestNormalizeSupportedEvents(t *testing.T) {
 			check: func(t *testing.T, e Event) {
 				assertEqual(t, "action", e.Action, "submitted")
 				assertEqual(t, "number", e.Number, int64(34))
-				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/drone-1")
+				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/forager-1")
 				assertEqual(t, "review state", e.ReviewState, "changes_requested")
 				assertEqual(t, "author", e.Author, "reviewer-one")
 				assertEqual(t, "association", e.AuthorAssociation, "COLLABORATOR")
@@ -159,7 +159,7 @@ func TestNormalizeSupportedEvents(t *testing.T) {
 			check: func(t *testing.T, e Event) {
 				assertEqual(t, "action", e.Action, "created")
 				assertEqual(t, "number", e.Number, int64(34))
-				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/drone-1")
+				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/forager-1")
 				assertEqual(t, "author", e.Author, "reviewer-one")
 				if !strings.Contains(e.Excerpt, "nit:") {
 					t.Fatalf("excerpt = %q, want review comment body", e.Excerpt)
@@ -173,7 +173,7 @@ func TestNormalizeSupportedEvents(t *testing.T) {
 			check: func(t *testing.T, e Event) {
 				assertEqual(t, "action", e.Action, "completed")
 				assertEqual(t, "number", e.Number, int64(34))
-				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/drone-1")
+				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/forager-1")
 				assertEqual(t, "conclusion", e.Conclusion, "failure")
 				assertEqual(t, "sha", e.SHA, "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567")
 				if !strings.Contains(e.URL, "/commit/") {
@@ -188,7 +188,7 @@ func TestNormalizeSupportedEvents(t *testing.T) {
 			check: func(t *testing.T, e Event) {
 				assertEqual(t, "action", e.Action, "completed")
 				assertEqual(t, "number", e.Number, int64(34))
-				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/drone-1")
+				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/forager-1")
 				assertEqual(t, "conclusion", e.Conclusion, "success")
 				assertEqual(t, "context", e.Context, "ci / test")
 				assertEqual(t, "url", e.URL, "https://github.com/acme/hive/runs/66001")
@@ -201,7 +201,7 @@ func TestNormalizeSupportedEvents(t *testing.T) {
 			check: func(t *testing.T, e Event) {
 				assertEqual(t, "action", e.Action, "success")
 				assertEqual(t, "state", e.State, "success")
-				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/drone-1")
+				assertEqual(t, "branch", e.Branch, "swarm/acme-hive/forager-1")
 				assertEqual(t, "context", e.Context, "ci / build")
 				assertEqual(t, "url", e.URL, "https://ci.example.com/acme/hive/builds/88001")
 			},
