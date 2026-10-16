@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 )
 
 //go:embed schema.sql
@@ -49,7 +50,10 @@ const (
 const activeNodeTask = `NOT terminal AND node_id IS NOT NULL AND NOT COALESCE((body->>'paused')::boolean,false) AND stage NOT IN ('waiting_dependencies','waiting_approval','waiting_manual_merge','partial_merge','blocked')`
 const activeProjectTask = `NOT terminal AND NOT COALESCE((body->>'paused')::boolean,false) AND stage NOT IN ('waiting_dependencies','waiting_approval','waiting_manual_merge','partial_merge','blocked') AND (node_id IS NOT NULL OR EXISTS(SELECT 1 FROM commands c WHERE c.task_id=tasks.id AND c.id='start-'||tasks.id))`
 
-type Store struct{ Pool *pgxpool.Pool }
+type Store struct {
+	Pool *pgxpool.Pool
+	Jobs jobs.Inserter
+}
 
 func (s *Store) HasSource(ctx context.Context, base string, issue domain.Issue) (bool, error) {
 	var exists bool
@@ -103,7 +107,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		p.Close()
 		return nil, e
 	}
-	return &Store{p}, nil
+	return &Store{Pool: p}, nil
 }
 func (s *Store) Close() { s.Pool.Close() }
 func (s *Store) Migrate(ctx context.Context) error {
@@ -149,7 +153,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return err
 		}
 	}
-	return tx.Commit(ctx)
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	return jobs.Migrate(ctx, s.Pool)
 }
 func mapErr(e error) error {
 	if errors.Is(e, pgx.ErrNoRows) {
@@ -424,6 +431,9 @@ func (s *Store) createTask(ctx context.Context, t domain.Task, requireNode bool)
 		if e != nil {
 			return t, e
 		}
+		if e = s.insertCommandJob(ctx, tx, c.ID, t.ID); e != nil {
+			return t, e
+		}
 	}
 	return t, tx.Commit(ctx)
 }
@@ -524,6 +534,9 @@ func (s *Store) AdmitPendingTasks(ctx context.Context, limit int) (int, error) {
 		cb, _ := json.Marshal(command)
 		if _, err = tx.Exec(ctx, `INSERT INTO commands(id,task_id,body) VALUES($1,$2,$3)`, command.ID, t.ID, cb); err != nil {
 			return 0, mapErr(err)
+		}
+		if err = s.insertCommandJob(ctx, tx, command.ID, t.ID); err != nil {
+			return 0, err
 		}
 		admitted++
 		admittedIDs = append(admittedIDs, t.ID)
@@ -697,14 +710,19 @@ func (s *Store) Enqueue(ctx context.Context, taskID string, c domain.Command) er
 		}
 	}
 	b, _ := json.Marshal(c)
-	tag, e := s.Pool.Exec(ctx, "INSERT INTO commands(id,task_id,body) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", c.ID, taskID, b)
+	tx, e := s.Pool.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	tag, e := tx.Exec(ctx, "INSERT INTO commands(id,task_id,body) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", c.ID, taskID, b)
 	if e != nil {
 		return mapErr(e)
 	}
 	if tag.RowsAffected() == 0 {
 		var old []byte
 		var tid string
-		e = s.Pool.QueryRow(ctx, "SELECT task_id,body FROM commands WHERE id=$1", c.ID).Scan(&tid, &old)
+		e = tx.QueryRow(ctx, "SELECT task_id,body FROM commands WHERE id=$1", c.ID).Scan(&tid, &old)
 		var oc domain.Command
 		_ = json.Unmarshal(old, &oc)
 		if e != nil {
@@ -714,8 +732,19 @@ func (s *Store) Enqueue(ctx context.Context, taskID string, c domain.Command) er
 		if tid != taskID || string(ob) != string(b) {
 			return ErrConflict
 		}
+		return tx.Commit(ctx)
 	}
-	return nil
+	if e = s.insertCommandJob(ctx, tx, c.ID, taskID); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) insertCommandJob(ctx context.Context, tx pgx.Tx, id, taskID string) error {
+	if s.Jobs == nil {
+		return nil
+	}
+	return s.Jobs.InsertCommand(ctx, tx, jobs.Command{ID: id, TaskID: taskID})
 }
 
 // EnqueueAutoMerge serializes the operator's decision with SaveTask's stage
@@ -766,6 +795,9 @@ func (s *Store) EnqueueAutoMerge(ctx context.Context, taskID string, c domain.Co
 	}
 	if _, err = tx.Exec(ctx, "INSERT INTO commands(id,task_id,body) VALUES($1,$2,$3)", c.ID, taskID, body); err != nil {
 		return mapErr(err)
+	}
+	if err = s.insertCommandJob(ctx, tx, c.ID, taskID); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }

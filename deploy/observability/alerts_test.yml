@@ -4,22 +4,6 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
-      - series: 'rabbitmq_detailed_queue_messages_ready{job="rabbitmq-queues",queue="swarmjet.webhooks"}'
-        values: '2+0x15'
-    alert_rule_test:
-      - eval_time: 11m
-        alertname: SwarmJetMessageBacklog
-        exp_alerts:
-          - exp_labels:
-              job: rabbitmq-queues
-              queue: swarmjet.webhooks
-              severity: warning
-              evidence: broker_queue_depth
-              threshold_status: provisional_dev
-            exp_annotations:
-              summary: 'Messages remain ready in swarmjet.webhooks'
-  - interval: 1m
-    input_series:
       - series: 'swarmjet_command_pending'
         values: '2+0x10'
       - series: 'swarmjet_command_oldest_wait_seconds'
@@ -37,7 +21,7 @@ tests:
               evidence: postgres_command_age
               threshold_status: provisional_dev
             exp_annotations:
-              summary: PostgreSQL command outbox has old undelivered commands
+              summary: PostgreSQL has old undelivered commands
       - eval_time: 6m
         alertname: SwarmJetAdmissionWaiting
         exp_alerts:
@@ -71,8 +55,6 @@ tests:
         values: '0+0x5'
       - series: 'swarmjet_state_snapshot_success{job="swarmjet-api"}'
         values: '0+0x5'
-      - series: 'rabbitmq_detailed_queue_messages_ready{job="rabbitmq-queues",queue="swarmjet.commands.dead"}'
-        values: '1+0x5'
     alert_rule_test:
       - eval_time: 3m
         alertname: SwarmJetScrapeTargetDown
@@ -103,14 +85,3 @@ tests:
             exp_annotations:
               summary: SwarmJet backlog snapshot failed
               description: Backlog gauges retain their last values while this is firing.
-      - eval_time: 3m
-        alertname: SwarmJetDeadLetterBacklog
-        exp_alerts:
-          - exp_labels:
-              job: rabbitmq-queues
-              queue: swarmjet.commands.dead
-              severity: warning
-              evidence: broker_queue_depth
-            exp_annotations:
-              summary: Dead-letter messages are waiting in swarmjet.commands.dead
-              description: Inspect message IDs and PostgreSQL receipts before replaying.

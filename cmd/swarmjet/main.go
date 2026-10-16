@@ -33,9 +33,9 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
 	"github.com/yyydddkkk/SwarmJet/internal/initflow"
 	"github.com/yyydddkkk/SwarmJet/internal/integration"
+	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 	"github.com/yyydddkkk/SwarmJet/internal/maintenance"
 	"github.com/yyydddkkk/SwarmJet/internal/managedmeta"
-	"github.com/yyydddkkk/SwarmJet/internal/mq"
 	"github.com/yyydddkkk/SwarmJet/internal/networkconfig"
 	"github.com/yyydddkkk/SwarmJet/internal/nodeenvironment"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
@@ -367,11 +367,6 @@ func run() error {
 		return nil
 	}
 	metrics := observability.New()
-	var readinessBroker *mq.Broker
-	if mode == "serve" {
-		readinessBroker = mq.New(required("RABBITMQ_URL"))
-		defer readinessBroker.Close()
-	}
 	checkReadiness := func(parent context.Context) error {
 		checkCtx, cancel := context.WithTimeout(parent, 3*time.Second)
 		defer cancel()
@@ -380,12 +375,6 @@ func run() error {
 		}
 		if _, err := tc.CheckHealth(checkCtx, &client.CheckHealthRequest{}); err != nil {
 			return err
-		}
-		if mode == "serve" {
-			if readinessBroker == nil {
-				return errors.New("RabbitMQ is not initialized")
-			}
-			return readinessBroker.Ping(checkCtx)
 		}
 		return nil
 	}
@@ -404,7 +393,6 @@ func run() error {
 		return e
 	}
 	if mode == "serve" {
-		broker := readinessBroker
 		adminUser := env("ADMIN_USERNAME", "admin")
 		password := required("ADMIN_PASSWORD")
 		if len(password) < 12 {
@@ -426,40 +414,41 @@ func run() error {
 			staticDir = ""
 		}
 		handler := api.New(s, api.Config{GitHubApp: ghApp, Metrics: metrics, Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: staticDir, SecureCookies: env("SECURE_COOKIES", "false") == "true", SMTP: api.SMTPConfig{Addr: os.Getenv("SMTP_ADDR"), Username: os.Getenv("SMTP_USERNAME"), Password: os.Getenv("SMTP_PASSWORD"), From: os.Getenv("SMTP_FROM"), PublicURL: env("PUBLIC_ORIGIN", "http://localhost:8180")}, ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, RepositoryChanges: repositoryChanges, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), PlatformImage: os.Getenv("PLATFORM_IMAGE"), PlatformVersion: buildVersion, PlatformCommit: buildCommit, MihomoURL: os.Getenv("MIHOMO_ADMIN_URL"), MihomoSecret: os.Getenv("MIHOMO_ADMIN_SECRET"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}, LabelsWake: labelsWake})
-		svc := &service.Service{DataDir: data, Store: s, Metrics: metrics, Temporal: tc, WebhookPublisher: broker, GitLabSigningToken: os.Getenv("GITLAB_WEBHOOK_SIGNING_TOKEN"), CommandPublisher: broker, ResolveCredential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Wake: make(chan struct{}, 1), LabelsWake: labelsWake}
+		svc := &service.Service{DataDir: data, Store: s, Metrics: metrics, Temporal: tc, Webhooks: s, GitLabSigningToken: os.Getenv("GITLAB_WEBHOOK_SIGNING_TOKEN"), ResolveCredential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Wake: make(chan struct{}, 1), LabelsWake: labelsWake}
+		recordJob := func(queue string, err error) {
+			result := "acked"
+			if errors.Is(err, jobs.ErrCancel) {
+				result = "dead_letter"
+			} else if err != nil {
+				result = "retry"
+			}
+			metrics.Message(queue, result)
+		}
+		queue, err := jobs.Open(s.Pool, jobs.Handlers{
+			Webhook: func(ctx context.Context, job jobs.Webhook) error {
+				err := svc.HandleWebhookJob(ctx, job)
+				recordJob("webhook", err)
+				return err
+			},
+			Command: func(ctx context.Context, job jobs.Command) error {
+				err := svc.HandleCommandJob(ctx, job)
+				recordJob("command", err)
+				return err
+			},
+		}, jobs.Config{})
+		if err != nil {
+			return err
+		}
+		s.Jobs = queue
+		if err := queue.RecoverCommands(ctx, s.Pool); err != nil {
+			return err
+		}
+		go func() {
+			if err := queue.Start(ctx); err != nil && ctx.Err() == nil {
+				slog.Error("job queue stopped", "error", err)
+			}
+		}()
 		go svc.Run(ctx)
-		go broker.ConsumeBatch(ctx, mq.WebhookQueue, func(ctx context.Context, bodies [][]byte) []error {
-			results := svc.ProcessWebhookDeliveries(ctx, bodies)
-			for i, err := range results {
-				if errors.Is(err, store.ErrWebhookConflict) || errors.Is(err, service.ErrInvalidWebhookDelivery) {
-					results[i] = mq.Permanent(err)
-				} else if errors.Is(err, store.ErrAdmissionQueueFull) {
-					results[i] = mq.Defer(err)
-				}
-				result := "acked"
-				if results[i] != nil {
-					result = "retry"
-					if errors.Is(results[i], store.ErrWebhookConflict) || errors.Is(results[i], service.ErrInvalidWebhookDelivery) {
-						result = "dead_letter"
-					}
-				}
-				metrics.Message("webhook", result)
-			}
-			return results
-		})
-		go broker.Consume(ctx, mq.CommandQueue, func(ctx context.Context, body []byte) error {
-			err := svc.ConsumeCommand(ctx, body)
-			if errors.Is(err, service.ErrInvalidCommandDelivery) || errors.Is(err, store.ErrNotFound) {
-				metrics.Message("command", "dead_letter")
-				return mq.Permanent(err)
-			}
-			if err != nil {
-				metrics.Message("command", "retry")
-				return mq.Defer(err)
-			}
-			metrics.Message("command", "acked")
-			return nil
-		})
 		go svc.SyncLabels(ctx)
 		a := &pipeline.Activities{Store: s, Credential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient}
 		go svc.Sync(ctx, a)

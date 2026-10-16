@@ -12,17 +12,11 @@ import sys
 
 def initialize(path, example, data_dir, agent_clis):
     if path.exists():
-        if not any(line.startswith("RABBITMQ_PASSWORD=") and line.split("=", 1)[1]
-                   for line in path.read_text().splitlines()):
-            with path.open("a") as stream:
-                stream.write("\nRABBITMQ_PASSWORD=" + secrets.token_hex(24) + "\n")
-            print("已为现有 .env 增加独立 RabbitMQ 密码。", flush=True)
         print("保留已有 .env，不修改密码、密钥或配置。", flush=True)
         return
     password = secrets.token_hex(24)
     values = {
         "POSTGRES_PASSWORD": password,
-        "RABBITMQ_PASSWORD": secrets.token_hex(24),
         "DATABASE_URL": f"postgres://swarmjet:{password}@postgres:5432/swarmjet?sslmode=disable",
         "ADMIN_PASSWORD": secrets.token_hex(24),
         "RUNTIME_ADMIN_SECRET": secrets.token_hex(32),

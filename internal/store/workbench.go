@@ -243,5 +243,8 @@ func (s *Store) EnqueueManualMerge(ctx context.Context, taskID string, command d
 	if err != nil {
 		return mapErr(err)
 	}
+	if err = s.insertCommandJob(ctx, tx, command.ID, taskID); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }

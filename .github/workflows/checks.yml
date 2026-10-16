@@ -65,7 +65,6 @@ jobs:
     env:
       DATABASE_URL: postgres://swarmjet:validation-only@postgres:5432/swarmjet?sslmode=disable
       POSTGRES_PASSWORD: validation-only
-      RABBITMQ_PASSWORD: validation-only-rabbitmq
       ADMIN_PASSWORD: validation-only-password
       RUNTIME_ADMIN_SECRET: validation-only-secret
       SWARMJET_MASTER_KEY: validation-only-master
