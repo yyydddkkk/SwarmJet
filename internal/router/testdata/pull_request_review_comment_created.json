@@ -1,0 +1,65 @@
+{
+  "action": "created",
+  "comment": {
+    "url": "https://api.github.com/repos/acme/hive/pulls/comments/7001",
+    "html_url": "https://github.com/acme/hive/pull/34#discussion_r7001",
+    "id": 7001,
+    "node_id": "PRRC_kwDOAAABc7001",
+    "user": {
+      "login": "reviewer-one",
+      "id": 5150,
+      "type": "User",
+      "site_admin": false
+    },
+    "body": "nit: this helper can take the clock as an argument instead of reading it.",
+    "created_at": "2026-10-15T11:10:00Z",
+    "updated_at": "2026-10-15T11:10:00Z",
+    "author_association": "COLLABORATOR",
+    "path": "internal/retry/retry.go",
+    "commit_id": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567"
+  },
+  "pull_request": {
+    "url": "https://api.github.com/repos/acme/hive/pulls/34",
+    "html_url": "https://github.com/acme/hive/pull/34",
+    "id": 30034,
+    "number": 34,
+    "state": "open",
+    "title": "Make the retry helper deterministic",
+    "user": {
+      "login": "octo-dev",
+      "id": 4242,
+      "type": "User",
+      "site_admin": false
+    },
+    "author_association": "MEMBER",
+    "merged": false,
+    "labels": [],
+    "head": {
+      "label": "acme:swarm/acme-hive/drone-1",
+      "ref": "swarm/acme-hive/drone-1",
+      "sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567"
+    },
+    "base": {
+      "label": "acme:dev",
+      "ref": "dev",
+      "sha": "aa218f56b14c9653891f9e74264a383fa43fefbd"
+    }
+  },
+  "repository": {
+    "id": 1296269,
+    "name": "hive",
+    "full_name": "acme/hive",
+    "html_url": "https://github.com/acme/hive",
+    "owner": {
+      "login": "acme",
+      "id": 991,
+      "type": "Organization"
+    }
+  },
+  "sender": {
+    "login": "reviewer-one",
+    "id": 5150,
+    "type": "User",
+    "site_admin": false
+  }
+}
