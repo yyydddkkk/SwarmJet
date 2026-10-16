@@ -18,15 +18,12 @@ import (
 	"sync"
 	"time"
 
-	"go.temporal.io/api/enums/v1"
-	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/forge"
 	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
 	"github.com/yyydddkkk/SwarmJet/internal/intake"
 	"github.com/yyydddkkk/SwarmJet/internal/labels"
-	"github.com/yyydddkkk/SwarmJet/internal/mq"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"github.com/yyydddkkk/SwarmJet/internal/pipeline"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
@@ -42,21 +39,22 @@ type InitReadiness interface {
 type Service struct {
 	ForgeClient      func(domain.Project, bool) (forge.Client, error)
 	DataDir          string
-	Store            *store.Store
-	Metrics          *observability.Metrics
-	WebhookPublisher interface {
-		Publish(context.Context, string, []byte, string) error
+	Store              *store.Store
+	Metrics            *observability.Metrics
+	Webhooks           interface {
+		AcceptWebhook(context.Context, string, string, string, []byte) error
 	}
-	GitLabSigningToken            string
-	Temporal                      client.Client
-	CommandPublisher              CommandPublisher
+	GitLabSigningToken string
+	Temporal           client.Client
 	ResolveCredential             func(string) (string, error)
 	ProjectCredential             func(domain.Project, bool) (string, error)
 	Initializer                   InitReadiness
 	RequireNode                   bool
 	Wake                          chan struct{}
 	LabelsWake                    chan struct{}
-	scanMu                        sync.Mutex
+	scanMu         sync.Mutex
+	webhookScans   *scanCoalescer
+	scanGroupOnce  sync.Once
 }
 
 func (s *Service) intakeOptions(projectID string, claim bool) intake.Options {
@@ -127,7 +125,6 @@ func (s *Service) client(p domain.Project) (forge.Client, error) {
 }
 
 func (s *Service) Run(ctx context.Context) {
-	go s.runOutbox(ctx)
 	go s.runInbox(ctx)
 	go s.runAdmission(ctx)
 	slow := time.NewTicker(120 * time.Second)
@@ -157,27 +154,6 @@ func (s *Service) runAdmission(ctx context.Context) {
 		}
 		if err != nil && ctx.Err() == nil {
 			slog.Error("task admission", "error", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-		}
-	}
-}
-
-func (s *Service) runOutbox(ctx context.Context) {
-	tick := time.NewTicker(2 * time.Second)
-	defer tick.Stop()
-	for {
-		var err error
-		if s.CommandPublisher != nil {
-			err = s.PublishCommands(ctx, s.CommandPublisher)
-		} else {
-			err = s.Deliver(ctx)
-		}
-		if err != nil && ctx.Err() == nil {
-			slog.Error("outbox delivery", "error", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -271,43 +247,6 @@ func webhookRepository(provider string, payload []byte) (domain.Provider, int64)
 		}
 	}
 	return "", 0
-}
-func (s *Service) Deliver(ctx context.Context) error {
-	pending, e := s.Store.Pending(ctx)
-	if e != nil {
-		return e
-	}
-	var lastErr error
-	for _, item := range pending {
-		if item.Command.Kind == "start" {
-			t, e := s.Store.Task(ctx, item.TaskID)
-			if e != nil {
-				return e
-			}
-			_, e = s.Temporal.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: t.ID, TaskQueue: pipeline.Queue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, pipeline.WorkflowName, t)
-			var started *serviceerror.WorkflowExecutionAlreadyStarted
-			if e != nil && !errors.As(e, &started) {
-				lastErr = e
-				continue
-			}
-		} else {
-			e = s.Temporal.SignalWorkflow(ctx, item.TaskID, "", pipeline.SignalName, item.Command)
-			if e != nil {
-				var gone *serviceerror.NotFound
-				t, readErr := s.Store.Task(ctx, item.TaskID)
-				if errors.As(e, &gone) && readErr == nil && domain.Terminal(t.Stage) {
-					_ = s.Store.Delivered(ctx, item.Command.ID)
-					continue
-				}
-				lastErr = e
-				continue
-			}
-		}
-		if e = s.Store.Delivered(ctx, item.Command.ID); e != nil {
-			return e
-		}
-	}
-	return lastErr
 }
 
 func (s *Service) Webhook(secret string) http.Handler {
@@ -414,7 +353,7 @@ func (s *Service) acceptWebhook(w http.ResponseWriter, r *http.Request, provider
 		http.Error(w, "missing delivery ID", http.StatusBadRequest)
 		return false
 	}
-	if s.WebhookPublisher == nil {
+	if s.Webhooks == nil {
 		http.Error(w, "webhook queue unavailable", http.StatusServiceUnavailable)
 		return false
 	}
@@ -422,20 +361,20 @@ func (s *Service) acceptWebhook(w http.ResponseWriter, r *http.Request, provider
 		http.Error(w, "event type too long", http.StatusBadRequest)
 		return false
 	}
-	message, err := json.Marshal(WebhookMessage{Provider: provider, DeliveryID: id, EventType: eventType, Payload: body})
-	if err != nil {
-		http.Error(w, "invalid webhook", http.StatusBadRequest)
-		return false
-	}
 	publishCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	err = s.WebhookPublisher.Publish(publishCtx, mq.WebhookQueue, message, provider+":"+id)
+	err := s.Webhooks.AcceptWebhook(publishCtx, provider, id, eventType, body)
+	if errors.Is(err, store.ErrWebhookConflict) {
+		slog.Error("webhook delivery ID content mismatch", "provider", provider, "delivery_id", id, "error", err)
+		http.Error(w, "delivery conflict", http.StatusConflict)
+		return false
+	}
 	if err != nil {
-		slog.Error("webhook publish", "provider", provider, "delivery_id", id, "error", err)
+		slog.Error("webhook queue", "provider", provider, "delivery_id", id, "error", err)
 		http.Error(w, "webhook queue unavailable", http.StatusServiceUnavailable)
 		return false
 	}
-	slog.Info("webhook published", "provider", provider, "delivery_id", id)
+	slog.Info("webhook queued", "provider", provider, "delivery_id", id)
 	return true
 }
 func (s *Service) Scan(ctx context.Context) error {

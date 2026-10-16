@@ -22,8 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
@@ -58,7 +60,7 @@ func TestScheduledAdmissionCountsOnlyAssignedTask(t *testing.T) {
 
 func TestGitHubWebhookValidatesBodySignature(t *testing.T) {
 	publisher := &testWebhookPublisher{}
-	service := &Service{WebhookPublisher: publisher}
+	service := &Service{Webhooks: publisher}
 	body := []byte(`{"action":"opened"}`)
 	mac := hmac.New(sha256.New, []byte("secret"))
 	_, _ = mac.Write(body)
@@ -92,7 +94,7 @@ func TestGitLabWebhookValidatesSigningToken(t *testing.T) {
 	key := []byte("gitlab-test-signing-key")
 	token := "whsec_" + base64.StdEncoding.EncodeToString(key)
 	publisher := &testWebhookPublisher{}
-	svc := &Service{WebhookPublisher: publisher, GitLabSigningToken: token}
+	svc := &Service{Webhooks: publisher, GitLabSigningToken: token}
 	body := []byte(`{"object_kind":"issue"}`)
 	id := "signed-delivery"
 	stamp := fmt.Sprint(time.Now().Unix())
@@ -142,7 +144,7 @@ func TestWebhookAuthenticationMethodAndBodyLimit(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			publisher := &testWebhookPublisher{}
-			service := &Service{WebhookPublisher: publisher}
+			service := &Service{Webhooks: publisher}
 			request := httptest.NewRequest(test.method, "/webhooks/gitlab", strings.NewReader(strings.Repeat("x", test.size)))
 			request.Header.Set("X-Gitlab-Token", test.token)
 			request.Header.Set("webhook-id", "delivery-1")
@@ -169,22 +171,26 @@ type testWebhookPublisher struct {
 	err      error
 }
 
-func (p *testWebhookPublisher) Publish(_ context.Context, queue string, body []byte, id string) error {
+func (p *testWebhookPublisher) AcceptWebhook(_ context.Context, provider, id, eventType string, payload []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if queue == "" || id == "" {
+	if provider == "" || id == "" {
 		return errors.New("missing queue or ID")
 	}
 	if p.err != nil {
 		return p.err
 	}
 	p.count++
-	p.messages = append(p.messages, append([]byte(nil), body...))
+	message, err := json.Marshal(WebhookMessage{Provider: provider, DeliveryID: id, EventType: eventType, Payload: payload})
+	if err != nil {
+		return err
+	}
+	p.messages = append(p.messages, message)
 	return nil
 }
 func TestWebhookRequiresStableDeliveryIDAndBrokerConfirmation(t *testing.T) {
 	publisher := &testWebhookPublisher{}
-	svc := &Service{WebhookPublisher: publisher}
+	svc := &Service{Webhooks: publisher}
 	send := func(id string) int {
 		req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", strings.NewReader(`{"object_kind":"issue"}`))
 		req.Header.Set("X-Gitlab-Token", "secret")
@@ -220,26 +226,21 @@ func TestWebhookRequiresStableDeliveryIDAndBrokerConfirmation(t *testing.T) {
 
 func TestWebhookReceiptDeduplicatesAndRejectsContentConflict(t *testing.T) {
 	s := scanTestStore(t)
-	svc := &Service{Store: s}
+	queued := &memoryJobs{}
+	s.Jobs = queued
 	ctx := context.Background()
-	message := WebhookMessage{Provider: "gitlab", DeliveryID: "same-id", EventType: "Issue Hook", Payload: []byte(`{"project":{"id":7}}`)}
-	body, err := json.Marshal(message)
-	if err != nil {
-		t.Fatal(err)
-	}
+	payload := []byte(`{"project":{"id":7}}`)
 	for i := 0; i < 2; i++ {
-		if err := svc.ProcessWebhookDelivery(ctx, body); err != nil {
+		if err := s.AcceptWebhook(ctx, "gitlab", "same-id", "Issue Hook", payload); err != nil {
 			t.Fatal(err)
 		}
 	}
 	var count int
-	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&count); err != nil || count != 1 {
-		t.Fatalf("receipts=%d err=%v", count, err)
+	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&count); err != nil || count != 1 || queued.webhooks != 1 {
+		t.Fatalf("receipts=%d jobs=%d err=%v", count, queued.webhooks, err)
 	}
-	message.Payload = []byte(`{"project":{"id":8}}`)
-	body, _ = json.Marshal(message)
-	if err := svc.ProcessWebhookDelivery(ctx, body); !errors.Is(err, store.ErrWebhookConflict) {
-		t.Fatalf("content conflict=%v", err)
+	if err := s.AcceptWebhook(ctx, "gitlab", "same-id", "Issue Hook", []byte(`{"project":{"id":8}}`)); !errors.Is(err, store.ErrWebhookConflict) || queued.webhooks != 1 {
+		t.Fatalf("content conflict=%v jobs=%d", err, queued.webhooks)
 	}
 }
 
@@ -259,21 +260,27 @@ func TestWebhookReceiptWaitsForSuccessfulScan(t *testing.T) {
 	if _, err := s.SaveProject(ctx, scanProject(remote.URL)); err != nil {
 		t.Fatal(err)
 	}
+	queued := &memoryJobs{}
+	s.Jobs = queued
 	svc := &Service{Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }}
-	body, _ := json.Marshal(WebhookMessage{Provider: "gitlab", DeliveryID: "retry-id", Payload: []byte(`{"project":{"id":7}}`)})
+	payload := []byte(`{"project":{"id":7}}`)
+	if err := s.AcceptWebhook(ctx, "gitlab", "retry-id", "Issue Hook", payload); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("receipt=%d err=%v", count, err)
+	}
+	body, _ := json.Marshal(WebhookMessage{Provider: "gitlab", DeliveryID: "retry-id", Payload: payload})
 	if err := svc.ProcessWebhookDelivery(ctx, body); err == nil {
 		t.Fatal("expected scan failure")
 	}
-	var count int
-	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&count); err != nil || count != 0 {
-		t.Fatalf("premature receipt=%d err=%v", count, err)
+	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("receipt lost after scan failure=%d err=%v", count, err)
 	}
 	fail.Store(false)
 	if err := svc.ProcessWebhookDelivery(ctx, body); err != nil {
 		t.Fatal(err)
-	}
-	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&count); err != nil || count != 1 {
-		t.Fatalf("receipt=%d err=%v", count, err)
 	}
 }
 
@@ -289,10 +296,16 @@ func TestWebhookBatchScansRepositoryOnce(t *testing.T) {
 	if _, err := s.SaveProject(ctx, scanProject(remote.URL)); err != nil {
 		t.Fatal(err)
 	}
+	queued := &memoryJobs{}
+	s.Jobs = queued
 	svc := &Service{Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }}
 	var bodies [][]byte
 	for _, id := range []string{"one", "two", "three"} {
-		body, _ := json.Marshal(WebhookMessage{Provider: "gitlab", DeliveryID: id, Payload: []byte(`{"project":{"id":7}}`)})
+		payload := []byte(`{"project":{"id":7}}`)
+		if err := s.AcceptWebhook(ctx, "gitlab", id, "Issue Hook", payload); err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(WebhookMessage{Provider: "gitlab", DeliveryID: id, Payload: payload})
 		bodies = append(bodies, body)
 	}
 	for _, err := range svc.ProcessWebhookDeliveries(ctx, bodies) {
@@ -411,8 +424,14 @@ func TestQueuedWebhookKeepsDeliveryWhenAdmissionIsFull(t *testing.T) {
 		t.Fatal(err)
 	}
 	grantScanActor(t, s, scanProject(gitlab.URL))
+	queued := &memoryJobs{}
+	s.Jobs = queued
 	svc := &Service{Store: s, RequireNode: true, ResolveCredential: func(string) (string, error) { return "token", nil }}
-	body, _ := json.Marshal(WebhookMessage{Provider: "gitlab", DeliveryID: "queue-admission", EventType: "Issue Hook", Payload: []byte(`{"project":{"id":7}}`)})
+	payload := []byte(`{"project":{"id":7}}`)
+	if err := s.AcceptWebhook(ctx, "gitlab", "queue-admission", "Issue Hook", payload); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(WebhookMessage{Provider: "gitlab", DeliveryID: "queue-admission", EventType: "Issue Hook", Payload: payload})
 	if err := svc.ProcessWebhookDelivery(ctx, body); !errors.Is(err, store.ErrAdmissionQueueFull) {
 		t.Fatalf("admission error=%v", err)
 	}
@@ -421,9 +440,36 @@ func TestQueuedWebhookKeepsDeliveryWhenAdmissionIsFull(t *testing.T) {
 		t.Fatalf("waiting=%d err=%v", page.Counts.Waiting, err)
 	}
 	var receipts int
-	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&receipts); err != nil || receipts != 0 {
-		t.Fatalf("premature receipts=%d err=%v", receipts, err)
+	if err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM webhook_receipts").Scan(&receipts); err != nil || receipts != 1 {
+		t.Fatalf("receipts=%d err=%v", receipts, err)
 	}
+}
+
+type memoryJobs struct {
+	mu       sync.Mutex
+	webhooks int
+	commands int
+	err      error
+}
+
+func (m *memoryJobs) InsertWebhook(context.Context, pgx.Tx, jobs.Webhook) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.err != nil {
+		return m.err
+	}
+	m.webhooks++
+	return nil
+}
+
+func (m *memoryJobs) InsertCommand(context.Context, pgx.Tx, jobs.Command) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.err != nil {
+		return m.err
+	}
+	m.commands++
+	return nil
 }
 
 func TestInboxScansAndRetriesRepositoriesIndependently(t *testing.T) {

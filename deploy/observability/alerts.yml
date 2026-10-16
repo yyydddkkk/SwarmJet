@@ -4,7 +4,7 @@ groups:
   - name: swarmjet-baseline
     rules:
       - alert: SwarmJetScrapeTargetDown
-        expr: up{job=~"swarmjet-api|swarmjet-worker|rabbitmq|rabbitmq-queues|temporal|postgres"} == 0
+        expr: up{job=~"swarmjet-api|swarmjet-worker|temporal|postgres"} == 0
         for: 2m
         labels:
           severity: warning
@@ -29,25 +29,7 @@ groups:
         annotations:
           summary: SwarmJet backlog snapshot failed
           description: 'Backlog gauges retain their last values while this is firing.'
-      - alert: SwarmJetDeadLetterBacklog
-        expr: rabbitmq_detailed_queue_messages_ready{job="rabbitmq-queues",queue=~"swarmjet[.](webhooks|commands)[.]dead"} > 0
-        for: 2m
-        labels:
-          severity: warning
-          evidence: broker_queue_depth
-        annotations:
-          summary: 'Dead-letter messages are waiting in {{ $labels.queue }}'
-          description: 'Inspect message IDs and PostgreSQL receipts before replaying.'
       # The holds below are dev investigation thresholds, not production SLOs.
-      - alert: SwarmJetMessageBacklog
-        expr: rabbitmq_detailed_queue_messages_ready{job="rabbitmq-queues",queue=~"swarmjet[.](webhooks|commands)"} > 0
-        for: 10m
-        labels:
-          severity: warning
-          evidence: broker_queue_depth
-          threshold_status: provisional_dev
-        annotations:
-          summary: 'Messages remain ready in {{ $labels.queue }}'
       - alert: SwarmJetCommandBacklog
         expr: swarmjet_command_pending > 0 and swarmjet_command_oldest_wait_seconds > 60
         for: 5m
@@ -56,7 +38,7 @@ groups:
           evidence: postgres_command_age
           threshold_status: provisional_dev
         annotations:
-          summary: PostgreSQL command outbox has old undelivered commands
+          summary: PostgreSQL has old undelivered commands
       - alert: SwarmJetAdmissionWaiting
         expr: swarmjet_admission_waiting > 0 and swarmjet_admission_oldest_wait_seconds > 300
         for: 5m

@@ -4,7 +4,7 @@ Workflow 决定阶段，Activity 实施 I/O。Activity 重试使用稳定执行 
 
 项目配置按版本保存，Task 固定 Project 快照。ReviewDigest 绑定整组仓库、基线、当前提交及目标分支；ApprovalDigest 仅批准同一摘要。合并请求携带源 SHA，已合并 MR 也要验证源、目标及提交身份。
 
-管理员命令通过持久化 outbox 投递，重复命令不得重复返工或批准。需求歧义是提示，实际障碍才阻断。
+管理员命令与任务变更写在同一个 PostgreSQL 事务里，并在该事务中插入 River Job。重复命令不得重复返工或批准。需求歧义是提示，实际障碍才阻断。
 
 长时间依赖等待按批次 Continue-As-New，携带执行序号、命令去重和等待状态，避免无限增长历史。以后修改已有 Workflow 的决策顺序时，需要使用 Temporal 版本化/patch 机制，并对已保存历史做 replay 验证。
 
@@ -20,11 +20,11 @@ Activity 通过 `internal/execution.AgentBackend` 调用 Agent 的启动、观�
 
 执行后端负责在执行主机上创建启动所需的文件。GitLab CLI 配置、镜像内凭证助手路径由本机后端准备，Activity 只选择当前阶段允许使用的凭证和 GitLab 地址。请求环境含凭证且不参与普通 JSON 序列化；未来远程协议必须单独设计认证及凭证传递，不能直接序列化 `AgentRequest` 后发送，也不能将凭证写入 Temporal 历史。
 
-当前已实现「控制面集中 + 多执行节点、准入后任务固定归属」：`swarmjet node` 在独立 `DATA_DIR` 与 Docker 上提供服务，控制面的 `execution.Pool` 通过带时间戳与 HMAC 的 HTTP 协议调用节点。Webhook 经 RabbitMQ 持久 quorum 队列缓冲，只有发布确认且成功路由后 API 才应答；PostgreSQL 保存 delivery 收据、Task 唯一性与准入状态。消费者手动 ACK，按仓库合并扫描，周期全量扫描负责对账。接单无容量时事件保留待重试，Task 保持 `queued`、`admissionStatus=waiting` 且没有 start 命令；准入事务分配 Node 后才启动 Workflow。节点归属写入 `tasks.node_id` 后不再更改；工作区、Agent、联调、报告读取和任务级退役都按该归属路由。节点失联时任务 blocked 并保留现场，不自动漂移。本机开发仍使用空 `NodeID` 走进程内管理器。
+当前已实现「控制面集中 + 多执行节点、准入后任务固定归属」：`swarmjet node` 在独立 `DATA_DIR` 与 Docker 上提供服务，控制面的 `execution.Pool` 通过带时间戳与 HMAC 的 HTTP 协议调用节点。Webhook 在一个 PostgreSQL 事务里写入 `(provider, delivery ID)` 收据并插入 River Job，成功后 API 才返回 202。同一 ID 且内容相同不再插入 Job；同一 ID 但内容不同返回 409，不覆盖已有收据。Worker 按仓库合并短窗口内的扫描，周期全量扫描负责对账。接单无容量时 Job 延后重试且不消耗尝试次数，Task 保持 `queued`、`admissionStatus=waiting` 且没有 start 命令；准入事务分配 Node 后才启动 Workflow。节点归属写入 `tasks.node_id` 后不再更改；工作区、Agent、联调、报告读取和任务级退役都按该归属路由。节点失联时任务 blocked 并保留现场，不自动漂移。本机开发仍使用空 `NodeID` 走进程内管理器。
 
-RabbitMQ 承接 webhook 和命令投递，不是业务状态来源。Webhook 使用平台 delivery ID；PostgreSQL 的 `(provider, delivery ID)` 收据防止发布确认丢失后重投造成重复接单。同一 ID 携带不同内容应进入死信并告警。命令意图与 Task 变更仍在一个 PostgreSQL 事务中；投递器确认发布后记录发送状态，消费者调用 Temporal 成功后才把命令标记为 delivered。命令 ID、固定 Workflow ID 与 Workflow 内去重共同处理重复投递和确认丢失。RabbitMQ 消息可能至少一次到达，因此所有业务操作都依赖稳定 ID 幂等。
+River 负责任务投递，不是业务状态来源。队列没有独立的条数或字节上限：插入失败（数据库不可用、磁盘满、语句超时）时 API 返回 503，由平台重试；积压留在 `river_job`，由 PostgreSQL 的容量兜底。命令行与 River Job 在同一个事务中提交。Worker 调用 Temporal 成功后才把命令标记为 delivered。非 start 命令会等到固定的 start 命令送达后再发送。命令 ID、固定 Workflow ID 与 Workflow 内去重共同处理重复投递。Job 可能至少一次执行，因此所有业务操作都依赖稳定 ID 幂等。
 
-Webhook、命令与死信分别使用持久化 RabbitMQ 4.3 quorum 队列。主队列配置 `reject-publish` 与条数/字节上限，拒绝发布时 API 返回 503，由平台重试；限额存在并发发布在途消息带来的少量超限可能。重试采用延迟重投；可靠死信转移须启用 quorum queue 的 at-least-once dead-letter 策略。周期对账与消息消费者共用仓库租约。切换期间旧 PostgreSQL inbox 保留并排空，不能删除未处理记录。单节点 RabbitMQ 只验证持久卷与进程重启恢复；生产可用性要求三节点 quorum 集群。
+周期对账与 Job 消费者各自扫描仓库。旧 PostgreSQL inbox 仍会排空，不能删除未处理记录。`commands.published_at` 保留为历史列，不再写入。已有部署升级前应先停写、排空旧队列里尚未写入收据或尚未标记 delivered 的消息，再启动新版本；启动时会为仍未 delivered 的 commands 补插 Job，已完成的命令不会再次送达。
 
 接入自动接管前仍需处理：
 

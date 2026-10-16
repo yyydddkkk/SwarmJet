@@ -38,4 +38,11 @@ func TestMigrateRemovesPlatformUpgradeTaskGate(t *testing.T) {
 	if gates != 0 {
 		t.Fatalf("platform upgrade task gate still installed: %d", gates)
 	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var jobs int
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM river_job`).Scan(&jobs); err != nil {
+		t.Fatal(err)
+	}
 }

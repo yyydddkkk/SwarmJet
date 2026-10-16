@@ -6,11 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"sync"
+	"time"
 
+	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
-// WebhookMessage is the stable payload of the durable webhook queue.
+// WebhookMessage is the stable payload of a webhook scan.
 type WebhookMessage struct {
 	Provider   string `json:"provider"`
 	DeliveryID string `json:"deliveryId"`
@@ -27,14 +31,101 @@ type webhookDeliveryContext struct {
 	deliveryID string
 }
 
-// ProcessWebhookDelivery is called by a manual-ACK RabbitMQ consumer. A nil
-// result means the receipt is durable and the delivery can be ACKed.
+type scanGroup struct {
+	done chan struct{}
+	err  error
+}
+
+// scanCoalescer runs one repository scan for jobs that arrive inside the window.
+type scanCoalescer struct {
+	window time.Duration
+	mu     sync.Mutex
+	groups map[string]*scanGroup
+}
+
+func (c *scanCoalescer) Do(ctx context.Context, key string, fn func(context.Context) error) error {
+	c.mu.Lock()
+	if existing, ok := c.groups[key]; ok {
+		c.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-existing.done:
+			return existing.err
+		}
+	}
+	group := &scanGroup{done: make(chan struct{})}
+	c.groups[key] = group
+	c.mu.Unlock()
+	timer := time.NewTimer(c.window)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		c.finish(key, group, ctx.Err())
+		return ctx.Err()
+	case <-timer.C:
+	}
+	err := fn(ctx)
+	c.finish(key, group, err)
+	return err
+}
+
+func (c *scanCoalescer) finish(key string, group *scanGroup, err error) {
+	c.mu.Lock()
+	group.err = err
+	if c.groups[key] == group {
+		delete(c.groups, key)
+	}
+	c.mu.Unlock()
+	close(group.done)
+}
+
+func (s *Service) repositoryScans() *scanCoalescer {
+	s.scanGroupOnce.Do(func() {
+		s.webhookScans = &scanCoalescer{window: 20 * time.Millisecond, groups: map[string]*scanGroup{}}
+	})
+	return s.webhookScans
+}
+
+// HandleWebhookJob scans the delivery's repository. Concurrent jobs for the
+// same repository share one scan. Admission pressure is retried without
+// consuming a job attempt.
+func (s *Service) HandleWebhookJob(ctx context.Context, job jobs.Webhook) error {
+	if (job.Provider != "gitlab" && job.Provider != "github") || job.DeliveryID == "" || len(job.DeliveryID) > 200 {
+		return fmt.Errorf("%w: %w", jobs.ErrCancel, ErrInvalidWebhookDelivery)
+	}
+	kind, repoID := webhookRepository(job.Provider, job.Payload)
+	key := job.Provider + ":" + strconv.FormatInt(repoID, 10)
+	err := s.repositoryScans().Do(ctx, key, func(ctx context.Context) error {
+		scanCtx := context.WithValue(ctx, webhookDeliveryContextKey{}, webhookDeliveryContext{provider: job.Provider, deliveryID: job.DeliveryID})
+		var scanErr error
+		if repoID == 0 {
+			scanErr = s.Scan(scanCtx)
+		} else {
+			scanErr = s.ScanRepository(scanCtx, kind, repoID)
+		}
+		if errors.Is(scanErr, store.ErrAdmissionQueueFull) {
+			return fmt.Errorf("%w: %w", jobs.ErrSnooze, scanErr)
+		}
+		return scanErr
+	})
+	if errors.Is(err, store.ErrWebhookConflict) || errors.Is(err, ErrInvalidWebhookDelivery) {
+		slog.Error("webhook delivery failed", "provider", job.Provider, "delivery_id", job.DeliveryID, "repository_id", repoID, "error", err)
+	} else if err == nil {
+		slog.Info("webhook delivery processed", "provider", job.Provider, "delivery_id", job.DeliveryID, "repository_id", repoID)
+	} else if !errors.Is(err, jobs.ErrSnooze) {
+		slog.Warn("webhook delivery processing failed", "provider", job.Provider, "delivery_id", job.DeliveryID, "repository_id", repoID, "error", err)
+	}
+	return err
+}
+
+// ProcessWebhookDelivery scans one queued webhook message.
 func (s *Service) ProcessWebhookDelivery(ctx context.Context, body []byte) error {
 	return s.ProcessWebhookDeliveries(ctx, [][]byte{body})[0]
 }
 
-// ProcessWebhookDeliveries coalesces a broker batch into one scan per target.
-// Results align with bodies so the consumer can ACK or retry each delivery.
+// ProcessWebhookDeliveries scans once per repository in the batch. Results
+// align with bodies. Receipts are recorded when the delivery is accepted.
 func (s *Service) ProcessWebhookDeliveries(ctx context.Context, bodies [][]byte) []error {
 	results := make([]error, len(bodies))
 	type target struct {
@@ -70,10 +161,9 @@ func (s *Service) ProcessWebhookDeliveries(ctx context.Context, bodies [][]byte)
 		scanned := false
 		for _, i := range ids {
 			event := events[i]
-			results[i] = s.Store.ProcessWebhook(ctx, event.Provider, event.DeliveryID, event.EventType, event.Payload, func() error {
-				if scanned || scanErr != nil {
-					return scanErr
-				}
+			if scanned || scanErr != nil {
+				results[i] = scanErr
+			} else {
 				scanCtx := context.WithValue(ctx, webhookDeliveryContextKey{}, webhookDeliveryContext{provider: event.Provider, deliveryID: event.DeliveryID})
 				if key.repoID == 0 {
 					scanErr = s.Scan(scanCtx)
@@ -82,11 +172,9 @@ func (s *Service) ProcessWebhookDeliveries(ctx context.Context, bodies [][]byte)
 					scanErr = s.ScanRepository(scanCtx, provider, key.repoID)
 				}
 				scanned = scanErr == nil
-				return scanErr
-			})
-			if errors.Is(results[i], store.ErrWebhookConflict) {
-				slog.Error("webhook delivery ID content mismatch", "provider", event.Provider, "delivery_id", event.DeliveryID, "repository_id", key.repoID, "error", results[i])
-			} else if results[i] == nil {
+				results[i] = scanErr
+			}
+			if results[i] == nil {
 				slog.Info("webhook delivery processed", "provider", event.Provider, "delivery_id", event.DeliveryID, "repository_id", key.repoID)
 			} else {
 				slog.Warn("webhook delivery processing failed", "provider", event.Provider, "delivery_id", event.DeliveryID, "repository_id", key.repoID, "error", results[i])
