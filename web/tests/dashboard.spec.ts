@@ -30,7 +30,7 @@ async function mockDashboard(page: Page) {
       { node: { id: "west", capacity: 2 }, running: 0, online: false },
     ] });
     if (path === "/api/system/checks") return route.fulfill({ json: { checkedAt: "2026-09-28T04:00:00Z", checks: [
-      { id: "registry", status: "ok", message: "镜像仓库拉取认证正常" },
+      { id: "mihomo", status: "ok", message: "控制面已连接 Mihomo 管理服务" },
       { id: "nodes", status: "warning", message: "1 个 Node 心跳中断" },
     ] } });
     if (path === "/api/workbench/issues") return route.fulfill({ json: { items: [], nextCursor: "" } });
@@ -53,7 +53,7 @@ test("new shell uses distinct sidebar icons and routes from workbench to control
   await expect(page.getByText("修复订单重复扣款")).toHaveCount(0);
   await page.getByRole("link", { name: "运行总览", exact: true }).click();
   await expect(page.getByRole("heading", { name: "运行总览" })).toBeVisible();
-  await expect(page.getByText("镜像仓库拉取认证正常")).toBeVisible();
+  await expect(page.getByText("控制面已连接 Mihomo 管理服务")).toBeVisible();
   await expect(page.getByText("1 个 Node 心跳中断")).toBeVisible();
   await page.getByRole("link", { name: "执行资源", exact: true }).click();
   await expect(page.getByRole("heading", { name: "执行资源" })).toBeVisible();

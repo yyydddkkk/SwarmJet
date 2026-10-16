@@ -36,7 +36,6 @@
 .system-section-intro { margin-bottom: 20px; }
 .system-section-intro h2 { margin-bottom: 4px; }
 .system-section-intro p { color: var(--muted); font-size: 13px; margin: 0; max-width: 72ch; }
-.system-registry > .button { margin-bottom: 25px; }
 .system-settings .network-settings { max-width: none; }
 .system-settings .network-settings > .page-head { margin-top: 3px; }
 .system-developer .panel-body { padding: 20px 24px 24px; }

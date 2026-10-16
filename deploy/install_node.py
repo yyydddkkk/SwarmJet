@@ -8,7 +8,6 @@ import platform
 import re
 import shutil
 import socket
-import ssl
 import subprocess
 import sys
 import tempfile
@@ -19,7 +18,7 @@ from urllib.parse import urlparse
 
 
 HERE = Path(__file__).resolve().parent
-IMAGE = re.compile(r"^[a-zA-Z0-9._:-]+/swarmjet/platform@sha256:[0-9a-f]{64}$")
+IMAGE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:/@-]{0,254}$")
 NODE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 SAFE_ENV = re.compile(r"^[A-Za-z0-9_./:@-]+$")
 
@@ -30,14 +29,13 @@ def run(*args, **kwargs):
 
 def read_config(path):
     config = json.loads(path.read_text())
-    required = ("nodeId", "nodeSecret", "image", "dataDir", "advertiseUrl",
-                "controlPlaneUrl", "registryAddress", "registryUser", "registryPassword")
+    required = ("nodeId", "nodeSecret", "image", "dataDir", "advertiseUrl", "controlPlaneUrl")
     if any(not isinstance(config.get(key), str) or not config[key] for key in required):
         raise ValueError("部署包缺少必要配置")
     if not NODE_ID.fullmatch(config["nodeId"]) or not re.fullmatch(r"[0-9a-f]{64}", config["nodeSecret"]):
         raise ValueError("节点身份或注册凭据无效")
-    if not IMAGE.fullmatch(config["image"]) or not config["image"].startswith(config["registryAddress"] + "/"):
-        raise ValueError("程序镜像必须来自配置的内置仓库，并使用摘要")
+    if not IMAGE.fullmatch(config["image"]):
+        raise ValueError("程序镜像地址无效")
     data = Path(config["dataDir"])
     if not data.is_absolute() or not SAFE_ENV.fullmatch(str(data)) or ".." in data.parts:
         raise ValueError("节点数据目录必须是安全的绝对路径")
@@ -47,10 +45,6 @@ def read_config(path):
             raise ValueError(f"{key} 必须是无凭据的 HTTP(S) 入口地址")
         if not SAFE_ENV.fullmatch(config[key]):
             raise ValueError(f"{key} 含不支持的字符")
-    if config["registryAddress"] not in config["image"] or not re.fullmatch(r"[a-zA-Z0-9.:-]+", config["registryAddress"]):
-        raise ValueError("镜像仓库地址无效")
-    if not re.fullmatch(r"[A-Za-z0-9_-]+", config["registryUser"]):
-        raise ValueError("镜像仓库账号无效")
     capacity, port = config.get("capacity", 2), config.get("port", 8092)
     if type(capacity) is not int or not 1 <= capacity <= 128 or type(port) is not int or not 1 <= port <= 65535:
         raise ValueError("容量或端口无效")
@@ -116,18 +110,6 @@ def probe_control_plane(config):
             raise RuntimeError("节点无法访问控制面 /healthz")
 
 
-def probe_registry(config):
-    context = ssl.create_default_context(cafile=str(HERE / "registry-ca.crt"))
-    req = urllib.request.Request("https://" + config["registryAddress"] + "/v2/")
-    try:
-        with urllib.request.urlopen(req, context=context, timeout=8) as response:
-            if response.status not in (200, 401):
-                raise RuntimeError("镜像仓库返回异常状态")
-    except urllib.error.HTTPError as exc:
-        if exc.code != 401:
-            raise
-
-
 def probe_host(config):
     env_file = HERE / "node.env"
     check_port = True
@@ -173,22 +155,13 @@ def install(config):
         install_docker()
     data = Path(config["dataDir"])
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
-    ca_dir = Path("/etc/docker/certs.d") / config["registryAddress"]
-    ca_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(HERE / "registry-ca.crt", ca_dir / "ca.crt")
-    with tempfile.TemporaryDirectory(prefix="swarmjet-docker-") as docker_config:
-        os.chmod(docker_config, 0o700)
-        docker = ["docker", "--config", docker_config]
-        run(*docker, "login", config["registryAddress"], "--username", config["registryUser"], "--password-stdin",
-            input=config["registryPassword"] + "\n", universal_newlines=True, stdout=subprocess.DEVNULL)
-        run(*docker, "pull", config["image"])
+    run("docker", "pull", config["image"])
     values = {
         "COMPOSE_PROJECT_NAME": config.get("projectName", "swarmjet-" + config["nodeId"]),
         "IMAGE": config["image"], "NODE_ID": config["nodeId"], "NODE_SECRET": config["nodeSecret"],
         "NODE_DATA_DIR": config["dataDir"], "NODE_ADVERTISE_URL": config["advertiseUrl"],
         "CONTROL_PLANE_URL": config["controlPlaneUrl"], "NODE_CAPACITY": str(config.get("capacity", 2)),
         "NODE_LISTEN_HOST": config.get("listenHost", "0.0.0.0"), "NODE_PORT": str(config.get("port", 8092)),
-        "NODE_BUNDLE_DIR": str(HERE),
     }
     env_file = HERE / "node.env"
     write_private(env_file, "".join(f"{key}={value}\n" for key, value in values.items()))
@@ -211,7 +184,7 @@ def main():
     parser.add_argument("--check", action="store_true", help="只检查部署包、系统和网络，不修改主机")
     args = parser.parse_args()
     config = read_config(HERE / "node.json")
-    if any(not (HERE / name).is_file() for name in ("registry-ca.crt", "compose.node.yaml", "upgrade_host.py", "Dockerfile.updater")):
+    if not (HERE / "compose.node.yaml").is_file():
         raise RuntimeError("部署包不完整")
     if platform.system() != "Linux":
         raise RuntimeError("Node 仅支持 Linux 主机")
@@ -221,7 +194,6 @@ def main():
             raise RuntimeError("此系统缺少 Docker，且不支持自动安装")
         print("Docker Engine/Compose 尚未就绪，安装时将从 Docker 官方 apt 仓库安装。")
     probe_control_plane(config)
-    probe_registry(config)
     probe_host(config)
     print("部署包和网络检查通过。")
     if not args.check:
@@ -231,6 +203,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, urllib.error.URLError, ssl.SSLError) as exc:
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, urllib.error.URLError) as exc:
         print(f"Node 部署失败：{exc}", file=sys.stderr)
         sys.exit(1)

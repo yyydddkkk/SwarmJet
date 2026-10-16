@@ -18,7 +18,6 @@ type Config = {
   network: NetworkChoice;
   image: string;
 };
-type RegistryImage = { digest: string; reference: string; tags: string[] };
 export type NodeView = {
   node: {
     id: string;
@@ -59,19 +58,14 @@ export default function NodeSettings() {
     { scope: string; status?: number; error?: string }[]
   >([]);
   const [nodes, setNodes] = useState<NodeView[]>([]),
-    [registryImages, setRegistryImages] = useState<RegistryImage[]>([]),
-    [platformImages, setPlatformImages] = useState<RegistryImage[]>([]),
-    [platformError, setPlatformError] = useState(""),
     [platformImage, setPlatformImage] = useState(""),
+    [defaultAgentImage, setDefaultAgentImage] = useState(""),
     [advertiseUrl, setAdvertiseUrl] = useState(""),
     [controlPlaneUrl, setControlPlaneUrl] = useState(""),
     [nodeDataDir, setNodeDataDir] = useState(""),
     [nodePort, setNodePort] = useState(8092),
     [nodeCapacity, setNodeCapacity] = useState(2),
     [bundleNotice, setBundleNotice] = useState(""),
-    [registryError, setRegistryError] = useState(""),
-    [loadingImages, setLoadingImages] = useState(false),
-    [manualImage, setManualImage] = useState(false),
     [draft, setDraft] = useState<Config | null>(null),
     [id, setID] = useState(""),
     [newID, setNewID] = useState(""),
@@ -85,32 +79,12 @@ export default function NodeSettings() {
     setError("");
   });
   const resolvedNodeDataDir = nodeDataDir || `/srv/swarmjet/nodes/${newID || "node-1"}`;
-  async function loadPlatformImages() {
-    try {
-      const result = await api<{ images: RegistryImage[] }>("/registry/platform-images");
-      setPlatformImages(result.images);
-      setPlatformError("");
-      if (!platformImage && result.images.length) setPlatformImage(result.images[0].reference);
-    } catch (e) {
-      setPlatformError((e as Error).message);
-    }
-  }
-  async function loadRegistryImages() {
-    setLoadingImages(true);
-    setRegistryError("");
-    try {
-      const result = await api<{ images: RegistryImage[] }>("/registry/images");
-      setRegistryImages(result.images);
-    } catch (e) {
-      setRegistryError((e as Error).message);
-    } finally {
-      setLoadingImages(false);
-    }
-  }
   useEffect(() => {
     load().catch((e) => setError(e.message));
-    void loadRegistryImages();
-    void loadPlatformImages();
+    api<{ agentImage?: string; platformImage?: string }>("/system").then((system) => {
+      setDefaultAgentImage(system.agentImage || "");
+      setPlatformImage((current) => current || system.platformImage || "");
+    }).catch(() => undefined);
     const t = setInterval(() => load().catch((e) => setError(e.message)), 5000);
     return () => clearInterval(t);
   }, []);
@@ -129,7 +103,6 @@ export default function NodeSettings() {
     setID("");
     setChecks([]);
     setDetailError("");
-    setManualImage(false);
   }
   function edit(n: NodeView) {
     detailGeneration.current += 1;
@@ -147,7 +120,6 @@ export default function NodeSettings() {
     );
     setChecks([]);
     setDetailError("");
-    setManualImage(false);
   }
   async function save() {
     const generation = detailGeneration.current;
@@ -202,7 +174,7 @@ export default function NodeSettings() {
           <ErrorBox error={addError} />
           {bundleNotice && <p role="status">{bundleNotice}</p>}
           <p>
-            下载部署包，在目标服务器检查环境并运行安装脚本。安装包包含节点注册凭据和仓库只读凭据，请作为私密文件保存。新节点默认不接收任务。
+            下载部署包，在目标服务器检查环境并运行安装脚本。安装包包含节点注册凭据，请作为私密文件保存。新节点默认不接收任务。
           </p>
           <Field label="节点 ID">
             <input
@@ -213,17 +185,9 @@ export default function NodeSettings() {
               }}
             />
           </Field>
-          <Field label="程序镜像版本">
-            <select value={platformImage} onChange={(e) => setPlatformImage(e.target.value)}>
-              <option value="">选择已发布的程序镜像</option>
-              {platformImages.map((image) => (
-                <option key={image.digest} value={image.reference}>{image.tags.join("、") || image.digest.slice(0, 19)} · {image.digest.slice(0, 19)}…</option>
-              ))}
-            </select>
+          <Field label="程序镜像" hint="目标服务器从此地址拉取，例如 ghcr.io/owner/swarmjet:v1.2.3。">
+            <input value={platformImage} onChange={(e) => setPlatformImage(e.target.value)} placeholder="ghcr.io/owner/swarmjet:v1.2.3" />
           </Field>
-          <button type="button" onClick={() => void loadPlatformImages()}>刷新程序镜像版本</button>
-          {platformError && <p role="alert">{platformError}</p>}
-          {!platformError && platformImages.length === 0 && <p>仓库中尚无程序镜像。请按部署文档发布；本机原生开发使用 <code>python3 deploy/publish_platform.py --dev --build --tag 版本号</code>。</p>}
           <Field label="Node 内网访问地址" hint="控制面访问 Node 的地址，例如 http://10.0.0.21:8092。">
             <input value={advertiseUrl} onChange={(e) => setAdvertiseUrl(e.target.value)} placeholder="http://10.0.0.21:8092" />
           </Field>
@@ -429,7 +393,7 @@ export default function NodeSettings() {
                     onChange={(network) => setDraft({ ...draft, network })}
                   />
                 </Field>
-                <Field label="额外预加载镜像（每行一个仓库摘要）">
+                <Field label="额外预加载镜像（每行一个镜像地址）">
                   <textarea
                     rows={3}
                     value={(draft.images || []).join("\n")}
@@ -441,40 +405,13 @@ export default function NodeSettings() {
                     }
                   />
                 </Field>
-                <div className="node-image-picker">
-                  <Field label="默认镜像（已发布版本）">
-                    <select
-                      value={manualImage ? "__manual__" : draft.image}
-                      onChange={(e) => {
-                        if (e.target.value === "__manual__") setManualImage(true);
-                        else { setManualImage(false); setDraft({ ...draft, image: e.target.value }); }
-                      }}
-                    >
-                      <option value="">暂不指定镜像</option>
-                      {draft.image && !registryImages.some((image) => image.reference === draft.image) && (
-                        <option value={draft.image} title={draft.image}>当前配置：{draft.image.length > 24 ? `${draft.image.slice(0, 24)}…` : draft.image}</option>
-                      )}
-                      {registryImages.map((image) => (
-                        <option key={image.digest} value={image.reference}>
-                          {image.tags.join("、") || "未命名版本"} · {image.digest.slice(0, 19)}…
-                        </option>
-                      ))}
-                      <option value="__manual__">手动填写镜像摘要…</option>
-                    </select>
-                  </Field>
-                  {registryImages.length === 0 && !registryError && <small>仓库中暂无已发布镜像，可先到镜像管理页构建。</small>}
-                  {registryError && <small role="alert">镜像列表读取失败：{registryError}</small>}
-                  <button type="button" disabled={loadingImages} onClick={() => void loadRegistryImages()}>
-                    {loadingImages ? "读取中…" : "刷新镜像列表"}
-                  </button>
-                  {manualImage && <Field label="手动填写镜像摘要">
-                    <input
-                      placeholder="registry.example.com/swarmjet/agent@sha256:…"
-                      value={draft.image}
-                      onChange={(e) => setDraft({ ...draft, image: e.target.value })}
-                    />
-                  </Field>}
-                </div>
+                <Field label="Agent 镜像" hint="节点拉取此镜像；拉取失败时使用节点上已有的同名镜像。">
+                  <input
+                    placeholder={defaultAgentImage || "ghcr.io/owner/swarmjet/agent:v1.2.3"}
+                    value={draft.image}
+                    onChange={(e) => setDraft({ ...draft, image: e.target.value.trim() })}
+                  />
+                </Field>
               </div>
               <label className="environment-check">
                 <input

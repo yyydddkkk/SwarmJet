@@ -20,27 +20,20 @@ import (
 	"strconv"
 	"strings"
 	"github.com/yyydddkkk/SwarmJet/internal/agentcli"
-	"github.com/yyydddkkk/SwarmJet/internal/imagebuild"
 	"sync"
 	"time"
 )
 
 type DockerRunner func(context.Context, []string, []string) ([]byte, error)
 type Config struct {
-	ConfigureImages        func(*imagebuild.Manager) error
-	ImagesOnly             bool
-	DisableImages          bool
 	DockerNetwork          string
 	Revision               string
-	ImageRunner            imagebuild.Runner
-	PlatformSourceDir      string
 	DataDir, Image, Secret string
 	Env                    map[string]string
 	DockerCommand          DockerRunner
 	TerminalCommand        func(context.Context, []string, []string) *exec.Cmd
 }
 type server struct {
-	imageManager   *imagebuild.Manager
 	cfg            Config
 	dirs           ProfileDirs
 	name, identity string
@@ -59,7 +52,7 @@ func New(cfg Config) http.Handler {
 	sum := sha256.Sum256([]byte(abs))
 	identity := hex.EncodeToString(sum[:12])
 	s := &server{cfg: cfg, dirs: GetProfileDirs(abs), name: "sj-config-" + identity, identity: identity, secret: sha256.Sum256([]byte(cfg.Secret)), terminal: make(chan struct{}, 1), initErr: e}
-	if missingDir || (cfg.Image == "" && !cfg.ImagesOnly) || strings.HasPrefix(cfg.Image, "-") || strings.ContainsAny(abs, ",\n\r") {
+	if missingDir || cfg.Image == "" || strings.HasPrefix(cfg.Image, "-") || strings.ContainsAny(abs, ",\n\r") {
 		s.initErr = errors.New("runtime profile configuration is incomplete")
 	}
 	safe := map[string]string{}
@@ -79,32 +72,15 @@ func New(cfg Config) http.Handler {
 		}
 	}
 	s.cfg.Env = safe
-	if s.initErr == nil && !cfg.DisableImages {
-		s.imageManager, _ = imagebuild.New(cfg.DataDir, cfg.ImageRunner)
-		if s.imageManager != nil && cfg.ConfigureImages != nil {
-			if err := cfg.ConfigureImages(s.imageManager); err != nil {
-				s.initErr = err
-				s.imageManager = nil
-			}
-		}
-	}
 	return s
 }
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.ImagesOnly && !strings.HasPrefix(r.URL.Path, "/images") {
-		writeJSON(w, 404, map[string]string{"error": "构建服务仅提供镜像接口"})
-		return
-	}
 	provided := sha256.Sum256([]byte(r.Header.Get("X-SwarmJet-Runtime-Secret")))
 	if s.cfg.Secret == "" || subtle.ConstantTimeCompare(provided[:], s.secret[:]) != 1 {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "运行环境鉴权失败"})
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	if r.URL.Path == "/images" || strings.HasPrefix(r.URL.Path, "/images/") {
-		s.images(w, r)
-		return
-	}
 	if r.Method != http.MethodGet && !(r.Method == http.MethodPost && (r.URL.Path == "/verify" || r.URL.Path == "/network-test" || r.URL.Path == "/runner-test")) {
 		w.Header().Set("Allow", "GET, POST")
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "不支持此请求方法"})
@@ -238,10 +214,7 @@ func (s *server) inspect(ctx context.Context) (profileContainer, bool, error) {
 	return c, true, nil
 }
 func (s *server) currentImage() (string, error) {
-	if s.cfg.DockerNetwork != "" {
-		return s.cfg.Image, nil
-	}
-	return imagebuild.CurrentImage(s.cfg.DataDir, s.cfg.Image)
+	return s.cfg.Image, nil
 }
 func (s *server) image(ctx context.Context) (string, error) {
 	configured, e := s.currentImage()

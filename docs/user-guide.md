@@ -29,7 +29,7 @@ projects:
 
 ## 选择 Agent
 
-管理员在“执行器环境”中启用可用的 Agent，项目再选择一个默认 Agent。Agent CLI 必须已安装在配置终端和任务使用的镜像中；在页面勾选启用不会安装软件。执行器镜像的构建、分发与回退见[部署指南](../deploy/README.md)和[仓库与构建服务](registry.md)。
+管理员在“执行器环境”中启用可用的 Agent，项目再选择一个默认 Agent。Agent CLI 必须已安装在配置终端和任务使用的镜像中；在页面勾选启用不会安装软件。Agent 镜像的来源与节点配置见[部署指南](../deploy/README.md#agent-镜像与跨机分发)。
 
 Issue 可以添加一个 `agent:opencode`、`agent:codex`、`agent:dst`、`agent:agy` 或 `agent:claude` 标签，覆盖项目默认 Agent。多个标签、未知 Agent 或未启用 Agent 会被拒绝接单，修正后轮询重试。Agent 标签只接受 Agent ID，不接受模型名称。任务接单后执行器固定，不因后续标签或启用列表变化而切换。
 

@@ -20,7 +20,7 @@ type Operations = {
 type Check = { id: string; status: "ok" | "warning" | "error" | "unavailable"; message: string };
 type CheckResult = { checks: Check[]; checkedAt: string };
 
-const checkNames: Record<string, string> = { registry: "镜像仓库", mihomo: "代理管理连接", nodes: "Node 心跳" };
+const checkNames: Record<string, string> = { mihomo: "代理管理连接", nodes: "Node 心跳" };
 const checkStates: Record<Check["status"], string> = { ok: "正常", warning: "需检查", error: "连接失败", unavailable: "未配置" };
 const taskLink = (task: Task) => `#/tasks/${encodeURIComponent(task.id)}`;
 const workbenchLink = (path: string, projectId: string) => `#${path}${projectId ? `${path.includes("?") ? "&" : "?"}project=${encodeURIComponent(projectId)}` : ""}`;
@@ -125,5 +125,5 @@ function Metric({ label, value, hint, warning }: { label: string; value?: number
 }
 
 export function ResourcesOverview() {
-  return <div className="dashboard-page resources-overview"><div className="page-head"><div><h1>执行资源</h1><p>配置执行节点、Runner 环境和所需镜像。</p></div></div><div className="resource-links"><a href="#/nodes"><Icon name="nodes" /><strong>执行节点</strong><span>查看容量、心跳、镜像就绪情况和节点配置。</span><small>管理 Node <Icon name="arrow" /></small></a><a href="#/runtime"><Icon name="runtime" /><strong>Runner 环境</strong><span>启用 Agent、检查 CLI 与节点上的执行环境。</span><small>管理 Runner <Icon name="arrow" /></small></a><a href="#/images"><Icon name="images" /><strong>镜像管理</strong><span>构建、分发和回退 Runner 与平台镜像。</span><small>管理镜像 <Icon name="arrow" /></small></a></div></div>;
+  return <div className="dashboard-page resources-overview"><div className="page-head"><div><h1>执行资源</h1><p>配置执行节点和 Runner 环境。</p></div></div><div className="resource-links"><a href="#/nodes"><Icon name="nodes" /><strong>执行节点</strong><span>查看容量、心跳、镜像就绪情况和节点配置。</span><small>管理 Node <Icon name="arrow" /></small></a><a href="#/runtime"><Icon name="runtime" /><strong>Runner 环境</strong><span>启用 Agent、检查 CLI 与节点上的执行环境。</span><small>管理 Runner <Icon name="arrow" /></small></a></div></div>;
 }

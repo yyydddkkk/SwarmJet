@@ -62,7 +62,9 @@ func (c NetworkChoice) Validate() error {
 	return nil
 }
 
-var RepositoryDigest = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[a-f0-9]{64}$`)
+// ImageReference accepts a tag or digest reference, such as
+// ghcr.io/owner/swarmjet/agent:v1.2.3 or a locally built swarmjet-agent:local.
+var ImageReference = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/@-]{0,254}$`)
 
 type NodeConfig struct {
 	Images    []string      `json:"images,omitempty"`
@@ -83,8 +85,8 @@ func (c NodeConfig) Validate() error {
 		return fmt.Errorf("最多预加载 20 个额外镜像")
 	}
 	for _, ref := range c.Images {
-		if !RepositoryDigest.MatchString(ref) {
-			return fmt.Errorf("额外镜像必须使用仓库摘要")
+		if !ImageReference.MatchString(ref) {
+			return fmt.Errorf("额外镜像地址无效")
 		}
 	}
 	if c.MemoryMB < 0 || c.MemoryMB > 1048576 || c.CPUs < 0 || c.CPUs > 1024 || c.PidsLimit < 0 || c.PidsLimit > 65536 {
@@ -93,8 +95,8 @@ func (c NodeConfig) Validate() error {
 	if c.Capacity < 1 || c.Capacity > 128 {
 		return fmt.Errorf("节点容量应在 1–128 之间")
 	}
-	if c.Image != "" && !RepositoryDigest.MatchString(c.Image) {
-		return fmt.Errorf("节点镜像必须是仓库地址@sha256:摘要")
+	if c.Image != "" && !ImageReference.MatchString(c.Image) {
+		return fmt.Errorf("节点镜像地址无效")
 	}
 	return c.Network.Validate()
 }

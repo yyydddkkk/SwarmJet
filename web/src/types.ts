@@ -202,7 +202,7 @@ export interface Task {
   dependencyTasks?: Record<string, string>;
   id: string;
   admissionStatus?: "waiting" | "assigned";
-  admissionBackend?: "local" | "node" | "kubernetes";
+  admissionBackend?: "local" | "node";
   executionPool?: string;
   authorityVersion?: number;
   project: Project;

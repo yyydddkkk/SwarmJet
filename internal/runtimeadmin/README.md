@@ -32,22 +32,8 @@ Use device/browser authorization supported by the installed CLI; for example, Co
 Opt-in real Docker validation uses only a new temporary profile: `SWARMJET_RUNTIME_IMAGE=swarmjet-agent:config-ui go test ./internal/runtimeadmin -run TestActualDockerTerminal -v`. It verifies actual OpenCode/Codex launch, PTY input/output and resize, disabled history, disconnect shutdown, and profile-file persistence across reconnects, then removes only its owned setup container and temporary directory. It does not log in, query paid models, or read real authentication.
 
 
-## Agent image management
+## Node environments
 
-Authenticated routes under `/images` are proxied by `/api/runtime/images` in single-host mode:
-
-- `GET /images`: draft, parameter catalog, build history, active image and deployment fallback. Does not start a build or a CLI.
-- `PUT /images/config`: validate and persist a recipe.
-- `POST /images/builds`: validate/save the supplied recipe, snapshot it and asynchronously build with the Worker's Docker daemon; returns 202.
-- `POST /images/import`: inspect `{reference}` in local Docker and record an immutable ID, without pulling or activating.
-- `GET /images/builds/{id}/log`: bounded build log.
-- `POST /images/builds/{id}/cancel`: cancel only the current owned build.
-- `POST /images/builds/{id}/activate`: require a successful record, recheck its immutable ID, then atomically save active image metadata. Returns 409 while a setup terminal is connected.
-
-`internal/imagebuild` owns build persistence and lifecycle. Its injected Runner permits tests without Docker builds or models. The build context is embedded in the Worker binary and includes only the Agent Dockerfile and installation/askpass scripts. Recipes contain no deployment environment or credential values. One management Worker owns an image-manager directory. Restarted builds are interrupted rather than silently retried. The local control plane reads the shared active image file only at task acceptance; running tasks retain their original project snapshots.
-
-## Dedicated builder and node environments
-
-`swarmjet builder` owns image metadata through PostgreSQL and a session advisory lock. It connects to independently managed BuildKit through a Unix socket (or authenticated remote endpoint) and pushes immutable registry references. `ImagesOnly` disables terminal routes on the builder; `DisableImages` prevents ordinary Workers and Nodes from constructing competing managers. Legacy local management remains available without BUILDER_ADMIN_URL.
+The configuration terminal uses the deployment `AGENT_IMAGE`. Images are not built here; Nodes pull the image named in their configuration.
 
 Node runtime handlers use the Node's applied image and network revision. Open terminal requests pin their handler; after they close, a changed revision recreates the configuration container. Proxy variables are included, including explicit empty values for direct mode. Node configuration files remain local; task profiles are private snapshots.

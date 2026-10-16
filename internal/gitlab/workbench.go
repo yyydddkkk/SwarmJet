@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/yyydddkkk/SwarmJet/internal/observability"
 )
 
 // Workbench records intentionally mirror GitLab's live response. No issue or MR
@@ -286,8 +285,6 @@ func (c *Client) WorkbenchUpload(ctx context.Context, projectID int64, filename 
 	}
 	req.Header.Set("PRIVATE-TOKEN", c.token)
 	req.Header.Set("Content-Type", w.FormDataContentType())
-	req, span := observability.TraceOutboundHTTP(req, "gitlab")
-	defer span.End()
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err

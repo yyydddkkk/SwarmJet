@@ -473,7 +473,7 @@ export default function MihomoSettings({
               <details className="mihomo-section">
                 <summary>添加到平台网络配置</summary>
                 <p>
-                  创建后可在 BuildKit 和 Node 中选择；不会自动改动平台默认代理。
+                  创建后可在 Node 中选择；不会自动改动平台默认代理。
                 </p>
                 <Field label="构建服务与节点可达的代理入口">
                   <input

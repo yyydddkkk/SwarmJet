@@ -1,16 +1,34 @@
 package runtimeadmin
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"github.com/yyydddkkk/SwarmJet/internal/networkconfig"
 )
 
+func decodeJSONRequest(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if err := d.Decode(v); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "请求 JSON 无效"})
+		return false
+	}
+	var extra any
+	if d.Decode(&extra) != io.EOF {
+		writeJSON(w, 400, map[string]string{"error": "请求只能包含一个 JSON 对象"})
+		return false
+	}
+	return true
+}
+
 func (s *server) checkNetwork(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Target string `json:"target"`
 	}
-	if !decodeImageRequest(w, r, &req) {
+	if !decodeJSONRequest(w, r, &req) {
 		return
 	}
 	if e := networkconfig.ValidateTarget(req.Target); e != nil {

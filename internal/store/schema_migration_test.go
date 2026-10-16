@@ -27,3 +27,15 @@ func TestMigrateRepairsVersionTwoNodesWithoutProtocolVersion(t *testing.T) {
 		t.Fatalf("statuses=%+v err=%v", statuses, err)
 	}
 }
+
+func TestMigrateRemovesPlatformUpgradeTaskGate(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	var gates int
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM pg_trigger WHERE tgname='platform_upgrade_task_gate'`).Scan(&gates); err != nil {
+		t.Fatal(err)
+	}
+	if gates != 0 {
+		t.Fatalf("platform upgrade task gate still installed: %d", gates)
+	}
+}

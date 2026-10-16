@@ -168,7 +168,7 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 	if err != nil {
 		result = "error"
 	}
-	slog.Info("task activity step finished", "task_id", in.Task.ID, "execution_id", in.ExecutionID, "phase", in.Phase, "result", result, "duration_ms", time.Since(start).Milliseconds(), "trace_id", observability.TraceID(ctx))
+	slog.Info("task activity step finished", "task_id", in.Task.ID, "execution_id", in.ExecutionID, "phase", in.Phase, "result", result, "duration_ms", time.Since(start).Milliseconds())
 	return out, err
 }
 

@@ -1,0 +1,40 @@
+# Combine with compose.yaml to run tasks on an execution node on this host.
+# The node pulls the Agent image chosen in Node management, or uses a local
+# image of the same name such as swarmjet-agent:local.
+services:
+  api:
+    environment:
+      NODE_SECRET: ${NODE_SECRET:-${RUNTIME_ADMIN_SECRET}}
+      USE_EXECUTION_NODES: 'true'
+  worker:
+    environment:
+      NODE_SECRET: ${NODE_SECRET:-${RUNTIME_ADMIN_SECRET}}
+      USE_EXECUTION_NODES: 'true'
+  local-node:
+    image: ${IMAGE:-swarmjet:local}
+    restart: unless-stopped
+    command: [node]
+    environment:
+      NODE_ID: ${LOCAL_NODE_ID:-local}
+      NODE_SECRET: ${NODE_SECRET:-${RUNTIME_ADMIN_SECRET}}
+      CONTROL_PLANE_URL: http://api:8080
+      NODE_ADVERTISE_URL: http://local-node:8092
+      NODE_LISTEN_ADDRESS: :8092
+      NODE_CAPACITY: ${TASK_CONCURRENCY:-2}
+      PLATFORM_IMAGE: ${IMAGE:-swarmjet:local}
+      DATA_DIR: ${DATA_DIR:?Set DATA_DIR}/local-node
+      AGENT_ENV_ALLOWLIST: ${AGENT_ENV_ALLOWLIST:-OPENAI_API_KEY,CODEX_API_KEY,ANTHROPIC_API_KEY,CLAUDE_CODE_OAUTH_TOKEN,DEEPSEEK_API_KEY,GEMINI_API_KEY,AGY_ADC_AUTH,GOOGLE_GEMINI_BASE_URL,OPENCODE_CONFIG_CONTENT}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CODEX_API_KEY: ${CODEX_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AGY_ADC_AUTH: ${AGY_ADC_AUTH:-}
+      GOOGLE_GEMINI_BASE_URL: ${GOOGLE_GEMINI_BASE_URL:-}
+      OPENCODE_CONFIG_CONTENT: ${OPENCODE_CONFIG_CONTENT:-}
+    volumes:
+      - ${DATA_DIR:?Set DATA_DIR}/local-node:${DATA_DIR}/local-node
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      api: {condition: service_healthy}

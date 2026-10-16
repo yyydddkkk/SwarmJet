@@ -1,5 +1,5 @@
-// Package buildproxy gives a persistent BuildKit daemon the network profile of
-// the currently serialized build. Its listener is private to the build network.
+// Package buildproxy forwards HTTP(S) traffic through a selected proxy profile.
+// The Mihomo gateway uses it; its listener is private to the deployment network.
 package buildproxy
 
 import (

@@ -17,10 +17,9 @@ class NodeInstallerTests(unittest.TestCase):
     def config(self):
         return {
             "nodeId": "remote1", "nodeSecret": "a" * 64,
-            "image": "10.0.0.20:5443/swarmjet/platform@sha256:" + "b" * 64,
+            "image": "ghcr.io/example/swarmjet:v1.2.3",
             "dataDir": "/srv/swarmjet/node-data", "advertiseUrl": "http://10.0.0.21:8092",
-            "controlPlaneUrl": "http://10.0.0.20:8180", "registryAddress": "10.0.0.20:5443",
-            "registryUser": "reader", "registryPassword": "private-password",
+            "controlPlaneUrl": "http://10.0.0.20:8180",
             "capacity": 2, "port": 8092, "listenHost": "0.0.0.0",
         }
 
@@ -30,12 +29,12 @@ class NodeInstallerTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             return installer.read_config(path)
 
-    def test_accepts_pinned_builtin_registry_image(self):
+    def test_accepts_public_platform_image(self):
         self.assertEqual(self.read(self.config())["nodeId"], "remote1")
 
-    def test_rejects_wrong_registry_and_unsafe_env_values(self):
+    def test_rejects_unsafe_image_and_env_values(self):
         for key, value in [
-            ("image", "other.example/swarmjet/platform@sha256:" + "b" * 64),
+            ("image", "ghcr.io/example/swarmjet:v1 --privileged"),
             ("dataDir", "/srv/swarmjet/../other"),
             ("advertiseUrl", "http://user:password@10.0.0.21:8092"),
             ("controlPlaneUrl", "http://10.0.0.20:8180/other"),

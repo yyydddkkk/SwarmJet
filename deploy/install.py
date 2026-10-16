@@ -2,34 +2,12 @@
 """Bootstrap a single-host source deployment using the existing Compose files."""
 import argparse
 import json
-import importlib.util
 import os
 from pathlib import Path
 import secrets
 import shutil
 import subprocess
 import sys
-
-
-def lan_host():
-    route = subprocess.run(["ip", "-4", "route", "show", "table", "main", "default"],
-                           check=True, text=True, capture_output=True).stdout.split()
-    if "dev" not in route:
-        raise RuntimeError("无法确定局域网网卡；请传入 --registry-host")
-    device = route[route.index("dev") + 1]
-    addresses = subprocess.run(["ip", "-o", "-4", "addr", "show", "dev", device],
-                               check=True, text=True, capture_output=True).stdout.split()
-    if "inet" not in addresses:
-        raise RuntimeError("无法确定局域网 IPv4；请传入 --registry-host")
-    return addresses[addresses.index("inet") + 1].split("/")[0]
-
-
-def setup_registry(root, host, env_file):
-    source = Path(__file__).resolve().parent / "registry_setup.py"
-    spec = importlib.util.spec_from_file_location("registry_setup", source)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    module.setup(root, host, 5443, env_file)
 
 
 def initialize(path, example, data_dir, agent_clis):
@@ -39,17 +17,7 @@ def initialize(path, example, data_dir, agent_clis):
             with path.open("a") as stream:
                 stream.write("\nRABBITMQ_PASSWORD=" + secrets.token_hex(24) + "\n")
             print("已为现有 .env 增加独立 RabbitMQ 密码。", flush=True)
-        values = dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
-        additions = {}
-        if not values.get("UPDATER_SECRET"):
-            additions["UPDATER_SECRET"] = secrets.token_hex(32)
-        if not values.get("UPDATER_DEPLOY_DIR"):
-            additions["UPDATER_DEPLOY_DIR"] = str(path.parent.resolve())
-        if additions:
-            with path.open("a") as stream:
-                stream.write("".join(f"\n{k}={v}" for k, v in additions.items()) + "\n")
-        else:
-            print("保留已有 .env，不修改密码、密钥或配置。", flush=True)
+        print("保留已有 .env，不修改密码、密钥或配置。", flush=True)
         return
     password = secrets.token_hex(24)
     values = {
@@ -60,8 +28,6 @@ def initialize(path, example, data_dir, agent_clis):
         "RUNTIME_ADMIN_SECRET": secrets.token_hex(32),
         "NODE_SECRET": secrets.token_hex(32),
         "SWARMJET_MASTER_KEY": secrets.token_hex(32),
-        "UPDATER_SECRET": secrets.token_hex(32),
-        "UPDATER_DEPLOY_DIR": str(path.parent.resolve()),
         "DATA_DIR": data_dir,
         "AGENT_CLIS": agent_clis,
         "INIT_VERIFY_IMAGE": "swarmjet-agent:local",
@@ -86,7 +52,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", default="/srv/swarmjet/data", help="首次生成配置时的数据目录")
     parser.add_argument("--agent-clis", default="opencode", help="首次安装的 CLI，如 opencode,codex,claude")
-    parser.add_argument("--registry-host", help="仓库对局域网节点公开的固定 IPv4 地址")
     args = parser.parse_args()
     if not Path(args.data_dir).is_absolute() or any(c in args.data_dir for c in "\r\n$#'\"\\ \t"):
         parser.error("--data-dir 必须是无空白或 dotenv 特殊字符的绝对路径")
@@ -109,16 +74,8 @@ def main():
     if endpoint != "unix:///var/run/docker.sock":
         raise RuntimeError("此部署需要本机 /var/run/docker.sock，请使用本机 Docker context。")
     initialize(directory / ".env", directory / ".env.example", args.data_dir, args.agent_clis)
-    values = dict(line.split("=", 1) for line in (directory / ".env").read_text().splitlines()
-                  if line and not line.startswith("#") and "=" in line)
-    registry_env = directory / ".env.registry"
-    existing = dict(line.split("=", 1) for line in registry_env.read_text().splitlines()
-                    if "=" in line) if registry_env.exists() else {}
-    host = args.registry_host or existing.get("REGISTRY_BIND_HOST") or lan_host()
-    setup_registry(Path(values["DATA_DIR"]) / "registry-config", host, registry_env)
     compose = ["docker", "compose", "--env-file", str(directory / ".env"),
-               "--env-file", str(registry_env), "-f", "compose.yaml", "-f", "compose.build.yaml",
-               "-f", "compose.builder.yaml", "-f", "compose.registry.yaml"]
+               "-f", "compose.yaml", "-f", "compose.build.yaml", "-f", "compose.local-node.yaml"]
     override = directory / "compose.override.yaml"
     if override.exists():
         compose += ["-f", str(override)]
@@ -147,6 +104,7 @@ def main():
     print(f"\n部署完成：{api_env['PUBLIC_ORIGIN']}")
     print(f"管理员账号：{api_env['ADMIN_USERNAME']}；密码保存在 {directory / '.env'} 的 ADMIN_PASSWORD。")
     print("默认仅监听本机。远程访问：ssh -N -L 8180:127.0.0.1:8180 用户名@服务器")
+    print("本机 Node 默认使用刚构建的 swarmjet-agent:local；可在 Node 管理中改为 GHCR 上的 Agent 镜像。")
     print("登录后启用 Agent、配置模型认证并添加 GitLab 项目；项目初始化验证通过后才能接单。")
 
 

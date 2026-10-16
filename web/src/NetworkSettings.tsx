@@ -4,7 +4,7 @@ import { api } from "./api";
 import { randomId } from "./ids";
 import { ConfirmDialog, ErrorBox, Field } from "./ui";
 import { useToast } from "./ToastProvider";
-import type { NetworkChoice, NetworkProfile } from "./NetworkSelect";
+import type { NetworkProfile } from "./NetworkSelect";
 import "./settings-page.css";
 import "./network-settings.css";
 const blank = (): NetworkProfile => ({
@@ -25,7 +25,6 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
   const editorGeneration = useRef(0);
   const [profiles, setProfiles] = useState<NetworkProfile[]>([]),
     [defaultId, setDefault] = useState(""),
-    [buildkitNetwork, setBuildkitNetwork] = useState<NetworkChoice>({ mode: "default" }),
     [draft, setDraft] = useState<NetworkProfile | null>(null),
     [baseline, setBaseline] = useState<NetworkProfile | null>(null),
     [password, setPassword] = useState(""),
@@ -40,8 +39,7 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
       running?: boolean;
       active?: string;
     } | null>(null),
-    [busy, setBusy] = useState(false),
-    [buildkitBusy, setBuildkitBusy] = useState(false);
+    [busy, setBusy] = useState(false);
   const load = useCallback(() =>
     api<{ profiles: NetworkProfile[]; defaultId: string }>("/networks").then(
       (v) => {
@@ -56,29 +54,10 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
   }) => setMihomoStatus(status), []);
   useEffect(() => {
     void load().catch((e) => setPageError(e.message));
-    void api<NetworkChoice>("/networks/buildkit-default")
-      .then(setBuildkitNetwork)
-      .catch((e) => setPageError(e.message));
     void api<{ enabled: boolean; running?: boolean; active?: string }>("/mihomo/status")
       .then(updateMihomoStatus)
       .catch(() => {});
   }, [load, updateMihomoStatus]);
-  async function updateBuildkitNetwork(value: string) {
-    const network: NetworkChoice = value === "default" || value === "direct"
-      ? { mode: value }
-      : { mode: "profile", id: value };
-    setBuildkitBusy(true);
-    setPageError("");
-    try {
-      const saved = await api<NetworkChoice>("/networks/buildkit-default", "PUT", network);
-      setBuildkitNetwork(saved);
-      toast.success("BuildKit 默认出口已更新，后续构建将使用新配置。");
-    } catch (e) {
-      setPageError((e as Error).message);
-    } finally {
-      setBuildkitBusy(false);
-    }
-  }
   useEffect(() => {
     const dialog = profileRef.current;
     if (draft && !dialog?.open) dialog?.showModal();
@@ -150,8 +129,6 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
     try {
       await api<void>(`/networks?id=${encodeURIComponent(draft.id)}&version=${draft.version}`, "DELETE");
       await load();
-      if (buildkitNetwork.mode === "profile" && buildkitNetwork.id === draft.id)
-        setBuildkitNetwork({ mode: "default" });
       if (editorGeneration.current === generation) {
         setConfirmDelete(false);
         profileRef.current?.close();
@@ -187,7 +164,7 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
         <div className="panel-body">
           <div>
             <h2 id="network-default-heading">平台默认出口</h2>
-            <p>选择“使用平台默认”的节点，以及设置为继承的 BuildKit 构建会使用此配置。更改只影响后续任务或构建。</p>
+            <p>选择“使用平台默认”的节点会使用此配置。更改只影响后续任务。</p>
           </div>
           <Field label="默认网络">
             <select
@@ -204,27 +181,6 @@ export default function NetworkSettings({ embedded = false }: { embedded?: boole
               }}
             >
               <option value="">直连</option>
-              {profiles.filter((p) => !p.revoked).map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </Field>
-        </div>
-      </section>
-      <section className="panel network-default" aria-labelledby="network-buildkit-heading">
-        <div className="panel-body">
-          <div>
-            <h2 id="network-buildkit-heading">BuildKit 默认出口</h2>
-            <p>用于平台发布构建和选择“默认”的 Agent 镜像构建，包括 GitHub 标签拉取及 Dockerfile RUN 中的 apt、npm、Go 下载。Agent 构建显式选择的网络配置优先。更改只影响后续构建。</p>
-          </div>
-          <Field label="BuildKit 默认网络">
-            <select
-              value={buildkitNetwork.mode === "profile" ? buildkitNetwork.id || "default" : buildkitNetwork.mode}
-              disabled={buildkitBusy}
-              onChange={(e) => void updateBuildkitNetwork(e.target.value)}
-            >
-              <option value="default">继承平台默认</option>
-              <option value="direct">直连</option>
               {profiles.filter((p) => !p.revoked).map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}

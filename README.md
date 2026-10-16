@@ -8,7 +8,7 @@ SwarmJet 是一个可自托管的 AI 开发任务平台。它从 GitLab 或 GitH
 - **可恢复的执行流程**：使用 Temporal 编排开发、验证、审查和合并；任务状态和操作记录持久化。
 - **可选的 Agent 与检查**：支持 OpenCode、Codex、DeepSeek Harness TUI（dst）、Antigravity（agy）和 Claude Code；项目可配置独立审查、额外验收与自动合并。
 - **独立执行环境**：每轮任务拥有私有 Git 工作区和角色会话；可在单机运行，也可分配给独立执行节点。
-- **团队管理**：提供成员与项目权限、连接管理、执行器镜像管理和人工操作入口。
+- **团队管理**：提供成员与项目权限、连接管理、执行节点管理和人工操作入口。
 
 平台负责协调任务和记录结果；仓库、Issue、MR/PR、CI 与分支规则仍由 GitLab 或 GitHub 管理。默认部署方式是单机 Docker Compose。
 

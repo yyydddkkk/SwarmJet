@@ -24,9 +24,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
-	"github.com/yyydddkkk/SwarmJet/internal/imagebuild"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
-	"github.com/yyydddkkk/SwarmJet/internal/pipeline"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
@@ -55,19 +53,6 @@ func TestScheduledAdmissionCountsOnlyAssignedTask(t *testing.T) {
 	metrics.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if !strings.Contains(response.Body.String(), `swarmjet_admitted_tasks_total{backend="local_or_node"} 1`) {
 		t.Fatalf("immediate admission count missing: %s", response.Body.String())
-	}
-}
-
-func TestWorkflowRouteSeparatesKubernetesWorker(t *testing.T) {
-	for _, tc := range []struct{ backend, name, queue string }{
-		{"local", pipeline.WorkflowName, pipeline.Queue},
-		{"node", pipeline.WorkflowName, pipeline.Queue},
-		{"kubernetes", pipeline.KubernetesWorkflowName, pipeline.KubernetesQueue},
-	} {
-		name, queue := workflowRoute(domain.Task{AdmissionBackend: tc.backend})
-		if name != tc.name || queue != tc.queue {
-			t.Fatalf("%s routed to %s/%s", tc.backend, name, queue)
-		}
 	}
 }
 
@@ -685,23 +670,7 @@ func TestScanRejectsAgentConflictWithoutClaimAndFreezesSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	grantScanActor(t, s, p)
-	imageDir := t.TempDir()
-	digest := "sha256:" + strings.Repeat("a", 64)
-	images, err := imagebuild.New(imageDir, func(ctx context.Context, args []string, out io.Writer) error {
-		_, err := io.WriteString(out, digest)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	image, err := images.Import(ctx, "agent:configured")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = images.Activate(ctx, image.ID); err != nil {
-		t.Fatal(err)
-	}
-	svc := &Service{DataDir: imageDir, Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }}
+	svc := &Service{DataDir: t.TempDir(), Store: s, ResolveCredential: func(string) (string, error) { return "token", nil }}
 	if err := svc.Scan(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -718,8 +687,8 @@ func TestScanRejectsAgentConflictWithoutClaimAndFreezesSelection(t *testing.T) {
 	if err != nil || len(tasks) != 1 {
 		t.Fatal(tasks, err)
 	}
-	if tasks[0].Project.Development.Image != digest || tasks[0].Project.Review.Image != digest {
-		t.Fatal("active image was not captured at acceptance")
+	if tasks[0].Project.Development.Image != p.Development.Image || tasks[0].Project.Review.Image != p.Review.Image {
+		t.Fatal("project image was not captured at acceptance")
 	}
 	if tasks[0].Project.Development.Adapter != "codex" || tasks[0].Project.Review.Adapter != "codex" || tasks[0].Project.Development.Model != "" || !tasks[0].Project.Development.UseCLIDefaults {
 		t.Fatal("agent selection not frozen", tasks[0].Project)

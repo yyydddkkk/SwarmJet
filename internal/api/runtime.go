@@ -19,31 +19,11 @@ func (a *server) runtime(w http.ResponseWriter, r *http.Request) {
 		a.agents(w, r)
 		return
 	}
-	imageRoute := path == "/images" || strings.HasPrefix(path, "/images/")
-	if path == "/images/platform" || strings.HasPrefix(path, "/images/platform/") {
-		options, err := a.loadDeveloperOptions(r)
-		if err != nil {
-			failure(w, err)
-			return
-		}
-		if !options.PlatformImages {
-			problem(w, 403, "请先在开发者选项启用平台镜像管理")
-			return
-		}
-		if a.cfg.BuilderURL == "" {
-			problem(w, 503, "请先启用独立构建服务")
-			return
-		}
-	}
-	if imageRoute && a.cfg.RequireNode && a.cfg.BuilderURL == "" {
-		problem(w, 503, "镜像管理目前仅支持单机执行环境，多执行节点请通过部署分发镜像。")
-		return
-	}
-	if !imageRoute && r.Method != "GET" && !(r.Method == "POST" && (path == "/verify" || path == "/network-test" || path == "/runner-test")) {
+	if r.Method != "GET" && !(r.Method == "POST" && (path == "/verify" || path == "/network-test" || path == "/runner-test")) {
 		problem(w, 405, "method not allowed")
 		return
 	}
-	if !imageRoute && path != "/status" && path != "/models" && path != "/terminal" && path != "/verify" && path != "/network-test" && path != "/runner-test" {
+	if path != "/status" && path != "/models" && path != "/terminal" && path != "/verify" && path != "/network-test" && path != "/runner-test" {
 		problem(w, 404, "runtime route not found")
 		return
 	}
@@ -51,7 +31,7 @@ func (a *server) runtime(w http.ResponseWriter, r *http.Request) {
 	runtimeSecret := a.cfg.RuntimeSecret
 	nodeID := r.URL.Query().Get("node")
 	if nodeID != "" {
-		if imageRoute || !domain.IDPattern.MatchString(nodeID) {
+		if !domain.IDPattern.MatchString(nodeID) {
 			problem(w, 400, "节点参数无效")
 			return
 		}
@@ -67,9 +47,6 @@ func (a *server) runtime(w http.ResponseWriter, r *http.Request) {
 		}
 		runtimeURL = strings.TrimRight(address, "/") + "/runtime"
 		runtimeSecret = secret
-	}
-	if imageRoute && a.cfg.BuilderURL != "" {
-		runtimeURL = a.cfg.BuilderURL
 	}
 	if runtimeSecret == "" || runtimeURL == "" {
 		problem(w, 503, "Runner 环境管理尚未启用，请检查管理连接。")

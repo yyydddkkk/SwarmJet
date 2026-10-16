@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { formatCommand, parseCommand } from "../src/commands";
 import type { Project, Repository } from "../src/types";
-const publishedRunner = "registry.test/swarmjet/agent@sha256:" + "a".repeat(64);
+const publishedRunner = "ghcr.io/example/swarmjet/agent:v1.2.3";
 
 const repositories: Repository[] = [
   {
@@ -143,10 +143,6 @@ async function setupAPI(page: Page, initial?: Project) {
       return route.fulfill({
         json: { agentImage: "swarmjet-agent:configured" },
       });
-    if (pathname === "/api/registry/images")
-      return route.fulfill({ json: { repository: "registry.test/swarmjet/agent", images: [
-        { digest: "sha256:" + "a".repeat(64), reference: publishedRunner, tags: ["stable"] },
-      ] } });
     if (pathname === "/api/connections" && request.method() === "GET")
       return route.fulfill({ json: connections });
     if (pathname === "/api/connections/verify" && request.method() === "POST")
@@ -480,20 +476,17 @@ test("project default only lists enabled agents and does not select models", asy
   await expect(page.getByLabel("开发模型",{exact:true})).toHaveCount(0);
 });
 
-test("project Runner image selector supports Node default and published versions for both roles", async ({page}) => {
+test("project Runner image accepts Node default and an entered image for both roles", async ({page}) => {
   const state = await setupAPI(page, configuredProject());
   await page.goto("/#/projects/custom-project");
   await page.getByText("执行环境设置", {exact:false}).click();
   const development = page.getByLabel("开发 Runner 镜像", {exact:true});
   await expect(development).toHaveValue("swarmjet-agent:configured");
-  await expect(development.locator(`option[value="${publishedRunner}"]`)).toHaveCount(1);
-  await development.selectOption("");
+  await development.fill("");
   await expect(page.getByRole("button", {name:"保存并启用"})).toBeEnabled();
   await page.getByRole("checkbox", {name:"审查沿用开发执行环境"}).uncheck();
   const review = page.getByLabel("审查 Runner 镜像", {exact:true});
-  await review.selectOption("__manual__");
-  await page.getByLabel("审查镜像摘要", {exact:true}).fill(publishedRunner);
-  await review.selectOption(publishedRunner);
+  await review.fill(publishedRunner);
   await page.getByRole("button", {name:"保存草稿"}).click();
   await expect.poll(() => state.saves.length).toBe(1);
   expect(state.saves[0].nodes?.mode).toBe("auto");
@@ -501,12 +494,15 @@ test("project Runner image selector supports Node default and published versions
   expect(state.saves[0].review.image).toBe(publishedRunner);
 });
 
-test("legacy local image cannot be enabled for Node scheduling until replaced", async ({page}) => {
+test("Node scheduling accepts a tagged image and an invalid one blocks enabling", async ({page}) => {
   const state = await setupAPI(page, {...configuredProject(), nodes:{mode:"auto"}});
   await page.goto("/#/projects/custom-project");
-  await expect(page.getByRole("button", {name:"保存并启用"})).toBeDisabled();
+  await expect(page.getByRole("button", {name:"保存并启用"})).toBeEnabled();
   await page.getByText("执行环境设置", {exact:false}).click();
-  await page.getByLabel("开发 Runner 镜像", {exact:true}).selectOption("");
+  const development = page.getByLabel("开发 Runner 镜像", {exact:true});
+  await development.fill("bad image");
+  await expect(page.getByRole("button", {name:"保存并启用"})).toBeDisabled();
+  await development.fill("");
   await expect(page.getByRole("button", {name:"保存并启用"})).toBeEnabled();
   await page.getByRole("button", {name:"保存草稿"}).click();
   await expect.poll(() => state.saves.length).toBe(1);

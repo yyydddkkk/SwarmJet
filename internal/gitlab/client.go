@@ -16,7 +16,6 @@ import (
 	"strings"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/forge"
-	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"sync"
 	"time"
 )
@@ -68,8 +67,6 @@ func (c *Client) request(ctx context.Context, method, path string, body, out any
 	}
 	req.Header.Set("PRIVATE-TOKEN", c.token)
 	req.Header.Set("Content-Type", "application/json")
-	req, span := observability.TraceOutboundHTTP(req, "gitlab")
-	defer span.End()
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err

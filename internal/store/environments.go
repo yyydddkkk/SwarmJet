@@ -95,9 +95,6 @@ func (s *Store) DeleteNetwork(ctx context.Context, id string, version int) error
 	if _, e = tx.Exec(ctx, `UPDATE platform_settings SET body='""'::jsonb WHERE name='default_network' AND body=to_jsonb($1::text)`, id); e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, `UPDATE platform_settings SET body='{"mode":"default"}'::jsonb WHERE name='buildkit_default_network' AND body->>'mode'='profile' AND body->>'id'=$1`, id); e != nil {
-		return e
-	}
 	return tx.Commit(ctx)
 }
 func (s *Store) Setting(ctx context.Context, name string, out any) error {
@@ -112,20 +109,6 @@ func (s *Store) SetSetting(ctx context.Context, name string, v any) error {
 	b, e := json.Marshal(v)
 	if e != nil {
 		return e
-	}
-	if name == "image_build_state" || name == "registry" {
-		tx, err := s.Pool.Begin(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback(ctx)
-		if _, err = tx.Exec(ctx, imageGuardLock); err != nil {
-			return err
-		}
-		if _, err = tx.Exec(ctx, `INSERT INTO platform_settings(name,body) VALUES($1,$2) ON CONFLICT(name) DO UPDATE SET body=excluded.body`, name, b); err != nil {
-			return err
-		}
-		return tx.Commit(ctx)
 	}
 	_, e = s.Pool.Exec(ctx, `INSERT INTO platform_settings(name,body) VALUES($1,$2) ON CONFLICT(name) DO UPDATE SET body=excluded.body`, name, b)
 	return e
@@ -152,79 +135,6 @@ func (s *Store) ResolveNetwork(ctx context.Context, c domain.NetworkChoice) (dom
 	return domain.NetworkVersion{ID: p.ID, Version: p.Version}, e
 }
 
-// BuildkitNetworkChoice returns the BuildKit default. Old installations have no
-// setting and inherit the platform default network.
-func (s *Store) BuildkitNetworkChoice(ctx context.Context) (domain.NetworkChoice, error) {
-	c := domain.NetworkChoice{Mode: "default"}
-	e := s.Setting(ctx, "buildkit_default_network", &c)
-	if errors.Is(e, ErrNotFound) {
-		return c, nil
-	}
-	if e != nil {
-		return c, e
-	}
-	if c.Mode == "" {
-		c.Mode = "default"
-	}
-	return c, c.Validate()
-}
-
-// SetBuildkitNetworkChoice validates a saved profile under the same lock used
-// for profile changes and deletion, preventing a dangling selection.
-func (s *Store) SetBuildkitNetworkChoice(ctx context.Context, c domain.NetworkChoice) error {
-	if e := c.Validate(); e != nil {
-		return e
-	}
-	if c.Mode == "" {
-		c.Mode = "default"
-	}
-	tx, e := s.Pool.Begin(ctx)
-	if e != nil {
-		return e
-	}
-	defer tx.Rollback(ctx)
-	if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(84261303)`); e != nil {
-		return e
-	}
-	if c.Mode == "profile" {
-		var b []byte
-		e = tx.QueryRow(ctx, `SELECT body FROM network_profiles WHERE id=$1 ORDER BY version DESC LIMIT 1`, c.ID).Scan(&b)
-		if e != nil {
-			return mapErr(e)
-		}
-		var p domain.NetworkProfile
-		if e = json.Unmarshal(b, &p); e != nil {
-			return e
-		}
-		if p.Revoked {
-			return ErrNotFound
-		}
-	}
-	b, e := json.Marshal(c)
-	if e != nil {
-		return e
-	}
-	if _, e = tx.Exec(ctx, `INSERT INTO platform_settings(name,body) VALUES('buildkit_default_network',$1) ON CONFLICT(name) DO UPDATE SET body=excluded.body`, b); e != nil {
-		return e
-	}
-	return tx.Commit(ctx)
-}
-
-// ResolveBuildNetwork captures the profile version at build start. An explicit
-// image recipe selection takes precedence over the BuildKit default.
-func (s *Store) ResolveBuildNetwork(ctx context.Context, explicit domain.NetworkChoice) (domain.NetworkVersion, error) {
-	if e := explicit.Validate(); e != nil {
-		return domain.NetworkVersion{}, e
-	}
-	if explicit.Mode == "" || explicit.Mode == "default" {
-		var e error
-		explicit, e = s.BuildkitNetworkChoice(ctx)
-		if e != nil {
-			return domain.NetworkVersion{}, e
-		}
-	}
-	return s.ResolveNetwork(ctx, explicit)
-}
 func (s *Store) NodeConfig(ctx context.Context, id string) (domain.NodeConfig, error) {
 	var b []byte
 	var c domain.NodeConfig
@@ -430,7 +340,7 @@ func pickTaskNode(ctx context.Context, tx pgx.Tx, t *domain.Task) (string, bool,
 					imageAgents = image.Agents
 				}
 			}
-			if !domain.RepositoryDigest.MatchString(agent.Image) {
+			if !domain.ImageReference.MatchString(agent.Image) {
 				ok = false
 				break
 			}

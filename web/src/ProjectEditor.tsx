@@ -49,8 +49,7 @@ interface Discovery {
   branches: Record<string, string[]>;
   warnings: string[];
 }
-type RegistryImage = { digest: string; reference: string; tags: string[] };
-const registryDigest = /^[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$/;
+const imageReference = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,254}$/;
 const lines = (s: string) =>
   s
     .split("\n")
@@ -83,28 +82,6 @@ export function ProjectEditor({
   useEffect(() => { if (initial.version === 0) void api<{ users: Account[] }>("/users?status=active").then(result => setActiveUsers(result.users || [])).catch(() => setActiveUsers([])); }, [initial.version]);
   const [nodes,setNodes]=useState<NodeView[]>([]);
   useEffect(()=>{if (platformAdmin) api<NodeView[]>("/nodes").then(setNodes).catch(()=>{});},[platformAdmin]);
-  const [registryImages, setRegistryImages] = useState<RegistryImage[]>([]);
-  const [registryError, setRegistryError] = useState("");
-  const [registryLoading, setRegistryLoading] = useState(false);
-  const [manualImages, setManualImages] = useState({ development: false, review: false });
-  async function loadRegistryImages(signal?: AbortSignal) {
-    setRegistryLoading(true);
-    setRegistryError("");
-    try {
-      const result = await api<{ images: RegistryImage[] }>("/registry/images", "GET", undefined, signal);
-      if (!signal?.aborted) setRegistryImages(result.images || []);
-    } catch (e) {
-      if (!signal?.aborted) setRegistryError((e as Error).message);
-    } finally {
-      if (!signal?.aborted) setRegistryLoading(false);
-    }
-  }
-  useEffect(() => {
-    if (!platformAdmin) return;
-    const controller = new AbortController();
-    void loadRegistryImages(controller.signal);
-    return () => controller.abort();
-  }, [platformAdmin]);
   const latestProject = useRef(p);
   latestProject.current = p;
   const runnerSettings = useRef<HTMLDetailsElement>(null);
@@ -355,7 +332,7 @@ export function ProjectEditor({
     (a) =>
       agentCatalog.enabled.includes(a.adapter) &&
       (a.image.trim()
-        ? !p.nodes?.mode || registryDigest.test(a.image.trim())
+        ? imageReference.test(a.image.trim())
         : !!p.nodes?.mode) &&
       a.timeoutSeconds > 0 &&
       a.timeoutSeconds <= 86400,
@@ -1067,34 +1044,13 @@ export function ProjectEditor({
                         <div key={role}>
                           <Field
                             label={`${label} Runner 镜像`}
-                            hint="使用 Node 默认镜像可直接继承该节点已就绪的版本；指定版本需先在 Node 上准备。"
+                            hint="留空则使用 Node 默认镜像；指定的镜像需先在 Node 上就绪。"
                           >
-                            <select value={manualImages[role] ? "__manual__" : p[role].image} onChange={(e) => {
-                              if (e.target.value === "__manual__") {
-                                setManualImages((old) => ({ ...old, [role]: true }));
-                              } else {
-                                setManualImages((old) => ({ ...old, [role]: false }));
-                                updateAgent(role, { image: e.target.value });
-                              }
-                            }}>
-                              <option value="">使用 Node 默认镜像（推荐）</option>
-                              {p[role].image && !registryImages.some((image) => image.reference === p[role].image) && (
-                                <option value={p[role].image}>当前配置（未在仓库列表）：{p[role].image}</option>
-                              )}
-                              {registryImages.map((image) => (
-                                <option key={image.digest} value={image.reference}>
-                                  {image.tags.join("、") || "未命名版本"} · {image.digest.slice(0, 19)}…
-                                </option>
-                              ))}
-                              <option value="__manual__">手动填写镜像摘要…</option>
-                            </select>
+                            <input value={p[role].image} placeholder="留空使用 Node 默认镜像，或填写 ghcr.io/owner/swarmjet/agent:v1.2.3"
+                              onChange={(e) => updateAgent(role, { image: e.target.value.trim() })} />
                           </Field>
-                          {manualImages[role] && <Field label={`${label}镜像摘要`}>
-                            <input value={p[role].image} placeholder="registry.example.com/swarmjet/agent@sha256:…"
-                              onChange={(e) => updateAgent(role, { image: e.target.value })} />
-                          </Field>}
-                          {p[role].image && !registryDigest.test(p[role].image) && p.nodes?.mode && (
-                            <p className="muted">当前值不是仓库镜像摘要，Node 无法使用它接单；请选择默认镜像或已发布版本。</p>
+                          {p[role].image && !imageReference.test(p[role].image) && (
+                            <p className="muted">镜像地址格式无效。</p>
                           )}
                           <Field label={`${label}超时（分钟）`}>
                             <input
@@ -1116,11 +1072,6 @@ export function ProjectEditor({
                       );
                     })}
                   </div>
-                  {registryError && <p className="muted" role="alert">镜像列表读取失败：{registryError}</p>}
-                  {!registryError && !registryLoading && registryImages.length === 0 && <p className="muted">仓库暂无已发布镜像，仍可使用 Node 默认镜像。</p>}
-                  <button type="button" disabled={registryLoading} onClick={() => void loadRegistryImages()}>
-                    {registryLoading ? "读取镜像中…" : "刷新镜像列表"}
-                  </button>
                 </details>
               </div>
             </section>
