@@ -1,0 +1,38 @@
+{
+  "id": 88001,
+  "sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567",
+  "name": "acme/hive",
+  "target_url": "https://ci.example.com/acme/hive/builds/88001",
+  "context": "ci / build",
+  "description": "Build succeeded",
+  "state": "success",
+  "commit": {
+    "sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567",
+    "url": "https://api.github.com/repos/acme/hive/commits/3f9a1c2d4e5f60718293a4b5c6d7e8f901234567"
+  },
+  "branches": [
+    {
+      "name": "swarm/acme-hive/drone-1",
+      "commit": {
+        "sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567"
+      }
+    }
+  ],
+  "repository": {
+    "id": 1296269,
+    "name": "hive",
+    "full_name": "acme/hive",
+    "html_url": "https://github.com/acme/hive",
+    "owner": {
+      "login": "acme",
+      "id": 991,
+      "type": "Organization"
+    }
+  },
+  "sender": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot",
+    "site_admin": false
+  }
+}

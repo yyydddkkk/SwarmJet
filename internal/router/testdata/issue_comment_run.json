@@ -1,0 +1,55 @@
+{
+  "action": "created",
+  "issue": {
+    "url": "https://api.github.com/repos/acme/hive/issues/12",
+    "repository_url": "https://api.github.com/repos/acme/hive",
+    "html_url": "https://github.com/acme/hive/issues/12",
+    "id": 10012,
+    "node_id": "I_kwDOAAABc12",
+    "number": 12,
+    "title": "Flaky checkout test",
+    "user": {
+      "login": "octo-dev",
+      "id": 4242,
+      "type": "User",
+      "site_admin": false
+    },
+    "labels": [],
+    "state": "open",
+    "author_association": "MEMBER",
+    "body": "The checkout test fails about once every ten runs."
+  },
+  "comment": {
+    "url": "https://api.github.com/repos/acme/hive/issues/comments/2002",
+    "html_url": "https://github.com/acme/hive/issues/12#issuecomment-2002",
+    "id": 2002,
+    "node_id": "IC_kwDOAAABc2002",
+    "user": {
+      "login": "hive-owner",
+      "id": 1001,
+      "type": "User",
+      "site_admin": false
+    },
+    "created_at": "2026-10-14T10:05:00Z",
+    "updated_at": "2026-10-14T10:05:00Z",
+    "author_association": "OWNER",
+    "body": "/swarmjet run\nPlease make the retry helper deterministic and add a regression test."
+  },
+  "repository": {
+    "id": 1296269,
+    "name": "hive",
+    "full_name": "acme/hive",
+    "html_url": "https://github.com/acme/hive",
+    "owner": {
+      "login": "acme",
+      "id": 991,
+      "type": "Organization"
+    }
+  },
+  "sender": {
+    "login": "hive-owner",
+    "id": 1001,
+    "type": "User",
+    "site_admin": false
+  }
+}
