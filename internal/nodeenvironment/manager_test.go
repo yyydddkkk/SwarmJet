@@ -3,11 +3,9 @@ package nodeenvironment
 import (
 	"context"
 	"errors"
-	"os"
 	"runtime"
 	"strings"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
-	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,10 +16,7 @@ func TestApplyDoesNotExecuteAgentAndReportsReadyOnlyAfterPull(t *testing.T) {
 	gate := make(chan struct{})
 	var pulls atomic.Int32
 	m.Command = func(ctx context.Context, args []string) ([]byte, error) {
-		if mode, e := os.Stat(args[1] + "/config.json"); e != nil || mode.Mode().Perm() != 0600 {
-			t.Error("private auth file missing")
-		}
-		cmd := args[2:]
+		cmd := args
 		switch cmd[0] {
 		case "network":
 			return []byte("ok"), nil
@@ -40,7 +35,7 @@ func TestApplyDoesNotExecuteAgentAndReportsReadyOnlyAfterPull(t *testing.T) {
 		}
 		return nil, errors.New("unexpected command")
 	}
-	d := Desired{Config: domain.NodeConfig{Version: 1, Image: "registry.test/agent@sha256:" + strings.Repeat("a", 64)}, Registry: registryconfig.Access{Address: "registry.test", Username: "reader", Password: "secret"}}
+	d := Desired{Config: domain.NodeConfig{Version: 1, Image: "ghcr.io/example/swarmjet/agent:v1.0.0"}}
 	m.Apply(context.Background(), d)
 	m.Apply(context.Background(), d)
 	if m.Active() != nil {
@@ -73,6 +68,52 @@ func TestFailedImagePreservesPreviouslyAppliedEnvironment(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	if m.Status().Status != "failed" || m.Active().Config.Version != 1 {
+		t.Fatal(m.Status())
+	}
+}
+
+func TestLocallyBuiltImageIsUsedWhenPullFails(t *testing.T) {
+	m := New(t.TempDir(), "local")
+	m.Command = func(ctx context.Context, args []string) ([]byte, error) {
+		switch args[0] {
+		case "network":
+			return []byte("ok"), nil
+		case "pull":
+			return nil, errors.New("pull access denied")
+		case "image":
+			if args[len(args)-2] == "{{.Id}}" {
+				return []byte("sha256:local"), nil
+			}
+			return []byte(runtime.GOARCH), nil
+		case "run":
+			return []byte("opencode\n"), nil
+		}
+		return nil, errors.New("unexpected command")
+	}
+	m.Apply(context.Background(), Desired{Config: domain.NodeConfig{Version: 1, Image: "swarmjet-agent:local"}})
+	deadline := time.Now().Add(time.Second)
+	for m.Status().Status == "pulling" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if m.Status().Status != "ready" {
+		t.Fatal(m.Status())
+	}
+}
+
+func TestMissingImageFailsWhenPullFails(t *testing.T) {
+	m := New(t.TempDir(), "missing")
+	m.Command = func(ctx context.Context, args []string) ([]byte, error) {
+		if args[0] == "network" {
+			return []byte("ok"), nil
+		}
+		return nil, errors.New("not found")
+	}
+	m.Apply(context.Background(), Desired{Config: domain.NodeConfig{Version: 1, Image: "ghcr.io/example/missing:v1"}})
+	deadline := time.Now().Add(time.Second)
+	for m.Status().Status == "pulling" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if m.Status().Status != "failed" || !strings.Contains(m.Status().Error, "拉取失败") {
 		t.Fatal(m.Status())
 	}
 }

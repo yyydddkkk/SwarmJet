@@ -37,18 +37,6 @@ func (s *Service) ProcessWebhookDelivery(ctx context.Context, body []byte) error
 // Results align with bodies so the consumer can ACK or retry each delivery.
 func (s *Service) ProcessWebhookDeliveries(ctx context.Context, bodies [][]byte) []error {
 	results := make([]error, len(bodies))
-	if s.Store != nil {
-		maintenance, err := s.Store.UpgradeMaintenance(ctx)
-		if err != nil || maintenance {
-			if err == nil {
-				err = errors.New("platform upgrade maintenance")
-			}
-			for i := range results {
-				results[i] = err
-			}
-			return results
-		}
-	}
 	type target struct {
 		provider string
 		repoID   int64

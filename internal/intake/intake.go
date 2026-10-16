@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
-	"github.com/yyydddkkk/SwarmJet/internal/imagebuild"
 )
 
 // Readiness is supplied by the persisted managed Meta initialization.
@@ -29,7 +28,6 @@ type Scheduler interface {
 }
 
 type Options struct {
-	DataDir      string
 	RequireNode  bool
 	Dependencies []domain.IssueRef
 	// ClaimRunCommands distinguishes a new round from a first Task. A non-nil
@@ -42,18 +40,12 @@ type AgentSelectionError struct{ Err error }
 func (e *AgentSelectionError) Error() string { return e.Err.Error() }
 func (e *AgentSelectionError) Unwrap() error { return e.Err }
 
-// Schedule freezes Agent and legacy image choices into the Task snapshot, then
+// Schedule freezes the Agent choice into the Task snapshot, then
 // delegates the atomic scheduling decision to the store.
 func Schedule(ctx context.Context, scheduler Scheduler, p domain.Project, issue domain.Issue, enabled []string, options Options) (domain.Task, error) {
 	project, err := domain.ResolveIssueAgent(p, issue, enabled)
 	if err != nil {
 		return domain.Task{}, &AgentSelectionError{Err: err}
-	}
-	if !options.RequireNode && project.Nodes.Mode == "" {
-		project, err = imagebuild.ApplyToProject(options.DataDir, project)
-		if err != nil {
-			return domain.Task{}, err
-		}
 	}
 	id := make([]byte, 16)
 	if _, err = rand.Read(id); err != nil {

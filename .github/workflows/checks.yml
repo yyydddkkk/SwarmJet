@@ -69,17 +69,6 @@ jobs:
       ADMIN_PASSWORD: validation-only-password
       RUNTIME_ADMIN_SECRET: validation-only-secret
       SWARMJET_MASTER_KEY: validation-only-master
-      REGISTRY_BIND_HOST: 10.0.0.20
-      REGISTRY_PORT: 5443
-      REGISTRY_TLS_DIR: /tmp/swarmjet-registry/tls
-      REGISTRY_AUTH_FILE: /tmp/swarmjet-registry/htpasswd
-      REGISTRY_HTTP_SECRET: validation-only-secret
-      REGISTRY_BUILDKIT_CONFIG: /tmp/swarmjet-registry/buildkitd.toml
-      REGISTRY_CA_FILE: /tmp/swarmjet-registry/tls/ca.crt
-      REGISTRY_PUSH_USER: builder
-      REGISTRY_PUSH_PASSWORD: validation-only-push
-      REGISTRY_PULL_USER: reader
-      REGISTRY_PULL_PASSWORD: validation-only-pull
       DATA_DIR: /tmp/swarmjet-compose-validation
     steps:
       - uses: actions/checkout@v4
@@ -87,6 +76,6 @@ jobs:
         run: |
           docker compose -f deploy/compose.yaml --profile tools config --quiet
           docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml --profile tools config --quiet
-          docker compose -f deploy/compose.yaml -f deploy/compose.builder.yaml -f deploy/compose.registry.yaml --profile tools config --quiet
+          docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml -f deploy/compose.local-node.yaml --profile tools config --quiet
           docker compose -f examples/http-check/compose.yaml config --quiet
           sh -n scripts/askpass.sh deploy/temporal/schema.sh deploy/temporal/namespace.sh

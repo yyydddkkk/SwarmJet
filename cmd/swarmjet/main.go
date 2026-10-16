@@ -3,15 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -123,29 +120,6 @@ func runNode(ctx context.Context) error {
 	adminRequests := 0
 	adminVersion := ""
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/upgrade/") {
-			if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-SwarmJet-Node-Secret")), []byte(secret)) != 1 {
-				http.Error(w, "node authentication required", http.StatusUnauthorized)
-				return
-			}
-			updaterURL := os.Getenv("UPDATER_ADMIN_URL")
-			target, err := url.Parse(updaterURL)
-			if err != nil || target.Scheme != "http" || target.Host == "" || os.Getenv("UPDATER_SECRET") == "" {
-				http.Error(w, "node updater unavailable", http.StatusServiceUnavailable)
-				return
-			}
-			proxy := httputil.NewSingleHostReverseProxy(target)
-			director := proxy.Director
-			proxy.Director = func(req *http.Request) {
-				director(req)
-				req.URL.Path = strings.TrimPrefix(req.URL.Path, "/upgrade")
-				req.Header.Del("X-SwarmJet-Node-Secret")
-				req.Header.Del("Cookie")
-				req.Header.Set("Authorization", "Bearer "+os.Getenv("UPDATER_SECRET"))
-			}
-			proxy.ServeHTTP(w, r)
-			return
-		}
 		if !strings.HasPrefix(r.URL.Path, "/runtime/") {
 			rpc.ServeHTTP(w, r)
 			return
@@ -174,7 +148,7 @@ func runNode(ctx context.Context) error {
 			for k, v := range active.Env {
 				vars[k] = v
 			}
-			admin = runtimeadmin.New(runtimeadmin.Config{DataDir: data, Image: active.Config.Image, Secret: secret, Env: vars, DockerNetwork: "sj-node-" + id, Revision: key, DisableImages: true})
+			admin = runtimeadmin.New(runtimeadmin.Config{DataDir: data, Image: active.Config.Image, Secret: secret, Env: vars, DockerNetwork: "sj-node-" + id, Revision: key})
 			adminVersion = key
 		}
 		h := admin
@@ -248,7 +222,7 @@ func run() error {
 		mode = os.Args[1]
 	}
 	if mode == "help" || mode == "--help" {
-		fmt.Println("swarmjet serve | worker | node | builder | mihomo | migrate | doctor | version | legacy-inventory <state.json>")
+		fmt.Println("swarmjet serve | worker | node | mihomo | migrate | doctor | version | legacy-inventory <state.json>")
 		return nil
 	}
 	if mode == "version" {
@@ -293,9 +267,6 @@ func run() error {
 	}
 	nodeSecret := func(ctx context.Context, id string) (string, error) {
 		return networkconfig.NodeSecret(ctx, s, box, id, os.Getenv("NODE_SECRET"))
-	}
-	if mode == "builder" {
-		return runBuilder(ctx, s, box)
 	}
 	resolver := &credentials.Resolver{Store: s, Box: box, Env: os.Getenv}
 	var ghApp *githubapp.App
@@ -454,7 +425,7 @@ func run() error {
 		if os.Getenv("SWARMJET_API_ONLY") == "1" {
 			staticDir = ""
 		}
-		handler := api.New(s, api.Config{GitHubApp: ghApp, Metrics: metrics, Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: staticDir, SecureCookies: env("SECURE_COOKIES", "false") == "true", SMTP: api.SMTPConfig{Addr: os.Getenv("SMTP_ADDR"), Username: os.Getenv("SMTP_USERNAME"), Password: os.Getenv("SMTP_PASSWORD"), From: os.Getenv("SMTP_FROM"), PublicURL: env("PUBLIC_ORIGIN", "http://localhost:8180")}, ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, RepositoryChanges: repositoryChanges, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), BuilderURL: os.Getenv("BUILDER_ADMIN_URL"), UpdaterURL: os.Getenv("UPDATER_ADMIN_URL"), UpdaterSecret: os.Getenv("UPDATER_SECRET"), UpgradeContext: ctx, RegistryCAFile: os.Getenv("REGISTRY_CA_FILE"), PlatformImage: os.Getenv("PLATFORM_IMAGE"), PlatformVersion: buildVersion, PlatformCommit: buildCommit, MihomoURL: os.Getenv("MIHOMO_ADMIN_URL"), MihomoSecret: os.Getenv("MIHOMO_ADMIN_SECRET"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}, LabelsWake: labelsWake})
+		handler := api.New(s, api.Config{GitHubApp: ghApp, Metrics: metrics, Username: adminUser, Password: password, AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"), DataDir: data, StaticDir: staticDir, SecureCookies: env("SECURE_COOKIES", "false") == "true", SMTP: api.SMTPConfig{Addr: os.Getenv("SMTP_ADDR"), Username: os.Getenv("SMTP_USERNAME"), Password: os.Getenv("SMTP_PASSWORD"), From: os.Getenv("SMTP_FROM"), PublicURL: env("PUBLIC_ORIGIN", "http://localhost:8180")}, ResolveCredential: resolver.Resolve, Box: box, Initializer: initializer, RepositoryChanges: repositoryChanges, DefaultAgentImage: env("AGENT_IMAGE", "swarmjet-agent:local"), RuntimeURL: os.Getenv("RUNTIME_ADMIN_URL"), PlatformImage: os.Getenv("PLATFORM_IMAGE"), PlatformVersion: buildVersion, PlatformCommit: buildCommit, MihomoURL: os.Getenv("MIHOMO_ADMIN_URL"), MihomoSecret: os.Getenv("MIHOMO_ADMIN_SECRET"), RuntimeSecret: os.Getenv("RUNTIME_ADMIN_SECRET"), NodeSecret: os.Getenv("NODE_SECRET"), RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Nodes: &execution.Pool{Lookup: s, Secret: os.Getenv("NODE_SECRET"), SecretFor: nodeSecret}, LabelsWake: labelsWake})
 		svc := &service.Service{DataDir: data, Store: s, Metrics: metrics, Temporal: tc, WebhookPublisher: broker, GitLabSigningToken: os.Getenv("GITLAB_WEBHOOK_SIGNING_TOKEN"), CommandPublisher: broker, ResolveCredential: resolver.Resolve, ProjectCredential: bound, ForgeClient: forgeClient, Initializer: initializer, RequireNode: os.Getenv("EXECUTION_MODE") == "distributed", Wake: make(chan struct{}, 1), LabelsWake: labelsWake}
 		go svc.Run(ctx)
 		go broker.ConsumeBatch(ctx, mq.WebhookQueue, func(ctx context.Context, bodies [][]byte) []error {
@@ -563,7 +534,7 @@ func run() error {
 	}}
 	// Initialization is resumed here so a worker restart recovers running jobs.
 	initMgr := &initflow.Manager{Store: s, DataDir: data, Managed: managedmeta.New(data), Credential: resolver.Resolve, CredentialFor: boundProject, ForgeClients: func(p domain.Project) (forge.Client, error) { return forgeClient(p, false) }, Agents: localAgents, VerifyImage: os.Getenv("INIT_VERIFY_IMAGE"), Logger: slog.Default()}
-	if os.Getenv("EXECUTION_MODE") == "distributed" || os.Getenv("BUILDER_ADMIN_URL") != "" {
+	if os.Getenv("EXECUTION_MODE") == "distributed" || os.Getenv("USE_EXECUTION_NODES") == "true" {
 		initMgr.RemoteAnalysis = func(ctx context.Context, in *domain.Initialization, p domain.Project) (execution.AnalysisResult, error) {
 			assigned, e := s.AssignInitializationNode(ctx, *in, p)
 			if e != nil {
@@ -609,7 +580,7 @@ func run() error {
 		if len(secret) < 32 {
 			return fmt.Errorf("RUNTIME_ADMIN_SECRET must contain at least 32 characters")
 		}
-		admin := &http.Server{Addr: env("RUNTIME_ADMIN_LISTEN", ":8091"), Handler: runtimeadmin.New(runtimeadmin.Config{DataDir: data, Image: env("AGENT_IMAGE", "swarmjet-agent:local"), Secret: secret, Env: agentEnv, DisableImages: os.Getenv("BUILDER_ADMIN_URL") != ""}), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
+		admin := &http.Server{Addr: env("RUNTIME_ADMIN_LISTEN", ":8091"), Handler: runtimeadmin.New(runtimeadmin.Config{DataDir: data, Image: env("AGENT_IMAGE", "swarmjet-agent:local"), Secret: secret, Env: agentEnv}), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 		go func() {
 			if err := admin.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				slog.Error("runtime admin stopped", "error", err)

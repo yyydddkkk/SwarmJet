@@ -7,22 +7,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"github.com/yyydddkkk/SwarmJet/internal/agentcli"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
-	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
 	"sync"
 	"time"
 )
 
 type Desired struct {
-	Config   domain.NodeConfig     `json:"config"`
-	Network  domain.NetworkVersion `json:"network"`
-	Env      map[string]string     `json:"env"`
-	Registry registryconfig.Access `json:"registry"`
+	Config  domain.NodeConfig     `json:"config"`
+	Network domain.NetworkVersion `json:"network"`
+	Env     map[string]string     `json:"env"`
 }
 type Reply struct {
 	Registered bool     `json:"registered"`
@@ -142,32 +139,27 @@ func (m *Manager) prepare(ctx context.Context, d Desired) ([]domain.ReadyImage, 
 	return out, nil
 }
 func (m *Manager) prepareImage(ctx context.Context, d Desired) ([]string, error) {
-	if !domain.RepositoryDigest.MatchString(d.Config.Image) {
-		return nil, fmt.Errorf("请选择已发布的镜像摘要")
+	if !domain.ImageReference.MatchString(d.Config.Image) {
+		return nil, fmt.Errorf("镜像地址无效")
 	}
-	if !strings.HasPrefix(d.Config.Image, d.Registry.Address+"/") {
-		return nil, fmt.Errorf("镜像与配置的仓库不匹配")
-	}
-	auth, e := d.Registry.DockerConfig(m.root)
-	if e != nil {
-		return nil, e
-	}
-	defer os.RemoveAll(auth)
 	run := func(args ...string) ([]byte, error) {
-		argv := append([]string{"--config", auth}, args...)
 		if m.Command != nil {
-			return m.Command(ctx, argv)
+			return m.Command(ctx, args)
 		}
-		cmd := exec.CommandContext(ctx, "docker", argv...)
+		cmd := exec.CommandContext(ctx, "docker", args...)
 		return cmd.Output()
 	}
 	if _, err := run("network", "inspect", "sj-node-"+m.nodeID); err != nil {
-		if _, e = run("network", "create", "--label", "swarmjet.node="+m.nodeID, "sj-node-"+m.nodeID); e != nil {
+		if _, e := run("network", "create", "--label", "swarmjet.node="+m.nodeID, "sj-node-"+m.nodeID); e != nil {
 			return nil, fmt.Errorf("节点网络创建失败")
 		}
 	}
-	if _, e = run("pull", d.Config.Image); e != nil {
-		return nil, fmt.Errorf("镜像拉取失败：请检查仓库认证、Docker 代理、证书及架构")
+	// A failed pull still accepts an image already present on the node, such as
+	// one built locally from Dockerfile.agent.
+	if _, e := run("pull", d.Config.Image); e != nil {
+		if _, local := run("image", "inspect", "--format", "{{.Id}}", d.Config.Image); local != nil {
+			return nil, fmt.Errorf("镜像拉取失败：请检查镜像地址、Docker 代理及网络")
+		}
 	}
 	raw, e := run("image", "inspect", "--format", "{{.Architecture}}", d.Config.Image)
 	if e != nil || strings.TrimSpace(string(raw)) != runtime.GOARCH {

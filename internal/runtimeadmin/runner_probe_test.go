@@ -13,7 +13,7 @@ import (
 func TestRunnerTestStartsRestrictedContainerAndReportsAgents(t *testing.T) {
 	image := "registry.test/swarmjet/agent@sha256:" + strings.Repeat("a", 64)
 	var runArgs []string
-	h := New(Config{DataDir: t.TempDir(), Image: image, Secret: "private", DisableImages: true,
+	h := New(Config{DataDir: t.TempDir(), Image: image, Secret: "private",
 		DockerCommand: func(_ context.Context, args, _ []string) ([]byte, error) {
 			if slices.Contains(args, "inspect") {
 				return []byte("sha256:image-id"), nil

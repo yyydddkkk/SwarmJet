@@ -25,8 +25,15 @@ var schemaUpgrade2 string
 
 //go:embed schema_upgrade_3.sql
 var schemaUpgrade3 string
+
+//go:embed schema_upgrade_4.sql
+var schemaUpgrade4 string
 var ErrConflict = errors.New("conflict: stale version or active task already exists")
 var ErrNotFound = errors.New("not found")
+
+// imageGuardLock once guarded Agent image deletion. Project, task, admission and
+// environment writes still take it, so dropping it is a separate concurrency change.
+const imageGuardLock = `SELECT pg_advisory_xact_lock(84261305)`
 var ErrNoNode = errors.New("no execution node with spare capacity")
 var ErrAdmissionQueueFull = errors.New("task admission queue is full")
 
@@ -115,7 +122,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err = tx.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil {
 		return err
 	}
-	if version > 3 {
+	if version > 4 {
 		return fmt.Errorf("database schema version %d is newer than this application supports", version)
 	}
 	if version < 2 {
@@ -131,6 +138,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO schema_version(version) VALUES(3) ON CONFLICT DO NOTHING`); err != nil {
+			return err
+		}
+	}
+	if version < 4 {
+		if _, err = tx.Exec(ctx, schemaUpgrade4); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO schema_version(version) VALUES(4) ON CONFLICT DO NOTHING`); err != nil {
 			return err
 		}
 	}

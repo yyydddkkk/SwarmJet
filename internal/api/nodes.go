@@ -6,7 +6,6 @@ import (
 	"strings"
 	"github.com/yyydddkkk/SwarmJet/internal/networkconfig"
 	"github.com/yyydddkkk/SwarmJet/internal/nodeenvironment"
-	"github.com/yyydddkkk/SwarmJet/internal/registryconfig"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 	"time"
 	"unicode"
@@ -59,17 +58,15 @@ func (a *server) nodeHeartbeat(w http.ResponseWriter, r *http.Request) {
 	reply := nodeenvironment.Reply{Registered: true}
 	c, e := a.s.NodeConfig(r.Context(), n.ID)
 	if errors.Is(e, store.ErrNotFound) {
-		c, e = a.s.SaveNodeConfig(r.Context(), n.ID, domain.NodeConfig{Name: n.ID, Capacity: n.Capacity, Network: domain.NetworkChoice{Mode: "default"}})
+		// A new node starts with the deployment's default Agent image; administrators can change it later.
+		c, e = a.s.SaveNodeConfig(r.Context(), n.ID, domain.NodeConfig{Name: n.ID, Capacity: n.Capacity, Network: domain.NetworkChoice{Mode: "default"}, Image: a.cfg.DefaultAgentImage})
 	}
 	if e == nil && !c.Archived {
 		ref, err := a.s.ResolveNetwork(r.Context(), c.Network)
 		if err == nil {
 			env, err := networkconfig.Resolve(r.Context(), a.s, a.cfg.Box, ref)
 			if err == nil {
-				_, access, err := registryconfig.Load(r.Context(), a.s, a.cfg.Box, false)
-				if err == nil {
-					reply.Desired = &nodeenvironment.Desired{Config: c, Network: ref, Env: env, Registry: access}
-				}
+				reply.Desired = &nodeenvironment.Desired{Config: c, Network: ref, Env: env}
 			}
 		}
 	}

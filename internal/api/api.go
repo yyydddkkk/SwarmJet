@@ -29,7 +29,6 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/forge"
 	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
 	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
-	"github.com/yyydddkkk/SwarmJet/internal/imagebuild"
 	"github.com/yyydddkkk/SwarmJet/internal/intake"
 	"github.com/yyydddkkk/SwarmJet/internal/labels"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
@@ -44,10 +43,6 @@ type Config struct {
 	MihomoURL, MihomoSecret                               string
 	Username, Password, AllowedOrigin, StaticDir, DataDir string
 	DefaultAgentImage                                     string
-	BuilderURL                                            string
-	UpdaterURL, UpdaterSecret                             string
-	UpgradeContext                                        context.Context
-	RegistryCAFile                                        string
 	PlatformImage                                         string
 	PlatformVersion, PlatformCommit                       string
 	RuntimeURL, RuntimeSecret                             string
@@ -89,9 +84,6 @@ func New(s *store.Store, cfg Config) http.Handler {
 	a := &server{s: s, cfg: cfg, attempts: map[string]attempt{}}
 	if s != nil {
 		a.conns = s
-	}
-	if s != nil && cfg.UpgradeContext != nil && cfg.UpdaterURL != "" {
-		go a.runUpgradeCoordinator(cfg.UpgradeContext)
 	}
 	return http.HandlerFunc(a.serve)
 }
@@ -224,25 +216,6 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 	if a.identityPrivate(w, r, principal) {
 		return
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead &&
-		!strings.HasPrefix(r.URL.Path, "/api/system/upgrades") &&
-		r.URL.Path != "/api/logout" && r.URL.Path != "/api/system/checks" {
-		if active, err := a.s.UpgradeMaintenance(r.Context()); err == nil && active {
-			problem(w, http.StatusServiceUnavailable, "平台升级维护中，暂不接受新的操作")
-			return
-		} else if err != nil {
-			failure(w, err)
-			return
-		}
-	}
-	if r.URL.Path == "/api/system/developer-options" {
-		a.developerOptions(w, r)
-		return
-	}
-	if r.URL.Path == "/api/system/upgrades" || strings.HasPrefix(r.URL.Path, "/api/system/upgrades/") {
-		a.upgrades(w, r)
-		return
-	}
 	if r.URL.Path == "/api/system" || r.URL.Path == "/api/system/checks" {
 		a.system(w, r)
 		return
@@ -259,19 +232,7 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		a.mihomo(w, r)
 		return
 	}
-	if r.URL.Path == "/api/registry" || r.URL.Path == "/api/registry/reveal" {
-		a.registry(w, r)
-		return
-	}
-	if r.URL.Path == "/api/registry/images" || strings.HasPrefix(r.URL.Path, "/api/registry/images/") {
-		a.registryImages(w, r)
-		return
-	}
-	if r.URL.Path == "/api/registry/platform-images" || strings.HasPrefix(r.URL.Path, "/api/registry/platform-images/") {
-		a.platformImages(w, r)
-		return
-	}
-	if r.URL.Path == "/api/networks" || r.URL.Path == "/api/networks/default" || r.URL.Path == "/api/networks/buildkit-default" {
+	if r.URL.Path == "/api/networks" || r.URL.Path == "/api/networks/default" {
 		a.networks(w, r)
 		return
 	}
@@ -331,21 +292,23 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		image := a.cfg.DefaultAgentImage
-		if !a.cfg.RequireNode {
-			var err error
-			image, err = imagebuild.CurrentImage(a.cfg.DataDir, image)
+		if image == "" {
+			image = "swarmjet-agent:local"
+		}
+		// Registered nodes choose their own Agent image in Node management.
+		distributed := a.cfg.RequireNode
+		if !distributed && a.s != nil {
+			nodes, err := a.s.NodeStatuses(r.Context())
 			if err != nil {
 				failure(w, err)
 				return
 			}
+			distributed = len(nodes) > 0
 		}
-		if image == "" {
-			image = "swarmjet-agent:local"
-		}
-		if a.cfg.RequireNode || a.cfg.BuilderURL != "" {
+		if distributed {
 			image = ""
 		}
-		respond(w, 200, map[string]any{"distributed": a.cfg.RequireNode || a.cfg.BuilderURL != "", "agentImage": image, "adapter": "opencode", "timeoutSeconds": 5400, "maxReworks": 3})
+		respond(w, 200, map[string]any{"distributed": distributed, "agentImage": image, "adapter": "opencode", "timeoutSeconds": 5400, "maxReworks": 3})
 		return
 	case "/api/projects":
 		a.projects(w, r)
@@ -966,7 +929,7 @@ func (a *server) tasks(w http.ResponseWriter, r *http.Request) {
 			failure(w, err)
 			return
 		}
-		scheduled, err := intake.Schedule(r.Context(), a.s, p, issue, enabled, intake.Options{DataDir: a.cfg.DataDir, RequireNode: a.cfg.RequireNode, Dependencies: req.Dependencies, ClaimRunCommands: pending})
+		scheduled, err := intake.Schedule(r.Context(), a.s, p, issue, enabled, intake.Options{RequireNode: a.cfg.RequireNode, Dependencies: req.Dependencies, ClaimRunCommands: pending})
 		var agentError *intake.AgentSelectionError
 		if errors.As(err, &agentError) {
 			problem(w, 400, err.Error())

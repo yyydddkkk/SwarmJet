@@ -60,7 +60,7 @@ type Service struct {
 }
 
 func (s *Service) intakeOptions(projectID string, claim bool) intake.Options {
-	return intake.Options{DataDir: s.DataDir, RequireNode: s.RequireNode, ClaimRunCommands: claim}
+	return intake.Options{RequireNode: s.RequireNode, ClaimRunCommands: claim}
 }
 
 // SyncLabels reconciles selectable labels independently of issue scanning.
@@ -151,15 +151,6 @@ func (s *Service) runAdmission(ctx context.Context) {
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	for {
-		maintenance, checkErr := s.Store.UpgradeMaintenance(ctx)
-		if checkErr != nil || maintenance {
-			select {
-			case <-ctx.Done():
-				return
-			case <-tick.C:
-				continue
-			}
-		}
 		admitted, err := s.Store.AdmitPendingTasks(ctx, 20)
 		if s.Metrics != nil {
 			s.Metrics.Admission("local_or_node", admitted, err)
@@ -219,13 +210,6 @@ func (s *Service) runInbox(ctx context.Context) {
 }
 
 func (s *Service) ProcessInbox(ctx context.Context) error {
-	maintenance, err := s.Store.UpgradeMaintenance(ctx)
-	if err != nil {
-		return err
-	}
-	if maintenance {
-		return nil
-	}
 	deliveries, err := s.Store.ClaimWebhookInbox(ctx, 100)
 	if err != nil || len(deliveries) == 0 {
 		return err
@@ -475,13 +459,6 @@ func (s *Service) ScanRepository(ctx context.Context, provider domain.Provider, 
 func (s *Service) scan(ctx context.Context, provider domain.Provider, repoID int64) error {
 	s.scanMu.Lock()
 	defer s.scanMu.Unlock()
-	maintenance, err := s.Store.UpgradeMaintenance(ctx)
-	if err != nil {
-		return err
-	}
-	if maintenance {
-		return nil
-	}
 	var scanErrors []error
 	projects, e := s.Store.Projects(ctx)
 	if e != nil {

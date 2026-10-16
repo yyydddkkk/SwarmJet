@@ -32,7 +32,7 @@ func TestSystemChecksReportDisabledServices(t *testing.T) {
 	a := &server{}
 	w := httptest.NewRecorder()
 	a.system(w, httptest.NewRequest(http.MethodPost, "/api/system/checks", nil))
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"id":"registry","status":"unavailable"`) || !strings.Contains(w.Body.String(), `"id":"mihomo","status":"unavailable"`) {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"id":"mihomo","status":"unavailable"`) {
 		t.Fatalf("unexpected checks: status %d, body %s", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()

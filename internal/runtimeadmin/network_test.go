@@ -15,7 +15,7 @@ func TestNetworkCheckWorksBeforeImageIsReady(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer target.Close()
-	handler := New(Config{DataDir: t.TempDir(), Secret: "node-secret", DisableImages: true,
+	handler := New(Config{DataDir: t.TempDir(), Secret: "node-secret",
 		DockerCommand: func(context.Context, []string, []string) ([]byte, error) { return nil, errors.New("image unavailable") }})
 	req := httptest.NewRequest(http.MethodPost, "/network-test", strings.NewReader(`{"target":"`+target.URL+`"}`))
 	req.Header.Set("X-SwarmJet-Runtime-Secret", "node-secret")

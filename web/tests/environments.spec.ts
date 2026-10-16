@@ -1,10 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 const ref = "registry.test/swarmjet/agent@sha256:" + "a".repeat(64);
-const publishedRef = "registry.test/swarmjet/agent@sha256:" + "b".repeat(64);
+const publishedRef = "ghcr.io/example/swarmjet/agent:v2.0.0";
 async function mock(page: Page) {
   const profiles: any[] = [];
   let defaultId = "";
-  let buildkitNetwork = { mode: "default" } as { mode: string; id?: string };
   let saved: any;
   const nodes = [
     {
@@ -49,14 +48,9 @@ async function mock(page: Page) {
           revisions: [{ id: "revision-a", name: "内网出口", createdAt: "2026-09-23T00:00:00Z", warnings: [] }],
         },
       });
-    if (path === "/api/registry/images") return route.fulfill({ json: { repository: "registry.test/swarmjet/agent", images: [{ digest: "sha256:" + "b".repeat(64), reference: publishedRef, tags: ["v2", "stable"] }] } });
     if (path === "/api/networks/default" && r.method() === "PUT") {
       defaultId = r.postDataJSON().id;
       return route.fulfill({ json: { id: defaultId } });
-    }
-    if (path === "/api/networks/buildkit-default") {
-      if (r.method() === "PUT") buildkitNetwork = r.postDataJSON();
-      return route.fulfill({ json: buildkitNetwork });
     }
     if (path === "/api/networks" && r.method() === "DELETE") {
       const id = u.searchParams.get("id");
@@ -98,29 +92,8 @@ async function mock(page: Page) {
     }
     return route.fulfill({ status: 404, json: { error: "not found" } });
   });
-  return { saved: () => saved, buildkitNetwork: () => buildkitNetwork, nodes };
+  return { saved: () => saved, nodes };
 }
-test("BuildKit default outlet inherits, connects directly, or selects a saved proxy", async ({ page }) => {
-  const state = await mock(page);
-  await page.goto("/#/networks");
-  const selector = page.getByLabel("BuildKit 默认网络");
-  await expect(selector).toHaveValue("default");
-  await expect(page.getByText("Dockerfile RUN 中的 apt、npm、Go 下载")).toBeVisible();
-  await selector.selectOption("direct");
-  await expect(selector).toHaveValue("direct");
-  expect(state.buildkitNetwork()).toEqual({ mode: "direct" });
-  await page.getByRole("button", { name: "新增配置" }).click();
-  await page.getByLabel("名称", { exact: true }).fill("构建出口");
-  await page.getByRole("button", { name: "保存配置", exact: true }).click();
-  await page.getByRole("button", { name: "关闭网络配置" }).click();
-  await selector.selectOption({ label: "构建出口" });
-  await expect(selector).toHaveValue(state.saved().id);
-  expect(state.buildkitNetwork()).toEqual({ mode: "profile", id: state.saved().id });
-  await page.reload();
-  await expect(selector).toHaveValue(state.saved().id);
-  await selector.selectOption("default");
-  expect(state.buildkitNetwork()).toEqual({ mode: "default" });
-});
 test("network editor creates versioned profile without placing password in the list", async ({
   page,
 }) => {
@@ -170,12 +143,9 @@ test("network editor opens when randomUUID is unavailable on an HTTP LAN origin"
   await expect(page.getByRole("dialog", { name: "新增网络配置" })).toBeVisible();
 });
 
-test("node deployment bundle uses a published platform image and private LAN addresses", async ({ page }) => {
+test("node deployment bundle uses the entered platform image and private LAN addresses", async ({ page }) => {
   await mock(page);
-  const platformRef = "10.0.0.20:5443/swarmjet/platform@sha256:" + "c".repeat(64);
-  await page.route("**/api/registry/platform-images", (route) => route.fulfill({ json: {
-    images: [{ digest: "sha256:" + "c".repeat(64), reference: platformRef, tags: ["v1.2.3"] }],
-  } }));
+  const platformRef = "ghcr.io/example/swarmjet:v1.2.3";
   let request: any;
   await page.route("**/api/nodes/remote1/deployment", (route) => {
     request = route.request().postDataJSON();
@@ -188,6 +158,7 @@ test("node deployment bundle uses a published platform image and private LAN add
   await page.getByRole("button", { name: "添加节点" }).click();
   await expect(addNode).toBeVisible();
   await addNode.getByLabel("节点 ID").fill("remote1");
+  await addNode.getByLabel("程序镜像").fill(platformRef);
   await addNode.getByLabel("Node 内网访问地址").fill("http://10.0.0.21:8092");
   await addNode.getByLabel("控制面内网地址").fill("http://10.0.0.20:8180");
   const download = page.waitForEvent("download");
@@ -280,11 +251,11 @@ test("node drain preserves image and scopes network tests to selected node", asy
   await page.keyboard.press("Escape");
   await expect(detail).not.toBeVisible();
 });
-test("node default image can be selected from published registry versions", async ({ page }) => {
+test("node Agent image accepts a free-form image reference", async ({ page }) => {
   const state = await mock(page);
   await page.goto("/#/nodes");
   await page.getByRole("button", { name: /内网执行节点/ }).click();
-  await page.getByLabel("默认镜像（已发布版本）").selectOption(publishedRef);
+  await page.getByLabel("Agent 镜像").fill(publishedRef);
   await page.getByRole("button", { name: "保存节点配置" }).click();
   expect(state.saved().image).toBe(publishedRef);
 });

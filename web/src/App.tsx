@@ -12,7 +12,6 @@ const Projects = lazy(() => import("./ProjectsPage"));
 const RuntimeSettings = lazy(() => import("./RuntimeSettings"));
 const NodeSettings = lazy(() => import("./NodeSettings"));
 const NetworkSettings = lazy(() => import("./NetworkSettings"));
-const ImageSettings = lazy(() => import("./ImageSettings"));
 const SystemSettings = lazy(() => import("./SystemSettings"));
 const AccessSettings = lazy(() => import("./AccessSettings"));
 const GitLabIdentitySettings = lazy(() => import("./GitLabIdentitySettings"));
@@ -75,12 +74,11 @@ export default function App() {
   const mrPage = path.startsWith("/merge-requests");
   const taskPage = path.startsWith("/tasks");
   const runtimePage = path.startsWith("/runtime");
-  const imagesPage = path.startsWith("/images");
   const settingsPage = path.startsWith("/settings");
   const accessPage = path.startsWith("/access");
   const identityPage = path === "/identity";
   const nodesPage = path.startsWith("/nodes"), networksPage = path.startsWith("/networks");
-  const executionPage = resourcesPage || runtimePage || nodesPage || imagesPage;
+  const executionPage = resourcesPage || runtimePage || nodesPage;
   const controlArea = controlPage || executionPage || projectPage || settingsPage || networksPage || accessPage;
   const scopeVisible = overviewPage || (taskPage && !parts[2]) || (issuePage && !parts[2]) || (mrPage && !parts[2]);
   const scopedHref = (target: string) => `#${target}${projectScope ? `?project=${encodeURIComponent(projectScope)}` : ""}`;
@@ -90,7 +88,7 @@ export default function App() {
     if (value) params.set("project", value); else params.delete("project");
     history.replaceState(null, "", `#${path}${params.size ? `?${params}` : ""}`);
   };
-  const pageName = overviewPage ? "行动总览" : taskPage ? "任务" : issuePage ? "Issue" : mrPage ? "MR" : controlPage ? "运行总览" : projectPage ? "项目与接入" : resourcesPage ? "执行资源" : runtimePage ? "Runner 环境" : nodesPage ? "Node 管理" : imagesPage ? "镜像管理" : networksPage ? "网络配置" : accessPage ? "成员与团队" : identityPage ? "个人 GitLab 身份" : "系统设置";
+  const pageName = overviewPage ? "行动总览" : taskPage ? "任务" : issuePage ? "Issue" : mrPage ? "MR" : controlPage ? "运行总览" : projectPage ? "项目与接入" : resourcesPage ? "执行资源" : runtimePage ? "Runner 环境" : nodesPage ? "Node 管理" : networksPage ? "网络配置" : accessPage ? "成员与团队" : identityPage ? "个人 GitLab 身份" : "系统设置";
   const adminOnly = controlPage || executionPage || settingsPage || networksPage || accessPage;
   const allowProjectRoute = !projectPage || parts[2] !== "new" || user.platformAdmin;
   return (
@@ -164,9 +162,7 @@ export default function App() {
         <main id="main" tabIndex={-1}>
           <ErrorBox error={error} />
           <Suspense fallback={<div className="loading">正在加载页面…</div>}>
-          {adminOnly && !user.platformAdmin || !allowProjectRoute ? <section className="panel panel-padding"><h1>无权访问</h1><p>当前账号没有此页面的访问权限。</p></section> : overviewPage ? <WorkbenchOverview key={projectScope} projectId={projectScope} platformAdmin={user.platformAdmin} canCreateIssue={user.platformAdmin || projects.some(project => project.myRole === "owner" || project.myRole === "operator")} /> : controlPage ? <ControlOverview /> : resourcesPage ? <ResourcesOverview /> : accessPage ? <AccessSettings projects={projects} currentUserId={user.id} /> : identityPage ? <GitLabIdentitySettings /> : issuePage ? <IssuesWorkbench key={route} route={route} initialProjectId={projectScope} onProjectChange={changeScope} accessProjects={projects} platformAdmin={user.platformAdmin} /> : mrPage ? <MergeRequestsWorkbench key={route} route={route} initialProjectId={projectScope} onProjectChange={changeScope} accessProjects={projects} platformAdmin={user.platformAdmin} /> : settingsPage ? (<SystemSettings section={parts[2] || "overview"} />) : nodesPage ? (<Suspense fallback={<p>正在加载节点…</p>}><NodeSettings/></Suspense>) : networksPage ? (<Suspense fallback={<p>正在加载网络配置…</p>}><NetworkSettings/></Suspense>) : imagesPage ? (
-            <Suspense fallback={<div className="loading">正在加载镜像管理…</div>}><ImageSettings /></Suspense>
-          ) : runtimePage ? (
+          {adminOnly && !user.platformAdmin || !allowProjectRoute ? <section className="panel panel-padding"><h1>无权访问</h1><p>当前账号没有此页面的访问权限。</p></section> : overviewPage ? <WorkbenchOverview key={projectScope} projectId={projectScope} platformAdmin={user.platformAdmin} canCreateIssue={user.platformAdmin || projects.some(project => project.myRole === "owner" || project.myRole === "operator")} /> : controlPage ? <ControlOverview /> : resourcesPage ? <ResourcesOverview /> : accessPage ? <AccessSettings projects={projects} currentUserId={user.id} /> : identityPage ? <GitLabIdentitySettings /> : issuePage ? <IssuesWorkbench key={route} route={route} initialProjectId={projectScope} onProjectChange={changeScope} accessProjects={projects} platformAdmin={user.platformAdmin} /> : mrPage ? <MergeRequestsWorkbench key={route} route={route} initialProjectId={projectScope} onProjectChange={changeScope} accessProjects={projects} platformAdmin={user.platformAdmin} /> : settingsPage ? (<SystemSettings section={parts[2] || "overview"} />) : nodesPage ? (<Suspense fallback={<p>正在加载节点…</p>}><NodeSettings/></Suspense>) : networksPage ? (<Suspense fallback={<p>正在加载网络配置…</p>}><NetworkSettings/></Suspense>) : runtimePage ? (
             <Suspense
               fallback={<div className="loading">正在加载 Runner 环境…</div>}
             >

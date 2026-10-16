@@ -12,19 +12,18 @@ import (
 )
 
 func TestNodeBundleRequestRejectsUnsafeDeploymentValues(t *testing.T) {
-	address := "10.0.0.20:5443"
 	valid := nodeBundleRequest{
-		Image:   address + "/swarmjet/platform@sha256:" + strings.Repeat("a", 64),
+		Image:   "ghcr.io/example/swarmjet:v1.2.3",
 		DataDir: "/srv/swarmjet/node-data", AdvertiseURL: "http://10.0.0.21:8092",
 		ControlPlaneURL: "http://10.0.0.20:8180", Capacity: 2, Port: 8092, ListenHost: "0.0.0.0",
 	}
-	if err := valid.validate(address); err != nil {
+	if err := valid.validate(); err != nil {
 		t.Fatal(err)
 	}
 	cases := []nodeBundleRequest{
 		func() nodeBundleRequest {
 			v := valid
-			v.Image = "example.com/swarmjet/platform@sha256:" + strings.Repeat("a", 64)
+			v.Image = "ghcr.io/example/swarmjet:v1 --privileged"
 			return v
 		}(),
 		func() nodeBundleRequest { v := valid; v.DataDir = "/srv/../tmp"; return v }(),
@@ -37,7 +36,7 @@ func TestNodeBundleRequestRejectsUnsafeDeploymentValues(t *testing.T) {
 		func() nodeBundleRequest { v := valid; v.Port = 0; return v }(),
 	}
 	for _, candidate := range cases {
-		if err := candidate.validate(address); err == nil {
+		if err := candidate.validate(); err == nil {
 			t.Fatalf("accepted unsafe bundle request: %#v", candidate)
 		}
 	}
@@ -51,8 +50,7 @@ func TestNodeBundleKeepsCredentialsInPrivateFile(t *testing.T) {
 	}
 	archive, err := makeNodeBundle(map[string][]byte{
 		"install_node.py": []byte("print('hello')\n"), "compose.node.yaml": []byte("services: {}\n"),
-		"upgrade_host.py": []byte("print('upgrade')\n"), "Dockerfile.updater": []byte("FROM scratch\n"),
-		"registry-ca.crt": []byte("certificate"), "node.json": config, "README.txt": []byte("instructions"),
+		"node.json": config, "README.txt": []byte("instructions"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +85,7 @@ func TestNodeBundleKeepsCredentialsInPrivateFile(t *testing.T) {
 		}
 		seen[h.Name] = true
 	}
-	if len(seen) != 7 {
+	if len(seen) != 4 {
 		t.Fatalf("bundle files = %v", seen)
 	}
 }

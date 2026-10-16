@@ -2,7 +2,7 @@
 
 部署包含控制台 API、Temporal Worker、PostgreSQL 18、Temporal Server 1.32.0 和 Temporal UI 2.54.1。业务执行器是独立的 Agent CLI 镜像，默认不会作为常驻服务启动。这里使用持久化生产 Server，不使用 `temporal server start-dev`。
 
-所有部署文件集中在 `deploy/`：`compose.yaml` 是唯一的服务定义，`compose.build.yaml` 只补充源码构建配置，两个 Dockerfile 分别构建应用与执行器镜像。构建上下文仍是仓库根目录。
+所有部署文件集中在 `deploy/`：`compose.yaml` 是唯一的服务定义，`compose.build.yaml` 只补充源码构建配置，`compose.local-node.yaml` 在本机运行一个执行节点，两个 Dockerfile 分别构建应用与执行器镜像。构建上下文仍是仓库根目录。
 
 ## 单机快速部署（源码构建）
 
@@ -12,19 +12,19 @@
 sudo python3 deploy/install.py
 # 需要多个执行器时，在首次部署指定（初始化始终需要 opencode）：
 # sudo python3 deploy/install.py --agent-clis opencode,codex,claude
-# 局域网有多个地址时，明确指定仓库地址：
-# sudo python3 deploy/install.py --registry-host 10.0.0.20
 ```
 
-脚本自动生成权限为 `0600` 的 `deploy/.env`、独立的数据库和管理员密码、运行终端密钥及连接加密主密钥，还会生成 `deploy/.env.registry`、局域网 TLS 证书和独立随机的仓库推送/拉取密码，创建 `/srv/swarmjet/data`，构建镜像并通过 Compose 完成迁移、启动和健康检查。仓库证书会加入本机 Docker 信任目录，远程节点仍需安装生成的 CA。宿主机需要 Docker、Python 3、OpenSSL 和 `ip` 命令，不需要 Go、Node.js 或 Agent CLI。可用 `--data-dir /绝对路径` 修改首次部署的数据目录。脚本要求本机 Docker socket，支持 `deploy/compose.override.yaml`。
+脚本自动生成权限为 `0600` 的 `deploy/.env`、独立的数据库和管理员密码、运行终端密钥及连接加密主密钥，创建 `/srv/swarmjet/data`，构建应用与 Agent 镜像，并通过 Compose 完成迁移、启动和健康检查。宿主机需要 Docker、Python 3 和 OpenSSL，不需要 Go、Node.js 或 Agent CLI。可用 `--data-dir /绝对路径` 修改首次部署的数据目录。脚本要求本机 Docker socket，支持 `deploy/compose.override.yaml`。
 
-控制台默认只监听服务器本机；镜像仓库网关监听安装时选定的局域网 IP。在自己的电脑执行 `ssh -N -L 8180:127.0.0.1:8180 用户名@服务器`，然后打开 `http://localhost:8180`。应急管理员账号为 `admin`，密码在服务器 `deploy/.env` 的 `ADMIN_PASSWORD` 中。登录后在“Runner 环境”选择 Node、启用已安装的 Agent 并配置模型认证，再添加 GitLab 项目。仓库所用 IP 应通过 DHCP 保留或静态配置保持稳定。
+脚本组合 `compose.yaml`、`compose.build.yaml` 和 `compose.local-node.yaml`：任务在同一主机上的执行节点 `local` 中运行。新节点默认使用 `AGENT_IMAGE`（源码安装时为本机构建的 `swarmjet-agent:local`），可在 Node 管理中改为任意镜像地址。
+
+控制台默认只监听服务器本机。在自己的电脑执行 `ssh -N -L 8180:127.0.0.1:8180 用户名@服务器`，然后打开 `http://localhost:8180`。应急管理员账号为 `admin`，密码在服务器 `deploy/.env` 的 `ADMIN_PASSWORD` 中。登录后在“Runner 环境”选择 Node、启用已安装的 Agent 并配置模型认证，再添加 GitLab 项目。
 
 成员自助申请及密码重置需要在 `deploy/.env` 配置 `SMTP_ADDR`（`host:port`）、`SMTP_FROM`、可选的 `SMTP_USERNAME` 和 `SMTP_PASSWORD`。服务只接受支持 STARTTLS 且证书有效的 SMTP 服务器；注册邮件发送 6 位验证码，密码重置邮件的链接使用 `PUBLIC_ORIGIN`。缺少 SMTP 配置时，应急管理员仍可登录，申请和重置接口返回不可用。升级到多人权限版本会清除旧会话；已有项目和连接仍在，平台管理员需为项目指定负责人，并显式启用需要的 GitLab/GitHub 自动接单策略。
 
 初始化验证默认使用 `swarmjet-agent:local`。如果业务项目需要额外工具链或离线依赖，应准备相应镜像并修改 `INIT_VERIFY_IMAGE`；服务启动成功不代表项目验收已通过。
 
-失败后可以重新运行脚本；已有 `.env` 不会被覆盖，只会补齐缺失的升级器配置，仓库密码和 CA 也不会轮换。`--data-dir` 和 `--agent-clis` 仅用于首次生成配置，之后直接编辑 `.env`。脚本会重新构建并更新服务，不删除数据；升级前仍应备份 PostgreSQL、数据目录、`.env.registry` 和主密钥。已发布镜像的更新使用下文的 `update.sh`。
+失败后可以重新运行脚本；已有 `.env` 不会被覆盖。`--data-dir` 和 `--agent-clis` 仅用于首次生成配置，之后直接编辑 `.env`。脚本会重新构建并更新服务，不删除数据；升级前仍应备份 PostgreSQL、数据目录和主密钥。使用已发布镜像的更新方式见下文。
 
 ## 手动本地构建
 
@@ -37,9 +37,8 @@ chmod 600 .env
 # 编辑 .env：独立随机 PostgreSQL / 管理员密码、实际凭证、DATA_DIR。
 mkdir -p /srv/swarmjet/data
 chmod 700 /srv/swarmjet/data
-python3 registry_setup.py --root /srv/swarmjet/data/registry-config --host 10.0.0.20 --env-file .env.registry
-docker compose --env-file .env --env-file .env.registry -f compose.yaml -f compose.build.yaml -f compose.builder.yaml -f compose.registry.yaml --profile tools build
-docker compose --env-file .env --env-file .env.registry -f compose.yaml -f compose.builder.yaml -f compose.registry.yaml up -d --wait
+docker compose -f compose.yaml -f compose.build.yaml -f compose.local-node.yaml --profile tools build
+docker compose -f compose.yaml -f compose.build.yaml -f compose.local-node.yaml up -d --wait
 ```
 
 `deploy/Dockerfile` 默认使用 Docker Hub 官方基础镜像，并固定版本。可在仓库根目录通过 build args 覆盖镜像来源：
@@ -60,16 +59,16 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
 
 独立执行镜像保留 Node `22.23.1`、glab `1.115.0`、uv、pnpm、Git、Python 与编译依赖。`AGENT_CLIS` 构建参数决定安装哪些 CLI，默认仅 `opencode`（受管项目静态初始化需要它），可选 `opencode,codex,dst,agy,claude`，不会默认安装全部。版本固定在 `deploy/Dockerfile.agent` 和 `scripts/install-agent-clis.sh`；Antigravity 使用官方固定版本归档及 SHA-512 校验。应用主镜像和 Agent 镜像独立。
 
-## 页面管理 Agent 镜像与跨机分发
+## Agent 镜像与跨机分发
 
-侧边栏“镜像管理”管理 Agent 执行镜像。独立 builder 调用 Compose 管理的持久化 BuildKit，发布到自建 Distribution。“系统设置 → 开发者选项”启用后，该页面还显示平台程序镜像：可为当前平台源码填写唯一版本标签，一键构建并发布到 `swarmjet/platform`，查看日志、取消构建、复制摘要及删除未使用版本。业务应用镜像仍使用各自发布流程。
+控制台不构建镜像。Agent 镜像有两种来源：
 
-源码安装脚本会组合 `compose.yaml`、`compose.build.yaml`、`compose.builder.yaml` 和 `compose.registry.yaml`。手动部署也应包含 builder 与 registry 配置；“系统设置 → 镜像仓库”默认使用局域网 TLS 仓库，可按需查看自动生成的账号密码或切换自定义仓库。概览页可检查控制面到仓库的 TLS 与认证连接，部署地址仍需在服务器环境文件中修改并重启。其他节点需信任仓库 CA 后才能拉取镜像。构建成功不会自动应用或启用 Agent；选择节点分发后，节点按摘要预拉取并检查 CLI，准备完成才可接单。
+- 发布流水线推送的 `ghcr.io/yyydddkkk/swarmjet/agent:<tag>`；
+- 用 `deploy/Dockerfile.agent` 自行构建并推送到自己的镜像仓库，例如需要额外工具链或其他 CLI 组合时。
 
-本机原生开发的 `scripts/dev start` 也会自动使用同一份 `compose.registry.yaml`，私有配置保存在 `DATA_DIR/registry-config`。
+在 Node 管理中为每个节点填写 Agent 镜像地址。节点先尝试 `docker pull`；拉取失败时，若节点上已有同名镜像（例如本机构建的 `swarmjet-agent:local`）则直接使用。随后节点检查镜像架构和其中的 CLI，准备完成才可接单。私有仓库需在节点主机预先执行 `docker login`，Docker daemon 的镜像代理也属于主机配置。
 
-节点支持默认镜像及多个额外预加载镜像，项目显式角色镜像优先于节点默认值。已有任务保留原摘要。未启用独立构建服务的旧单机部署仍保留原本地镜像管理路径；本地 image ID 不能直接用于跨机器分发。
-
+节点支持默认镜像及多个额外预加载镜像，项目显式角色镜像优先于节点默认值。已有任务保留原镜像引用。镜像标签可变；需要固定版本时使用 `@sha256:` 摘要引用。
 
 ## 服务器使用发布镜像
 
@@ -79,20 +78,11 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
 
 ```sh
 chmod 600 .env
-./update.sh
-# 或仅本次覆盖镜像；要持久保存版本仍应编辑 .env。
-./update.sh ghcr.io/yyydddkkk/swarmjet:v1 ghcr.io/yyydddkkk/swarmjet/agent:v1
+docker compose -f compose.yaml -f compose.local-node.yaml --profile tools pull
+docker compose -f compose.yaml -f compose.local-node.yaml up -d --wait
 ```
 
-脚本拉取镜像，先执行 Temporal schema 更新和 namespace 初始化、再执行应用 migration，最后更新 API、Worker、builder、BuildKit、本地节点和内置仓库。它不会执行 `compose down` 或删除数据卷。已有执行容器和 Temporal 历史不会因为替换 Worker 而删除。
-
-### 控制台升级引导
-
-安装包含升级功能的首个发布版时，先按上面的 `update.sh` 流程更新控制面。脚本为控制面生成独立 `UPDATER_SECRET`、保存部署目录，并启动与 API 分离的 `updater`。将 `UPDATER_STATE_DIR` 配置为**独立挂载的备份文件系统**；控制台升级的预检会检查挂载位置和剩余空间。
-
-已部署的远程 Node 需要一次人工引导：把此发布版的 `compose.node.yaml`、`install_node.py`、`upgrade_host.py` 和 `Dockerfile.updater` 复制到该 Node 原有的私密部署包目录，保留其中的 `node.json`、`node.env` 与仓库 CA，然后在 Node 主机执行 `python3 install_node.py --check` 和 `sudo python3 install_node.py`。确认 Node 恢复心跳并上报协议版本 2 后，后续程序升级可从“系统设置 → 平台升级”发起。
-
-控制台先从固定 GitHub 仓库的 `vX.Y.Z` 标签取得源码，由本集群 BuildKit 构建并发布到内置 Registry。管理员查看构建与预检结果后启动升级；系统停止新接单、等待实际执行结束、自动备份，再更新控制面并逐台升级已启用的 Node。待审批或待回复任务保留；启用但离线的 Node 会阻断启动。Runner 镜像继续在镜像管理中独立更新。升级器接口、备份内容及失败恢复见 [宿主机升级器说明](UPGRADE.md)。
+升级时修改 `.env` 中的 `IMAGE` 和 `AGENT_IMAGE`，重复上面两条命令。Compose 按依赖顺序先完成 Temporal schema 更新、namespace 初始化和应用 migration，再更新 API、Worker 和本地节点。它不会删除数据卷；已有执行容器和 Temporal 历史不会因为替换 Worker 而删除。节点的 Agent 镜像在 Node 管理中单独更新。远程 Node 的程序镜像在其部署目录中修改 `node.env` 的 `IMAGE` 后执行 `docker compose --env-file node.env -f compose.node.yaml pull` 和 `up -d`。
 
 首次初始化由 PostgreSQL 建立 `swarmjet`、`temporal`、`temporal_visibility` 三个数据库，随后对应工具建立 schema。升级已有数据库前先备份；不要给新版 Temporal 强行降级数据库 schema。更换主版本应遵循官方升级路径，不能仅修改镜像 tag 跳过中间升级要求。`TEMPORAL_NAMESPACE` 默认 `swarmjet`，历史保留 7 天。
 
@@ -110,7 +100,7 @@ Git HTTPS 认证使用 `/usr/local/bin/swarmjet-askpass`，用户名为 `oauth2`
 
 设置 `RUNTIME_ADMIN_SECRET` 为独立随机值（至少 32 个字符，例如 `openssl rand -hex 32`），重启 API/Worker 后，控制台的“执行器环境”可以打开配置终端。API 通过私有网络连接 Worker 的 8091 端口；该端口不发布到宿主机，API 本身仍然没有 Docker socket。
 
-配置终端初始使用部署的 `AGENT_IMAGE`，在页面应用镜像后使用所选镜像摘要，只挂载 `DATA_DIR/runtime-profiles/default/home`。按需打包后，在“执行器环境”勾选需要启用的 Agent 并保存。新安装/升级后没有隐式启用项，管理员需要明确选择；已有任务继续运行，新的接单使用新列表。
+配置终端使用部署的 `AGENT_IMAGE`，只挂载 `DATA_DIR/runtime-profiles/default/home`。按需打包后，在“执行器环境”勾选需要启用的 Agent 并保存。新安装/升级后没有隐式启用项，管理员需要明确选择；已有任务继续运行，新的接单使用新列表。
 
 ```sh
 # 在 deploy/.env 设置 AGENT_CLIS=opencode,codex,claude 后构建
@@ -118,7 +108,7 @@ Git HTTPS 认证使用 `/usr/local/bin/swarmjet-askpass`，用户名为 `oauth2`
 docker compose --env-file deploy/.env -f deploy/compose.yaml -f deploy/compose.build.yaml --profile tools build agent-image
 ```
 
-重建完成后，按正常发布流程让配置终端和所有执行节点使用新的 `AGENT_IMAGE`。执行器环境页的勾选只控制平台准入，不会构建镜像，也不验证账号额度；镜像管理页的“保存并构建”才会提交构建。项目默认 Agent 和 Issue 的 `agent:*` 标签都必须位于已启用列表中。
+重建完成后，让配置终端使用新的 `AGENT_IMAGE`，并在 Node 管理中为各节点填写新的 Agent 镜像。执行器环境页的勾选只控制平台准入，不会构建镜像，也不验证账号额度。项目默认 Agent 和 Issue 的 `agent:*` 标签都必须位于已启用列表中。
 
 | Agent ID | 终端入口 | 复制到任务的配置 |
 |---|---|---|
@@ -178,7 +168,7 @@ Worker 执行保留期清理：`FAILED_KEEP_DAYS=7` 用于已取消任务的现�
 
 Compose 使用 RabbitMQ 4.3 单节点 quorum queue 和持久化数据卷，分别缓冲 webhook、命令和死信。此配置适用于开发与单机部署，覆盖容器/Broker 重启后的持久恢复，不提供节点故障高可用。生产部署应使用三台独立故障域中的 RabbitMQ 节点，为 webhook、command 与 DLQ 建立三副本 quorum queues，并配置 TLS、认证、受限网络访问及节点磁盘告警。单节点 Compose 不构成生产 HA。
 
-新安装由 `install.py` 生成独立 `RABBITMQ_PASSWORD`；旧安装执行 `update.sh` 时会为缺少该键的 `.env` 追加随机密码。已有外部集群可向应用提供 `RABBITMQ_URL`，地址应指向可切换节点的 TLS 入口；当前 Compose 仍会启动本地 Broker，生产三节点集群需在独立部署中管理。检查积压可在单节点运行 `docker compose exec rabbitmq rabbitmqctl list_queues name messages_ready messages_unacknowledged message_bytes consumers`；死信重放前先停止或隔离相关消费者，核对消息 ID 与 PostgreSQL 收据，再按原 ID 重新发布并等待确认。生产切换前仍需单独验收平台重试、可接单事件积压以及三节点故障切换。
+新安装由 `install.py` 生成独立 `RABBITMQ_PASSWORD`；旧安装重新运行 `install.py` 时会为缺少该键的 `.env` 追加随机密码。已有外部集群可向应用提供 `RABBITMQ_URL`，地址应指向可切换节点的 TLS 入口；当前 Compose 仍会启动本地 Broker，生产三节点集群需在独立部署中管理。检查积压可在单节点运行 `docker compose exec rabbitmq rabbitmqctl list_queues name messages_ready messages_unacknowledged message_bytes consumers`；死信重放前先停止或隔离相关消费者，核对消息 ID 与 PostgreSQL 收据，再按原 ID 重新发布并等待确认。生产切换前仍需单独验收平台重试、可接单事件积压以及三节点故障切换。
 
 生产集群先按 [RabbitMQ 集群指南](https://www.rabbitmq.com/docs/clustering) 建立三台独立持久磁盘节点，共享集群 cookie，并在应用首次声明队列前确认三个节点在线；默认 quorum 初始成员数为三。把应用 `RABBITMQ_URL` 指向带 TLS 的集群入口，限制 vhost/user 权限。若从单节点队列迁移，先备份并排空或逐条确认迁移中的消息，随后用 `rabbitmq-queues grow <node> all --queue-pattern 'swarmjet.*'` 为新节点增加成员，逐队列核对成员数、leader 和积压，再切换发布与消费。新增集群节点不会自动成为既有 quorum queue 的成员；官方 [成员管理说明](https://www.rabbitmq.com/docs/quorum-queues#managing-members)列出扩容命令和多数派要求。生产切换前演练断开一个节点后的发布确认、消费和恢复。
 
@@ -194,21 +184,9 @@ Webhook 的 PostgreSQL `(provider, delivery ID)` 收据用于确认丢失后的�
 
 ### 内网快速添加 Node
 
-内置 Distribution 同时存放程序镜像与 Agent 镜像。程序镜像使用独立路径 `swarmjet/platform`，Agent 镜像继续使用 `swarmjet/agent`。**系统设置 → 平台升级**从发布标签构建新版并协调已安装升级器的控制面与 Node 更新。开发者也可在 **系统设置 → 开发者选项**启用“管理平台程序镜像”，然后在 **镜像管理 → 平台镜像**为当前源码构建镜像；这个开发者构建操作本身不会更新运行中的服务。
-
-也可在**运行控制面 API 容器的主机**使用 CLI 发布当前程序镜像（tag 使用本次发布的唯一版本号）：
-
-```sh
-sudo python3 deploy/publish_platform.py --tag v1.2.3
-```
-
-脚本核对本机源镜像与正在运行的 API、Worker 容器使用相同镜像，再以仓库 builder 凭据推送并输出不可变摘要。它只发布程序镜像，不更新运行中的服务。内置仓库通过安装时固定的内网地址 `:5443` 提供 TLS。
-
-若控制面通过本仓库的 `scripts/dev start` 原生运行，程序镜像不会自动构建。开发主机使用 `python3 deploy/publish_platform.py --dev --build --tag dev-20260924` 一次构建并发布；脚本读取 `.cache/dev/.env.registry`，检查本机 API/Worker 进程，并将当前源码构建为 `swarmjet:local`。正式 Compose 部署继续使用上面的命令。
-
 原生开发 API 默认只监听回环地址。要让另一台内网主机注册 Node，在 `deploy/.env.development` 设置 `DEV_API_HOST` 为控制面主机的内网 IPv4，再运行 `./scripts/dev restart`；目标机的 `CONTROL_PLANE_URL` 填 `http://<该内网 IP>:8181`。浏览器仍可通过本机 Vite 页面访问。完成测试后可移除该变量并重启，恢复回环监听。
 
-在控制台 **Node 管理 → 添加节点**填写唯一 ID、已发布的程序镜像、两端内网地址、数据目录和端口，下载私密部署包。`CONTROL_PLANE_URL` 必须从目标服务器访问到 API；默认安装的 `LISTEN_HOST=127.0.0.1` 仅允许本机访问，跨机器部署前应为 API 配置可达的内网监听地址或 HTTPS 反向代理。`NODE_ADVERTISE_URL` 必须能从控制面访问目标服务器；默认包使用目标机 8092 端口。限制该端口只接受控制面访问。生产网络按前文要求使用 HTTPS。
+在控制台 **Node 管理 → 添加节点**填写唯一 ID、程序镜像地址（例如 `ghcr.io/yyydddkkk/swarmjet:<tag>`，默认填入控制面当前使用的 `PLATFORM_IMAGE`）、两端内网地址、数据目录和端口，下载私密部署包。`CONTROL_PLANE_URL` 必须从目标服务器访问到 API；默认安装的 `LISTEN_HOST=127.0.0.1` 仅允许本机访问，跨机器部署前应为 API 配置可达的内网监听地址或 HTTPS 反向代理。`NODE_ADVERTISE_URL` 必须能从控制面访问目标服务器；默认包使用目标机 8092 端口。限制该端口只接受控制面访问。生产网络按前文要求使用 HTTPS。
 
 将下载的 `swarmjet-node-<ID>.tar.gz` 安全复制到目标服务器（不要上传到公开位置），执行：
 
@@ -220,9 +198,9 @@ python3 install_node.py --check
 sudo python3 install_node.py
 ```
 
-部署包包含 Node 专属注册凭据、仓库只读凭据和 CA 公钥证书。脚本先检查 Linux、程序镜像引用、控制面和仓库连通性；目标机缺少 Docker 时，在 Ubuntu/Debian 上从 Docker 官方 apt 仓库安装 Engine 与 Compose 插件。已有 Docker 只补齐缺失的 Compose 插件或启动 daemon，不清理旧容器、镜像或卷。随后脚本安装仓库 CA、用临时 Docker 配置拉取指定摘要的程序镜像、创建独立数据目录并启动 Node。重复运行保留数据目录；`node.env` 保存 Node 注册凭据，权限为 `0600`。部署包自身含明文凭据，也必须保存在受限目录。
+部署包包含 Node 专属注册凭据。脚本先检查 Linux、程序镜像引用、控制面连通性和端口；目标机缺少 Docker 时，在 Ubuntu/Debian 上从 Docker 官方 apt 仓库安装 Engine 与 Compose 插件。已有 Docker 只补齐缺失的 Compose 插件或启动 daemon，不清理旧容器、镜像或卷。随后脚本拉取程序镜像、创建独立数据目录并启动 Node。私有仓库的镜像需先在目标机执行 `docker login`。重复运行保留数据目录；`node.env` 保存 Node 注册凭据，权限为 `0600`。部署包自身含明文凭据，也必须保存在受限目录。
 
-Node 容器启动后，回到 Node 管理页确认“在线”，选择默认 Agent 镜像并等待“镜像就绪”，在该 Node 的 Runner 环境中完成登录，最后启用“接收新任务”。安装脚本验证容器启动；跨机器回连、Agent 镜像准备和可调度状态仍以页面显示为准。首次下载部署包会生成注册凭据，已注册的 ID 不可重复下载部署包。Node 完成上述升级器引导后，程序版本由“系统设置 → 平台升级”逐台更新并核对心跳。
+Node 容器启动后，回到 Node 管理页确认“在线”，填写 Agent 镜像并等待“镜像就绪”，在该 Node 的 Runner 环境中完成登录，最后启用“接收新任务”。安装脚本验证容器启动；跨机器回连、Agent 镜像准备和可调度状态仍以页面显示为准。首次下载部署包会生成注册凭据，已注册的 ID 不可重复下载部署包。
 
 控制面把 `EXECUTION_MODE` 设为 `distributed`；在执行节点页面为每个 Node 创建独立注册凭据，作为该节点的 `NODE_SECRET`。旧部署的共享 `NODE_SECRET` 保留兼容入口。`local` 是默认的单机回退：没有注册节点时任务在本机 Worker 执行。
 

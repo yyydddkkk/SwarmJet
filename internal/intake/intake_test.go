@@ -3,8 +3,6 @@ package intake
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -45,33 +43,25 @@ func TestAdmissionReadiness(t *testing.T) {
 
 func TestScheduleFreezesAgentImageAndRoundIntent(t *testing.T) {
 	ctx := context.Background()
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "image-manager"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	const digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	if err := os.WriteFile(filepath.Join(dir, "image-manager", "active.json"), []byte(`{"imageId":"`+digest+`"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	p := domain.Project{ID: "p", Enabled: true, Development: domain.AgentConfig{Adapter: "opencode", Model: "old", Image: "old-image"}, Review: domain.AgentConfig{Adapter: "opencode", Model: "review", Image: "old-image"}}
 	issue := domain.Issue{Provider: domain.ProviderGitHub, ProjectID: 7, IID: 3, Labels: []string{"autonomous", "agent:codex"}}
 	deps := []domain.IssueRef{{Provider: domain.ProviderGitHub, ProjectID: 7, IID: 2}}
 	scheduler := &captureScheduler{}
-	task, err := Schedule(ctx, scheduler, p, issue, []string{"codex"}, Options{DataDir: dir, Dependencies: deps, ClaimRunCommands: true})
+	task, err := Schedule(ctx, scheduler, p, issue, []string{"codex"}, Options{Dependencies: deps, ClaimRunCommands: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if scheduler.calls != 1 || scheduler.requireNode || task.ID == "" || task.Stage != "queued" || task.Executions == nil || task.TriggerNoteIDs == nil || len(task.TriggerNoteIDs) != 0 || len(task.Dependencies) != 1 || task.Dependencies[0] != deps[0] {
 		t.Fatalf("incorrect Task snapshot: %+v", task)
 	}
-	if task.Project.Development.Adapter != "codex" || task.Project.Review.Adapter != "codex" || task.Project.Development.Model != "" || !task.Project.Development.UseCLIDefaults || task.Project.Development.Image != digest || task.Project.Review.Image != digest {
+	if task.Project.Development.Adapter != "codex" || task.Project.Review.Adapter != "codex" || task.Project.Development.Model != "" || !task.Project.Development.UseCLIDefaults || task.Project.Development.Image != "old-image" || task.Project.Review.Image != "old-image" {
 		t.Fatalf("Agent/image choices not frozen: %+v", task.Project)
 	}
 	if p.Development.Adapter != "opencode" || p.Development.Image != "old-image" {
 		t.Fatal("source Project changed")
 	}
 	scheduler = &captureScheduler{}
-	task, err = Schedule(ctx, scheduler, p, issue, []string{"codex"}, Options{DataDir: dir, RequireNode: true})
+	task, err = Schedule(ctx, scheduler, p, issue, []string{"codex"}, Options{RequireNode: true})
 	if err != nil || !scheduler.requireNode || task.TriggerNoteIDs != nil || task.Project.Development.Image != "old-image" {
 		t.Fatalf("Node mode must preserve configured image and first-round intent: %+v %v", task, err)
 	}

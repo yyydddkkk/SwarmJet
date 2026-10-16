@@ -1,4 +1,4 @@
-# Optional overlay: add after compose.yaml / compose.builder.yaml.
+# Optional overlay: add after compose.yaml / compose.local-node.yaml.
 # No Docker socket, TUN device or NET_ADMIN capability is required.
 services:
   api:
