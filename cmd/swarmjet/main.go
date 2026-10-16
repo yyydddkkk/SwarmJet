@@ -435,6 +435,11 @@ func run() error {
 				recordJob("command", err)
 				return err
 			},
+			Message: func(ctx context.Context, job jobs.Message) error {
+				err := s.DeliverMessage(ctx, job.ID)
+				recordJob("message", err)
+				return err
+			},
 		}, jobs.Config{})
 		if err != nil {
 			return err
