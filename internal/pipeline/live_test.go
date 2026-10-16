@@ -55,11 +55,11 @@ func TestLiveTemporalWorkerRestart(t *testing.T) {
 		currentWorker.RegisterActivityWithOptions(func(context.Context, domain.Task) error { return nil }, activity.RegisterOptions{Name: "SaveTask"})
 		currentWorker.RegisterActivityWithOptions(func(_ context.Context, input StepInput) (StepResult, error) {
 			out := successfulStep(input)
-			if input.Phase == "waiting_dependencies" {
+			if input.Phase == domain.StageWaitingDependencies {
 				dependencyChecks.Add(1)
 				out.Ready = ready.Load()
 			}
-			if input.Phase == "developing" {
+			if input.Phase == domain.StageDeveloping {
 				developerExecutions.Add(1)
 			}
 			return out, nil
@@ -111,7 +111,7 @@ func TestLiveTemporalWorkerRestart(t *testing.T) {
 		}
 		return recovered.Paused && len(recovered.Notes) == 1
 	})
-	if recovered.Stage != "waiting_dependencies" || recovered.Notes[0] != "recorded while worker was stopped" {
+	if recovered.Stage != domain.StageWaitingDependencies || recovered.Notes[0] != "recorded while worker was stopped" {
 		t.Fatalf("worker restart lost checkpoint/signals: %+v", recovered)
 	}
 	if developerExecutions.Load() != 0 {

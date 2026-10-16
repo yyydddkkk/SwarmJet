@@ -3,7 +3,6 @@ package pipeline
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"go.temporal.io/sdk/temporal"
@@ -14,6 +13,18 @@ import (
 const Queue = "swarmjet"
 const WorkflowName = "WorkTask"
 const SignalName = "command"
+
+// Control phases are StepInput.Phase values that are not task stages. They
+// orchestrate recovery and cancellation around a stage Activity.
+const (
+	phaseStop               = "stop"
+	phaseStopping           = "stopping"
+	phaseRecover            = "recover"
+	phaseRecoverManualMerge = "recover_manual_merge"
+	phasePauseQueue         = "pause_queue"
+	phaseCancel             = "cancel"
+	phaseFinalize           = "finalize"
+)
 
 type StepInput struct {
 	Phase       string
@@ -27,541 +38,499 @@ type StepResult struct {
 	Waiting bool
 }
 
+// workTask holds the state of one WorkTask run. The fields listed under the
+// checkpoint group are serialized into the Continue-As-New checkpoint; the rest
+// is rebuilt from the version gates and the signal channel on every run.
+type workTask struct {
+	ctx      workflow.Context
+	task     domain.Task
+	commands workflow.ReceiveChannel
+
+	// Checkpointed state.
+	serial        int
+	previousPhase string
+	seen          map[string]bool
+	retry         bool
+	rejected      bool
+	cancelled     bool
+	ciWaits       int
+
+	// Version gates and the project switches they derive.
+	autoMergeVersion workflow.Version
+	evergreen        bool
+	skipAcceptance   bool
+	reviewEnabled    bool
+	earlyPublish     bool
+
+	// Coordination between the background command handler and the run loop.
+	controlVersion          int
+	autoMergeControlVersion int
+	activeCancel            workflow.CancelFunc
+	interrupted             bool
+}
+
+// WorkTask is the durable workflow for one task. It only wires the pieces
+// together; each phase advances in workflow_stages.go and the state lives in
+// workTask.
 func WorkTask(ctx workflow.Context, t domain.Task) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 2 * time.Hour, HeartbeatTimeout: time.Minute, WaitForCancellation: true, RetryPolicy: &temporal.RetryPolicy{InitialInterval: 2 * time.Second, BackoffCoefficient: 2, MaximumInterval: time.Minute, MaximumAttempts: 3}})
+	w := &workTask{ctx: ctx, task: t}
+	w.initGates()
+	w.commands = workflow.GetSignalChannel(ctx, SignalName)
+	w.restore()
+	w.startCommandLoop()
+	return w.run()
+}
+
+// initGates reads the workflow version markers. Their order, change IDs and
+// bounds are part of the saved-history contract and must not change.
+func (w *workTask) initGates() {
 	// Version gate for the project-level auto-merge switch. Executions saved
 	// before this change replay with the previous decision order; new executions
 	// honor the switch. DefaultVersion is the pre-switch behavior.
-	autoMergeVersion := workflow.GetVersion(ctx, "auto-merge-switch", workflow.DefaultVersion, 1)
-	evergreenVersion := workflow.GetVersion(ctx, "evergreen-issue", workflow.DefaultVersion, 1)
-	evergreen := evergreenVersion >= 1 && t.Round > 0
-	acceptanceVersion := workflow.GetVersion(ctx, "acceptance-strategy", workflow.DefaultVersion, 1)
-	skipAcceptance := t.Project.AcceptanceStrategy == "none"
-	reviewEnabled := t.Project.IndependentReview()
-	earlyPublish := acceptanceVersion >= 1 && t.Project.AcceptanceStrategy != "" && !skipAcceptance
-	commands := workflow.GetSignalChannel(ctx, SignalName)
-	seen := map[string]bool{}
-	cancelled := false
-	retry := false
-	rejected := false
-	var serial int
-	var previousPhase string
-	ciWaits := 0
-	if c := t.Checkpoint; c != nil {
-		serial = c.Serial
-		previousPhase = c.PreviousPhase
+	w.autoMergeVersion = workflow.GetVersion(w.ctx, "auto-merge-switch", workflow.DefaultVersion, 1)
+	evergreenVersion := workflow.GetVersion(w.ctx, "evergreen-issue", workflow.DefaultVersion, 1)
+	w.evergreen = evergreenVersion >= 1 && w.task.Round > 0
+	acceptanceVersion := workflow.GetVersion(w.ctx, "acceptance-strategy", workflow.DefaultVersion, 1)
+	w.skipAcceptance = w.task.Project.AcceptanceStrategy == "none"
+	w.reviewEnabled = w.task.Project.IndependentReview()
+	w.earlyPublish = acceptanceVersion >= 1 && w.task.Project.AcceptanceStrategy != "" && !w.skipAcceptance
+}
+
+// restore loads the checkpoint left by a Continue-As-New or a worker restart.
+func (w *workTask) restore() {
+	w.seen = map[string]bool{}
+	if c := w.task.Checkpoint; c != nil {
+		w.serial = c.Serial
+		w.previousPhase = c.PreviousPhase
 		if c.Seen != nil {
-			seen = c.Seen
+			w.seen = c.Seen
 		}
-		retry = c.Retry
-		rejected = c.Rejected
-		cancelled = c.Cancelled
-		ciWaits = c.CIWaits
+		w.retry = c.Retry
+		w.rejected = c.Rejected
+		w.cancelled = c.Cancelled
+		w.ciWaits = c.CIWaits
 	}
-	t.Checkpoint = nil
-	var activeCancel workflow.CancelFunc
-	interrupted := false
-	controlVersion := 0
-	autoMergeControlVersion := 0
-	applyCommand := func(c domain.Command) {
-		if seen[c.ID] {
-			return
-		}
-		seen[c.ID] = true
-		controlVersion++
-		switch c.Kind {
-		case "pause":
-			t.Paused = true
-			if activeCancel != nil {
-				interrupted = true
-				activeCancel()
-			}
-		case "resume":
-			t.Paused = false
-		case "continue_committed":
-			if t.Paused && t.Stage == "developing" {
-				if activeCancel != nil {
-					interrupted = true
-					activeCancel()
-				}
-				t.Project.AcceptanceStrategy = "none"
-				skipAcceptance = true
-				t.AcceptanceCommands = nil
-				t.Verification = nil
-				t.AcceptanceIncomplete = false
-				t.Notes = append(t.Notes, "管理员确认已有提交，直接进入发布与审查："+c.Text)
-				t.Message = "已确认现有提交，跳过重复开发和额外验收，进入发布与审查"
-				t.Stage = "publishing"
-				t.Paused = false
-			}
-		case "set_auto_merge":
-			if c.AutoMerge == nil || t.Stage == "finalizing" || t.Stage == "completed" || t.Stage == "cancelled" || t.Stage == "partial_merge" || t.Stage == "manual_merging" {
-				break
-			}
-			if t.Stage == "merging" && *c.AutoMerge {
-				break
-			}
-			value := *c.AutoMerge
-			t.AutoMergeOverride = &value
-			autoMergeControlVersion++
-			if value {
-				t.Notes = append(t.Notes, "管理员开启了此任务自动合并")
-			} else {
-				t.Notes = append(t.Notes, "管理员关闭了此任务自动合并；合并阶段等待人工操作")
-			}
-			if !value && (t.Stage == "acquiring_merge" || t.Stage == "merging") {
-				if activeCancel != nil {
-					interrupted = true
-					activeCancel()
-				}
-				t.Stage = "waiting_manual_merge"
-			} else if !value && t.Stage == "waiting_approval" {
-				t.Stage = "waiting_manual_merge"
-			}
-		case "merge_round":
-			if t.Project.HostingProvider() == domain.ProviderGitLab && t.Stage == "waiting_manual_merge" && !t.Paused {
-				disabled := false
-				t.AutoMergeOverride = &disabled
-				autoMergeControlVersion++
-				t.Stage = "manual_merging"
-				t.Message = "正在按人工验收记录合并整轮 MR"
-				if activeCancel != nil {
-					interrupted = true
-					activeCancel()
-				}
-			}
-		case "cancel":
-			cancelled = true
-			if activeCancel != nil {
-				activeCancel()
-			}
-		case "retry":
-			retry = true
-		case "note":
-			t.Notes = append(t.Notes, c.Text)
-		case "approve":
-			if t.Stage == "waiting_approval" && c.Digest != "" && c.Digest == t.ReviewDigest {
-				t.ApprovalDigest = c.Digest
-			}
-		case "reject":
-			if t.Stage == "waiting_approval" {
-				t.Notes = append(t.Notes, "人工审核要求修改: "+c.Text)
-				rejected = true
-			}
-		case "dependencies":
-			t.Dependencies = c.Dependencies
-		}
-	}
-	workflow.Go(ctx, func(ctx workflow.Context) {
+	w.task.Checkpoint = nil
+}
+
+// startCommandLoop runs the background signal handler and exposes the state
+// query. Commands are applied while the run loop is parked on a timer.
+func (w *workTask) startCommandLoop() {
+	workflow.Go(w.ctx, func(ctx workflow.Context) {
 		for {
 			var c domain.Command
-			commands.Receive(ctx, &c)
-			applyCommand(c)
+			w.commands.Receive(ctx, &c)
+			w.applyCommand(c)
 		}
 	})
-	_ = workflow.SetQueryHandler(ctx, "state", func() (domain.Task, error) { return t, nil })
-	persist := func() error {
-		saveCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: time.Minute}})
-		return workflow.ExecuteActivity(saveCtx, "SaveTask", t).Get(saveCtx, nil)
+	_ = workflow.SetQueryHandler(w.ctx, "state", func() (domain.Task, error) { return w.task, nil })
+}
+
+// applyCommand folds one signal command into the live task state. It is
+// idempotent per command ID because the signal channel replays on restart.
+func (w *workTask) applyCommand(c domain.Command) {
+	if w.seen[c.ID] {
+		return
 	}
-	waitTick := func(d time.Duration) {
-		timerCtx, cancel := workflow.WithCancel(ctx)
-		defer cancel()
-		v := controlVersion
-		f := workflow.NewTimer(timerCtx, d)
-		_ = workflow.Await(timerCtx, func() bool { return f.IsReady() || cancelled || t.Paused || controlVersion != v })
-	}
-	// Yield through durable timers while the background signal handler applies commands.
-	wait := func(test func() bool) error { return workflow.Await(ctx, func() bool { return cancelled || test() }) }
-	advanceAfterReview := func() {
-		// ReviewDigest pins the exact revision set for later merge checks. When
-		// independent review is disabled it is still a revision checkpoint.
-		t.ReviewDigest = domain.Digest(t.Workspace.Revisions)
-		special := false
-		changed := false
-		for _, r := range t.Workspace.Revisions {
-			special = special || r.Sensitive
-			changed = changed || r.Changed
+	w.seen[c.ID] = true
+	w.controlVersion++
+	switch c.Kind {
+	case "pause":
+		w.task.Paused = true
+		if w.activeCancel != nil {
+			w.interrupted = true
+			w.activeCancel()
 		}
-		for _, label := range t.Issue.Labels {
-			special = special || label == "no-auto-close"
-		}
-		if autoMergeVersion >= 1 && (!t.AutoMergeEnabled() || t.AcceptanceIncomplete) {
-			if !changed {
-				t.Stage = "finalizing"
-			} else {
-				t.Message = "等待真人验收并人工合并全部 MR"
-				if t.AcceptanceIncomplete {
-					t.Message = "自动验收不完整，禁止自动合并；请按 MR 顶部清单人工验收"
-				}
-				t.Stage = "waiting_manual_merge"
+	case "resume":
+		w.task.Paused = false
+	case "continue_committed":
+		if w.task.Paused && w.task.Stage == domain.StageDeveloping {
+			if w.activeCancel != nil {
+				w.interrupted = true
+				w.activeCancel()
 			}
-		} else if !evergreen && special && t.ApprovalDigest != t.ReviewDigest {
-			t.Stage = "waiting_approval"
-		} else if !changed {
-			t.Stage = "finalizing"
-		} else {
-			t.Stage = "acquiring_merge"
+			w.task.Project.AcceptanceStrategy = "none"
+			w.skipAcceptance = true
+			w.task.AcceptanceCommands = nil
+			w.task.Verification = nil
+			w.task.AcceptanceIncomplete = false
+			w.task.Notes = append(w.task.Notes, "管理员确认已有提交，直接进入发布与审查："+c.Text)
+			w.task.Message = "已确认现有提交，跳过重复开发和额外验收，进入发布与审查"
+			w.task.Stage = domain.StagePublishing
+			w.task.Paused = false
 		}
+	case "set_auto_merge":
+		if c.AutoMerge == nil || w.task.Stage == domain.StageFinalizing || w.task.Stage == domain.StageCompleted || w.task.Stage == domain.StageCancelled || w.task.Stage == domain.StagePartialMerge || w.task.Stage == domain.StageManualMerging {
+			break
+		}
+		if w.task.Stage == domain.StageMerging && *c.AutoMerge {
+			break
+		}
+		value := *c.AutoMerge
+		w.task.AutoMergeOverride = &value
+		w.autoMergeControlVersion++
+		if value {
+			w.task.Notes = append(w.task.Notes, "管理员开启了此任务自动合并")
+		} else {
+			w.task.Notes = append(w.task.Notes, "管理员关闭了此任务自动合并；合并阶段等待人工操作")
+		}
+		if !value && (w.task.Stage == domain.StageAcquiringMerge || w.task.Stage == domain.StageMerging) {
+			if w.activeCancel != nil {
+				w.interrupted = true
+				w.activeCancel()
+			}
+			w.task.Stage = domain.StageWaitingManualMerge
+		} else if !value && w.task.Stage == domain.StageWaitingApproval {
+			w.task.Stage = domain.StageWaitingManualMerge
+		}
+	case "merge_round":
+		if w.task.Project.HostingProvider() == domain.ProviderGitLab && w.task.Stage == domain.StageWaitingManualMerge && !w.task.Paused {
+			disabled := false
+			w.task.AutoMergeOverride = &disabled
+			w.autoMergeControlVersion++
+			w.task.Stage = domain.StageManualMerging
+			w.task.Message = "正在按人工验收记录合并整轮 MR"
+			if w.activeCancel != nil {
+				w.interrupted = true
+				w.activeCancel()
+			}
+		}
+	case "cancel":
+		w.cancelled = true
+		if w.activeCancel != nil {
+			w.activeCancel()
+		}
+	case "retry":
+		w.retry = true
+	case "note":
+		w.task.Notes = append(w.task.Notes, c.Text)
+	case "approve":
+		if w.task.Stage == domain.StageWaitingApproval && c.Digest != "" && c.Digest == w.task.ReviewDigest {
+			w.task.ApprovalDigest = c.Digest
+		}
+	case "reject":
+		if w.task.Stage == domain.StageWaitingApproval {
+			w.task.Notes = append(w.task.Notes, "人工审核要求修改: "+c.Text)
+			w.rejected = true
+		}
+	case "dependencies":
+		w.task.Dependencies = c.Dependencies
 	}
+}
+
+func (w *workTask) persist() error {
+	saveCtx := workflow.WithActivityOptions(w.ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: time.Minute}})
+	return workflow.ExecuteActivity(saveCtx, "SaveTask", w.task).Get(saveCtx, nil)
+}
+
+func (w *workTask) waitTick(d time.Duration) {
+	timerCtx, cancel := workflow.WithCancel(w.ctx)
+	defer cancel()
+	v := w.controlVersion
+	f := workflow.NewTimer(timerCtx, d)
+	_ = workflow.Await(timerCtx, func() bool { return f.IsReady() || w.cancelled || w.task.Paused || w.controlVersion != v })
+}
+
+// wait yields through durable timers while the background signal handler
+// applies commands.
+func (w *workTask) wait(test func() bool) error {
+	return workflow.Await(w.ctx, func() bool { return w.cancelled || test() })
+}
+
+// advanceAfterReview decides the phase after the revision set is fixed.
+func (w *workTask) advanceAfterReview() {
+	// ReviewDigest pins the exact revision set for later merge checks. When
+	// independent review is disabled it is still a revision checkpoint.
+	w.task.ReviewDigest = domain.Digest(w.task.Workspace.Revisions)
+	special := false
+	changed := false
+	for _, r := range w.task.Workspace.Revisions {
+		special = special || r.Sensitive
+		changed = changed || r.Changed
+	}
+	for _, label := range w.task.Issue.Labels {
+		special = special || label == "no-auto-close"
+	}
+	if w.autoMergeVersion >= 1 && (!w.task.AutoMergeEnabled() || w.task.AcceptanceIncomplete) {
+		if !changed {
+			w.task.Stage = domain.StageFinalizing
+		} else {
+			w.task.Message = "等待真人验收并人工合并全部 MR"
+			if w.task.AcceptanceIncomplete {
+				w.task.Message = "自动验收不完整，禁止自动合并；请按 MR 顶部清单人工验收"
+			}
+			w.task.Stage = domain.StageWaitingManualMerge
+		}
+	} else if !w.evergreen && special && w.task.ApprovalDigest != w.task.ReviewDigest {
+		w.task.Stage = domain.StageWaitingApproval
+	} else if !changed {
+		w.task.Stage = domain.StageFinalizing
+	} else {
+		w.task.Stage = domain.StageAcquiringMerge
+	}
+}
+
+// loopAction tells the run loop how a helper ended its iteration. The values
+// mirror the continue/return statements of the original inline loop.
+type loopAction int
+
+const (
+	// loopNext evaluates the next run-loop check.
+	loopNext loopAction = iota
+	// loopRestart restarts the loop, mirroring a continue.
+	loopRestart
+	// loopFinish returns err from WorkTask.
+	loopFinish
+)
+
+// run drives one step per iteration until the workflow finishes or must
+// Continue-As-New. Each helper reports loopFinish when WorkTask has to return
+// its error as the final result.
+func (w *workTask) run() error {
 	steps := 0
 	for {
 		steps++
 		if steps > 500 {
-			var c domain.Command
-			for commands.ReceiveAsync(&c) {
-				applyCommand(c)
-			}
-			t.Checkpoint = &domain.WorkflowCheckpoint{Serial: serial, PreviousPhase: previousPhase, Seen: seen, Retry: retry, Rejected: rejected, Cancelled: cancelled, CIWaits: ciWaits}
-			return workflow.NewContinueAsNewError(ctx, WorkflowName, t)
+			return w.continueAsNew()
 		}
-		if cancelled {
-			var result StepResult
-			if err := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "stop", Task: t}).Get(ctx, &result); err != nil {
-				cancelled = false
-				t.Stage = "blocked"
-				t.Paused = false
-				t.Message = "停止执行失败，请重试取消或检查现场：" + err.Error()
-				previousPhase = "stopping"
-				continue
-			}
-			t.Stage = "cancelled"
-			t.Message = "任务已取消；远端分支、MR 与现场保留"
-			return persist()
-		}
-		if t.Paused {
-			if t.Project.HostingProvider() == domain.ProviderGitHub && (t.Stage == "merging" || t.Stage == "partial_merge") {
-				var paused StepResult
-				if err := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "pause_queue", Task: t}).Get(ctx, &paused); err != nil {
-					t.Paused = false
-					t.Stage = "blocked"
-					t.Message = "无法撤销 GitHub merge queue；请核实远端状态：" + err.Error()
-					previousPhase = "partial_merge"
-					continue
-				}
-				t = paused.Task
-			}
-			if err := persist(); err != nil {
-				return err
-			}
-			v := controlVersion
-			if err := wait(func() bool { return !t.Paused || controlVersion != v }); err != nil {
-				return err
-			}
+		switch action, err := w.handleCancelled(); action {
+		case loopFinish:
+			return err
+		case loopRestart:
 			continue
 		}
-		if t.Stage == "blocked" {
-			if err := persist(); err != nil {
-				return err
-			}
-			v := controlVersion
-			if err := wait(func() bool { return retry || t.Paused || controlVersion != v }); err != nil {
-				return err
-			}
-			if retry {
-				retry = false
-				t.Stage = previousPhase
-			}
+		switch action, err := w.handlePaused(); action {
+		case loopFinish:
+			return err
+		case loopRestart:
 			continue
 		}
-		if t.Stage == "waiting_approval" {
-			if err := persist(); err != nil {
-				return err
-			}
-			v := controlVersion
-			if err := wait(func() bool {
-				return t.ApprovalDigest == t.ReviewDigest && t.ReviewDigest != "" || rejected || t.Paused || controlVersion != v
-			}); err != nil {
-				return err
-			}
-			if cancelled || t.Paused {
-				continue
-			}
-			if rejected {
-				rejected = false
-				t.ApprovalDigest = ""
-				t.ReviewDigest = ""
-				t.Reworks++
-				previousPhase = "developing"
-				if t.Reworks > t.Project.MaxReworks {
-					t.Stage = "blocked"
-					t.Message = "人工审核返工达到上限"
-				} else {
-					t.Stage = "developing"
-				}
-			} else if t.ApprovalDigest == t.ReviewDigest && t.ReviewDigest != "" {
-				t.Stage = "acquiring_merge"
-			}
+		switch action, err := w.handleBlocked(); action {
+		case loopFinish:
+			return err
+		case loopRestart:
 			continue
 		}
-		if t.Stage == "completed" {
-			return persist()
+		switch action, err := w.handleWaitingApproval(); action {
+		case loopFinish:
+			return err
+		case loopRestart:
+			continue
 		}
-		if t.Stage == "queued" {
-			t.Stage = "waiting_dependencies"
+		if w.task.Stage == domain.StageCompleted {
+			return w.persist()
 		}
-		previousPhase = t.Stage
-		if err := persist(); err != nil {
+		if w.task.Stage == domain.StageQueued {
+			w.task.Stage = domain.StageWaitingDependencies
+		}
+		w.previousPhase = w.task.Stage
+		if action, err := w.runStep(); action == loopFinish {
 			return err
 		}
-		serial++
-		op := fmt.Sprintf("%s-%s-%d", t.ID, t.Stage, serial)
-		child, cancel := workflow.WithCancel(ctx)
-		interrupted = false
-		activeCancel = cancel
-		mergeControlAtStart := autoMergeControlVersion
-		var result StepResult
-		err := workflow.ExecuteActivity(child, "Step", StepInput{Phase: t.Stage, Task: t, ExecutionID: op}).Get(child, &result)
-		activeCancel = nil
-		cancel()
-		if cancelled || t.Paused || interrupted {
-			var recovered StepResult
-			if previousPhase == "manual_merging" {
-				if e := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "recover_manual_merge", Task: t, ExecutionID: op}).Get(ctx, &recovered); e != nil {
-					return e
-				}
-				t.Workspace = recovered.Task.Workspace
-			} else {
-				// Read the durable execution after cancellation to retain an exact resume session.
-				if e := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "recover", Task: t, ExecutionID: op}).Get(ctx, &recovered); e == nil {
-					t.Executions = recovered.Task.Executions
-				} else {
-					t.Paused = false
-					t.Stage = "blocked"
-					t.Message = "无法确认执行已停止：" + e.Error()
-				}
-			}
-			continue
-		}
-		if err != nil {
-			var recovered StepResult
-			if previousPhase == "manual_merging" {
-				if e := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "recover_manual_merge", Task: t, ExecutionID: op}).Get(ctx, &recovered); e != nil {
-					return e
-				}
-				t.Workspace = recovered.Task.Workspace
-			} else if e := workflow.ExecuteActivity(ctx, "Step", StepInput{Phase: "recover", Task: t, ExecutionID: op}).Get(ctx, &recovered); e == nil && recovered.Task.Executions != nil {
-				t.Executions = recovered.Task.Executions
-			}
-			t.Stage = "blocked"
-			t.Message = err.Error()
-			continue
-		}
-		// Notes/signals received during an Activity belong to the live workflow state.
-		notes, deps, approval, taskAutoMerge := t.Notes, t.Dependencies, t.ApprovalDigest, t.AutoMergeOverride
-		t = result.Task
-		t.Notes = notes
-		t.Dependencies = deps
-		t.ApprovalDigest = approval
-		if autoMergeControlVersion != mergeControlAtStart {
-			t.AutoMergeOverride = taskAutoMerge
-		}
-		if result.Rework {
-			t.Reworks++
-			t.ApprovalDigest = ""
-			t.ReviewDigest = ""
-			t.Notes = append(t.Notes, t.Message)
-			if t.Reworks > t.Project.MaxReworks {
-				t.Stage = "blocked"
-				previousPhase = "developing"
-			} else {
-				t.Stage = "developing"
-			}
-			continue
-		}
-		switch previousPhase {
-		case "stopping":
-			t.Stage = "cancelled"
-			t.Message = "任务已取消，现场保留"
-			return persist()
-		case "waiting_dependencies":
-			if result.Ready {
-				t.Stage = "preparing"
-			} else {
-				waitTick(120 * time.Second)
-			}
-		case "preparing":
-			t.Stage = "developing"
-		case "developing":
-			ex := t.Executions["dev"]
-			if ex.Result == nil || ex.Result.Outcome == "blocked" {
-				t.Stage = "blocked"
-				if ex.Result != nil {
-					t.Message = ex.Result.NeedsHelp
-				}
-				continue
-			}
-			t.Assumptions = append(t.Assumptions, ex.Result.Assumptions...)
-			if skipAcceptance || earlyPublish {
-				t.Stage = "publishing"
-			} else {
-				t.Stage = "verifying"
-			}
-		case "verifying":
-			if result.Waiting {
-				ciWaits++
-				if ciWaits <= 60 {
-					waitTick(30 * time.Second)
-					continue
-				}
-				t.AcceptanceIncomplete = true
-				t.Message = "等待 CI 超过 30 分钟，保留 MR 供人工验收，禁止自动合并"
-				result.Ready = true
-			} else {
-				ciWaits = 0
-			}
-
-			if result.Ready {
-				if earlyPublish {
-					if reviewEnabled {
-						t.Stage = "reviewing"
-					} else {
-						advanceAfterReview()
-					}
-				} else {
-					t.Stage = "publishing"
-				}
-			} else {
-				t.Reworks++
-				t.ApprovalDigest = ""
-				t.ReviewDigest = ""
-				failed := []string{}
-				for _, check := range t.Verification {
-					if check.Required && !check.Passed {
-						failed = append(failed, check.Name)
-					}
-				}
-				t.Message = "必需验收未通过，请读取报告并修复"
-				if len(failed) > 0 {
-					t.Message += "：" + strings.Join(failed, "、")
-				}
-				t.Notes = append(t.Notes, t.Message)
-				if t.Reworks > t.Project.MaxReworks {
-					t.Stage = "blocked"
-					previousPhase = "developing"
-				} else {
-					t.Stage = "developing"
-				}
-			}
-		case "publishing":
-			ex := t.Executions["dev"]
-			if ex.Result != nil && ex.Result.Outcome == "blocked" {
-				t.Stage = "blocked"
-				t.Message = ex.Result.NeedsHelp
-				continue
-			}
-			if skipAcceptance {
-				if reviewEnabled {
-					t.Stage = "reviewing"
-				} else {
-					advanceAfterReview()
-				}
-			} else if earlyPublish {
-				t.Stage = "verifying"
-			} else {
-				if reviewEnabled {
-					t.Stage = "reviewing"
-				} else {
-					advanceAfterReview()
-				}
-			}
-		case "reviewing":
-			ex := t.Executions["review"]
-			if ex.Result == nil || ex.Result.Outcome == "blocked" {
-				t.Stage = "blocked"
-				if ex.Result != nil {
-					t.Message = ex.Result.NeedsHelp
-				}
-				continue
-			}
-			if ex.Result.Outcome != "approved" {
-				t.Reworks++
-				t.Notes = append(t.Notes, ex.Result.Summary)
-				for _, f := range ex.Result.Findings {
-					t.Notes = append(t.Notes, fmt.Sprintf("%s/%s: %s", f.RepositoryID, f.Path, f.Message))
-				}
-				t.ApprovalDigest = ""
-				t.ReviewDigest = ""
-				if t.Reworks > t.Project.MaxReworks {
-					t.Stage = "blocked"
-					previousPhase = "developing"
-				} else {
-					t.Stage = "developing"
-				}
-				continue
-			}
-			advanceAfterReview()
-		case "acquiring_merge":
-			if t.Stage == "waiting_approval" || t.Stage == "waiting_manual_merge" {
-				continue
-			}
-			if result.Ready {
-				ciWaits = 0
-				t.Stage = "merging"
-			} else {
-				if strings.HasPrefix(t.Message, "等待 GitLab") {
-					ciWaits++
-					if ciWaits >= 180 {
-						t.Stage = "blocked"
-						t.Message = "GitLab CI 或合并检查等待超过 30 分钟，请检查后重试"
-						ciWaits = 0
-						continue
-					}
-				}
-				waitTick(10 * time.Second)
-			}
-		case "waiting_manual_merge":
-			if t.Stage == "waiting_approval" {
-				continue
-			}
-			if t.AutoMergeEnabled() && !t.AcceptanceIncomplete && !result.Ready {
-				t.Stage = "acquiring_merge"
-				continue
-			}
-			if result.Ready {
-				t.Stage = "finalizing"
-			} else {
-				waitTick(30 * time.Second)
-			}
-		case "merging", "partial_merge":
-			if t.Stage == "waiting_approval" || t.Stage == "waiting_manual_merge" {
-				continue
-			}
-			if result.Ready {
-				t.Stage = "finalizing"
-			} else if t.Project.HostingProvider() == domain.ProviderGitHub && strings.HasPrefix(t.Message, "等待 GitHub merge queue") {
-				t.Stage = "partial_merge"
-				if err := persist(); err != nil {
-					return err
-				}
-				waitTick(30 * time.Second)
-			} else {
-				t.Stage = "partial_merge"
-				if err := persist(); err != nil {
-					return err
-				}
-				previousPhase = "partial_merge"
-				t.Stage = "blocked"
-			}
-		case "manual_merging":
-			if result.Ready {
-				t.Stage = "finalizing"
-			} else {
-				previousPhase = "manual_merging"
-				t.Stage = "blocked"
-			}
-		case "finalizing":
-			if t.Stage == "waiting_approval" {
-				continue
-			}
-			t.Stage = "completed"
-			if evergreen {
-				t.Message = "所有仓库已合并，来源 Issue 保持打开以供复核和后续迭代"
-			} else {
-				t.Message = "所有仓库处理完成，来源 Issue 已关闭"
-			}
-		default:
-			return fmt.Errorf("unknown phase %q", previousPhase)
-		}
 	}
+}
+
+// continueAsNew drains pending commands, checkpoints the live state, and starts
+// a fresh run with the same task snapshot.
+func (w *workTask) continueAsNew() error {
+	var c domain.Command
+	for w.commands.ReceiveAsync(&c) {
+		w.applyCommand(c)
+	}
+	w.task.Checkpoint = &domain.WorkflowCheckpoint{Serial: w.serial, PreviousPhase: w.previousPhase, Seen: w.seen, Retry: w.retry, Rejected: w.rejected, Cancelled: w.cancelled, CIWaits: w.ciWaits}
+	return workflow.NewContinueAsNewError(w.ctx, WorkflowName, w.task)
+}
+
+// handleCancelled runs the stop Activity once a cancel command was applied.
+func (w *workTask) handleCancelled() (loopAction, error) {
+	if !w.cancelled {
+		return loopNext, nil
+	}
+	var result StepResult
+	if err := workflow.ExecuteActivity(w.ctx, "Step", StepInput{Phase: phaseStop, Task: w.task}).Get(w.ctx, &result); err != nil {
+		w.cancelled = false
+		w.task.Stage = domain.StageBlocked
+		w.task.Paused = false
+		w.task.Message = "停止执行失败，请重试取消或检查现场：" + err.Error()
+		w.previousPhase = phaseStopping
+		return loopRestart, nil
+	}
+	w.task.Stage = domain.StageCancelled
+	w.task.Message = "任务已取消；远端分支、MR 与现场保留"
+	return loopFinish, w.persist()
+}
+
+// handlePaused parks the workflow while the task is paused, first undoing a
+// GitHub merge-queue entry so nothing merges behind the operator's back.
+func (w *workTask) handlePaused() (loopAction, error) {
+	if !w.task.Paused {
+		return loopNext, nil
+	}
+	if w.task.Project.HostingProvider() == domain.ProviderGitHub && (w.task.Stage == domain.StageMerging || w.task.Stage == domain.StagePartialMerge) {
+		var paused StepResult
+		if err := workflow.ExecuteActivity(w.ctx, "Step", StepInput{Phase: phasePauseQueue, Task: w.task}).Get(w.ctx, &paused); err != nil {
+			w.task.Paused = false
+			w.task.Stage = domain.StageBlocked
+			w.task.Message = "无法撤销 GitHub merge queue；请核实远端状态：" + err.Error()
+			w.previousPhase = domain.StagePartialMerge
+			return loopRestart, nil
+		}
+		w.task = paused.Task
+	}
+	if err := w.persist(); err != nil {
+		return loopFinish, err
+	}
+	v := w.controlVersion
+	if err := w.wait(func() bool { return !w.task.Paused || w.controlVersion != v }); err != nil {
+		return loopFinish, err
+	}
+	return loopRestart, nil
+}
+
+// handleBlocked waits for a retry command and then resumes the phase that
+// failed.
+func (w *workTask) handleBlocked() (loopAction, error) {
+	if w.task.Stage != domain.StageBlocked {
+		return loopNext, nil
+	}
+	if err := w.persist(); err != nil {
+		return loopFinish, err
+	}
+	v := w.controlVersion
+	if err := w.wait(func() bool { return w.retry || w.task.Paused || w.controlVersion != v }); err != nil {
+		return loopFinish, err
+	}
+	if w.retry {
+		w.retry = false
+		w.task.Stage = w.previousPhase
+	}
+	return loopRestart, nil
+}
+
+// handleWaitingApproval waits for an approval digest or a rejection and routes
+// the task back to development or on to merging.
+func (w *workTask) handleWaitingApproval() (loopAction, error) {
+	if w.task.Stage != domain.StageWaitingApproval {
+		return loopNext, nil
+	}
+	if err := w.persist(); err != nil {
+		return loopFinish, err
+	}
+	v := w.controlVersion
+	if err := w.wait(func() bool {
+		return w.task.ApprovalDigest == w.task.ReviewDigest && w.task.ReviewDigest != "" || w.rejected || w.task.Paused || w.controlVersion != v
+	}); err != nil {
+		return loopFinish, err
+	}
+	if w.cancelled || w.task.Paused {
+		return loopRestart, nil
+	}
+	if w.rejected {
+		w.rejected = false
+		w.task.ApprovalDigest = ""
+		w.task.ReviewDigest = ""
+		w.task.Reworks++
+		w.previousPhase = domain.StageDeveloping
+		if w.task.Reworks > w.task.Project.MaxReworks {
+			w.task.Stage = domain.StageBlocked
+			w.task.Message = "人工审核返工达到上限"
+		} else {
+			w.task.Stage = domain.StageDeveloping
+		}
+	} else if w.task.ApprovalDigest == w.task.ReviewDigest && w.task.ReviewDigest != "" {
+		w.task.Stage = domain.StageAcquiringMerge
+	}
+	return loopRestart, nil
+}
+
+// runStep persists the current stage, executes its Step Activity, recovers from
+// interruption or failure, and hands the result to dispatchPhase.
+func (w *workTask) runStep() (loopAction, error) {
+	if err := w.persist(); err != nil {
+		return loopFinish, err
+	}
+	w.serial++
+	op := fmt.Sprintf("%s-%s-%d", w.task.ID, w.task.Stage, w.serial)
+	child, cancel := workflow.WithCancel(w.ctx)
+	w.interrupted = false
+	w.activeCancel = cancel
+	mergeControlAtStart := w.autoMergeControlVersion
+	var result StepResult
+	err := workflow.ExecuteActivity(child, "Step", StepInput{Phase: w.task.Stage, Task: w.task, ExecutionID: op}).Get(child, &result)
+	w.activeCancel = nil
+	cancel()
+	if w.cancelled || w.task.Paused || w.interrupted {
+		if e := w.recoverAfterInterrupt(op); e != nil {
+			return loopFinish, e
+		}
+		return loopRestart, nil
+	}
+	if err != nil {
+		if e := w.recoverAfterFailure(op); e != nil {
+			return loopFinish, e
+		}
+		w.task.Stage = domain.StageBlocked
+		w.task.Message = err.Error()
+		return loopRestart, nil
+	}
+	// Notes/signals received during an Activity belong to the live workflow state.
+	notes, deps, approval, taskAutoMerge := w.task.Notes, w.task.Dependencies, w.task.ApprovalDigest, w.task.AutoMergeOverride
+	w.task = result.Task
+	w.task.Notes = notes
+	w.task.Dependencies = deps
+	w.task.ApprovalDigest = approval
+	if w.autoMergeControlVersion != mergeControlAtStart {
+		w.task.AutoMergeOverride = taskAutoMerge
+	}
+	if result.Rework {
+		w.task.Reworks++
+		w.task.ApprovalDigest = ""
+		w.task.ReviewDigest = ""
+		w.task.Notes = append(w.task.Notes, w.task.Message)
+		if w.task.Reworks > w.task.Project.MaxReworks {
+			w.task.Stage = domain.StageBlocked
+			w.previousPhase = domain.StageDeveloping
+		} else {
+			w.task.Stage = domain.StageDeveloping
+		}
+		return loopRestart, nil
+	}
+	return w.dispatchPhase(w.previousPhase, result)
+}
+
+// recoverAfterInterrupt reconciles the interrupted execution before the run
+// loop parks on the pause state.
+func (w *workTask) recoverAfterInterrupt(op string) error {
+	var recovered StepResult
+	if w.previousPhase == domain.StageManualMerging {
+		if e := workflow.ExecuteActivity(w.ctx, "Step", StepInput{Phase: phaseRecoverManualMerge, Task: w.task, ExecutionID: op}).Get(w.ctx, &recovered); e != nil {
+			return e
+		}
+		w.task.Workspace = recovered.Task.Workspace
+		return nil
+	}
+	// Read the durable execution after cancellation to retain an exact resume session.
+	if e := workflow.ExecuteActivity(w.ctx, "Step", StepInput{Phase: phaseRecover, Task: w.task, ExecutionID: op}).Get(w.ctx, &recovered); e == nil {
+		w.task.Executions = recovered.Task.Executions
+	} else {
+		w.task.Paused = false
+		w.task.Stage = domain.StageBlocked
+		w.task.Message = "无法确认执行已停止：" + e.Error()
+	}
+	return nil
+}
+
+// recoverAfterFailure reclaims any state the failed Activity left behind.
+func (w *workTask) recoverAfterFailure(op string) error {
+	var recovered StepResult
+	if w.previousPhase == domain.StageManualMerging {
+		if e := workflow.ExecuteActivity(w.ctx, "Step", StepInput{Phase: phaseRecoverManualMerge, Task: w.task, ExecutionID: op}).Get(w.ctx, &recovered); e != nil {
+			return e
+		}
+		w.task.Workspace = recovered.Task.Workspace
+	} else if e := workflow.ExecuteActivity(w.ctx, "Step", StepInput{Phase: phaseRecover, Task: w.task, ExecutionID: op}).Get(w.ctx, &recovered); e == nil && recovered.Task.Executions != nil {
+		w.task.Executions = recovered.Task.Executions
+	}
+	return nil
 }

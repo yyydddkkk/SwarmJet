@@ -44,8 +44,8 @@ func TestRecoveryUsesBackendAndOnlyMatchingExecutions(t *testing.T) {
 	// Both an exact ID and its retry/merge suffixes belong to this recovery.
 	a := Activities{Agents: b}
 	out, err := a.Step(context.Background(), StepInput{
-		Phase: "recover", ExecutionID: "attempt",
-		Task: domain.Task{ID: "task", Stage: "merging"},
+		Phase: phaseRecover, ExecutionID: "attempt",
+		Task: domain.Task{ID: "task", Stage: domain.StageMerging},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestRecoveryDoesNotHideBackendCancellationFailure(t *testing.T) {
 	}
 	a := Activities{Agents: b}
 	_, err := a.Step(context.Background(), StepInput{
-		Phase: "recover", ExecutionID: "attempt", Task: domain.Task{ID: "task"},
+		Phase: phaseRecover, ExecutionID: "attempt", Task: domain.Task{ID: "task"},
 	})
 	if !errors.Is(err, failure) || len(b.inspected) != 0 {
 		t.Fatalf("err=%v inspected=%v", err, b.inspected)

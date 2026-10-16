@@ -90,7 +90,7 @@ func TestManualMergeReconcilesLostResponseAndPartialRound(t *testing.T) {
 	if _, err := s.Pool.Exec(ctx, `INSERT INTO projects(id,version,body) VALUES($1,1,$2)`, project.ID, projectJSON); err != nil {
 		t.Fatal(err)
 	}
-	task := domain.Task{ID: "manual", Project: project, Issue: domain.Issue{ProjectID: 1, IID: 9}, Stage: "waiting_manual_merge", Executions: map[string]domain.Execution{}, Workspace: domain.Workspace{Revisions: []domain.Revision{
+	task := domain.Task{ID: "manual", Project: project, Issue: domain.Issue{ProjectID: 1, IID: 9}, Stage: domain.StageWaitingManualMerge, Executions: map[string]domain.Execution{}, Workspace: domain.Workspace{Revisions: []domain.Revision{
 		{RepositoryID: "one", ProjectID: 1, MRIID: 11, BaseSHA: "base-1", HeadSHA: "head-1", TargetBranch: "main", Branch: "branch-1", Changed: true},
 		{RepositoryID: "two", ProjectID: 2, MRIID: 22, BaseSHA: "base-2", HeadSHA: "head-2", TargetBranch: "main", Branch: "branch-2", Changed: true},
 	}}}
@@ -102,7 +102,7 @@ func TestManualMergeReconcilesLostResponseAndPartialRound(t *testing.T) {
 	if err := s.SaveManualAcceptance(ctx, task.ID, structuralAcceptance(task)); err != nil {
 		t.Fatal(err)
 	}
-	task.Stage = "manual_merging"
+	task.Stage = domain.StageManualMerging
 	if err := s.SaveTask(ctx, task); err != nil {
 		t.Fatal(err)
 	}

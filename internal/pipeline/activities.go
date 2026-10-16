@@ -175,11 +175,11 @@ func (a *Activities) Step(ctx context.Context, in StepInput) (StepResult, error)
 func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error) {
 	t := in.Task
 	out := StepResult{Task: t, Ready: true}
-	if in.Phase == "recover_manual_merge" {
+	if in.Phase == phaseRecoverManualMerge {
 		fresh, err := a.Store.Task(ctx, t.ID)
 		return StepResult{Task: fresh, Ready: true}, err
 	}
-	if in.Phase == "acquiring_merge" || in.Phase == "merging" || in.Phase == "partial_merge" {
+	if in.Phase == domain.StageAcquiringMerge || in.Phase == domain.StageMerging || in.Phase == domain.StagePartialMerge {
 		allowed, err := a.taskAutoMergeAllowed(ctx, t)
 		if err != nil {
 			return out, err
@@ -192,14 +192,14 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 			}
 			disabled := false
 			t.AutoMergeOverride = &disabled
-			t.Stage = "waiting_manual_merge"
+			t.Stage = domain.StageWaitingManualMerge
 			t.Message = "此任务已关闭自动合并，等待人工合并 MR"
 			out.Task = t
 			out.Ready = false
 			return out, nil
 		}
 	}
-	if t.NodeConfigVersion > 0 && a.NetworkEnv != nil && in.Phase != "cancel" && in.Phase != "recover" && in.Phase != "finalize" {
+	if t.NodeConfigVersion > 0 && a.NetworkEnv != nil && in.Phase != phaseCancel && in.Phase != phaseRecover && in.Phase != phaseFinalize {
 		env, e := a.NetworkEnv(ctx, t.Network)
 		if e != nil {
 			return out, e
@@ -226,7 +226,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 			}
 		}
 	}(ctx)
-	if in.Phase == "recover" {
+	if in.Phase == phaseRecover {
 		n, e := a.node(ctx, t)
 		if e != nil {
 			return out, e
@@ -252,7 +252,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 		out.Task = t
 		return out, nil
 	}
-	if in.Phase == "pause_queue" {
+	if in.Phase == phasePauseQueue {
 		if t.Project.HostingProvider() == domain.ProviderGitHub {
 			if err := a.cancelQueuedGitHub(ctx, &t); err != nil {
 				return out, err
@@ -261,7 +261,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 		out.Task = t
 		return out, nil
 	}
-	if in.Phase == "stop" || in.Phase == "stopping" {
+	if in.Phase == phaseStop || in.Phase == phaseStopping {
 		if t.Project.HostingProvider() == domain.ProviderGitHub {
 			if err := a.cancelQueuedGitHub(ctx, &t); err != nil {
 				return out, err
@@ -285,7 +285,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 		out.Task = t
 		return out, nil
 	}
-	if in.Phase == "manual_merging" {
+	if in.Phase == domain.StageManualMerging {
 		return a.manualMergeRound(ctx, t)
 	}
 	c, e := a.client(t.Project, false)
@@ -293,7 +293,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 		return out, e
 	}
 	switch in.Phase {
-	case "waiting_dependencies":
+	case domain.StageWaitingDependencies:
 		deps, e := c.Dependencies(ctx, t.Issue)
 		if e != nil {
 			return out, e
@@ -310,7 +310,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 				if err != nil && !errors.Is(err, store.ErrNotFound) {
 					return out, err
 				}
-				if err == nil && upstream.Stage != "cancelled" {
+				if err == nil && upstream.Stage != domain.StageCancelled {
 					if t.DependencyTasks == nil {
 						t.DependencyTasks = map[string]string{}
 					}
@@ -323,7 +323,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 				if err != nil {
 					return out, err
 				}
-				if upstream.Stage == "completed" {
+				if upstream.Stage == domain.StageCompleted {
 					continue
 				}
 			} else {
@@ -338,7 +338,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 			out.Ready = false
 			t.Message = fmt.Sprintf("等待依赖 %d#%d", d.ProjectID, d.IID)
 		}
-	case "preparing":
+	case domain.StagePreparing:
 		resourceCtx, release, e := a.resourceSlot(ctx, in.ExecutionID, t.NodeID)
 		if e != nil {
 			return out, e
@@ -390,7 +390,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 			return out, e
 		}
 		t.Workspace = w
-	case "developing", "publishing", "reviewing":
+	case domain.StageDeveloping, domain.StagePublishing, domain.StageReviewing:
 		if t.Workspace.Root == "" {
 			// A prior remote call can lose its response while the Node still
 			// retains the private worktree. Resume that durable Node state.
@@ -407,7 +407,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 				return out, err
 			}
 		}
-		if in.Phase == "publishing" {
+		if in.Phase == domain.StagePublishing {
 			// An Agent may fast-forward a repository it did not otherwise change
 			// while resolving a stale target. Normalize baselines before deciding
 			// which branches need publishing, or upstream-only commits look like
@@ -449,7 +449,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 				break
 			}
 		}
-		if in.Phase == "publishing" && t.Project.HostingProvider() == domain.ProviderGitHub {
+		if in.Phase == domain.StagePublishing && t.Project.HostingProvider() == domain.ProviderGitHub {
 			return a.publishGitHub(ctx, in, t, c)
 		}
 		ex, e := a.execute(ctx, in, t)
@@ -461,7 +461,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 			return StepResult{Task: t}, agentExecutionError(ex, in.ExecutionID)
 		}
 		if ex.Result != nil {
-			if in.Phase == "developing" {
+			if in.Phase == domain.StageDeveloping {
 				if t.Project.AcceptanceStrategy == "none" {
 					t.AcceptanceCommands = nil
 				} else {
@@ -473,12 +473,12 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 				t.HumanAcceptance = ex.Result.HumanAcceptance
 			}
 		}
-		if in.Phase == "publishing" && ex.Result != nil && ex.Result.Outcome == "blocked" {
+		if in.Phase == domain.StagePublishing && ex.Result != nil && ex.Result.Outcome == "blocked" {
 			t.Message = ex.Result.NeedsHelp
 			out.Task = t
 			return out, nil
 		}
-		if in.Phase == "developing" && t.Project.AcceptanceStrategy != "" && t.Project.AcceptanceStrategy != "none" && ex.Result != nil && ex.Result.Outcome != "blocked" {
+		if in.Phase == domain.StageDeveloping && t.Project.AcceptanceStrategy != "" && t.Project.AcceptanceStrategy != "none" && ex.Result != nil && ex.Result.Outcome != "blocked" {
 			// New strategies publish before verification: capture the developer's
 			// committed revisions now, rather than relying on the later verify step.
 			node, err := a.node(ctx, t)
@@ -491,7 +491,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 			}
 			t.Workspace = current
 		}
-		if in.Phase == "publishing" {
+		if in.Phase == domain.StagePublishing {
 			before := domain.Digest(t.Workspace.Revisions)
 			n, e := a.node(ctx, t)
 			if e != nil {
@@ -539,7 +539,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 				}
 			}
 		}
-		if in.Phase == "reviewing" {
+		if in.Phase == domain.StageReviewing {
 			n, e := a.node(ctx, t)
 			if e != nil {
 				return out, e
@@ -559,7 +559,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 				}
 			}
 		}
-	case "verifying":
+	case domain.StageVerifying:
 		resourceCtx, release, e := a.resourceSlot(ctx, in.ExecutionID, t.NodeID)
 		if e != nil {
 			return out, e
@@ -638,14 +638,14 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 		if e = n.StopIntegration(ctx, w, taskIntegration(t), a.integrationEnv(t)); e != nil {
 			return out, e
 		}
-	case "acquiring_merge":
+	case domain.StageAcquiringMerge:
 		fresh, e := c.GetIssue(ctx, t.Issue.ProjectID, t.Issue.IID)
 		if e != nil {
 			return out, e
 		}
 		t.Issue = fresh
 		if t.Round == 0 && t.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
-			t.Stage = "waiting_approval"
+			t.Stage = domain.StageWaitingApproval
 			out.Ready = false
 			break
 		}
@@ -685,7 +685,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 				_ = a.Store.ReleaseLeases(ctx, t.ID)
 			}
 		}
-	case "waiting_manual_merge":
+	case domain.StageWaitingManualMerge:
 		// Auto-merge is off. Required verification must still be current for the
 		// reviewed revision set, then the task waits until every changed MR is
 		// actually merged before the workflow closes the source issue.
@@ -719,7 +719,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 				t.Message = "验收不完整，禁止自动合并；请查看 MR 真人验收清单"
 			}
 		}
-	case "merging", "partial_merge":
+	case domain.StageMerging, domain.StagePartialMerge:
 		if t.Project.HostingProvider() == domain.ProviderGitHub {
 			return a.mergeGitHub(ctx, t, c)
 		}
@@ -734,7 +734,7 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 		if !ok {
 			t.Message = reason
 			if reason == "manual approval required" {
-				t.Stage = "waiting_approval"
+				t.Stage = domain.StageWaitingApproval
 			}
 			out.Task = t
 			out.Ready = false
@@ -790,14 +790,14 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 			}
 		}
 		_ = a.Store.ReleaseLeases(ctx, t.ID)
-	case "finalizing":
+	case domain.StageFinalizing:
 		fresh, e := c.GetIssue(ctx, t.Issue.ProjectID, t.Issue.IID)
 		if e != nil {
 			return out, e
 		}
 		t.Issue = fresh
 		if t.Round == 0 && t.AutoMergeEnabled() && requiresApproval(t) && t.ApprovalDigest != t.ReviewDigest {
-			t.Stage = "waiting_approval"
+			t.Stage = domain.StageWaitingApproval
 			out.Task = t
 			out.Ready = false
 			return out, nil
@@ -838,9 +838,9 @@ func (a *Activities) step(ctx context.Context, in StepInput) (StepResult, error)
 }
 func roleFor(phase string) string {
 	switch phase {
-	case "reviewing":
+	case domain.StageReviewing:
 		return "review"
-	case "merging", "partial_merge":
+	case domain.StageMerging, domain.StagePartialMerge:
 		return "merge"
 	default:
 		return "dev"
@@ -1168,7 +1168,7 @@ func prompt(t domain.Task, phase string, merge *domain.Revision) string {
 	base += "\nProject acceptance policy: " + string(config) + "\n"
 	plan, _ := json.Marshal(t.HumanAcceptance)
 	base += "\nHuman acceptance plan: " + string(plan) + "\n"
-	if phase == "developing" || phase == "publishing" {
+	if phase == domain.StageDeveloping || phase == domain.StagePublishing {
 		base += "For a completed developing or publishing outcome, return humanAcceptance exactly as " + humanAcceptanceShape + ". Each steps item must have action and expected strings; notes must be a string array. Do not use separate expectedResults. When outcome is blocked, omit humanAcceptance and provide the concrete obstacle in needsHelp. Do not use production data or expose credentials. Update the guide when code changes.\n"
 		if t.Round > 0 {
 			base += "The platform publishes this as an informational post-merge review guide on the source Issue. Do not put a human sign-off checklist in MR descriptions or claim a person tested the change.\n"
@@ -1181,17 +1181,17 @@ For acceptanceStrategy=repository, statically read AGENTS.md, package scripts, C
 For a platform CI strategy, commit changes first; the platform publishes branches and change requests and waits for checks on the exact commit. Never skip CI. When independent review is enabled, reviewers assess the adequacy of the checks and the human checklist, including task coverage and missing/weak tests. Missing infrastructure is not a passing check; describe it explicitly. The platform must prohibit automatic merge when enabled checks are incomplete.
 `
 	switch phase {
-	case "developing":
+	case domain.StageDeveloping:
 		base += `Implement the issue across all necessary repositories using the same task workspace. Write meaningful tests. Fix validation failures. Synchronize with each configured origin target if it has advanced, preserving task changes; report conflicts honestly. Commit all changes. Do not push or create MRs yet; publishing and verification are orchestrated by the platform. Use changed/no_change/blocked outcome.\n`
-	case "publishing":
+	case domain.StagePublishing:
 		base += `Push each changed task branch and create or update one GitLab MR per source/target pair using glab. Use the provided exact target per repository. Include verification and assumptions in MR descriptions. Do not modify code or merge. Use changed/blocked outcome.\n`
-	case "reviewing":
+	case domain.StageReviewing:
 		if t.Project.AcceptanceStrategy == "none" {
 			base += `Independently review the entire repository change set and development test evidence. Extra platform acceptance is disabled for this project. Check task coverage, cross-repository contracts and tests; request changes if evidence is inadequate. Do not modify code, push, approve on the hosting platform or merge. Return approved, changes_requested with precise findings, or blocked. A no-change result must be independently justified.\n`
 		} else {
 			base += `Independently review the entire repository change set and actual verification reports. Check task coverage, cross-repository contracts and tests. Do not modify code, push, approve on the hosting platform or merge. Return approved, changes_requested with precise findings, or blocked. A no-change result must be independently justified.\n`
 		}
-	case "merging", "partial_merge":
+	case domain.StageMerging, domain.StagePartialMerge:
 		m, _ := json.Marshal(merge)
 		base += `Merge ONLY this MR using GitLab API via glab, with exact sha and target verification. If already merged report success; never force push or bypass GitLab checks. Do not change code. Return merged/blocked. MR: ` + string(m) + "\n"
 	}

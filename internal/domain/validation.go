@@ -395,7 +395,7 @@ func MergeOrder(repos []Repository) []string {
 	}
 	return out
 }
-func Terminal(stage string) bool { return stage == "completed" || stage == "cancelled" }
+func Terminal(stage string) bool { return stage == StageCompleted || stage == StageCancelled }
 
 // NormalizeGitLabURL validates and canonicalises an http(s) GitLab base URL.
 // The path keeps an optional relative URL root but drops a trailing /api/v4.
