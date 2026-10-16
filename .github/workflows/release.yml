@@ -49,7 +49,9 @@ jobs:
           file: deploy/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: "ghcr.io/${{ github.repository_owner }}/swarmjet:${{ github.ref_name }}"
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/swarmjet:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/swarmjet:latest
           build-args: |
             RELEASE_VERSION=${{ github.ref_name }}
             RELEASE_COMMIT=${{ github.sha }}
@@ -60,4 +62,8 @@ jobs:
           file: deploy/Dockerfile.agent
           platforms: linux/amd64
           push: true
-          tags: "ghcr.io/${{ github.repository_owner }}/swarmjet/agent:${{ github.ref_name }}"
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/swarmjet/agent:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/swarmjet/agent:latest
+          build-args: |
+            AGENT_CLIS=opencode,codex,claude,dst,agy
