@@ -40,7 +40,12 @@ CREATE INDEX IF NOT EXISTS agents_by_hive_chain ON agents(hive_id,chain_id);
 
 -- Inbox messages. state is pending/delivered/handled; claimed_by plus
 -- claim_expires_at implement the Hive Inbox claim lease.
+--
+-- seq is the insertion order and the Inbox cursor. Message IDs are supplied by
+-- callers (the Router uses "gh-<hash>"), so their text order is not insertion
+-- order and must not be used for pagination.
 CREATE TABLE IF NOT EXISTS messages(
+  seq bigserial,
   id text PRIMARY KEY,
   hive_id text NOT NULL REFERENCES hives(id) ON DELETE CASCADE,
   from_addr text NOT NULL,
@@ -55,7 +60,7 @@ CREATE TABLE IF NOT EXISTS messages(
   claim_expires_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS messages_by_inbox ON messages(hive_id,to_addr,id);
+CREATE INDEX IF NOT EXISTS messages_by_inbox ON messages(hive_id,to_addr,seq);
 
 -- MCP access tokens. Only the hash is stored; the plaintext is returned once.
 CREATE TABLE IF NOT EXISTS mcp_tokens(

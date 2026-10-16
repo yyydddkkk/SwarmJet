@@ -63,8 +63,8 @@ func TestSendMessageIdempotencyAndConflict(t *testing.T) {
 		t.Fatalf("%+v %v", a, err)
 	}
 	b, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, To: domain.AddressHive, Body: "b"})
-	if err != nil || b.ID == a.ID || !(a.ID < b.ID) {
-		t.Fatalf("generated ids not ordered: %q %q (%v)", a.ID, b.ID, err)
+	if err != nil || b.ID == a.ID {
+		t.Fatalf("generated ids not unique: %q %q (%v)", a.ID, b.ID, err)
 	}
 }
 
@@ -95,6 +95,43 @@ func TestInboxPaginationOrder(t *testing.T) {
 	all, err := s.Inbox(ctx, h.ID, domain.AddressHive, "", 0)
 	if err != nil || len(all) != 3 {
 		t.Fatalf("zero limit did not use default: %+v %v", all, err)
+	}
+}
+
+func TestInboxCursorUsesInsertionSequence(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	h := newTestHive(t, s, "acme/a")
+	// The Router picks IDs like "gh-<hash>", which sort after the generated
+	// "0..." IDs. Insertion order, not text order, must drive the cursor.
+	if _, err := s.SendMessage(ctx, domain.Message{ID: "gh-ffffffffffff", HiveID: h.ID, To: domain.AddressHive, Kind: domain.MessageEvent, Body: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	later, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, To: domain.AddressHive, Kind: domain.MessageEvent, Body: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if later.ID >= "gh-ffffffffffff" {
+		t.Fatalf("test precondition: generated id %q should sort before the caller id", later.ID)
+	}
+	page, err := s.Inbox(ctx, h.ID, domain.AddressHive, "gh-ffffffffffff", 10)
+	if err != nil || len(page) != 1 || page[0].ID != later.ID {
+		t.Fatalf("cursor by caller ID lost the later message: %+v %v", page, err)
+	}
+	all, err := s.Inbox(ctx, h.ID, domain.AddressHive, "", 10)
+	if err != nil || len(all) != 2 || all[0].ID != "gh-ffffffffffff" || all[1].ID != later.ID {
+		t.Fatalf("messages not in insertion order: %+v %v", all, err)
+	}
+	// WaitInbox uses the same seq-based existence check.
+	if err := s.WaitInbox(ctx, h.ID, domain.AddressHive, "gh-ffffffffffff"); err != nil {
+		t.Fatalf("wait after caller id: %v", err)
+	}
+	// A cursor that no longer exists cannot be resumed.
+	if _, err := s.Inbox(ctx, h.ID, domain.AddressHive, "gh-000000000000", 10); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing cursor: %v", err)
+	}
+	if err := s.WaitInbox(ctx, h.ID, domain.AddressHive, "gh-000000000000"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing wait cursor: %v", err)
 	}
 }
 

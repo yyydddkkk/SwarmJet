@@ -23,8 +23,8 @@ const messageColumns = `id,hive_id,from_addr,to_addr,kind,chain_id,hop,body,arti
 
 var messageSeq uint64
 
-// newMessageID generates an ID whose text order matches insertion order, so the
-// id column doubles as the Inbox pagination cursor.
+// newMessageID generates an ID for callers that do not supply one. Ordering no
+// longer depends on this format: the messages.seq column is the Inbox cursor.
 func newMessageID() (string, error) {
 	id, err := newOpaqueID()
 	if err != nil {
@@ -153,13 +153,37 @@ func (s *Store) insertMessageJob(ctx context.Context, tx pgx.Tx, id string) erro
 	return nil
 }
 
-// Inbox returns messages for one address in ID order, starting after afterID.
+// messageSeqForID resolves an Inbox cursor to the message's insertion
+// sequence. ids are caller-supplied, so text order cannot stand in for
+// insertion order; a cursor that does not exist cannot be resumed and yields
+// domain.ErrNotFound.
+func (s *Store) messageSeqForID(ctx context.Context, id string) (int64, error) {
+	var seq int64
+	if err := s.Pool.QueryRow(ctx, `SELECT seq FROM messages WHERE id=$1`, id).Scan(&seq); err != nil {
+		return 0, domainErr(err)
+	}
+	return seq, nil
+}
+
+// Inbox returns messages for one address in insertion order, starting after
+// afterID. The cursor is messages.seq, not the caller-supplied ID.
 func (s *Store) Inbox(ctx context.Context, hiveID string, to domain.Address, afterID string, limit int) ([]domain.Message, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT `+messageColumns+` FROM messages WHERE hive_id=$1 AND to_addr=$2 AND ($3='' OR id>$3) ORDER BY id ASC LIMIT $4`,
-		hiveID, string(to), afterID, limit)
+	query := `SELECT ` + messageColumns + ` FROM messages WHERE hive_id=$1 AND to_addr=$2`
+	args := []any{hiveID, string(to)}
+	if afterID != "" {
+		seq, err := s.messageSeqForID(ctx, afterID)
+		if err != nil {
+			return nil, err
+		}
+		query += ` AND seq>$3`
+		args = append(args, seq)
+	}
+	query += fmt.Sprintf(` ORDER BY seq ASC LIMIT $%d`, len(args)+1)
+	args = append(args, limit)
+	rows, err := s.Pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -175,11 +199,25 @@ func (s *Store) Inbox(ctx context.Context, hiveID string, to domain.Address, aft
 	return messages, rows.Err()
 }
 
+// inboxHasAfter reports whether a message newer than the cursor exists. It
+// compares messages.seq, matching Inbox, because IDs are not ordered.
 func (s *Store) inboxHasAfter(ctx context.Context, hiveID string, to domain.Address, afterID string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM messages WHERE hive_id=$1 AND to_addr=$2`
+	args := []any{hiveID, string(to)}
+	if afterID != "" {
+		seq, err := s.messageSeqForID(ctx, afterID)
+		if err != nil {
+			return false, err
+		}
+		query += ` AND seq>$3`
+		args = append(args, seq)
+	}
+	query += `)`
 	var exists bool
-	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM messages WHERE hive_id=$1 AND to_addr=$2 AND ($3='' OR id>$3))`,
-		hiveID, string(to), afterID).Scan(&exists)
-	return exists, err
+	if err := s.Pool.QueryRow(ctx, query, args...).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 // ClaimMessage takes the Hive Inbox claim lease. Only one owner succeeds while
@@ -215,8 +253,10 @@ func (s *Store) MarkMessageHandled(ctx context.Context, id string) error {
 }
 
 // WaitInbox blocks until a message newer than afterID exists for the address or
-// ctx ends. It listens before re-checking, which closes the race where the
-// message commits between the first check and LISTEN.
+// ctx ends. It compares insertion sequence, so a caller-supplied cursor works;
+// a cursor that does not exist returns domain.ErrNotFound. It listens before
+// re-checking, which closes the race where the message commits between the
+// first check and LISTEN.
 func (s *Store) WaitInbox(ctx context.Context, hiveID string, to domain.Address, afterID string) error {
 	exists, err := s.inboxHasAfter(ctx, hiveID, to, afterID)
 	if err != nil {
