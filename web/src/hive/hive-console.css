@@ -34,33 +34,33 @@
   --hg-line-strong: #d8d0bc;
   --hg-neutral-fill: #b4ac98;
   --hg-focus: #1f5fa8;
-  /* Bee illustration: honey body, near-black brown stripes, light translucent wings.
-     The keyline is what keeps the dark parts readable on a dark surface, so it
-     stays light in every theme. */
-  --hg-bee-body: var(--hg-honey);
-  --hg-bee-stripe: #2e2410;
-  --hg-bee-head: #3a2a05;
-  --hg-bee-line: #3a2a05;
-  --hg-bee-antenna: #3a2a05;
-  --hg-bee-wing: rgba(255, 255, 255, 0.72);
-  --hg-bee-wing-ink: rgba(58, 58, 51, 0.5);
-  --hg-bee-keyline: #fbf8f1;
-  --hg-bee-stinger: var(--hg-bee-stripe);
   /* Dark surface, only used by the icon reference page. */
   --hg-night: #23231f;
   --hg-night-ink: #fbf8f1;
   --hg-night-muted: #b9b2a0;
-  --hg-night-bee-head: #f3e6c8;
-  --hg-night-bee-wing-ink: rgba(255, 255, 255, 0.6);
   /* Typography: Source Han Sans for Chinese, Inter for Latin, JetBrains Mono for code */
   --hg-font-body: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
     "Hiragino Sans GB", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --hg-font-queen: "Source Han Serif SC", "Noto Serif SC", "Songti SC", Georgia,
     "Times New Roman", serif;
   --hg-font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  /* Shape */
-  --hg-radius-card: 12px;
-  --hg-radius-control: 8px;
+  /* Pixel accents. Every pixel drawing resolves its colours from these, so the
+     dark surface is a token swap rather than a second set of artwork. */
+  --hg-px-ink: #2e2410;
+  --hg-px-body: #f2b53a;
+  --hg-px-shade: #e5a61f;
+  --hg-px-wing: #cfe3f5;
+  --hg-px-wing-hi: #edf5fc;
+  --hg-px-wing-edge: #a9c6e0;
+  --hg-px-blush: #f2a0a8;
+  --hg-px-gold: #ffd34d;
+  --hg-px-gold-shade: #c98a15;
+  --hg-px-shine: #fffdf8;
+  --hg-px-shadow: #2e2410;
+  /* Shape: pixel accents want tight corners and honest 2px borders. */
+  --hg-radius-card: 4px;
+  --hg-radius-control: 3px;
+  --hg-radius-chip: 2px;
 
   min-height: 100vh;
   display: flex;
@@ -131,9 +131,6 @@
   place-items: center;
   width: 32px;
   height: 32px;
-  color: var(--hg-honey-ink);
-  background: var(--hg-honey);
-  clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
 }
 
 .hg-brand-name {
@@ -241,7 +238,7 @@
   padding: 0 11px;
   color: var(--hg-muted);
   background: var(--hg-panel);
-  border: 1px solid var(--hg-line-strong);
+  border: 2px solid var(--hg-line-strong);
   border-radius: var(--hg-radius-control);
 }
 
@@ -320,15 +317,20 @@
   height: 100%;
   padding: 18px;
   background: var(--hg-panel);
-  border: 1px solid var(--hg-line);
+  border: 2px solid var(--hg-line-strong);
   border-radius: var(--hg-radius-card);
   text-decoration: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, border-color 0.1s ease;
 }
 
 .hg-hive-card:hover {
   border-color: var(--hg-honey);
-  background: #fffdf7;
+  box-shadow: 2px 2px 0 var(--hg-px-shadow);
+}
+
+.hg-hive-card:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--hg-px-shadow);
 }
 
 .hg-hive-card-head {
@@ -348,19 +350,18 @@
   flex: none;
   width: 42px;
   height: 42px;
-  clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
-  color: var(--hg-honey-ink);
-  background: var(--hg-honey);
+  border: 2px solid var(--hg-line-strong);
+  border-radius: var(--hg-radius-card);
+  background: var(--hg-honey-soft);
+  box-shadow: 2px 2px 0 var(--hg-px-shadow);
 }
 
 .hg-hive-mark-1 {
-  color: #14301f;
-  background: var(--hg-mint);
+  background: var(--hg-mint-soft);
 }
 
 .hg-hive-mark-2 {
-  color: var(--hg-ink);
-  background: var(--hg-leaf-strong);
+  background: var(--hg-leaf);
 }
 
 .hg-hive-stats {
@@ -389,138 +390,23 @@
 
 /* ---- Avatars, dots, badges ---- */
 
-.hg-avatar {
+.hg-px-avatar {
   display: inline-grid;
   place-items: center;
   flex: none;
 }
 
-.hg-avatar svg {
+.hg-px-avatar svg {
   display: block;
-  width: 100%;
-  height: 100%;
 }
 
-.hg-avatar-queen .hg-avatar-hex {
-  fill: var(--hg-honey);
-  stroke: var(--hg-honey);
+/* The Queen reads as the crown; a muted crown means the Queen is switched off. */
+.hg-px-avatar-queen.is-off {
+  opacity: 0.45;
+  filter: grayscale(0.6);
 }
 
-.hg-avatar-queen .hg-avatar-crown {
-  fill: var(--hg-honey-ink);
-}
-
-.hg-avatar-queen.is-off .hg-avatar-hex {
-  fill: var(--hg-leaf);
-  stroke: var(--hg-line-strong);
-}
-
-.hg-avatar-queen.is-off .hg-avatar-crown {
-  fill: var(--hg-muted);
-}
-
-.hg-avatar-forager .hg-avatar-hex {
-  fill: var(--hg-panel);
-  stroke: var(--hg-tone-fill);
-  stroke-width: 2;
-}
-
-.hg-avatar-forager .hg-avatar-core {
-  fill: var(--hg-tone-fill);
-  opacity: 0.35;
-}
-
-/* ---- Bees ---- */
-
-.hg-bee-halo {
-  fill: var(--hg-bee-keyline);
-  stroke: var(--hg-bee-keyline);
-  stroke-width: 4;
-  stroke-linejoin: round;
-}
-
-.hg-bee-halo path {
-  fill: none;
-  stroke-linecap: round;
-}
-
-.hg-bee-wing {
-  fill: var(--hg-bee-wing);
-  stroke: var(--hg-bee-wing-ink);
-  stroke-width: 1.3;
-}
-
-.hg-bee-wing.hg-bee-hindwing {
-  fill-opacity: 0.62;
-  stroke-width: 1;
-}
-
-.hg-bee-abdomen {
-  fill: var(--hg-bee-body);
-}
-
-.hg-bee-abdomen-line {
-  fill: none;
-  stroke: var(--hg-bee-line);
-  stroke-width: 2;
-}
-
-.hg-bee-stripe {
-  fill: var(--hg-bee-stripe);
-}
-
-.hg-bee-stinger {
-  fill: var(--hg-bee-stinger);
-}
-
-.hg-bee-thorax,
-.hg-bee-head,
-.hg-bee-tip {
-  fill: var(--hg-bee-head);
-}
-
-.hg-bee-antenna {
-  fill: none;
-  stroke: var(--hg-bee-antenna);
-  stroke-width: 1.8;
-  stroke-linecap: round;
-}
-
-.hg-bee-line-wing {
-  fill: currentColor;
-  fill-opacity: 0.14;
-  stroke: currentColor;
-  stroke-width: 2.4;
-}
-
-.hg-bee-line-wing.hg-bee-line-hindwing {
-  fill-opacity: 0.08;
-  stroke-width: 1.9;
-}
-
-.hg-bee-line-stripe {
-  fill: currentColor;
-}
-
-.hg-bee-line-abdomen {
-  fill: currentColor;
-  fill-opacity: 0.16;
-  stroke: currentColor;
-  stroke-width: 2.6;
-}
-
-.hg-bee-line-thorax,
-.hg-bee-line-head {
-  fill: currentColor;
-}
-
-.hg-bee-line-antenna {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.8;
-  stroke-linecap: round;
-}
-
+/* Status stays a badge, never the avatar: a small honeycomb dot plus a label. */
 .hg-dot {
   display: inline-block;
   flex: none;
@@ -535,7 +421,7 @@
   align-items: center;
   gap: 6px;
   padding: 3px 10px 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--hg-radius-chip);
   background: var(--hg-tone-soft);
   color: var(--hg-tone);
   font-size: 12px;
@@ -575,7 +461,7 @@
 
 .hg-tab-count {
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--hg-radius-chip);
   background: var(--hg-leaf);
   color: var(--hg-muted);
   font-size: 11px;
@@ -586,7 +472,7 @@
 
 .hg-panel {
   background: var(--hg-panel);
-  border: 1px solid var(--hg-line);
+  border: 2px solid var(--hg-line-strong);
   border-radius: var(--hg-radius-card);
 }
 
@@ -686,7 +572,7 @@
 
 .hg-msg-kind {
   padding: 0 7px;
-  border-radius: 999px;
+  border-radius: var(--hg-radius-chip);
   background: var(--hg-honey-soft);
   color: var(--hg-honey-ink);
 }
@@ -725,7 +611,7 @@
 .hg-card {
   padding: 14px 16px;
   background: var(--hg-panel);
-  border: 1px solid var(--hg-line);
+  border: 2px solid var(--hg-line);
   border-radius: var(--hg-radius-card);
 }
 
@@ -741,9 +627,9 @@
   flex: none;
   width: 28px;
   height: 28px;
-  color: var(--hg-honey-ink);
-  background: var(--hg-honey);
-  clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+  border: 2px solid var(--hg-honey-strong);
+  border-radius: var(--hg-radius-control);
+  background: var(--hg-honey-soft);
 }
 
 .hg-card-title strong {
@@ -761,7 +647,7 @@
 
 .hg-action {
   border-left: 3px solid var(--hg-honey);
-  background: #fffdf7;
+  background: var(--hg-honey-soft);
 }
 
 .hg-action-cancel_forager {
@@ -844,6 +730,7 @@
   padding: 10px 12px;
   background: var(--hg-leaf);
   border-radius: var(--hg-radius-control);
+  border-left: 2px solid var(--hg-line-strong);
   font-size: 13px;
 }
 
@@ -874,51 +761,35 @@
 
 .hg-artifacts code {
   padding: 1px 6px;
-  border-radius: 5px;
+  border-radius: var(--hg-radius-chip);
   background: var(--hg-leaf);
   color: var(--hg-ink);
   font-size: 11px;
 }
 
-/* ---- Empty state: pale honeycomb + line bee ---- */
+/* ---- Empty state: a pixel honeycomb with a bee ---- */
 
 .hg-empty {
-  position: relative;
-  overflow: hidden;
-  padding: 34px 20px;
+  padding: 30px 20px;
   text-align: center;
   background: var(--hg-panel);
-  border: 1px dashed var(--hg-line-strong);
+  border: 2px solid var(--hg-line);
   border-radius: var(--hg-radius-card);
 }
 
-.hg-comb {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0.55;
-  pointer-events: none;
-}
-
-.hg-comb polygon {
-  fill: none;
-  stroke: var(--hg-leaf-strong);
-  stroke-width: 1.2;
-}
-
 .hg-empty-body {
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-.hg-empty-bee {
+.hg-empty-art {
   display: inline-grid;
   place-items: center;
-  color: var(--hg-honey);
 }
 
 .hg-empty-title {
-  margin: 8px 0 0;
+  margin: 12px 0 0;
   font-weight: 600;
 }
 
@@ -932,42 +803,35 @@
   margin-top: 14px;
 }
 
-/* ---- Bee loading animation along a hexagon path ---- */
+/* ---- Bee loader: two wing frames on steps(), plus a small bob ---- */
 
 .hg-loader {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 24px;
-}
-
-.hg-loader-track {
-  position: relative;
-  display: block;
-  width: 80px;
-  height: 80px;
-}
-
-.hg-loader-track svg {
-  width: 80px;
-  height: 80px;
-  fill: none;
-  stroke: var(--hg-leaf-strong);
-  stroke-width: 1.2;
+  gap: 8px;
+  padding: 20px;
 }
 
 .hg-loader-bee {
+  position: relative;
+  display: block;
+  width: 32px;
+  height: 32px;
+  animation: hg-px-bob 0.84s steps(1, end) infinite;
+}
+
+.hg-loader-frame {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 22px;
-  height: 22px;
-  margin: -11px;
-  color: var(--hg-honey-ink);
-  offset-path: path("M 40 10 L 65.98 25 L 65.98 55 L 40 70 L 14.02 55 L 14.02 25 Z");
-  offset-rotate: 0deg;
-  animation: hg-fly 5s linear infinite;
+  inset: 0;
+}
+
+.hg-loader-frame-up {
+  animation: hg-px-frame-a 0.42s steps(1, end) infinite;
+}
+
+.hg-loader-frame-down {
+  animation: hg-px-frame-b 0.42s steps(1, end) infinite;
 }
 
 .hg-loader-label {
@@ -975,22 +839,51 @@
   font-size: 13px;
 }
 
-@keyframes hg-fly {
-  from {
-    offset-distance: 0%;
+@keyframes hg-px-frame-a {
+  0% {
+    visibility: visible;
   }
-  to {
-    offset-distance: 100%;
+  50% {
+    visibility: hidden;
+  }
+  100% {
+    visibility: visible;
+  }
+}
+
+@keyframes hg-px-frame-b {
+  0% {
+    visibility: hidden;
+  }
+  50% {
+    visibility: visible;
+  }
+  100% {
+    visibility: hidden;
+  }
+}
+
+@keyframes hg-px-bob {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+  100% {
+    transform: translateY(0);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hg-loader-bee {
-    offset-path: none;
+  .hg-loader-bee,
+  .hg-loader-frame-up,
+  .hg-loader-frame-down {
     animation: none;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+  }
+
+  .hg-loader-frame-down {
+    visibility: hidden;
   }
 
   .hg-app * {
@@ -1038,7 +931,7 @@
   gap: 6px;
   min-height: 34px;
   padding: 6px 12px;
-  border: 1px solid var(--hg-line-strong);
+  border: 2px solid var(--hg-line-strong);
   border-radius: var(--hg-radius-control);
   background: var(--hg-panel);
   color: var(--hg-ink);
@@ -1055,15 +948,21 @@
 }
 
 .hg-btn-primary {
-  border-color: var(--hg-honey);
+  border-color: var(--hg-honey-strong);
   background: var(--hg-honey);
   color: var(--hg-honey-ink);
   font-weight: 600;
+  box-shadow: 2px 2px 0 var(--hg-px-shadow);
 }
 
 .hg-btn-primary:hover {
   background: var(--hg-honey-strong);
   border-color: var(--hg-honey-strong);
+}
+
+.hg-btn-primary:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--hg-px-shadow);
 }
 
 .hg-composer {
@@ -1072,7 +971,7 @@
   gap: 8px;
   padding: 16px;
   background: var(--hg-panel);
-  border: 1px solid var(--hg-line);
+  border: 2px solid var(--hg-line-strong);
   border-radius: var(--hg-radius-card);
 }
 
@@ -1089,7 +988,7 @@
 .hg-composer textarea,
 .hg-inline-field select {
   padding: 9px 11px;
-  border: 1px solid var(--hg-line-strong);
+  border: 2px solid var(--hg-line-strong);
   border-radius: var(--hg-radius-control);
   background: var(--hg-paper);
   color: var(--hg-ink);
@@ -1173,7 +1072,7 @@
   gap: 10px;
   padding: 10px;
   background: var(--hg-paper);
-  border: 1px solid var(--hg-line-soft);
+  border: 2px solid var(--hg-line-soft);
   border-radius: var(--hg-radius-control);
 }
 
@@ -1261,7 +1160,7 @@ a.hg-meta:hover {
   margin-top: 18px;
   padding: 14px 16px;
   background: var(--hg-panel);
-  border: 1px solid var(--hg-line);
+  border: 2px solid var(--hg-line-strong);
   border-radius: var(--hg-radius-card);
 }
 
@@ -1291,7 +1190,7 @@ a.hg-meta:hover {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--hg-radius-chip);
   background: var(--hg-tone-soft);
   color: var(--hg-tone);
   font-size: 12px;
@@ -1309,7 +1208,7 @@ a.hg-meta:hover {
 .hg-handoff-grid > div {
   padding: 12px;
   background: var(--hg-paper);
-  border: 1px solid var(--hg-line-soft);
+  border: 2px solid var(--hg-line-soft);
   border-radius: var(--hg-radius-control);
 }
 
@@ -1341,6 +1240,110 @@ a.hg-meta:hover {
 
 /* ---- Icon reference page ---- */
 
+.hg-px-lab + .hg-px-lab {
+  margin-top: 22px;
+}
+
+.hg-px-row {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hg-line-soft);
+}
+
+.hg-icon-lab-dark .hg-px-row {
+  border-top-color: #3a3a33;
+}
+
+.hg-px-row:first-of-type {
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.hg-px-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.hg-px-row-label {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.hg-px-row-note {
+  color: var(--hg-muted);
+  font-size: 12px;
+}
+
+.hg-icon-lab-dark .hg-px-row-note {
+  color: var(--hg-night-muted);
+}
+
+.hg-px-row-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.hg-px-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.hg-px-cell-art {
+  display: grid;
+  place-items: end center;
+  min-height: 96px;
+}
+
+.hg-px-sizes {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.hg-px-cell-label {
+  color: var(--hg-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hg-icon-lab-dark .hg-px-cell-label {
+  color: var(--hg-night-muted);
+}
+
+.hg-px-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hg-px-palette li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.hg-px-swatch {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--hg-line-strong);
+  border-radius: 2px;
+}
+
+
+
 .hg-icon-lab {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1350,7 +1353,7 @@ a.hg-meta:hover {
 .hg-icon-lab-panel {
   padding: 18px;
   background: var(--hg-panel);
-  border: 1px solid var(--hg-line);
+  border: 2px solid var(--hg-line-strong);
   border-radius: var(--hg-radius-card);
 }
 
@@ -1369,14 +1372,11 @@ a.hg-meta:hover {
   background: var(--hg-night);
   border-color: var(--hg-night);
   color: var(--hg-night-ink);
-  /* On a dark surface the front of the bee turns light instead of relying on
-     the keyline halo, and the line variant follows currentColor. */
-  --hg-bee-keyline: transparent;
-  --hg-bee-head: var(--hg-night-bee-head);
-  --hg-bee-antenna: var(--hg-night-bee-head);
-  --hg-bee-stinger: var(--hg-night-bee-head);
-  --hg-bee-line: var(--hg-night-bee-head);
-  --hg-bee-wing-ink: var(--hg-night-bee-wing-ink);
+  /* One token swap keeps every pixel drawing readable on a dark surface: the ink
+     (outline, stripes, eyes) turns cream, and the eye shine turns dark. */
+  --hg-px-ink: #fbf8f1;
+  --hg-px-shine: #2e2410;
+  --hg-px-wing-hi: #f4faff;
 }
 
 .hg-icon-lab-dark .hg-icon-lab-note {

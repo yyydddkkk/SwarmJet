@@ -1,6 +1,7 @@
 // Conversation stream: Queen prose, structured action cards and external event cards.
 import type { Agent, AgentState, ConversationEntry, Message, MessageKind } from "./types";
-import { ActionCard, EmptyState, EventCard, HexAvatar } from "./components";
+import { ActionCard, EmptyState, EventCard } from "./components";
+import { ForagerAvatar, QueenAvatar } from "./pixel";
 import { Icon } from "./icons";
 
 const kindLabels: Record<MessageKind, string> = {
@@ -36,7 +37,11 @@ function MessageRow({ message, agents, at }: { message: Message; agents: Agent[]
   const author = isQueen ? "Queen（蜂王）" : `Forager · ${foragerId}`;
   return (
     <div className={`hg-msg ${isQueen ? "hg-msg-queen" : "hg-msg-forager"}`}>
-      <HexAvatar role={isQueen ? "queen" : "forager"} state={state} size={34} />
+      {isQueen ? (
+        <QueenAvatar size={32} off={state === "disabled"} />
+      ) : (
+        <ForagerAvatar id={foragerId} size={32} />
+      )}
       <div className="hg-msg-main">
         <div className="hg-msg-meta">
           <span className="hg-msg-author">{author}</span>
@@ -49,7 +54,7 @@ function MessageRow({ message, agents, at }: { message: Message; agents: Agent[]
           <ul className="hg-artifacts">
             {message.artifacts.map(artifact => (
               <li key={`${artifact.kind}-${artifact.ref}`}>
-                <Icon name={artifact.kind === "pr" ? "pr" : artifact.kind === "commit" ? "check" : "branch"} size={13} />
+                <Icon name={artifact.kind === "pr" ? "pr" : artifact.kind === "commit" ? "check" : "branch"} size={16} />
                 <code>{artifact.ref}</code>
               </li>
             ))}
