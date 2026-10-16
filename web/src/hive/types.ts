@@ -1,16 +1,16 @@
-// Domain types for the Hive / Queen / Drone console (ADR docs/claude/adr-hive-queen-drone.md).
+// Domain types for the Hive / Queen / Forager console (ADR docs/claude/adr-hive-queen-drone.md).
 // Field names mirror the Go contract in docs/claude/round1-prompts.md as camelCase JSON.
 // This round is front-end only: the pages below read the fake fixtures in web/src/fixtures.
 
 export type HiveConfig = {
   cli: string;
-  maxConcurrentDrones: number;
+  maxConcurrentForagers: number;
   maxHops: number;
-  maxDronesPerChain: number;
+  maxForagersPerChain: number;
   idleParkMinutes: number;
   hibernateHours: number;
   turnTimeoutMinutes: number;
-  droneMaxLifetimeHours: number;
+  foragerMaxLifetimeHours: number;
   triggers: TriggerRule[];
 };
 
@@ -34,7 +34,7 @@ export type Hive = {
   updatedAt: string;
 };
 
-export type AgentRole = "queen" | "drone";
+export type AgentRole = "queen" | "forager";
 
 export type AgentState =
   | "creating"
@@ -109,12 +109,12 @@ export type Message = {
 /** Aggregates shown on a Hive card (ADR section 18). */
 export type HiveOverview = {
   hive: Hive;
-  activeDrones: number;
+  activeForagers: number;
   pendingApprovals: number;
   inboxBacklog: number;
 };
 
-export type QueenActionKind = "spawn_drone" | "cancel_drone" | "request_approval";
+export type QueenActionKind = "spawn_forager" | "cancel_forager" | "request_approval";
 
 /** A structured card for a Queen action inside the conversation stream. */
 export type QueenAction = {
@@ -152,7 +152,7 @@ export type Check = {
   detail: string;
 };
 
-export type DroneDetail = {
+export type ForagerDetail = {
   agent: Agent;
   ci: Check[];
   guards: Check[];

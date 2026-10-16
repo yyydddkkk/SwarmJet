@@ -13,8 +13,9 @@ const Prototype =
   new URLSearchParams(location.search).get("prototype") === "workbench"
     ? lazy(() => import("./WorkbenchPrototype"))
     : null;
-// New Hive console ("honey garden"). Serves #/hives routes from fake fixtures only;
-// the existing console keeps its own routes and pages.
+// New Hive console ("honey garden"). Serves #/hives routes (plus the #/icons
+// reference page) from fake fixtures only; the existing console keeps its own
+// routes and pages.
 const HiveConsole = lazy(() => import("./hive/HiveConsoleApp"));
 
 function Root() {
@@ -24,7 +25,7 @@ function Root() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
-  if (hash.startsWith("#/hives"))
+  if (hash.startsWith("#/hives") || hash.startsWith("#/icons"))
     return (
       <Suspense fallback={<div className="loading">正在打开 Hive 控制台…</div>}>
         <HiveConsole />

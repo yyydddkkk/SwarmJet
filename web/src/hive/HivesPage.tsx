@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { hiveOverviews } from "../fixtures/hive-console";
 import { EmptyState, StatusBadge } from "./components";
-import { Icon } from "./icons";
+import { BeeIcon, Icon } from "./icons";
 
 export default function HivesPage() {
   const [query, setQuery] = useState("");
@@ -20,7 +20,7 @@ export default function HivesPage() {
         <div>
           <h1>Hive（蜂巢）</h1>
           <p className="hg-page-sub">
-            每个 Hive 对应一个仓库，里面有 Queen（蜂王）和一群 Drone（工蜂）。
+            每个 Hive 对应一个仓库，里面有 Queen（蜂王）和一群 Forager。
           </p>
         </div>
         <div className="hg-search">
@@ -60,7 +60,7 @@ export default function HivesPage() {
                 >
                   <header className="hg-hive-card-head">
                     <span className={`hg-hive-mark hg-hive-mark-${index % 3}`} aria-hidden="true">
-                      <Icon name="hive" size={22} />
+                      <BeeIcon size={24} />
                     </span>
                     <div>
                       <h2>{hive.name}</h2>
@@ -78,8 +78,8 @@ export default function HivesPage() {
                       </dd>
                     </div>
                     <div>
-                      <dt>活跃 Drone</dt>
-                      <dd className="hg-stat-value">{overview.activeDrones}</dd>
+                      <dt>活跃 Forager</dt>
+                      <dd className="hg-stat-value">{overview.activeForagers}</dd>
                     </div>
                     <div>
                       <dt>待审批</dt>

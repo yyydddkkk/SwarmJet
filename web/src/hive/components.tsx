@@ -8,7 +8,7 @@ import type {
   ExternalEvent,
   QueenAction,
 } from "./types";
-import { GithubMark, hexPoints, Icon, type IconName } from "./icons";
+import { BeeIcon, BeeLineIcon, GithubMark, hexPoints, Icon } from "./icons";
 
 export type Tone = "mint" | "amber" | "coral" | "neutral";
 
@@ -49,11 +49,10 @@ const checkLabel: Record<CheckStatus, string> = {
   pending: "等待",
 };
 
-const actionIcon: Record<QueenAction["kind"], IconName> = {
-  spawn_drone: "bee",
-  cancel_drone: "close",
-  request_approval: "shield",
-};
+function ActionMark({ kind }: { kind: QueenAction["kind"] }) {
+  if (kind === "spawn_forager") return <BeeLineIcon size={16} />;
+  return <Icon name={kind === "cancel_forager" ? "close" : "shield"} size={16} />;
+}
 
 export function HexAvatar({
   role,
@@ -66,7 +65,7 @@ export function HexAvatar({
   size?: number;
   label?: string;
 }) {
-  const name = label ?? (role === "queen" ? "Queen（蜂王）" : "Drone（工蜂）");
+  const name = label ?? (role === "queen" ? "Queen（蜂王）" : "Forager");
   const description = `${name} · ${stateLabels[state]}`;
   if (role === "queen") {
     return (
@@ -88,7 +87,7 @@ export function HexAvatar({
   }
   return (
     <span
-      className={`hg-avatar hg-avatar-drone hg-tone-${stateTone(state)}`}
+      className={`hg-avatar hg-avatar-forager hg-tone-${stateTone(state)}`}
       style={{ width: size, height: size }}
       role="img"
       aria-label={description}
@@ -175,7 +174,7 @@ export function ActionCard({ action }: { action: QueenAction }) {
     <article className={`hg-card hg-action hg-action-${action.kind}`}>
       <header className="hg-card-head">
         <span className="hg-card-mark">
-          <Icon name={actionIcon[action.kind]} size={16} />
+          <ActionMark kind={action.kind} />
         </span>
         <div className="hg-card-title">
           <strong>{action.title}</strong>
@@ -243,7 +242,7 @@ export function EmptyState({
       <HoneycombBackdrop />
       <div className="hg-empty-body">
         <span className="hg-empty-bee" aria-hidden="true">
-          <Icon name="bee" size={30} />
+          <BeeIcon size={32} />
         </span>
         <p className="hg-empty-title">{title}</p>
         {hint ? <p className="hg-empty-hint">{hint}</p> : null}
@@ -287,7 +286,7 @@ export function BeeLoader({ label = "正在飞行…" }: { label?: string }) {
           <polygon points={hexPoints(40, 40, 30)} />
         </svg>
         <span className="hg-loader-bee">
-          <Icon name="bee" size={22} />
+          <BeeIcon size={24} />
         </span>
       </span>
       <span className="hg-loader-label">{label}</span>

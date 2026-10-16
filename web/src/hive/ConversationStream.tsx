@@ -16,8 +16,8 @@ function MessageRow({ message, agents, at }: { message: Message; agents: Agent[]
   const from = message.from;
   const isLocal = from.startsWith("local:");
   const isQueen = from === "queen";
-  const droneId = from.startsWith("drone:") ? from.slice("drone:".length) : "";
-  const agent = droneId ? agents.find(candidate => candidate.id === droneId) : undefined;
+  const foragerId = from.startsWith("forager:") ? from.slice("forager:".length) : "";
+  const agent = foragerId ? agents.find(candidate => candidate.id === foragerId) : undefined;
   const state: AgentState = agent?.state ?? "active";
 
   if (isLocal) {
@@ -33,10 +33,10 @@ function MessageRow({ message, agents, at }: { message: Message; agents: Agent[]
     );
   }
 
-  const author = isQueen ? "Queen（蜂王）" : `Drone（工蜂）· ${droneId}`;
+  const author = isQueen ? "Queen（蜂王）" : `Forager · ${foragerId}`;
   return (
-    <div className={`hg-msg ${isQueen ? "hg-msg-queen" : "hg-msg-drone"}`}>
-      <HexAvatar role={isQueen ? "queen" : "drone"} state={state} size={34} />
+    <div className={`hg-msg ${isQueen ? "hg-msg-queen" : "hg-msg-forager"}`}>
+      <HexAvatar role={isQueen ? "queen" : "forager"} state={state} size={34} />
       <div className="hg-msg-main">
         <div className="hg-msg-meta">
           <span className="hg-msg-author">{author}</span>

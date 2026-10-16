@@ -31,17 +31,17 @@ test("Hive conversation with Queen enabled shows prose, action cards, events and
 
   // Queen speaks as prose; actions and external events arrive as cards.
   await expect(
-    page.getByText("收到。我先把 #142 交给一只使用 implementation 预设的 Drone", { exact: false }),
+    page.getByText("收到。我先把 #142 交给一只使用 implementation 预设的 Forager", { exact: false }),
   ).toBeVisible();
-  await expect(page.getByText("派出 Drone", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("派出 Forager", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("外部内容", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Swarm（蜂群）", level: 2 })).toBeVisible();
-  await expect(page.getByRole("link", { name: /drone-7f3a/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /forager-7f3a/ })).toBeVisible();
 
   await page.screenshot({ path: testInfo.outputPath("hive-conversation-1440.png"), fullPage: true });
 
   // The composer writes to the in-memory demo stream; the bee loader shows while Queen reads.
-  await page.getByLabel("对 Queen（蜂王）说话").fill("再派一只 Drone 审一下 #88");
+  await page.getByLabel("对 Queen（蜂王）说话").fill("再派一只 Forager 审一下 #88");
   await page.getByRole("button", { name: "发送" }).click();
   await expect(page.locator(".hg-loader")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("hive-queen-thinking-1440.png"), fullPage: true });
@@ -53,21 +53,21 @@ test("Hive with Queen disabled offers the direct dispatch form", async ({ page }
   await page.goto("/#/hives/orders");
 
   await expect(page.getByText("Queen（蜂王）未开启", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "直接派 Drone", level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "直接派 Forager", level: 2 })).toBeVisible();
 
-  await page.getByRole("button", { name: "派出 Drone" }).click();
+  await page.getByRole("button", { name: "派出 Forager" }).click();
   await expect(page.getByRole("alert")).toContainText("派活说明不能为空");
   await page.screenshot({ path: testInfo.outputPath("hive-dispatch-1440.png"), fullPage: true });
 
   await page.getByLabel("派活说明").fill("把订单导出改成流式响应，避免大报表超时。");
-  await page.getByRole("button", { name: "派出 Drone" }).click();
-  await expect(page.locator(".hg-form-status")).toContainText("已在本地演示中创建 Drone（工蜂）");
+  await page.getByRole("button", { name: "派出 Forager" }).click();
+  await expect(page.locator(".hg-form-status")).toContainText("已在本地演示中创建 Forager");
 });
 
-test("Drone detail implements the conversation and handoff sections", async ({ page }, testInfo) => {
-  await page.goto("/#/hives/swarmjet/drones/drone-7f3a");
+test("Forager detail implements the conversation and handoff sections", async ({ page }, testInfo) => {
+  await page.goto("/#/hives/swarmjet/foragers/forager-7f3a");
 
-  await expect(page.getByRole("heading", { name: /drone-7f3a/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /forager-7f3a/ })).toBeVisible();
   await expect(page.getByText("CI 2/3", { exact: true })).toBeVisible();
   await expect(page.getByText("Guard（守卫蜂） 3/4", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "对话", level: 2 })).toBeVisible();
@@ -75,13 +75,32 @@ test("Drone detail implements the conversation and handoff sections", async ({ p
     "处理 #142：在 Swarm 面板增加按状态筛选。",
   );
 
-  await page.screenshot({ path: testInfo.outputPath("drone-conversation-1440.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("forager-conversation-1440.png"), fullPage: true });
 
   await page.getByRole("link", { name: "交接摘要" }).click();
-  await expect(page).toHaveURL(/#\/hives\/swarmjet\/drones\/drone-7f3a\/handoff$/);
+  await expect(page).toHaveURL(/#\/hives\/swarmjet\/foragers\/forager-7f3a\/handoff$/);
   await expect(page.getByRole("heading", { name: "交接摘要", level: 2 })).toBeVisible();
-  await expect(page.getByText("在 Swarm 面板增加按状态筛选 Drone 的入口", { exact: true })).toBeVisible();
+  await expect(page.getByText("在 Swarm 面板增加按状态筛选 Forager 的入口", { exact: true })).toBeVisible();
   await expect(page.getByText("前端筛选交互与空结果提示", { exact: true })).toBeVisible();
 
-  await page.screenshot({ path: testInfo.outputPath("drone-handoff-1440.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("forager-handoff-1440.png"), fullPage: true });
+});
+
+test("Icon lab shows both bee variants at 16/20/32/64 on light and dark surfaces", async ({ page }, testInfo) => {
+  await page.goto("/#/icons");
+
+  await expect(page.getByRole("heading", { name: "图标规范", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "浅色背景", level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "深色背景", level: 2 })).toBeVisible();
+
+  const light = page.locator(".hg-icon-lab-panel").first();
+  const dark = page.locator(".hg-icon-lab-panel").nth(1);
+  await expect(light.locator(".hg-bee")).toHaveCount(4);
+  await expect(light.locator(".hg-bee-line")).toHaveCount(4);
+  await expect(dark.locator(".hg-bee")).toHaveCount(4);
+  await expect(dark.locator(".hg-bee-line")).toHaveCount(4);
+  await expect(page.getByText("16px", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("64px", { exact: true }).first()).toBeVisible();
+
+  await page.screenshot({ path: testInfo.outputPath("icon-lab-1440.png"), fullPage: true });
 });

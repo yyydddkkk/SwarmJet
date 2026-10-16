@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import {
   agentsByHive,
   conversationByHive,
-  droneDetailById,
+  foragerDetailById,
   overviewById,
 } from "../fixtures/hive-console";
 import type { Agent, ConversationEntry, Hive } from "./types";
@@ -17,7 +17,7 @@ import {
   Tabs,
   stateLabels,
 } from "./components";
-import { Icon } from "./icons";
+import { BeeLineIcon, Icon } from "./icons";
 import { ConversationStream } from "./ConversationStream";
 
 const sections = [
@@ -32,11 +32,11 @@ const sections = [
 const placeholders: Record<string, { title: string; hint: string }> = {
   timeline: {
     title: "时间线",
-    hint: "时间线会按 chain_id 展开因果树：哪个事件触发了哪些消息和 Drone，最后产出了哪些 PR。这一轮先放占位。",
+    hint: "时间线会按 chain_id 展开因果树：哪个事件触发了哪些消息和 Forager，最后产出了哪些 PR。这一轮先放占位。",
   },
   inbox: {
     title: "Inbox（蜂巢收件箱）",
-    hint: "无法确定性路由的事件会留在这里，可以认领、指派给 Drone 或忽略。这一轮先放占位。",
+    hint: "无法确定性路由的事件会留在这里，可以认领、指派给 Forager 或忽略。这一轮先放占位。",
   },
   memory: {
     title: "记忆",
@@ -69,7 +69,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
   const { hive } = overview;
   const agents = agentsByHive(hive.id);
   const queen = agents.find(agent => agent.role === "queen");
-  const drones = agents.filter(agent => agent.role === "drone");
+  const foragers = agents.filter(agent => agent.role === "forager");
   const entries = conversationByHive(hive.id);
   const active = section || "conversation";
 
@@ -77,7 +77,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
     ...item,
     href: item.id === "conversation" ? `#/hives/${hive.id}` : `#/hives/${hive.id}/${item.id}`,
     count:
-      item.id === "swarm" ? drones.length : item.id === "inbox" ? overview.inboxBacklog : undefined,
+      item.id === "swarm" ? foragers.length : item.id === "inbox" ? overview.inboxBacklog : undefined,
   }));
 
   return (
@@ -103,7 +103,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
             state={queen?.state ?? (hive.queenEnabled ? "active" : "disabled")}
             label={`Queen（蜂王）${hive.queenEnabled ? "已开启" : "未开启"}`}
           />
-          <span className="hg-badge hg-tone-neutral">{drones.length} 只 Drone</span>
+          <span className="hg-badge hg-tone-neutral">{foragers.length} 只 Forager</span>
         </div>
       </header>
 
@@ -113,13 +113,13 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
         <ConversationSection
           hive={hive}
           agents={agents}
-          drones={drones}
+          foragers={foragers}
           entries={entries}
-          maxConcurrent={hive.config.maxConcurrentDrones}
+          maxConcurrent={hive.config.maxConcurrentForagers}
         />
       ) : active === "swarm" ? (
         <div className="hg-conversation single">
-          <SwarmPanel hive={hive} drones={drones} maxConcurrent={hive.config.maxConcurrentDrones} />
+          <SwarmPanel hive={hive} foragers={foragers} maxConcurrent={hive.config.maxConcurrentForagers} />
         </div>
       ) : (
         <Panel title={placeholders[active]?.title ?? "占位"}>
@@ -136,13 +136,13 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
 function ConversationSection({
   hive,
   agents,
-  drones,
+  foragers,
   entries,
   maxConcurrent,
 }: {
   hive: Hive;
   agents: Agent[];
-  drones: Agent[];
+  foragers: Agent[];
   entries: ConversationEntry[];
   maxConcurrent: number;
 }) {
@@ -213,7 +213,7 @@ function ConversationSection({
             entries={stream}
             agents={agents}
             emptyTitle="对话还是空的。"
-            emptyHint={hive.queenEnabled ? "在下面跟 Queen 说点什么。" : "在下面直接派一只 Drone。"}
+            emptyHint={hive.queenEnabled ? "在下面跟 Queen 说点什么。" : "在下面直接派一只 Forager。"}
           />
           {queenThinking ? <BeeLoader label="Queen（蜂王）正在读你的消息…" /> : null}
         </Panel>
@@ -224,7 +224,7 @@ function ConversationSection({
         )}
       </div>
       <aside className="hg-conversation-side">
-        <SwarmPanel hive={hive} drones={drones} maxConcurrent={maxConcurrent} />
+        <SwarmPanel hive={hive} foragers={foragers} maxConcurrent={maxConcurrent} />
       </aside>
     </div>
   );
@@ -261,7 +261,7 @@ function QueenComposer({ onSend }: { onSend: (body: string) => void }) {
         placeholder="例如：把这 5 个 Issue 并行修了。"
       />
       <div className="hg-composer-foot">
-        <span className="hg-composer-hint">发送后 Queen 会拆成 Task 派给 Drone。</span>
+        <span className="hg-composer-hint">发送后 Queen 会拆成 Task 派给 Forager。</span>
         <button className="hg-btn hg-btn-primary" type="submit">
           <Icon name="send" size={15} />
           发送
@@ -297,14 +297,14 @@ function DispatchForm({ hive }: { hive: Hive }) {
         }
         setError("");
         setStatus(
-          `已在本地演示中创建 Drone（工蜂）：使用 ${preset} 预设，从 main 切出 swarm/${hive.id}/drone-新 分支开始工作。`,
+          `已在本地演示中创建 Forager：使用 ${preset} 预设，从 main 切出 swarm/${hive.id}/forager-新 分支开始工作。`,
         );
         setTask("");
       }}
     >
-      <h2 className="hg-composer-title">直接派 Drone</h2>
+      <h2 className="hg-composer-title">直接派 Forager</h2>
       <p className="hg-composer-hint">
-        Queen（蜂王）未开启，任务直接派给 Drone（工蜂）；它的分支和进展会出现在右侧 Swarm 面板。
+        Queen（蜂王）未开启，任务直接派给 Forager；它的分支和进展会出现在右侧 Swarm 面板。
       </p>
       <label className="hg-field-label" htmlFor={id}>
         派活说明
@@ -330,8 +330,8 @@ function DispatchForm({ hive }: { hive: Hive }) {
           </select>
         </label>
         <button className="hg-btn hg-btn-primary" type="submit">
-          <Icon name="bee" size={15} />
-          派出 Drone
+          <BeeLineIcon size={15} />
+          派出 Forager
         </button>
       </div>
       {error ? (
@@ -350,30 +350,30 @@ function DispatchForm({ hive }: { hive: Hive }) {
 
 function SwarmPanel({
   hive,
-  drones,
+  foragers,
   maxConcurrent,
 }: {
   hive: Hive;
-  drones: Agent[];
+  foragers: Agent[];
   maxConcurrent: number;
 }) {
   const [notice, setNotice] = useState("");
-  const busy = drones.filter(drone =>
-    ["creating", "active", "parked"].includes(drone.state),
+  const busy = foragers.filter(forager =>
+    ["creating", "active", "parked"].includes(forager.state),
   ).length;
 
   return (
     <Panel
-      title="Swarm（蜂群）"
+      title={<span className="hg-panel-title"><Icon name="swarm" size={17} />Swarm（蜂群）</span>}
       subtitle={`${busy}/${maxConcurrent} 个并发槽在用`}
       extra={
         <button
           className="hg-btn"
           type="button"
-          onClick={() => setNotice("已记录：接上 MCP 服务后会真的建一只 Drone。")}
+          onClick={() => setNotice("已记录：接上 MCP 服务后会真的建一只 Forager。")}
         >
           <Icon name="plus" size={15} />
-          派一只 Drone
+          派一只 Forager
         </button>
       }
     >
@@ -387,32 +387,32 @@ function SwarmPanel({
         </div>
       </div>
 
-      {drones.length === 0 ? (
-        <EmptyState title="这个 Hive 还没有 Drone。" hint="派一只去干活吧。" />
+      {foragers.length === 0 ? (
+        <EmptyState title="这个 Hive 还没有 Forager。" hint="派一只去干活吧。" />
       ) : (
         <ul className="hg-swarm-list">
-          {drones.map(drone => {
-            const detail = droneDetailById(drone.id);
+          {foragers.map(forager => {
+            const detail = foragerDetailById(forager.id);
             const content = (
               <>
-                <HexAvatar role="drone" state={drone.state} size={30} />
+                <HexAvatar role="forager" state={forager.state} size={30} />
                 <div className="hg-swarm-item-main">
-                  <span className="hg-swarm-id">{drone.id}</span>
-                  <p className="hg-swarm-task">{drone.task}</p>
-                  {drone.branch ? (
+                  <span className="hg-swarm-id">{forager.id}</span>
+                  <p className="hg-swarm-task">{forager.task}</p>
+                  {forager.branch ? (
                     <code className="hg-branch">
                       <Icon name="branch" size={12} />
-                      {drone.branch}
+                      {forager.branch}
                     </code>
                   ) : null}
                 </div>
-                <StatusBadge state={drone.state} label={stateLabels[drone.state]} />
+                <StatusBadge state={forager.state} label={stateLabels[forager.state]} />
               </>
             );
             return (
-              <li key={drone.id}>
+              <li key={forager.id}>
                 {detail ? (
-                  <a className="hg-swarm-item is-link" href={`#/hives/${hive.id}/drones/${drone.id}`}>
+                  <a className="hg-swarm-item is-link" href={`#/hives/${hive.id}/foragers/${forager.id}`}>
                     {content}
                   </a>
                 ) : (

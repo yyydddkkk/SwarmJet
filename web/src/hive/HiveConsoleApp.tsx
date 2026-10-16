@@ -1,20 +1,22 @@
-// Entry point for the "honey garden" console. Mounted only for #/hives routes
-// (see web/src/main.tsx) and fed by the fake fixtures, so it never touches the
-// existing pages or the API.
+// Entry point for the "honey garden" console. Mounted only for #/hives (and the
+// #/icons reference page) — see web/src/main.tsx — and fed by the fake fixtures,
+// so it never touches the existing pages or the API.
 import { useEffect, useState } from "react";
 import HivesPage from "./HivesPage";
 import HivePage from "./HivePage";
-import DronePage from "./DronePage";
+import ForagerPage from "./ForagerPage";
+import IconLab from "./IconLab";
 import { EmptyState } from "./components";
-import { Icon } from "./icons";
+import { BeeIcon } from "./icons";
 import "./hive-console.css";
 
 type Route =
   | { name: "hives" }
   | { name: "hive"; hiveId: string; section: string }
-  | { name: "drone"; hiveId: string; droneId: string; section: string }
+  | { name: "forager"; hiveId: string; foragerId: string; section: string }
   | { name: "approvals" }
   | { name: "system" }
+  | { name: "icons" }
   | { name: "unknown" };
 
 function parseRoute(hash: string): Route {
@@ -22,13 +24,14 @@ function parseRoute(hash: string): Route {
   const parts = path.split("/").filter(Boolean);
   if (parts[0] === "approvals") return { name: "approvals" };
   if (parts[0] === "system") return { name: "system" };
+  if (parts[0] === "icons") return { name: "icons" };
   if (parts[0] !== "hives") return { name: "unknown" };
   if (parts.length === 1) return { name: "hives" };
-  if (parts[2] === "drones" && parts[3]) {
+  if (parts[2] === "foragers" && parts[3]) {
     return {
-      name: "drone",
+      name: "forager",
       hiveId: parts[1],
-      droneId: decodeURIComponent(parts[3]),
+      foragerId: decodeURIComponent(parts[3]),
       section: parts[4] ?? "conversation",
     };
   }
@@ -58,7 +61,7 @@ const placeholders: Record<"approvals" | "system", { title: string; hint: string
 
 export default function HiveConsoleApp() {
   const route = useRoute();
-  const inHive = route.name === "hives" || route.name === "hive" || route.name === "drone";
+  const inHive = route.name === "hives" || route.name === "hive" || route.name === "forager";
 
   return (
     <div className="hg-app">
@@ -75,7 +78,7 @@ export default function HiveConsoleApp() {
       <header className="hg-topbar">
         <a className="hg-brand" href="#/hives">
           <span className="hg-brand-mark" aria-hidden="true">
-            <Icon name="hive" size={20} />
+            <BeeIcon size={20} />
           </span>
           <span className="hg-brand-name">SwarmJet</span>
           <span className="hg-brand-note">蜂巢控制台</span>
@@ -99,7 +102,9 @@ export default function HiveConsoleApp() {
             系统
           </a>
         </nav>
-        <p className="hg-topbar-note">假数据预览 · 后端接口下一轮接入</p>
+        <p className="hg-topbar-note">
+          假数据预览 · <a href="#/icons">图标规范</a>
+        </p>
       </header>
 
       <main id="hg-main" className="hg-main" tabIndex={-1}>
@@ -107,13 +112,15 @@ export default function HiveConsoleApp() {
           <HivesPage key="hives" />
         ) : route.name === "hive" ? (
           <HivePage key={`hive-${route.hiveId}-${route.section}`} hiveId={route.hiveId} section={route.section} />
-        ) : route.name === "drone" ? (
-          <DronePage
-            key={`drone-${route.hiveId}-${route.droneId}-${route.section}`}
+        ) : route.name === "forager" ? (
+          <ForagerPage
+            key={`forager-${route.hiveId}-${route.foragerId}-${route.section}`}
             hiveId={route.hiveId}
-            droneId={route.droneId}
+            foragerId={route.foragerId}
             section={route.section}
           />
+        ) : route.name === "icons" ? (
+          <IconLab />
         ) : route.name === "unknown" ? (
           <EmptyState
             title="页面不存在。"

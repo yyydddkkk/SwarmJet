@@ -34,6 +34,24 @@
   --hg-line-strong: #d8d0bc;
   --hg-neutral-fill: #b4ac98;
   --hg-focus: #1f5fa8;
+  /* Bee illustration: honey body, near-black brown stripes, light translucent wings.
+     The keyline is what keeps the dark parts readable on a dark surface, so it
+     stays light in every theme. */
+  --hg-bee-body: var(--hg-honey);
+  --hg-bee-stripe: #2e2410;
+  --hg-bee-head: #3a2a05;
+  --hg-bee-line: #3a2a05;
+  --hg-bee-antenna: #3a2a05;
+  --hg-bee-wing: rgba(255, 255, 255, 0.72);
+  --hg-bee-wing-ink: rgba(58, 58, 51, 0.5);
+  --hg-bee-keyline: #fbf8f1;
+  --hg-bee-stinger: var(--hg-bee-stripe);
+  /* Dark surface, only used by the icon reference page. */
+  --hg-night: #23231f;
+  --hg-night-ink: #fbf8f1;
+  --hg-night-muted: #b9b2a0;
+  --hg-night-bee-head: #f3e6c8;
+  --hg-night-bee-wing-ink: rgba(255, 255, 255, 0.6);
   /* Typography: Source Han Sans for Chinese, Inter for Latin, JetBrains Mono for code */
   --hg-font-body: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
     "Hiragino Sans GB", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -158,6 +176,11 @@
   margin: 0 0 0 auto;
   font-size: 12px;
   color: var(--hg-muted);
+}
+
+.hg-topbar-note a {
+  color: var(--hg-honey-ink);
+  text-underline-offset: 2px;
 }
 
 .hg-main {
@@ -396,15 +419,96 @@
   fill: var(--hg-muted);
 }
 
-.hg-avatar-drone .hg-avatar-hex {
+.hg-avatar-forager .hg-avatar-hex {
   fill: var(--hg-panel);
   stroke: var(--hg-tone-fill);
   stroke-width: 2;
 }
 
-.hg-avatar-drone .hg-avatar-core {
+.hg-avatar-forager .hg-avatar-core {
   fill: var(--hg-tone-fill);
   opacity: 0.35;
+}
+
+/* ---- Bees ---- */
+
+.hg-bee-halo {
+  fill: var(--hg-bee-keyline);
+  stroke: var(--hg-bee-keyline);
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+
+.hg-bee-halo path {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.hg-bee-wing {
+  fill: var(--hg-bee-wing);
+  stroke: var(--hg-bee-wing-ink);
+  stroke-width: 1.3;
+}
+
+.hg-bee-abdomen {
+  fill: var(--hg-bee-body);
+}
+
+.hg-bee-abdomen-line {
+  fill: none;
+  stroke: var(--hg-bee-line);
+  stroke-width: 2;
+}
+
+.hg-bee-stripe {
+  fill: var(--hg-bee-stripe);
+}
+
+.hg-bee-stinger {
+  fill: var(--hg-bee-stinger);
+}
+
+.hg-bee-thorax,
+.hg-bee-head,
+.hg-bee-tip {
+  fill: var(--hg-bee-head);
+}
+
+.hg-bee-antenna {
+  fill: none;
+  stroke: var(--hg-bee-antenna);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.hg-bee-line-wing {
+  fill: currentColor;
+  fill-opacity: 0.14;
+  stroke: currentColor;
+  stroke-width: 2.4;
+}
+
+.hg-bee-line-stripe {
+  fill: currentColor;
+}
+
+.hg-bee-line-abdomen {
+  fill: currentColor;
+  fill-opacity: 0.16;
+  stroke: currentColor;
+  stroke-width: 2.6;
+}
+
+.hg-bee-line-thorax,
+.hg-bee-line-head {
+  fill: currentColor;
+}
+
+.hg-bee-line-antenna {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.8;
+  stroke-linecap: round;
 }
 
 .hg-dot {
@@ -650,7 +754,7 @@
   background: #fffdf7;
 }
 
-.hg-action-cancel_drone {
+.hg-action-cancel_forager {
   border-left-color: var(--hg-coral);
 }
 
@@ -1096,10 +1200,10 @@
   font-size: 11px;
 }
 
-/* ---- Hive header, Drone header ---- */
+/* ---- Hive header, Forager header ---- */
 
 .hg-hive-head-text,
-.hg-drone-head-text {
+.hg-forager-head-text {
   min-width: 0;
 }
 
@@ -1110,13 +1214,13 @@
   margin-left: auto;
 }
 
-.hg-drone-head h1 {
+.hg-forager-head h1 {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.hg-drone-task {
+.hg-forager-task {
   margin: 6px 0 0;
 }
 
@@ -1211,4 +1315,109 @@ a.hg-meta:hover {
 
 .hg-handoff-artifacts {
   margin-top: 16px;
+}
+
+/* ---- Panel title with icon ---- */
+
+.hg-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hg-panel-title .hg-icon {
+  color: var(--hg-honey-ink);
+}
+
+/* ---- Icon reference page ---- */
+
+.hg-icon-lab {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.hg-icon-lab-panel {
+  padding: 18px;
+  background: var(--hg-panel);
+  border: 1px solid var(--hg-line);
+  border-radius: var(--hg-radius-card);
+}
+
+.hg-icon-lab-panel h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.hg-icon-lab-note {
+  margin: 4px 0 0;
+  color: var(--hg-muted);
+  font-size: 12px;
+}
+
+.hg-icon-lab-dark {
+  background: var(--hg-night);
+  border-color: var(--hg-night);
+  color: var(--hg-night-ink);
+  /* On a dark surface the front of the bee turns light instead of relying on
+     the keyline halo, and the line variant follows currentColor. */
+  --hg-bee-keyline: transparent;
+  --hg-bee-head: var(--hg-night-bee-head);
+  --hg-bee-antenna: var(--hg-night-bee-head);
+  --hg-bee-stinger: var(--hg-night-bee-head);
+  --hg-bee-line: var(--hg-night-bee-head);
+  --hg-bee-wing-ink: var(--hg-night-bee-wing-ink);
+}
+
+.hg-icon-lab-dark .hg-icon-lab-note {
+  color: var(--hg-night-muted);
+}
+
+.hg-icon-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 26px;
+  padding: 16px 0 4px;
+  margin-top: 12px;
+  border-top: 1px solid var(--hg-line-soft);
+}
+
+.hg-icon-lab-dark .hg-icon-row {
+  border-top-color: #3a3a33;
+}
+
+.hg-icon-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.hg-icon-cell-box {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+}
+
+.hg-icon-cell-label {
+  color: var(--hg-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hg-icon-lab-dark .hg-icon-cell-label {
+  color: var(--hg-night-muted);
+}
+
+.hg-icon-row-label {
+  align-self: center;
+  width: 84px;
+  color: var(--hg-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hg-icon-lab-dark .hg-icon-row-label {
+  color: var(--hg-night-muted);
 }

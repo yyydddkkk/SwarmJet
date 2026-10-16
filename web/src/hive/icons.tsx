@@ -1,11 +1,15 @@
 // Line icons for the honey-garden console, following the project's existing
 // inline-SVG convention (see web/src/ConsoleIcon.tsx). No icon library is added.
+//
+// Bees come in two flavours, both inline SVG:
+//   BeeIcon     - colour, token-driven, for the brand, empty states and Hive cards
+//   BeeLineIcon - single currentColor, for nav and buttons at 16-20px
+import { useId } from "react";
 
 export type IconName =
   | "hive"
   | "hexagon"
   | "crown"
-  | "bee"
   | "swarm"
   | "chat"
   | "timeline"
@@ -37,17 +41,13 @@ const paths: Record<IconName, string | string[]> = {
   hive: "M12 2.6 20.1 7.3v9.4L12 21.4 3.9 16.7V7.3L12 2.6Z",
   hexagon: "M12 2.6 20.1 7.3v9.4L12 21.4 3.9 16.7V7.3L12 2.6Z",
   crown: "M4.5 18h15M5.4 17 3.6 8.4l4.9 3.1L12 6l3.5 5.5 4.9-3.1L18.6 17",
-  bee: [
-    "M12 8.6c2.3 0 4 1.6 4 3.4s-1.7 3.4-4 3.4-4-1.6-4-3.4 1.7-3.4 4-3.4Z",
-    "M8.4 10.6h7.2M8.2 12h7.6M8.4 13.4h7.2",
-    "M10.6 8.7 9.2 6.2M13.4 8.7l1.4-2.5",
-    "M9.4 9.4C6.8 6.6 4.2 7.6 5.4 10.4M14.6 9.4c2.6-2.8 5.2-1.8 4 1",
-    "M12 15.4v1.8",
-  ],
+  // A honeycomb cell with a bee in it.
   swarm: [
-    "M9 2.8 5 5.2v4.9L9 12.5l4-2.4V5.2L9 2.8Z",
-    "M4.4 13.6l-2.6 1.5v3.2l2.6 1.5 2.6-1.5v-3.2l-2.6-1.5Z",
-    "M15.4 13.6l-2.6 1.5v3.2l2.6 1.5 2.6-1.5v-3.2l-2.6-1.5Z",
+    "M12 2.2 20.4 7.1v9.8L12 21.8 3.6 16.9V7.1L12 2.2Z",
+    "M12 11.8c1.9 0 3.4 1.5 3.4 3.4s-1.5 3.4-3.4 3.4-3.4-1.5-3.4-3.4 1.5-3.4 3.4-3.4Z",
+    "M8.9 14.2h6.2M9 16.7h6",
+    "M9.5 12.1c-1.7-1.8-3.8-1.5-3.4.7M14.5 12.1c1.7-1.8 3.8-1.5 3.4.7",
+    "M12 8.4a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8",
   ],
   chat: "M4 5h16v11H9.5L4 20V5Z",
   timeline: ["M7 4v16", "M7 5h7a3 3 0 0 1 0 6H7", "M7 15h5a3 3 0 0 1 0 6H7"],
@@ -135,6 +135,203 @@ export function GithubMark({ size = 16 }: { size?: number }) {
       focusable="false"
     >
       <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bee geometry. Drawn upright in a 48x48 box and tilted ~35 degrees, so both
+// variants share the same silhouette.
+// ---------------------------------------------------------------------------
+const BEE_TILT = "rotate(-35 24 24)";
+const BEE_ABDOMEN = { cx: 24, cy: 32.5, rx: 8.4, ry: 9.5 };
+const BEE_HEAD = { cx: 24, cy: 13.8, r: 4.9 };
+const BEE_THORAX = { cx: 24, cy: 21, rx: 4.7, ry: 3.5 };
+const BEE_WING_LEFT = { cx: 14.9, cy: 13.4, rx: 8.7, ry: 3.8, rotate: 25.2 };
+const BEE_WING_RIGHT = { cx: 33.1, cy: 13.4, rx: 8.7, ry: 3.8, rotate: -25.2 };
+const BEE_ANTENNA_TIPS: [number, number][] = [
+  [17.4, 3.9],
+  [30.6, 3.9],
+];
+const BEE_ANTENNA_LEFT = "M21.9 9.9C20.1 6.9 18.7 5.3 17.4 3.9";
+const BEE_ANTENNA_RIGHT = "M26.1 9.9C27.9 6.9 29.3 5.3 30.6 3.9";
+const BEE_STINGER = "24,40.4 26.6,45.8 21.4,45.8";
+// Evenly spaced bands across the abdomen (3 colour, 2 line for small sizes).
+const COLOR_STRIPES = [25.1, 30.7, 36.4];
+const LINE_STRIPES = [26.9, 34.5];
+
+function BeeWings() {
+  return (
+    <>
+      <ellipse
+        cx={BEE_WING_LEFT.cx}
+        cy={BEE_WING_LEFT.cy}
+        rx={BEE_WING_LEFT.rx}
+        ry={BEE_WING_LEFT.ry}
+        transform={`rotate(${BEE_WING_LEFT.rotate} ${BEE_WING_LEFT.cx} ${BEE_WING_LEFT.cy})`}
+      />
+      <ellipse
+        cx={BEE_WING_RIGHT.cx}
+        cy={BEE_WING_RIGHT.cy}
+        rx={BEE_WING_RIGHT.rx}
+        ry={BEE_WING_RIGHT.ry}
+        transform={`rotate(${BEE_WING_RIGHT.rotate} ${BEE_WING_RIGHT.cx} ${BEE_WING_RIGHT.cy})`}
+      />
+    </>
+  );
+}
+
+/**
+ * Colour bee. Every part is painted from a --hg-bee-* token, and the dark head,
+ * thorax, antennae and stinger sit on a light keyline halo, so the bee stays
+ * readable on honey, on white and on a dark surface.
+ */
+export function BeeIcon({
+  size = 24,
+  className,
+  title,
+}: {
+  size?: number;
+  className?: string;
+  title?: string;
+}) {
+  const clipId = `hg-bee-body-${useId().replace(/[:]/g, "")}`;
+  return (
+    <svg
+      className={className ? `hg-icon hg-bee ${className}` : "hg-icon hg-bee"}
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      role={title ? "img" : undefined}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+      focusable="false"
+    >
+      <defs>
+        <clipPath id={clipId}>
+          <ellipse
+            cx={BEE_ABDOMEN.cx}
+            cy={BEE_ABDOMEN.cy}
+            rx={BEE_ABDOMEN.rx}
+            ry={BEE_ABDOMEN.ry}
+          />
+        </clipPath>
+      </defs>
+      <g transform={BEE_TILT}>
+        {/* Halo first: it has to sit behind the translucent wings. */}
+        <g className="hg-bee-halo">
+          <ellipse cx={BEE_THORAX.cx} cy={BEE_THORAX.cy} rx={BEE_THORAX.rx} ry={BEE_THORAX.ry} />
+          <circle cx={BEE_HEAD.cx} cy={BEE_HEAD.cy} r={BEE_HEAD.r} />
+          {BEE_ANTENNA_TIPS.map(([cx, cy]) => (
+            <circle key={`halo-${cx}`} cx={cx} cy={cy} r={1.4} />
+          ))}
+          <path d={BEE_ANTENNA_LEFT} />
+          <path d={BEE_ANTENNA_RIGHT} />
+          <polygon points={BEE_STINGER} />
+        </g>
+        <g className="hg-bee-wing">
+          <BeeWings />
+        </g>
+        <polygon className="hg-bee-stinger" points={BEE_STINGER} />
+        <ellipse
+          className="hg-bee-abdomen"
+          cx={BEE_ABDOMEN.cx}
+          cy={BEE_ABDOMEN.cy}
+          rx={BEE_ABDOMEN.rx}
+          ry={BEE_ABDOMEN.ry}
+        />
+        <g clipPath={`url(#${clipId})`}>
+          {COLOR_STRIPES.map(y => (
+            <rect key={y} className="hg-bee-stripe" x="14" y={y} width="20" height="3.6" rx="1.8" />
+          ))}
+        </g>
+        <ellipse
+          className="hg-bee-abdomen-line"
+          cx={BEE_ABDOMEN.cx}
+          cy={BEE_ABDOMEN.cy}
+          rx={BEE_ABDOMEN.rx}
+          ry={BEE_ABDOMEN.ry}
+        />
+        <ellipse
+          className="hg-bee-thorax"
+          cx={BEE_THORAX.cx}
+          cy={BEE_THORAX.cy}
+          rx={BEE_THORAX.rx}
+          ry={BEE_THORAX.ry}
+        />
+        <circle className="hg-bee-head" cx={BEE_HEAD.cx} cy={BEE_HEAD.cy} r={BEE_HEAD.r} />
+        <path className="hg-bee-antenna" d={BEE_ANTENNA_LEFT} />
+        <path className="hg-bee-antenna" d={BEE_ANTENNA_RIGHT} />
+        {BEE_ANTENNA_TIPS.map(([cx, cy]) => (
+          <circle key={`tip-${cx}`} className="hg-bee-tip" cx={cx} cy={cy} r={1.4} />
+        ))}
+      </g>
+    </svg>
+  );
+}
+
+/**
+ * Single-colour bee for nav and buttons. Stripes stay solid and the wings keep
+ * their outline so the shape still reads at 16px.
+ */
+export function BeeLineIcon({
+  size = 24,
+  className,
+  title,
+}: {
+  size?: number;
+  className?: string;
+  title?: string;
+}) {
+  const clipId = `hg-bee-line-body-${useId().replace(/[:]/g, "")}`;
+  return (
+    <svg
+      className={className ? `hg-icon hg-bee-line ${className}` : "hg-icon hg-bee-line"}
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      role={title ? "img" : undefined}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+      focusable="false"
+    >
+      <defs>
+        <clipPath id={clipId}>
+          <ellipse
+            cx={BEE_ABDOMEN.cx}
+            cy={BEE_ABDOMEN.cy}
+            rx={BEE_ABDOMEN.rx}
+            ry={BEE_ABDOMEN.ry}
+          />
+        </clipPath>
+      </defs>
+      <g transform={BEE_TILT}>
+        <g className="hg-bee-line-wing">
+          <BeeWings />
+        </g>
+        <g clipPath={`url(#${clipId})`}>
+          {LINE_STRIPES.map(y => (
+            <rect key={y} className="hg-bee-line-stripe" x="14" y={y} width="20" height="3.6" rx="1.8" />
+          ))}
+        </g>
+        <ellipse
+          className="hg-bee-line-abdomen"
+          cx={BEE_ABDOMEN.cx}
+          cy={BEE_ABDOMEN.cy}
+          rx={BEE_ABDOMEN.rx}
+          ry={BEE_ABDOMEN.ry}
+        />
+        <ellipse
+          className="hg-bee-line-thorax"
+          cx={BEE_THORAX.cx}
+          cy={BEE_THORAX.cy}
+          rx={BEE_THORAX.rx}
+          ry={BEE_THORAX.ry}
+        />
+        <circle className="hg-bee-line-head" cx={BEE_HEAD.cx} cy={BEE_HEAD.cy} r={BEE_HEAD.r} />
+        <path className="hg-bee-line-antenna" d={BEE_ANTENNA_LEFT} />
+        <path className="hg-bee-line-antenna" d={BEE_ANTENNA_RIGHT} />
+      </g>
     </svg>
   );
 }

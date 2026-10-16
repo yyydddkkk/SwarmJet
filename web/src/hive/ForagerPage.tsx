@@ -1,6 +1,6 @@
-// Drone detail page: header checks plus the conversation and handoff sections.
+// Forager detail page: header checks plus the conversation and handoff sections.
 // The Diff / timeline / terminal sections are placeholders for the next rounds.
-import { droneDetailById, hiveById } from "../fixtures/hive-console";
+import { foragerDetailById, hiveById } from "../fixtures/hive-console";
 import type { Check } from "./types";
 import { CheckList, EmptyState, HexAvatar, Panel, StatusBadge, Tabs } from "./components";
 import { Icon } from "./icons";
@@ -17,7 +17,7 @@ const sections = [
 const placeholders: Record<string, { title: string; hint: string }> = {
   diff: {
     title: "Diff",
-    hint: "这里会按文件展示 Drone 的改动，大的 diff 分页拉取。这一轮先放占位。",
+    hint: "这里会按文件展示 Forager 的改动，大的 diff 分页拉取。这一轮先放占位。",
   },
   timeline: {
     title: "时间线",
@@ -56,23 +56,23 @@ function CheckChips({ label, checks }: { label: string; checks: Check[] }) {
   );
 }
 
-export default function DronePage({
+export default function ForagerPage({
   hiveId,
-  droneId,
+  foragerId,
   section,
 }: {
   hiveId: string;
-  droneId: string;
+  foragerId: string;
   section: string;
 }) {
-  const detail = droneDetailById(droneId);
+  const detail = foragerDetailById(foragerId);
   const hive = hiveById(hiveId);
 
   if (!detail || !hive) {
     return (
       <div className="hg-page">
         <EmptyState
-          title="找不到这只 Drone。"
+          title="找不到这只 Forager。"
           hint="它可能已经休眠或完成，链接也可能不对。"
           action={
             <a className="hg-btn" href="#/hives">
@@ -90,8 +90,8 @@ export default function DronePage({
     ...item,
     href:
       item.id === "conversation"
-        ? `#/hives/${hive.id}/drones/${agent.id}`
-        : `#/hives/${hive.id}/drones/${agent.id}/${item.id}`,
+        ? `#/hives/${hive.id}/foragers/${agent.id}`
+        : `#/hives/${hive.id}/foragers/${agent.id}/${item.id}`,
   }));
 
   return (
@@ -104,14 +104,14 @@ export default function DronePage({
         <span>{agent.id}</span>
       </nav>
 
-      <header className="hg-page-head hg-drone-head">
-        <HexAvatar role="drone" state={agent.state} size={44} />
-        <div className="hg-drone-head-text">
+      <header className="hg-page-head hg-forager-head">
+        <HexAvatar role="forager" state={agent.state} size={44} />
+        <div className="hg-forager-head-text">
           <h1>
             {agent.id}
             <StatusBadge state={agent.state} />
           </h1>
-          <p className="hg-drone-task">{agent.task}</p>
+          <p className="hg-forager-task">{agent.task}</p>
           <div className="hg-meta-row">
             {agent.branch ? (
               <span className="hg-meta">
@@ -146,11 +146,11 @@ export default function DronePage({
       <Tabs items={tabs} active={active} label={`${agent.id} 分区`} />
 
       {active === "conversation" ? (
-        <Panel title="对话" subtitle="Drone（工蜂）与 Queen（蜂王）之间的往来。">
+        <Panel title="对话" subtitle="Forager 与 Queen（蜂王）之间的往来。">
           <ConversationStream
             entries={detail.conversation}
             agents={[agent]}
-            emptyTitle="这只 Drone 还没有对话。"
+            emptyTitle="这只 Forager 还没有对话。"
           />
         </Panel>
       ) : active === "handoff" ? (
@@ -185,7 +185,7 @@ export default function DronePage({
           ) : (
             <EmptyState
               title="还没有交接摘要。"
-              hint="Drone 完成第一轮之后，这里会出现目标、进展和风险。"
+              hint="Forager 完成第一轮之后，这里会出现目标、进展和风险。"
             />
           )}
         </Panel>
