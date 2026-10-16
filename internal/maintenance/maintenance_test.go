@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"github.com/yyydddkkk/SwarmJet/internal/agent"
-	"github.com/yyydddkkk/SwarmJet/internal/artifacts"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 	"github.com/yyydddkkk/SwarmJet/internal/workspace"
@@ -26,32 +25,7 @@ func fixture(t *testing.T) (*Manager, domain.Task) {
 	return m, domain.Task{ID: "expired", Stage: "completed"}
 }
 
-type retentionKubernetes struct{ deleted bool }
 
-func (*retentionKubernetes) Cancel(context.Context, string, int64) error { return nil }
-func (r *retentionKubernetes) DeletePVC(context.Context, string) error   { r.deleted = true; return nil }
-
-func TestKubernetesCleanupRequiresSavedReportBeforePVCDeletion(t *testing.T) {
-	ctx := context.Background()
-	objects := artifacts.FileStore{Root: t.TempDir()}
-	runner := &retentionKubernetes{}
-	m := &Manager{Store: &store.Store{}, Kubernetes: runner, KubernetesArtifacts: objects}
-	task := domain.Task{ID: "task", Stage: "completed", AdmissionBackend: "kubernetes", Executions: map[string]domain.Execution{}}
-	if err := m.cleanup(ctx, task); err == nil || runner.deleted {
-		t.Fatalf("missing report permitted cleanup: %v", err)
-	}
-	ref, err := objects.Put(ctx, artifacts.Request{TaskID: "task", ExecutionID: "task-dev", Kind: artifacts.Report, Name: "report"}, strings.NewReader("saved"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	task.Executions["dev"] = domain.Execution{ID: "task-dev", Artifacts: []domain.ArtifactRef{{TaskID: ref.TaskID, ExecutionID: ref.ExecutionID, Kind: string(ref.Kind), Name: ref.Name, SHA256: ref.SHA256, Size: ref.Size}}}
-	if err := m.cleanup(ctx, task); err != nil || !runner.deleted {
-		t.Fatalf("saved report cleanup: %v", err)
-	}
-	if _, err := objects.Read(ctx, ref); err == nil {
-		t.Fatal("expired report retained")
-	}
-}
 func put(t *testing.T, p string, b []byte) {
 	t.Helper()
 	if e := os.MkdirAll(filepath.Dir(p), 0700); e != nil {

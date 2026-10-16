@@ -26,7 +26,6 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/imagebuild"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
-	"github.com/yyydddkkk/SwarmJet/internal/pipeline"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
@@ -55,19 +54,6 @@ func TestScheduledAdmissionCountsOnlyAssignedTask(t *testing.T) {
 	metrics.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if !strings.Contains(response.Body.String(), `swarmjet_admitted_tasks_total{backend="local_or_node"} 1`) {
 		t.Fatalf("immediate admission count missing: %s", response.Body.String())
-	}
-}
-
-func TestWorkflowRouteSeparatesKubernetesWorker(t *testing.T) {
-	for _, tc := range []struct{ backend, name, queue string }{
-		{"local", pipeline.WorkflowName, pipeline.Queue},
-		{"node", pipeline.WorkflowName, pipeline.Queue},
-		{"kubernetes", pipeline.KubernetesWorkflowName, pipeline.KubernetesQueue},
-	} {
-		name, queue := workflowRoute(domain.Task{AdmissionBackend: tc.backend})
-		if name != tc.name || queue != tc.queue {
-			t.Fatalf("%s routed to %s/%s", tc.backend, name, queue)
-		}
 	}
 }
 

@@ -215,7 +215,7 @@ func (m *Metrics) Message(queue, result string) {
 }
 
 func (m *Metrics) Admission(backend string, count int, err error) {
-	if backend != "local_or_node" && backend != "kubernetes" {
+	if backend != "local_or_node" {
 		return
 	}
 	result := "ok"
@@ -233,7 +233,7 @@ func (m *Metrics) Admitted(backend string) {
 	if backend == "local" || backend == "node" {
 		backend = "local_or_node"
 	}
-	if backend != "local_or_node" && backend != "kubernetes" {
+	if backend != "local_or_node" {
 		return
 	}
 	m.admittedTasks.WithLabelValues(backend).Inc()
@@ -263,7 +263,7 @@ func (m *Metrics) Scan(scope string, elapsed time.Duration, err error) {
 
 func phaseLabel(phase string) string {
 	switch phase {
-	case "waiting_dependencies", "preparing", "developing", "verifying", "reviewing", "publishing", "acquiring_merge", "waiting_manual_merge", "merging", "partial_merge", "finalizing", "stop", "pause_queue", "recover", "cancel", "run_kubernetes_task", "stop_kubernetes_task":
+	case "waiting_dependencies", "preparing", "developing", "verifying", "reviewing", "publishing", "acquiring_merge", "waiting_manual_merge", "merging", "partial_merge", "finalizing", "stop", "pause_queue", "recover", "cancel":
 		return phase
 	default:
 		return "other"

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/yyydddkkk/SwarmJet/internal/observability"
 )
 
 var ErrUnsupportedUploadImage = errors.New("GitLab upload is not a supported image")
@@ -23,8 +22,6 @@ func (c *Client) DownloadUploadImage(ctx context.Context, projectID int64, secre
 		return nil, "", err
 	}
 	req.Header.Set("PRIVATE-TOKEN", c.token)
-	req, span := observability.TraceOutboundHTTP(req, "gitlab")
-	defer span.End()
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, "", err

@@ -54,24 +54,13 @@ type Service struct {
 	ProjectCredential             func(domain.Project, bool) (string, error)
 	Initializer                   InitReadiness
 	RequireNode                   bool
-	KubernetesPool                string
-	KubernetesValidationProjectID string
-	KubernetesCapacity            int
-	RunnerResources               domain.RunnerResources
-	RunnerImage                   string
 	Wake                          chan struct{}
 	LabelsWake                    chan struct{}
 	scanMu                        sync.Mutex
 }
 
 func (s *Service) intakeOptions(projectID string, claim bool) intake.Options {
-	options := intake.Options{DataDir: s.DataDir, RequireNode: s.RequireNode, ClaimRunCommands: claim}
-	if s.KubernetesPool != "" && projectID == s.KubernetesValidationProjectID {
-		options.KubernetesPool = s.KubernetesPool
-		options.RunnerResources = s.RunnerResources
-		options.RunnerImage = s.RunnerImage
-	}
-	return options
+	return intake.Options{DataDir: s.DataDir, RequireNode: s.RequireNode, ClaimRunCommands: claim}
 }
 
 // SyncLabels reconciles selectable labels independently of issue scanning.
@@ -177,15 +166,6 @@ func (s *Service) runAdmission(ctx context.Context) {
 		}
 		if err != nil && ctx.Err() == nil {
 			slog.Error("task admission", "error", err)
-		}
-		if s.KubernetesPool != "" {
-			admitted, err := s.Store.AdmitKubernetesTasks(ctx, s.KubernetesPool, s.KubernetesCapacity, 20)
-			if s.Metrics != nil {
-				s.Metrics.Admission("kubernetes", admitted, err)
-			}
-			if err != nil && ctx.Err() == nil {
-				slog.Error("Kubernetes task admission", "error", err)
-			}
 		}
 		select {
 		case <-ctx.Done():
@@ -320,8 +300,7 @@ func (s *Service) Deliver(ctx context.Context) error {
 			if e != nil {
 				return e
 			}
-			name, queue := workflowRoute(t)
-			_, e = s.Temporal.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: t.ID, TaskQueue: queue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, name, t)
+			_, e = s.Temporal.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: t.ID, TaskQueue: pipeline.Queue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, pipeline.WorkflowName, t)
 			var started *serviceerror.WorkflowExecutionAlreadyStarted
 			if e != nil && !errors.As(e, &started) {
 				lastErr = e
@@ -345,13 +324,6 @@ func (s *Service) Deliver(ctx context.Context) error {
 		}
 	}
 	return lastErr
-}
-
-func workflowRoute(t domain.Task) (name, queue string) {
-	if t.AdmissionBackend == "kubernetes" {
-		return pipeline.KubernetesWorkflowName, pipeline.KubernetesQueue
-	}
-	return pipeline.WorkflowName, pipeline.Queue
 }
 
 func (s *Service) Webhook(secret string) http.Handler {
@@ -479,7 +451,7 @@ func (s *Service) acceptWebhook(w http.ResponseWriter, r *http.Request, provider
 		http.Error(w, "webhook queue unavailable", http.StatusServiceUnavailable)
 		return false
 	}
-	slog.Info("webhook published", "provider", provider, "delivery_id", id, "trace_id", observability.TraceID(r.Context()))
+	slog.Info("webhook published", "provider", provider, "delivery_id", id)
 	return true
 }
 func (s *Service) Scan(ctx context.Context) error {
@@ -620,7 +592,7 @@ func (s *Service) scan(ctx context.Context, provider domain.Provider, repoID int
 }
 
 func logTaskScheduled(ctx context.Context, task domain.Task) {
-	attrs := []any{"task_id", task.ID, "project_id", task.Project.ID, "provider", task.Project.HostingProvider(), "repository_id", task.Issue.ProjectID, "issue_iid", task.Issue.IID, "admission_backend", task.AdmissionBackend, "admission_status", task.AdmissionStatus, "trace_id", observability.TraceID(ctx)}
+	attrs := []any{"task_id", task.ID, "project_id", task.Project.ID, "provider", task.Project.HostingProvider(), "repository_id", task.Issue.ProjectID, "issue_iid", task.Issue.IID, "admission_backend", task.AdmissionBackend, "admission_status", task.AdmissionStatus}
 	if delivery, ok := ctx.Value(webhookDeliveryContextKey{}).(webhookDeliveryContext); ok {
 		attrs = append(attrs, "webhook_provider", delivery.provider, "delivery_id", delivery.deliveryID)
 	}

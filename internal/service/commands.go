@@ -13,7 +13,6 @@ import (
 	"go.temporal.io/sdk/client"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/mq"
-	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"github.com/yyydddkkk/SwarmJet/internal/pipeline"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
@@ -43,15 +42,9 @@ func (s *Service) PublishCommands(ctx context.Context, publisher CommandPublishe
 		return err
 	}
 	for _, item := range commands {
-		publishCtx := ctx
-		if task, taskErr := s.Store.Task(ctx, item.TaskID); taskErr == nil {
-			publishCtx = observability.ContinueTaskTrace(ctx, task.TraceParent)
-		} else {
-			return fmt.Errorf("load command task %s: %w", item.TaskID, taskErr)
-		}
 		message, err := json.Marshal(commandMessage{ID: item.Command.ID, TaskID: item.TaskID})
 		if err == nil {
-			err = publisher.Publish(publishCtx, CommandQueue, message, item.Command.ID)
+			err = publisher.Publish(ctx, CommandQueue, message, item.Command.ID)
 		}
 		if err == nil {
 			err = s.Store.MarkCommandPublished(ctx, item.Command.ID)
@@ -80,7 +73,7 @@ func (s *Service) ConsumeCommand(ctx context.Context, body []byte) (err error) {
 		if err != nil {
 			result = "error"
 		}
-		slog.Info("task command processed", "task_id", message.TaskID, "command_id", message.ID, "result", result, "duration_ms", time.Since(start).Milliseconds(), "trace_id", observability.TraceID(ctx))
+		slog.Info("task command processed", "task_id", message.TaskID, "command_id", message.ID, "result", result, "duration_ms", time.Since(start).Milliseconds())
 	}()
 	item, delivered, err := s.Store.CommandForDelivery(ctx, message.ID)
 	if err != nil {
@@ -104,8 +97,7 @@ func (s *Service) deliverCommand(ctx context.Context, item store.PendingCommand)
 		if err != nil {
 			return err
 		}
-		name, queue := workflowRoute(t)
-		_, err = s.Temporal.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: t.ID, TaskQueue: queue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, name, t)
+		_, err = s.Temporal.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: t.ID, TaskQueue: pipeline.Queue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, pipeline.WorkflowName, t)
 		var started *serviceerror.WorkflowExecutionAlreadyStarted
 		if err != nil && !errors.As(err, &started) {
 			return err

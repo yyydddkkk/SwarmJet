@@ -171,18 +171,8 @@ type Execution struct {
 	FailureCode   string        `json:"failureCode,omitempty"`
 	ResultRepair  bool          `json:"resultRepair,omitempty"`
 	Result        *AgentResult  `json:"result,omitempty"`
-	Artifacts     []ArtifactRef `json:"artifacts,omitempty"`
 }
 
-// ArtifactRef locates verified output independently of a Runner Pod or PVC.
-type ArtifactRef struct {
-	TaskID      string `json:"taskId"`
-	ExecutionID string `json:"executionId"`
-	Kind        string `json:"kind"`
-	Name        string `json:"name"`
-	SHA256      string `json:"sha256"`
-	Size        int64  `json:"size"`
-}
 type AgentRequest struct {
 	ExecutionID string `json:"executionId"`
 	TaskID      string `json:"taskId"`
@@ -213,15 +203,8 @@ type Task struct {
 	AcceptanceIncomplete bool                `json:"acceptanceIncomplete,omitempty"`
 	Checkpoint           *WorkflowCheckpoint `json:"checkpoint,omitempty"`
 	ID                   string              `json:"id"`
-	// TraceParent carries only the W3C trace context across the durable command
-	// outbox. It contains no task input, credentials, or repository metadata.
-	TraceParent      string          `json:"traceParent,omitempty"`
 	NodeID           string          `json:"nodeId,omitempty"`
-	ExecutionPool    string          `json:"executionPool,omitempty"`
-	RunnerResources  RunnerResources `json:"runnerResources,omitempty"`
-	RunnerImage      string          `json:"runnerImage,omitempty"`
 	ExecutionID      string          `json:"executionId,omitempty"`
-	AuthorityVersion int64           `json:"authorityVersion,omitempty"`
 	AdmissionStatus  string          `json:"admissionStatus,omitempty"`
 	AdmissionBackend string          `json:"admissionBackend,omitempty"`
 	Project          Project         `json:"project"`
@@ -242,15 +225,6 @@ type Task struct {
 	Paused            bool                 `json:"paused"`
 	CreatedAt         time.Time            `json:"createdAt"`
 	UpdatedAt         time.Time            `json:"updatedAt"`
-}
-
-// RunnerResources is frozen at task creation so later pool configuration
-// changes cannot silently alter an admitted execution.
-type RunnerResources struct {
-	CPUMilli       int `json:"cpuMilli"`
-	MemoryMi       int `json:"memoryMi"`
-	StorageMi      int `json:"storageMi"`
-	TimeoutSeconds int `json:"timeoutSeconds"`
 }
 
 func (t Task) AutoMergeEnabled() bool {

@@ -6,12 +6,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/imagebuild"
-	"github.com/yyydddkkk/SwarmJet/internal/observability"
 )
 
 // Readiness is supplied by the persisted managed Meta initialization.
@@ -30,10 +28,6 @@ type Scheduler interface {
 	CreateTaskScheduled(context.Context, domain.Task, bool) (domain.Task, error)
 }
 
-type KubernetesScheduler interface {
-	CreateKubernetesTask(context.Context, domain.Task, string, domain.RunnerResources) (domain.Task, error)
-}
-
 type Options struct {
 	DataDir      string
 	RequireNode  bool
@@ -41,9 +35,6 @@ type Options struct {
 	// ClaimRunCommands distinguishes a new round from a first Task. A non-nil
 	// TriggerNoteIDs asks the store to claim commands atomically with scheduling.
 	ClaimRunCommands bool
-	KubernetesPool   string
-	RunnerResources  domain.RunnerResources
-	RunnerImage      string
 }
 
 type AgentSelectionError struct{ Err error }
@@ -58,7 +49,7 @@ func Schedule(ctx context.Context, scheduler Scheduler, p domain.Project, issue 
 	if err != nil {
 		return domain.Task{}, &AgentSelectionError{Err: err}
 	}
-	if options.KubernetesPool == "" && !options.RequireNode && project.Nodes.Mode == "" {
+	if !options.RequireNode && project.Nodes.Mode == "" {
 		project, err = imagebuild.ApplyToProject(options.DataDir, project)
 		if err != nil {
 			return domain.Task{}, err
@@ -71,21 +62,12 @@ func Schedule(ctx context.Context, scheduler Scheduler, p domain.Project, issue 
 	now := time.Now().UTC()
 	t := domain.Task{
 		ID: hex.EncodeToString(id), Project: project, Issue: issue,
-		TraceParent:  observability.TraceParent(ctx),
 		Dependencies: options.Dependencies, Stage: "queued",
 		Executions: map[string]domain.Execution{}, Verification: []domain.Verification{},
 		Assumptions: []string{}, Notes: []string{}, CreatedAt: now, UpdatedAt: now,
 	}
 	if options.ClaimRunCommands {
 		t.TriggerNoteIDs = []int64{}
-	}
-	if options.KubernetesPool != "" {
-		kubernetes, ok := scheduler.(KubernetesScheduler)
-		if !ok {
-			return domain.Task{}, fmt.Errorf("scheduler does not support Kubernetes admission")
-		}
-		t.RunnerImage = options.RunnerImage
-		return kubernetes.CreateKubernetesTask(ctx, t, options.KubernetesPool, options.RunnerResources)
 	}
 	return scheduler.CreateTaskScheduled(ctx, t, options.RequireNode)
 }
