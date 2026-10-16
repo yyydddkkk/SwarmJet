@@ -19,6 +19,7 @@ import (
 const (
 	webhookQueue = "webhooks"
 	commandQueue = "commands"
+	messageQueue = "messages"
 )
 
 // ErrSnooze asks the queue to run the job again later without consuming an attempt.
@@ -41,7 +42,15 @@ type Command struct {
 	TaskID string
 }
 
-// Inserter adds a job to an existing transaction.
+// Message is one Inbox delivery. The delivery worker only reports the message
+// as delivered; pushing it into a CLI session is the next round's Cell runtime.
+type Message struct {
+	ID string
+}
+
+// Inserter adds a job to an existing transaction. InsertMessage is deliberately
+// not part of this interface so existing implementations keep compiling; a
+// caller that needs it asserts for the method instead.
 type Inserter interface {
 	InsertWebhook(context.Context, pgx.Tx, Webhook) error
 	InsertCommand(context.Context, pgx.Tx, Command) error
@@ -51,6 +60,7 @@ type Inserter interface {
 type Handlers struct {
 	Webhook func(context.Context, Webhook) error
 	Command func(context.Context, Command) error
+	Message func(context.Context, Message) error
 }
 
 // Config tunes the worker. Zero values use River's defaults.
@@ -74,6 +84,12 @@ type commandArgs struct {
 
 func (commandArgs) Kind() string { return "command" }
 
+type messageArgs struct {
+	ID string `json:"id" river:"unique"`
+}
+
+func (messageArgs) Kind() string { return "message" }
+
 type Client struct {
 	river *river.Client[pgx.Tx]
 }
@@ -93,11 +109,13 @@ func Open(pool *pgxpool.Pool, handlers Handlers, cfg Config) (*Client, error) {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &webhookWorker{handle: handlers.Webhook})
 	river.AddWorker(workers, &commandWorker{handle: handlers.Command})
+	river.AddWorker(workers, &messageWorker{handle: handlers.Message})
 	config := &river.Config{
 		Logger: slog.New(slog.DiscardHandler),
 		Queues: map[string]river.QueueConfig{
 			webhookQueue: {MaxWorkers: 8},
 			commandQueue: {MaxWorkers: 8},
+			messageQueue: {MaxWorkers: 8},
 		},
 		Workers:    workers,
 		JobTimeout: 10 * time.Minute,
@@ -129,6 +147,15 @@ func (c *Client) InsertWebhook(ctx context.Context, tx pgx.Tx, job Webhook) erro
 func (c *Client) InsertCommand(ctx context.Context, tx pgx.Tx, job Command) error {
 	_, err := c.river.InsertTx(ctx, tx, commandArgs{ID: job.ID, TaskID: job.TaskID}, &river.InsertOpts{
 		Queue:      commandQueue,
+		UniqueOpts: river.UniqueOpts{ByArgs: true},
+	})
+	return err
+}
+
+// InsertMessage enqueues one Inbox delivery in the caller's transaction.
+func (c *Client) InsertMessage(ctx context.Context, tx pgx.Tx, job Message) error {
+	_, err := c.river.InsertTx(ctx, tx, messageArgs{ID: job.ID}, &river.InsertOpts{
+		Queue:      messageQueue,
 		UniqueOpts: river.UniqueOpts{ByArgs: true},
 	})
 	return err
@@ -192,6 +219,18 @@ func (w *commandWorker) Work(ctx context.Context, job *river.Job[commandArgs]) e
 		return river.JobCancel(errors.New("command handler is not configured"))
 	}
 	return disposition(w.handle(ctx, Command{ID: job.Args.ID, TaskID: job.Args.TaskID}))
+}
+
+type messageWorker struct {
+	river.WorkerDefaults[messageArgs]
+	handle func(context.Context, Message) error
+}
+
+func (w *messageWorker) Work(ctx context.Context, job *river.Job[messageArgs]) error {
+	if w.handle == nil {
+		return river.JobCancel(errors.New("message handler is not configured"))
+	}
+	return disposition(w.handle(ctx, Message{ID: job.Args.ID}))
 }
 
 func disposition(err error) error {
