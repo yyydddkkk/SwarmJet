@@ -47,6 +47,7 @@ const paths: Record<IconName, string | string[]> = {
     "M12 11.8c1.9 0 3.4 1.5 3.4 3.4s-1.5 3.4-3.4 3.4-3.4-1.5-3.4-3.4 1.5-3.4 3.4-3.4Z",
     "M8.9 14.2h6.2M9 16.7h6",
     "M9.5 12.1c-1.7-1.8-3.8-1.5-3.4.7M14.5 12.1c1.7-1.8 3.8-1.5 3.4.7",
+    "M10 14.6c-1.4-.9-3-.5-2.7.9M14 14.6c1.4-.9 3-.5 2.7.9",
     "M12 8.4a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8",
   ],
   chat: "M4 5h16v11H9.5L4 20V5Z",
@@ -147,36 +148,46 @@ const BEE_TILT = "rotate(-35 24 24)";
 const BEE_ABDOMEN = { cx: 24, cy: 32.5, rx: 8.4, ry: 9.5 };
 const BEE_HEAD = { cx: 24, cy: 13.8, r: 4.9 };
 const BEE_THORAX = { cx: 24, cy: 21, rx: 4.7, ry: 3.5 };
-const BEE_WING_LEFT = { cx: 14.9, cy: 13.4, rx: 8.7, ry: 3.8, rotate: 25.2 };
-const BEE_WING_RIGHT = { cx: 33.1, cy: 13.4, rx: 8.7, ry: 3.8, rotate: -25.2 };
+// Bees have two wing pairs: the larger forewings above, the smaller hindwings
+// tucked underneath and further out.
+const BEE_FOREWING_LEFT = { cx: 15, cy: 13, rx: 8.2, ry: 3.4, rotate: 29 };
+const BEE_FOREWING_RIGHT = { cx: 33, cy: 13, rx: 8.2, ry: 3.4, rotate: -29 };
+const BEE_HINDWING_LEFT = { cx: 15.8, cy: 18.7, rx: 6.5, ry: 2.6, rotate: 22 };
+const BEE_HINDWING_RIGHT = { cx: 32.2, cy: 18.7, rx: 6.5, ry: 2.6, rotate: -22 };
 const BEE_ANTENNA_TIPS: [number, number][] = [
   [17.4, 3.9],
   [30.6, 3.9],
 ];
 const BEE_ANTENNA_LEFT = "M21.9 9.9C20.1 6.9 18.7 5.3 17.4 3.9";
 const BEE_ANTENNA_RIGHT = "M26.1 9.9C27.9 6.9 29.3 5.3 30.6 3.9";
-const BEE_STINGER = "24,40.4 26.6,45.8 21.4,45.8";
+// Wide where it meets the abdomen, tapering to a sharp point at the tip.
+const BEE_STINGER = "21.9,40.5 26.1,40.5 24,46";
 // Evenly spaced bands across the abdomen (3 colour, 2 line for small sizes).
 const COLOR_STRIPES = [25.1, 30.7, 36.4];
 const LINE_STRIPES = [26.9, 34.5];
 
-function BeeWings() {
+type Wing = { cx: number; cy: number; rx: number; ry: number; rotate: number };
+
+function WingShape({ wing, className }: { wing: Wing; className: string }) {
+  return (
+    <ellipse
+      className={className}
+      cx={wing.cx}
+      cy={wing.cy}
+      rx={wing.rx}
+      ry={wing.ry}
+      transform={`rotate(${wing.rotate} ${wing.cx} ${wing.cy})`}
+    />
+  );
+}
+
+function BeeWings({ fore, hind }: { fore: string; hind: string }) {
   return (
     <>
-      <ellipse
-        cx={BEE_WING_LEFT.cx}
-        cy={BEE_WING_LEFT.cy}
-        rx={BEE_WING_LEFT.rx}
-        ry={BEE_WING_LEFT.ry}
-        transform={`rotate(${BEE_WING_LEFT.rotate} ${BEE_WING_LEFT.cx} ${BEE_WING_LEFT.cy})`}
-      />
-      <ellipse
-        cx={BEE_WING_RIGHT.cx}
-        cy={BEE_WING_RIGHT.cy}
-        rx={BEE_WING_RIGHT.rx}
-        ry={BEE_WING_RIGHT.ry}
-        transform={`rotate(${BEE_WING_RIGHT.rotate} ${BEE_WING_RIGHT.cx} ${BEE_WING_RIGHT.cy})`}
-      />
+      <WingShape wing={BEE_HINDWING_LEFT} className={hind} />
+      <WingShape wing={BEE_HINDWING_RIGHT} className={hind} />
+      <WingShape wing={BEE_FOREWING_LEFT} className={fore} />
+      <WingShape wing={BEE_FOREWING_RIGHT} className={fore} />
     </>
   );
 }
@@ -229,9 +240,7 @@ export function BeeIcon({
           <path d={BEE_ANTENNA_RIGHT} />
           <polygon points={BEE_STINGER} />
         </g>
-        <g className="hg-bee-wing">
-          <BeeWings />
-        </g>
+        <BeeWings fore="hg-bee-wing" hind="hg-bee-wing hg-bee-hindwing" />
         <polygon className="hg-bee-stinger" points={BEE_STINGER} />
         <ellipse
           className="hg-bee-abdomen"
@@ -306,9 +315,7 @@ export function BeeLineIcon({
         </clipPath>
       </defs>
       <g transform={BEE_TILT}>
-        <g className="hg-bee-line-wing">
-          <BeeWings />
-        </g>
+        <BeeWings fore="hg-bee-line-wing" hind="hg-bee-line-wing hg-bee-line-hindwing" />
         <g clipPath={`url(#${clipId})`}>
           {LINE_STRIPES.map(y => (
             <rect key={y} className="hg-bee-line-stripe" x="14" y={y} width="20" height="3.6" rx="1.8" />
