@@ -72,7 +72,9 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
 
 ## 服务器使用发布镜像
 
-发布流水线在 `vX.Y.Z` 标签通过检查后，将主镜像推送为 `ghcr.io/yyydddkkk/swarmjet:<tag>`，执行器镜像为 `ghcr.io/yyydddkkk/swarmjet/agent:<tag>`。私有仓库需先执行 `docker login`。
+发布流水线在 `vX.Y.Z` 标签通过检查后，将主镜像推送为 `ghcr.io/yyydddkkk/swarmjet:<tag>`，执行器镜像为 `ghcr.io/yyydddkkk/swarmjet/agent:<tag>`；两者同时附加 `latest` 标签，首次部署可直接引用。私有仓库需先执行 `docker login`。
+
+发布的 Agent 镜像以 `AGENT_CLIS=opencode,codex,claude,dst,agy` 构建，因此已包含 `opencode`、`codex`、`claude`、`dst`、`agy` 五个 CLI 及其固定版本，节点无需自行安装。`dst` 对应 DSH/dsh-TUI，`agy` 对应 Antigravity。若需其他工具链或裁剪 CLI，请按上文自行构建派生镜像。镜像标签可变；固定版本请使用 `@sha256:` 摘要。
 
 将 `deploy/` 目录复制到服务器，进入该目录，复制其中的 `.env.example` 为 `.env`，填写发布流水线产生的完整 `IMAGE` 和 `AGENT_IMAGE` 地址。创建绝对 `DATA_DIR` 后执行：
 

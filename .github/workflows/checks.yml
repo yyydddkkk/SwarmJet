@@ -79,3 +79,13 @@ jobs:
           docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml -f deploy/compose.local-node.yaml --profile tools config --quiet
           docker compose -f examples/http-check/compose.yaml config --quiet
           sh -n scripts/askpass.sh deploy/temporal/schema.sh deploy/temporal/namespace.sh
+
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test deploy scripts
+        run: python3 -m unittest discover -s deploy -p 'test_*.py'
