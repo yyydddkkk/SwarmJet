@@ -2,7 +2,8 @@
 // The Diff / timeline / terminal sections are placeholders for the next rounds.
 import { foragerDetailById, hiveById } from "../fixtures/hive-console";
 import type { Check } from "./types";
-import { CheckList, EmptyState, HexAvatar, Panel, StatusBadge, Tabs } from "./components";
+import { CheckList, EmptyState, Panel, StatusBadge, Tabs } from "./components";
+import { ForagerAvatar } from "./pixel";
 import { Icon } from "./icons";
 import { ConversationStream } from "./ConversationStream";
 
@@ -47,7 +48,7 @@ function CheckChips({ label, checks }: { label: string; checks: Check[] }) {
       <ul className="hg-chip-row">
         {checks.map(check => (
           <li key={check.name} className={`hg-chip hg-tone-${check.status === "passed" ? "mint" : check.status === "failed" ? "coral" : "amber"}`}>
-            <Icon name={check.status === "passed" ? "check" : check.status === "failed" ? "alert" : "clock"} size={13} />
+            <Icon name={check.status === "passed" ? "check" : check.status === "failed" ? "alert" : "clock"} size={16} />
             {check.name}
           </li>
         ))}
@@ -105,7 +106,7 @@ export default function ForagerPage({
       </nav>
 
       <header className="hg-page-head hg-forager-head">
-        <HexAvatar role="forager" state={agent.state} size={44} />
+        <ForagerAvatar id={agent.id} size={64} />
         <div className="hg-forager-head-text">
           <h1>
             {agent.id}
@@ -115,7 +116,7 @@ export default function ForagerPage({
           <div className="hg-meta-row">
             {agent.branch ? (
               <span className="hg-meta">
-                <Icon name="branch" size={14} />
+                <Icon name="branch" size={16} />
                 <code>{agent.branch}</code>
               </span>
             ) : null}
@@ -126,12 +127,12 @@ export default function ForagerPage({
                 target="_blank"
                 rel="noreferrer"
               >
-                <Icon name="pr" size={14} />
+                <Icon name="pr" size={16} />
                 PR #{agent.prNumber}
               </a>
             ) : null}
             <span className="hg-meta">
-              <Icon name="clock" size={14} />
+              <Icon name="clock" size={16} />
               预设 {agent.preset ?? "默认"}
             </span>
           </div>
@@ -174,7 +175,7 @@ export default function ForagerPage({
                   <ul className="hg-artifacts">
                     {agent.handoff.artifacts.map(artifact => (
                       <li key={`${artifact.kind}-${artifact.ref}`}>
-                        <Icon name={artifact.kind === "pr" ? "pr" : "branch"} size={13} />
+                        <Icon name={artifact.kind === "pr" ? "pr" : "branch"} size={16} />
                         <code>{artifact.ref}</code>
                       </li>
                     ))}

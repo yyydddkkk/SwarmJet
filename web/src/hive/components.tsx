@@ -1,14 +1,14 @@
 // Shared "honey garden" building blocks for the Hive console.
-import { useId, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import type {
-  AgentRole,
   AgentState,
   Check,
   CheckStatus,
   ExternalEvent,
   QueenAction,
 } from "./types";
-import { BeeIcon, BeeLineIcon, GithubMark, hexPoints, Icon } from "./icons";
+import { GithubMark, Icon } from "./icons";
+import { ForagerAvatar, LoaderBee, PixelIcon, QueenAvatar } from "./pixel";
 
 export type Tone = "mint" | "amber" | "coral" | "neutral";
 
@@ -50,54 +50,8 @@ const checkLabel: Record<CheckStatus, string> = {
 };
 
 function ActionMark({ kind }: { kind: QueenAction["kind"] }) {
-  if (kind === "spawn_forager") return <BeeLineIcon size={16} />;
+  if (kind === "spawn_forager") return <PixelIcon name="bee-16" size={16} />;
   return <Icon name={kind === "cancel_forager" ? "close" : "shield"} size={16} />;
-}
-
-export function HexAvatar({
-  role,
-  state,
-  size = 40,
-  label,
-}: {
-  role: AgentRole;
-  state: AgentState;
-  size?: number;
-  label?: string;
-}) {
-  const name = label ?? (role === "queen" ? "Queen（蜂王）" : "Forager");
-  const description = `${name} · ${stateLabels[state]}`;
-  if (role === "queen") {
-    return (
-      <span
-        className={`hg-avatar hg-avatar-queen${state === "disabled" ? " is-off" : ""}`}
-        style={{ width: size, height: size }}
-        role="img"
-        aria-label={description}
-      >
-        <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
-          <polygon className="hg-avatar-hex" points={hexPoints(20, 20, 18)} />
-          <path
-            className="hg-avatar-crown"
-            d="M13.2 25.4h13.6l1.4-7.6-4.5 2.9L20 14.2l-3.7 6.5-4.5-2.9 1.4 7.6Z"
-          />
-        </svg>
-      </span>
-    );
-  }
-  return (
-    <span
-      className={`hg-avatar hg-avatar-forager hg-tone-${stateTone(state)}`}
-      style={{ width: size, height: size }}
-      role="img"
-      aria-label={description}
-    >
-      <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
-        <polygon className="hg-avatar-hex" points={hexPoints(20, 20, 17)} />
-        <polygon className="hg-avatar-core" points={hexPoints(20, 20, 6)} />
-      </svg>
-    </span>
-  );
 }
 
 export function StatusDot({ state, title }: { state: AgentState; title?: string }) {
@@ -128,7 +82,7 @@ export function CheckList({ checks, empty }: { checks: Check[]; empty: string })
         <li key={check.name} className={`hg-check hg-tone-${checkTone[check.status]}`}>
           <Icon
             name={check.status === "passed" ? "check" : check.status === "failed" ? "alert" : "clock"}
-            size={15}
+            size={16}
           />
           <span className="hg-check-name">{check.name}</span>
           <span className="hg-check-state">{checkLabel[check.status]}</span>
@@ -194,7 +148,7 @@ export function ActionCard({ action }: { action: QueenAction }) {
         </dl>
         {action.artifact ? (
           <p className="hg-artifact">
-            <Icon name={action.artifact.kind === "pr" ? "pr" : "branch"} size={14} />
+            <Icon name={action.artifact.kind === "pr" ? "pr" : "branch"} size={16} />
             <code>{action.artifact.ref}</code>
           </p>
         ) : null}
@@ -208,7 +162,7 @@ export function EventCard({ event }: { event: ExternalEvent }) {
     <article className="hg-card hg-event">
       <header className="hg-card-head">
         <span className="hg-card-source">
-          <GithubMark size={15} />
+          <GithubMark size={16} />
           GitHub
         </span>
         <span className="hg-muted hg-event-kind">
@@ -218,7 +172,7 @@ export function EventCard({ event }: { event: ExternalEvent }) {
       </header>
       <a className="hg-event-title" href={event.url} target="_blank" rel="noreferrer">
         {event.title}
-        <Icon name="external" size={14} />
+        <Icon name="external" size={16} />
       </a>
       <blockquote className="hg-excerpt">
         <span className="hg-excerpt-tag">外部内容</span>
@@ -239,10 +193,9 @@ export function EmptyState({
 }) {
   return (
     <div className="hg-empty">
-      <HoneycombBackdrop />
       <div className="hg-empty-body">
-        <span className="hg-empty-bee" aria-hidden="true">
-          <BeeIcon size={32} />
+        <span className="hg-empty-art" aria-hidden="true">
+          <PixelIcon name="comb-32" size={96} />
         </span>
         <p className="hg-empty-title">{title}</p>
         {hint ? <p className="hg-empty-hint">{hint}</p> : null}
@@ -252,41 +205,19 @@ export function EmptyState({
   );
 }
 
-export function HoneycombBackdrop() {
-  const id = useId();
-  const r = 16;
-  const width = Math.sqrt(3) * r;
-  const height = 3 * r;
-  // Four cells per tile close the pointy-top honeycomb lattice when repeated.
-  const centers: [number, number][] = [
-    [0, r],
-    [width, r],
-    [width / 2, -r / 2],
-    [width / 2, 2.5 * r],
-  ];
-  return (
-    <svg className="hg-comb" aria-hidden="true" focusable="false">
-      <defs>
-        <pattern id={id} width={width} height={height} patternUnits="userSpaceOnUse">
-          {centers.map(([cx, cy]) => (
-            <polygon key={`${cx}-${cy}`} points={hexPoints(cx, cy, r)} />
-          ))}
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill={`url(#${id})`} />
-    </svg>
-  );
-}
-
+/**
+ * Pixel loader: the 32-grid bee in two wing positions, flipped by CSS `steps()`
+ * with a 2px bob on top. `prefers-reduced-motion` parks it on the first frame.
+ */
 export function BeeLoader({ label = "正在飞行…" }: { label?: string }) {
   return (
     <div className="hg-loader" role="status" aria-live="polite">
-      <span className="hg-loader-track" aria-hidden="true">
-        <svg viewBox="0 0 80 80" focusable="false">
-          <polygon points={hexPoints(40, 40, 30)} />
-        </svg>
-        <span className="hg-loader-bee">
-          <BeeIcon size={24} />
+      <span className="hg-loader-bee" aria-hidden="true">
+        <span className="hg-loader-frame hg-loader-frame-up">
+          <LoaderBee frame="up" size={32} />
+        </span>
+        <span className="hg-loader-frame hg-loader-frame-down">
+          <LoaderBee frame="down" size={32} />
         </span>
       </span>
       <span className="hg-loader-label">{label}</span>
