@@ -71,6 +71,10 @@ func newCellStack(s *store.Store, apps githubAppSource, dataDir string, logger *
 	mcpURL := env("SWARMJET_CELL_MCP_URL", defaultCellMCPURL)
 	llmURL := env("SWARMJET_CELL_LLM_URL", deriveLLMURL(mcpURL))
 
+	// Every prompt reads the active methodology through this source, so a
+	// publish or rollback changes the standing rules on the next turn.
+	forager.SetMethodologySource(s)
+
 	runtime := docker.NewRuntime(dataDir)
 	runtime.Config.Image = image
 	runtime.Config.DockerNetwork = network

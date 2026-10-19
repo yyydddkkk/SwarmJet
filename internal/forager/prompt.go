@@ -1,11 +1,14 @@
 package forager
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/methodology"
 )
 
 const (
@@ -13,7 +16,41 @@ const (
 	MaxPromptChars = 12000
 	// MaxPromptMessages caps how many Inbox messages go into one turn.
 	MaxPromptMessages = 50
+	// MaxMethodologyPromptChars caps the standing-rules header so an oversized
+	// standing order cannot crowd out the Inbox.
+	MaxMethodologyPromptChars = 4000
 )
+
+var (
+	methodologyMu     sync.RWMutex
+	methodologySource methodology.ActiveSource
+)
+
+// SetMethodologySource installs the store used to read the Hive's active
+// methodology. The source is read again for every prompt, so publishing a new
+// version or activating an older one changes the standing rules on the next
+// turn. The Cell's ConfigFiles (including role prompt files) still refresh only
+// on the next Start.
+//
+// A nil source selects methodology.Builtin.
+func SetMethodologySource(source methodology.ActiveSource) {
+	methodologyMu.Lock()
+	methodologySource = source
+	methodologyMu.Unlock()
+}
+
+func currentMethodology(agent domain.Agent) methodology.AgentConfig {
+	methodologyMu.RLock()
+	source := methodologySource
+	methodologyMu.RUnlock()
+	config, err := methodology.ForAgent(context.Background(), source, agent)
+	if err != nil {
+		// A broken active role must not fail the turn; fall back to the
+		// builtin so the Agent still receives its task.
+		config, _ = methodology.ForAgent(context.Background(), nil, agent)
+	}
+	return config
+}
 
 // foragerID extracts the Agent ID from "forager:<id>".
 func foragerID(address domain.Address) (string, bool) {
@@ -73,6 +110,10 @@ func dedupeMessages(msgs []domain.Message) []domain.Message {
 // framed as data, never as platform instructions.
 func buildPrompt(agent domain.Agent, hive domain.Hive, msgs []domain.Message, firstTurn bool) string {
 	var b strings.Builder
+	if header := strings.TrimSpace(truncateRunes(currentMethodology(agent).PromptHeader(), MaxMethodologyPromptChars)); header != "" {
+		b.WriteString(header)
+		b.WriteString("\n\n")
+	}
 	if firstTurn {
 		fmt.Fprintf(&b, "You are Forager %s for Hive %q (%s).\n", agent.ID, hive.Name, hive.Repository)
 		b.WriteString("Your task:\n")

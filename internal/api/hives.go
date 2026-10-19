@@ -58,6 +58,8 @@ func (a *server) hives(w http.ResponseWriter, r *http.Request) {
 		a.hiveForagers(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "hives" && parts[2] == "messages":
 		a.hiveMessages(w, r, parts[1])
+	case len(parts) >= 3 && parts[0] == "hives" && parts[2] == "methodology":
+		a.methodology(w, r, parts[1], parts[3:])
 	case len(parts) == 2 && parts[0] == "foragers":
 		a.foragerItem(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "foragers" && parts[2] == "cancel":

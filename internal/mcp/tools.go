@@ -109,6 +109,8 @@ func (ts *toolset) register(s *mcpsdk.Server) {
 		Description: "Summarize what happened since the given cursor: messages addressed to this token, plus Foragers whose state changed, and a new cursor to pass next time. Omit the cursor on first call. Read-only.",
 		Annotations: ro(),
 	}, ts.offlineDigest)
+
+	ts.registerMethodology(s)
 }
 
 // --- views -----------------------------------------------------------------

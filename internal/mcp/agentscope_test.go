@@ -18,6 +18,7 @@ var allToolNames = []string{
 	"list_hives", "get_hive", "create_hive", "update_hive", "send", "wait",
 	"spawn_forager", "cancel_forager", "get_forager", "read_forager_detail",
 	"update_handoff", "inbox", "claim", "offline_digest",
+	"get_methodology", "list_methodology_versions", "publish_methodology", "activate_methodology",
 }
 
 func allTools() map[string]bool {
@@ -111,6 +112,21 @@ func denied(t *testing.T, res *mcpsdk.CallToolResult, err error) bool {
 	return res != nil && res.IsError
 }
 
+func agentVisibleTools(role domain.AgentRole) map[string]bool {
+	out := map[string]bool{}
+	for name, allowed := range agentTools[role] {
+		if allowed {
+			out[name] = true
+		}
+	}
+	// Methodology tools are visible to every token; publish and activate check
+	// the effective role permission in their handlers.
+	for name := range methodologyTools {
+		out[name] = true
+	}
+	return out
+}
+
 func TestToolVisibilityFollowsScope(t *testing.T) {
 	env := newAgentScopeEnv(t)
 	cases := []struct {
@@ -120,8 +136,8 @@ func TestToolVisibilityFollowsScope(t *testing.T) {
 	}{
 		{"default", env.userToken, allTools()},
 		{"admin", env.adminToken, allTools()},
-		{"forager", env.foragerToken, agentTools[domain.RoleForager]},
-		{"queen", env.queenToken, agentTools[domain.RoleQueen]},
+		{"forager", env.foragerToken, agentVisibleTools(domain.RoleForager)},
+		{"queen", env.queenToken, agentVisibleTools(domain.RoleQueen)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -143,7 +159,7 @@ func TestAgentScopePermissionTable(t *testing.T) {
 			ts := &toolset{token: base, actor: actor{token: base, agent: &agent}}
 			for _, tool := range allToolNames {
 				err := ts.authorize(tool)
-				wantAllowed := agentTools[role][tool]
+				wantAllowed := agentTools[role][tool] || methodologyTools[tool]
 				if allowed := err == nil; allowed != wantAllowed {
 					t.Errorf("%s %s: allowed=%v, want %v (err=%v)", role, tool, allowed, wantAllowed, err)
 				}

@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/methodology"
 )
 
 // MemoryBackend is an in-memory Backend used by tests and by the first round of
@@ -45,6 +46,9 @@ type MemoryBackend struct {
 	tokens map[string]domain.Token // sha256(plaintext) hex -> token
 	claims map[string]claim
 
+	methodologies      map[string][]memMethodology
+	methodologyChanges map[string][]methodology.Change
+
 	seq int64
 }
 
@@ -56,14 +60,16 @@ type claim struct {
 // NewMemoryBackend returns an empty in-memory backend.
 func NewMemoryBackend() *MemoryBackend {
 	return &MemoryBackend{
-		now:      time.Now,
-		hives:    map[string]domain.Hive{},
-		agents:   map[string]domain.Agent{},
-		messages: map[string]domain.Message{},
-		inboxes:  map[string][]domain.Message{},
-		waiters:  map[string][]chan struct{}{},
-		tokens:   map[string]domain.Token{},
-		claims:   map[string]claim{},
+		now:                time.Now,
+		hives:              map[string]domain.Hive{},
+		agents:             map[string]domain.Agent{},
+		messages:           map[string]domain.Message{},
+		inboxes:            map[string][]domain.Message{},
+		waiters:            map[string][]chan struct{}{},
+		tokens:             map[string]domain.Token{},
+		claims:             map[string]claim{},
+		methodologies:      map[string][]memMethodology{},
+		methodologyChanges: map[string][]methodology.Change{},
 	}
 }
 
