@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 	"github.com/yyydddkkk/SwarmJet/internal/mcp"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
+	"github.com/yyydddkkk/SwarmJet/internal/onboarding"
 	"github.com/yyydddkkk/SwarmJet/internal/router"
 	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
 	"github.com/yyydddkkk/SwarmJet/internal/service"
@@ -102,19 +102,23 @@ func runServe(ctx context.Context, s *store.Store) error {
 		return fmt.Errorf("SWARMJET_MASTER_KEY must be 32 bytes of hex: %w", err)
 	}
 
-	// The environment-based GitHub App remains the deployment-managed source.
-	// A later round adds a database-backed App created from the console.
+	// The Provider is the single dynamic GitHub App source for Cells, webhook
+	// verification, Router platform-event detection and the setup page.
+	// Environment variables win over the encrypted database row; an App created
+	// from the console works without a restart.
+	ghProvider := onboarding.NewProvider(onboarding.ProviderConfig{
+		Env:    onboarding.EnvConfigFromEnvironment(),
+		Store:  s,
+		Box:    box,
+		Logger: slog.Default(),
+	})
 	var ghApp *githubapp.App
-	if appID := os.Getenv("GITHUB_APP_ID"); appID != "" {
-		id, parseErr := strconv.ParseInt(appID, 10, 64)
-		key, readErr := os.ReadFile(required("GITHUB_APP_PRIVATE_KEY_FILE"))
-		if parseErr != nil || readErr != nil {
-			return fmt.Errorf("GitHub App ID or private key is invalid")
-		}
-		ghApp, err = githubapp.New(githubapp.Config{AppID: id, PrivateKeyPEM: key})
-		if err != nil {
+	ghApp, err = ghProvider.App(ctx)
+	if err != nil {
+		if !errors.Is(err, onboarding.ErrNotConfigured) {
 			return err
 		}
+		ghApp = nil
 	}
 
 	metrics := observability.New()
@@ -137,14 +141,41 @@ func runServe(ctx context.Context, s *store.Store) error {
 		return err
 	}
 
+	var tunnel *onboarding.Tunnel
+	if raw := os.Getenv("SWARMJET_TUNNEL_URL"); raw != "" {
+		tunnel, err = onboarding.NewTunnel(onboarding.TunnelConfig{
+			MetricsURL: raw,
+			Apps:       ghProvider,
+			Logger:     slog.Default(),
+		})
+		if err != nil {
+			return err
+		}
+		go tunnel.Run(ctx)
+	}
+	setupManager, err := onboarding.NewManager(onboarding.ManagerConfig{
+		Provider:     ghProvider,
+		Store:        s,
+		Box:          box,
+		PublicOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"),
+		Tunnel:       tunnel,
+		Logger:       slog.Default(),
+	})
+	if err != nil {
+		return err
+	}
+
 	// Cells run in this process: the River message delivery job hands each
 	// delivered Inbox message straight to the supervisor. Install the sink
 	// before the queue starts and wait for the supervisor on shutdown.
 	var cells *cellStack
 	if os.Getenv("SWARMJET_CELLS") == "1" {
-		cells, err = newCellStack(s, ghApp, data, slog.Default())
+		cells, err = newCellStack(s, ghProvider, data, slog.Default())
 		if err != nil {
 			return err
+		}
+		if ghApp == nil {
+			slog.Warn("GitHub App is not configured; Cells will report an explicit error until the App is created in the setup page")
 		}
 		s.MessageSink = cells.Supervisor.Notify
 		cells.Start(ctx)
@@ -159,15 +190,20 @@ func runServe(ctx context.Context, s *store.Store) error {
 	adminUser := required("ADMIN_USERNAME")
 	staticDir := env("STATIC_DIR", "web/dist")
 	handler := api.New(s, api.Config{
-		GitHubApp:     ghApp,
-		Box:           box,
-		Username:      adminUser,
-		Password:      password,
-		AllowedOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"),
-		StaticDir:     staticDir,
-		SecureCookies: env("SECURE_COOKIES", "false") == "true",
+		GitHubApp:       ghApp,
+		Box:             box,
+		Username:        adminUser,
+		Password:        password,
+		AllowedOrigin:   env("PUBLIC_ORIGIN", "http://localhost:8180"),
+		StaticDir:       staticDir,
+		SecureCookies:   env("SECURE_COOKIES", "false") == "true",
+		Setup:           setupManager,
+		CellsEnabled:    os.Getenv("SWARMJET_CELLS") == "1",
+		CellsImage:      env("AGENT_IMAGE", "swarmjet-agent:local"),
+		CellsModel:      env("SWARMJET_FORAGER_MODEL", forager.DefaultModel),
+		DockerAvailable: onboarding.DockerAvailable,
 	})
-	svc := &service.Service{Store: s, Webhooks: s}
+	svc := &service.Service{Store: s, Webhooks: s, AppSlugSource: ghProvider.Slug}
 
 	recordJob := func(queue string, err error) {
 		result := "acked"
@@ -201,7 +237,7 @@ func runServe(ctx context.Context, s *store.Store) error {
 	}()
 
 	routes := http.NewServeMux()
-	routes.Handle("/api/webhooks/github", svc.GitHubWebhook(os.Getenv("GITHUB_WEBHOOK_SECRET")))
+	routes.Handle("/api/webhooks/github", svc.GitHubWebhookDynamic(ghProvider.WebhookSecret))
 	// MCP authenticates with a bearer token only; it never uses the console
 	// session (ADR section 12).
 	routes.Handle("/mcp", mcp.NewHandler(s, mcp.Options{Logger: slog.Default()}))

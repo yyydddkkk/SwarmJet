@@ -257,3 +257,40 @@ func TestHiveRouterWithoutStoreIsNil(t *testing.T) {
 		t.Fatalf("second hiveRouter = %v, want nil", got)
 	}
 }
+
+func TestRouterUsesDynamicAppSlugSource(t *testing.T) {
+	s := webhookTestStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateHive(ctx, domain.Hive{Name: "alpha", Repository: "acme/hive"}); err != nil {
+		t.Fatalf("CreateHive: %v", err)
+	}
+	payload := []byte(`{
+		"action": "opened",
+		"number": 55,
+		"pull_request": {"number": 55, "title": "publish", "head": {"ref": "feature/human-work"}, "user": {"login": "swarmjet[bot]"}},
+		"repository": {"full_name": "acme/hive"},
+		"sender": {"login": "swarmjet[bot]", "type": "Bot"}
+	}`)
+	slug := ""
+	svc := &Service{Store: s, AppSlugSource: func(context.Context) string { return slug }}
+	job := jobs.Webhook{Provider: "github", DeliveryID: "dynamic-slug-1", EventType: "pull_request", Payload: payload}
+	decision, err := svc.routeHiveDelivery(ctx, job)
+	if err != nil {
+		t.Fatalf("route without slug: %v", err)
+	}
+	if decision.Action == router.ActionIgnored {
+		t.Fatalf("event was ignored before the App slug was known: %q", decision.Reason)
+	}
+
+	// The Router was built on the first call; the source is still consulted per
+	// event, so a newly learned slug takes effect without rebuilding it.
+	slug = "swarmjet"
+	job.DeliveryID = "dynamic-slug-2"
+	decision, err = svc.routeHiveDelivery(ctx, job)
+	if err != nil {
+		t.Fatalf("route with slug: %v", err)
+	}
+	if decision.Action != router.ActionIgnored {
+		t.Fatalf("action = %q, want ignored after the slug was learned (reason %q)", decision.Action, decision.Reason)
+	}
+}

@@ -51,7 +51,7 @@ func (s *Service) hiveRouter() *router.Router {
 			return
 		}
 		if s.Store != nil {
-			s.hiveRoutes = router.New(s.Store)
+			s.hiveRoutes = router.NewWithOptions(s.Store, router.Options{AppSlugSource: s.AppSlugSource})
 		}
 	})
 	return s.hiveRoutes

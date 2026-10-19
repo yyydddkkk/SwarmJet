@@ -32,7 +32,11 @@ type Service struct {
 	// HiveRouter optionally injects a Router (tests); it must be set before the
 	// Service starts handling deliveries. hiveRouter reads it only inside the
 	// Once and stores the result in hiveRoutes.
-	HiveRouter     *router.Router
+	HiveRouter *router.Router
+	// AppSlugSource supplies the current GitHub App slug to the Router's
+	// platform-event detection. It is called per event, so an App created after
+	// serve started is picked up without rebuilding the Router.
+	AppSlugSource  func(context.Context) string
 	hiveRouterOnce sync.Once
 	hiveRoutes     *router.Router
 }

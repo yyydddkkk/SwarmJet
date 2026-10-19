@@ -40,20 +40,29 @@ type cellStack struct {
 	done   chan struct{}
 }
 
-// newCellStack builds the runtime, publisher and supervisor. It fails fast when
-// Cells are enabled without the GitHub App or without the Docker socket: those
-// would otherwise only surface after a Forager had already been woken.
-func newCellStack(s *store.Store, app *githubapp.App, dataDir string, logger *slog.Logger) (*cellStack, error) {
-	if app == nil {
-		return nil, errors.New("SWARMJET_CELLS=1 requires GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE")
-	}
+// githubAppSource resolves the active GitHub App. Provider reads environment
+// variables first and the encrypted database row otherwise, so a newly created
+// App is visible without restarting serve.
+type githubAppSource interface {
+	App(context.Context) (*githubapp.App, error)
+}
+
+var errGitHubAppUnavailable = errors.New("GitHub App 未配置，请在接入页创建")
+
+// newCellStack builds the runtime, publisher and supervisor. Cells still
+// require the Docker socket, but not a GitHub App: serve starts with a warning
+// and a Forager that needs GitHub reports errGitHubAppUnavailable.
+func newCellStack(s *store.Store, apps githubAppSource, dataDir string, logger *slog.Logger) (*cellStack, error) {
 	if err := requireCellDocker(); err != nil {
 		return nil, err
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	repos := newGitHubRepositories(app)
+	if apps == nil {
+		logger.Warn("SWARMJET_CELLS=1 without a GitHub App source; Foragers will report a configuration error until the App is created in the setup page")
+	}
+	repos := newGitHubRepositories(apps)
 
 	image := env("AGENT_IMAGE", "swarmjet-agent:local")
 	network := env("SWARMJET_CELL_NETWORK", "")
@@ -166,24 +175,35 @@ func (c *cellStack) Stop() {
 // installation tokens. Only expiring tokens and the repository ID mapping live
 // here, in memory; nothing is persisted or logged.
 type githubRepositories struct {
-	app *githubapp.App
+	apps githubAppSource
 
 	mu     sync.Mutex
 	names  map[int64]string
 	tokens map[string]githubapp.Token
 }
 
-func newGitHubRepositories(app *githubapp.App) *githubRepositories {
+func newGitHubRepositories(apps githubAppSource) *githubRepositories {
 	return &githubRepositories{
-		app:    app,
+		apps:   apps,
 		names:  map[int64]string{},
 		tokens: map[string]githubapp.Token{},
 	}
 }
 
+func (r *githubRepositories) app(ctx context.Context) (*githubapp.App, error) {
+	if r.apps == nil {
+		return nil, errGitHubAppUnavailable
+	}
+	return r.apps.App(ctx)
+}
+
 // Resolve implements docker.RepositoryResolver.
 func (r *githubRepositories) Resolve(ctx context.Context, fullName string) (int64, error) {
-	id, err := r.app.RepositoryID(ctx, fullName)
+	app, err := r.app(ctx)
+	if err != nil {
+		return 0, err
+	}
+	id, err := app.RepositoryID(ctx, fullName)
 	if err != nil {
 		return 0, err
 	}
@@ -194,14 +214,21 @@ func (r *githubRepositories) Resolve(ctx context.Context, fullName string) (int6
 }
 
 // Token implements docker.TokenSource for both the first clone and publishing.
+// The cache key includes the App ID so replacing the App does not keep serving
+// a token minted by the old one.
 func (r *githubRepositories) Token(ctx context.Context, fullName string) (string, error) {
+	app, err := r.app(ctx)
+	if err != nil {
+		return "", err
+	}
+	cacheKey := fmt.Sprintf("%d|%s", app.ID(), fullName)
 	r.mu.Lock()
-	token, ok := r.tokens[fullName]
+	token, ok := r.tokens[cacheKey]
 	r.mu.Unlock()
 	if ok && time.Until(token.ExpiresAt) > tokenRefreshMargin {
 		return token.Token, nil
 	}
-	token, err := r.app.RepositoryToken(ctx, fullName)
+	token, err = app.RepositoryToken(ctx, fullName)
 	if err != nil {
 		return "", err
 	}
@@ -209,7 +236,7 @@ func (r *githubRepositories) Token(ctx context.Context, fullName string) (string
 	if r.tokens == nil {
 		r.tokens = map[string]githubapp.Token{}
 	}
-	r.tokens[fullName] = token
+	r.tokens[cacheKey] = token
 	r.mu.Unlock()
 	return token.Token, nil
 }
