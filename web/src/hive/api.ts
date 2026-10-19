@@ -3,10 +3,16 @@
 // fixes the sender address to local:web-<signed-in user>.
 import type {
   Agent,
+  CreatedToken,
+  GithubRepository,
   Hive,
   HiveOverview,
   Message,
   MessageKind,
+  Principal,
+  SetupStatus,
+  TokenScope,
+  TokenSummary,
 } from "./types";
 
 export type HiveListResponse = {
@@ -58,6 +64,11 @@ export type CreateHiveInput = {
   config?: Partial<Hive["config"]>;
 };
 
+export type GithubManifestResponse = {
+  action: string;
+  manifest: Record<string, unknown>;
+};
+
 export class HiveAPIError extends Error {
   constructor(
     message: string,
@@ -70,7 +81,7 @@ export class HiveAPIError extends Error {
 
 async function request<T>(
   path: string,
-  method: "GET" | "POST" = "GET",
+  method: "GET" | "POST" | "DELETE" = "GET",
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
@@ -92,10 +103,10 @@ async function request<T>(
       // The body was not JSON; keep the status-based message.
     }
     if (response.status === 401) {
-      message = "会话已过期或未登录，请回到主控制台登录后再打开 Hive 控制台。";
+      message = "会话已过期或未登录，请重新登录。";
     }
     if (response.status === 403) {
-      message = "需要平台管理员权限才能使用 Hive 控制台。";
+      message = "需要管理员会话才能继续。";
     }
     throw new HiveAPIError(message, response.status);
   }
@@ -106,6 +117,55 @@ async function request<T>(
 const segment = (value: string) => encodeURIComponent(value);
 
 export const hiveAPI = {
+  /* ---- session ---- */
+
+  getSession(signal?: AbortSignal) {
+    return request<Principal>("/session", "GET", undefined, signal);
+  },
+
+  login(username: string, password: string, signal?: AbortSignal) {
+    return request<void>("/login", "POST", { username, password }, signal);
+  },
+
+  logout(signal?: AbortSignal) {
+    return request<void>("/logout", "POST", undefined, signal);
+  },
+
+  /* ---- setup / onboarding ---- */
+
+  getSetupStatus(signal?: AbortSignal) {
+    return request<SetupStatus>("/setup/status", "GET", undefined, signal);
+  },
+
+  createGithubManifest(owner: string, signal?: AbortSignal) {
+    return request<GithubManifestResponse>("/setup/github/manifest", "POST", { owner }, signal);
+  },
+
+  listGithubRepositories(signal?: AbortSignal) {
+    return request<{ repositories: GithubRepository[] }>(
+      "/setup/github/repositories",
+      "GET",
+      undefined,
+      signal,
+    );
+  },
+
+  /* ---- tokens / local agent connections ---- */
+
+  listTokens(signal?: AbortSignal) {
+    return request<{ tokens: TokenSummary[] }>("/tokens", "GET", undefined, signal);
+  },
+
+  createToken(input: { name: string; scope: TokenScope }, signal?: AbortSignal) {
+    return request<CreatedToken>("/tokens", "POST", input, signal);
+  },
+
+  revokeToken(id: string, signal?: AbortSignal) {
+    return request<void>(`/tokens/${segment(id)}`, "DELETE", undefined, signal);
+  },
+
+  /* ---- hives ---- */
+
   listHives(signal?: AbortSignal) {
     return request<HiveListResponse>("/hives", "GET", undefined, signal);
   },

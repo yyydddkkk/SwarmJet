@@ -1,10 +1,12 @@
-import { TerminalWindow } from "./TerminalWindow";
+// Inline CLI-login terminal. Adapted from the old RuntimeSettings/TerminalPanel:
+// only the OpenCode login shell is kept (no Node, network or image options). The
+// terminal still talks to /api/runtime/terminal with the existing protocol, and
+// never stores its contents.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { Icon } from "./icons";
 import "@xterm/xterm/css/xterm.css";
-import { useToast } from "./ToastProvider";
-import "./runtime-settings.css";
 
 type ConnectionState = "disconnected" | "connecting" | "connected";
 
@@ -17,22 +19,13 @@ type Session = {
   frame: number;
 };
 
-const commands = [
+const loginCommands = [
   { command: "opencode auth login", label: "登录 OpenCode" },
   { command: "opencode auth list", label: "查看已有登录配置" },
   { command: "opencode models", label: "查看可用模型" },
 ];
 
-// TerminalPanel reuses the existing authenticated runtime terminal service and
-// WebSocket protocol. It never persists or records terminal content.
-export function TerminalPanel({
-  available,
-  onConnected,
-}: {
-  available: boolean;
-  onConnected?: (connected: boolean) => void;
-}) {
-  const toast = useToast();
+export default function CliTerminal({ available }: { available: boolean }) {
   const [connection, setConnection] = useState<ConnectionState>("disconnected");
   const [terminalError, setTerminalError] = useState("");
   const [notice, setNotice] = useState("");
@@ -50,16 +43,14 @@ export function TerminalPanel({
     current.socket.onclose = null;
     current.observer.disconnect();
     cancelAnimationFrame(current.frame);
-    current.disposables.forEach((item) => item.dispose());
+    current.disposables.forEach(item => item.dispose());
     current.socket.close();
     current.terminal.reset();
     current.terminal.dispose();
     host.current?.replaceChildren();
   }, []);
 
-  useEffect(() => () => {
-    dispose();
-  }, [dispose]);
+  useEffect(() => () => dispose(), [dispose]);
 
   const disconnect = useCallback(
     (message = "连接已断开，当前终端内容已清空。") => {
@@ -67,9 +58,8 @@ export function TerminalPanel({
       setConnection("disconnected");
       setSelection(false);
       setNotice(message);
-      onConnected?.(false);
     },
-    [dispose, onConnected],
+    [dispose],
   );
 
   function connect() {
@@ -82,24 +72,24 @@ export function TerminalPanel({
     try {
       const terminal = new Terminal({
         cursorBlink: true,
-        fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+        fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
         fontSize: 13,
         lineHeight: 1.35,
         scrollback: 1200,
         convertEol: false,
         screenReaderMode: true,
         theme: {
-          background: "#172331",
-          foreground: "#e2e9f3",
-          cursor: "#c1d3ef",
-          selectionBackground: "#42628b",
+          background: "#23231f",
+          foreground: "#fbf8f1",
+          cursor: "#f2b53a",
+          selectionBackground: "#5a4a1f",
         },
       });
       pendingTerminal = terminal;
       const fit = new FitAddon();
       terminal.loadAddon(fit);
       terminal.open(host.current);
-      terminal.textarea?.setAttribute("aria-label", "OpenCode 配置终端输入");
+      terminal.textarea?.setAttribute("aria-label", "CLI 登录终端输入");
       const url = new URL("/api/runtime/terminal", window.location.href);
       url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const socket = new WebSocket(url);
@@ -114,24 +104,14 @@ export function TerminalPanel({
         });
       });
       const send = (data: unknown) => {
-        if (socket.readyState === WebSocket.OPEN)
-          socket.send(JSON.stringify(data));
+        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(data));
       };
       const disposables = [
-        terminal.onData((data) => send({ type: "input", data })),
-        terminal.onResize(({ cols, rows }) =>
-          send({ type: "resize", cols, rows }),
-        ),
+        terminal.onData(data => send({ type: "input", data })),
+        terminal.onResize(({ cols, rows }) => send({ type: "resize", cols, rows })),
         terminal.onSelectionChange(() => setSelection(terminal.hasSelection())),
       ];
-      session.current = {
-        socket,
-        terminal,
-        fit,
-        observer,
-        disposables,
-        frame: 0,
-      };
+      session.current = { socket, terminal, fit, observer, disposables, frame: 0 };
       pendingTerminal = null;
       pendingSocket = null;
       observer.observe(host.current);
@@ -141,7 +121,6 @@ export function TerminalPanel({
         fit.fit();
         send({ type: "resize", cols: terminal.cols, rows: terminal.rows });
         terminal.focus();
-        onConnected?.(true);
       };
       socket.onmessage = (event: MessageEvent) => {
         if (session.current?.socket !== socket) return;
@@ -151,19 +130,14 @@ export function TerminalPanel({
         }
         if (typeof event.data !== "string") return;
         try {
-          const message = JSON.parse(event.data) as {
-            type?: string;
-            message?: string;
-          };
+          const message = JSON.parse(event.data) as { type?: string; message?: string };
           if (message.type === "error") {
-            setTerminalError(
-              message.message || "终端连接失败，请检查执行器服务。",
-            );
+            setTerminalError(message.message || "终端连接失败，请检查 CLI 登录服务。");
             disconnect("终端连接已结束。修复后可重新连接。");
             return;
           }
           if (message.type === "exit") {
-            disconnect("配置进程已退出，当前终端内容已清空。");
+            disconnect("登录进程已退出，当前终端内容已清空。");
             return;
           }
         } catch {
@@ -173,13 +147,12 @@ export function TerminalPanel({
       };
       socket.onerror = () => {
         if (session.current?.socket !== socket) return;
-        setTerminalError("无法连接配置终端，请确认登录会话和执行器服务可用。");
+        setTerminalError("无法连接 CLI 登录终端，请确认登录会话和 Docker 可用。");
         disconnect("连接未建立。");
       };
-      socket.onclose = (event) => {
+      socket.onclose = event => {
         if (session.current?.socket !== socket) return;
-        if (!event.wasClean)
-          setTerminalError("终端连接意外断开，请检查网络或执行器状态后重连。");
+        if (!event.wasClean) setTerminalError("终端连接意外断开，请重新连接。");
         disconnect("连接已结束，当前终端内容已清空。");
       };
     } catch {
@@ -200,71 +173,68 @@ export function TerminalPanel({
     setNotice("命令已填入终端，请确认后按 Enter 执行。");
   }
 
-  async function copy(text: string) {
+  async function copySelection() {
+    const text = session.current?.terminal.getSelection();
+    if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      toast.success("已复制所选终端文字。");
+      setNotice("已复制所选终端文字。");
     } catch {
-      toast.error("浏览器未允许复制，请选中文字后使用系统复制快捷键。");
+      setNotice("浏览器未允许复制，请选中文字后使用系统复制快捷键。");
     }
   }
 
   return (
-    <TerminalWindow title="OpenCode 配置终端" available={available} connection={connection}
-      onOpen={connect} onClose={() => disconnect()} onRestore={() => requestAnimationFrame(() => session.current?.fit.fit())}>
-    <div className="runtime-terminal-panel wizard-terminal">
-      <div className="panel-head">
+    <section className="hg-terminal" aria-labelledby="hg-terminal-title">
+      <header className="hg-terminal-head">
         <div>
-          <h2>OpenCode 配置终端</h2>
-          <p>在隔离的配置环境中执行登录命令，退出后配置仍会保留。</p>
+          <h2 id="hg-terminal-title">
+            <Icon name="terminal" size={16} />
+            CLI 登录终端
+          </h2>
+          <p>在隔离环境里完成登录；结果会保留，并自动交给新的 Cell 使用。</p>
         </div>
-        <div className="actions">
-          <span
-            className={
-              "status " + (connection === "connected" ? "completed" : "paused")
-            }
-          >
-            {connection === "connected"
-              ? "已连接"
-              : connection === "connecting"
-                ? "连接中"
-                : "未连接"}
+        <div className="hg-terminal-actions">
+          <span className={`hg-badge ${connection === "connected" ? "hg-tone-mint" : "hg-tone-neutral"}`}>
+            <span
+              className={`hg-dot ${connection === "connected" ? "hg-tone-mint" : "hg-tone-neutral"}`}
+              aria-hidden="true"
+            />
+            {connection === "connected" ? "已连接" : connection === "connecting" ? "连接中" : "未连接"}
           </span>
           {connection === "disconnected" ? (
-            <button
-              className="primary"
-              disabled={!available}
-              onClick={connect}
-              type="button"
-            >
-              重新连接
+            <button className="hg-btn hg-btn-primary" type="button" disabled={!available} onClick={connect}>
+              连接终端
             </button>
           ) : (
-            <button onClick={() => disconnect()} type="button">
+            <button className="hg-btn" type="button" onClick={() => disconnect()}>
               断开连接
             </button>
           )}
         </div>
-      </div>
-      {!available && (
-        <div className="setup-warning" role="status">
-          Runner 配置终端当前不可用。请确认所选 Node 已连接且镜像就绪。
-        </div>
-      )}
-      {terminalError && (
-        <div className="error runtime-inline-error" role="alert">
+      </header>
+
+      {!available ? (
+        <p className="hg-callout hg-callout-amber" role="status">
+          CLI 登录终端当前不可用。启用 Cell 并挂载 Docker socket 后才能打开。
+        </p>
+      ) : null}
+      {terminalError ? (
+        <p className="hg-form-error" role="alert">
           {terminalError}
-        </div>
-      )}
-      <div className="runtime-commands">
+        </p>
+      ) : null}
+
+      <div className="hg-terminal-commands">
         <span>填入命令</span>
         <div>
-          {commands.map(({ command, label }) => (
+          {loginCommands.map(({ command, label }) => (
             <button
+              className="hg-btn hg-btn-small"
               type="button"
               key={command}
               disabled={connection !== "connected"}
-              title={label + "；仅填入，不自动执行"}
+              title={`${label}；仅填入，不自动执行`}
               onClick={() => fillCommand(command)}
             >
               <code>{command}</code>
@@ -273,42 +243,27 @@ export function TerminalPanel({
         </div>
         <small>点击后追加到当前终端输入；确认后按 Enter 执行。</small>
       </div>
-      <div className="runtime-terminal-stage">
-        <div
-          ref={host}
-          className="runtime-terminal-host"
-          data-testid="wizard-terminal"
-        />
-        {connection !== "connected" && (
-          <div className="runtime-terminal-placeholder">
-            <div className="runtime-terminal-symbol" aria-hidden="true">
-              $ _
-            </div>
+
+      <div className="hg-terminal-stage">
+        <div ref={host} className="hg-terminal-host" data-testid="cli-terminal" />
+        {connection !== "connected" ? (
+          <div className="hg-terminal-placeholder">
             <strong>
-              {connection === "connecting"
-                ? "正在连接执行器…"
-                : "准备好后，重新连接"}
+              {connection === "connecting" ? "正在连接…" : "点“连接终端”开始登录"}
             </strong>
-            <p>打开终端并执行 opencode auth login，完成后再点击“检查并继续”。</p>
+            <p>执行 opencode auth login，按提示完成授权。终端内容只留在当前页面内存里。</p>
           </div>
-        )}
+        ) : null}
       </div>
-      <div className="runtime-terminal-footer">
+
+      <footer className="hg-terminal-foot">
         <span role="status">
-          {notice || "终端内容仅保留在当前页面内存中，不会被录制或保存。"}
+          {notice || "登录后无需重启；新的 Forager 会自动使用这次登录的凭证。"}
         </span>
-        <button
-          type="button"
-          disabled={!selection || connection !== "connected"}
-          onClick={() => {
-            const text = session.current?.terminal.getSelection();
-            if (text) void copy(text);
-          }}
-        >
+        <button className="hg-btn hg-btn-small" type="button" disabled={!selection} onClick={() => void copySelection()}>
           复制选中内容
         </button>
-      </div>
-    </div>
-    </TerminalWindow>
+      </footer>
+    </section>
   );
 }

@@ -5,9 +5,11 @@ import { hiveAPI } from "./api";
 import { BeeLoader, EmptyState, ErrorNotice, StatusBadge } from "./components";
 import { Icon } from "./icons";
 import { useResource } from "./use-resource";
+import CreateHiveDialog from "./CreateHiveDialog";
 
 export default function HivesPage() {
   const [query, setQuery] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const resource = useResource(signal => hiveAPI.listHives(signal), []);
   const overviews = resource.data?.hives ?? [];
 
@@ -28,15 +30,21 @@ export default function HivesPage() {
             每个 Hive 对应一个仓库，里面有 Queen（蜂王）和一群 Forager。
           </p>
         </div>
-        <div className="hg-search">
-          <Icon name="search" size={16} />
-          <input
-            type="search"
-            value={query}
-            onChange={event => setQuery(event.target.value)}
-            placeholder="搜索名称或仓库"
-            aria-label="搜索 Hive"
-          />
+        <div className="hg-page-actions">
+          <button className="hg-btn hg-btn-primary" type="button" onClick={() => setCreateOpen(true)}>
+            <Icon name="plus" size={16} />
+            新建 Hive
+          </button>
+          <div className="hg-search">
+            <Icon name="search" size={16} />
+            <input
+              type="search"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="搜索名称或仓库"
+              aria-label="搜索 Hive"
+            />
+          </div>
         </div>
       </header>
 
@@ -67,6 +75,12 @@ export default function HivesPage() {
               <EmptyState
                 title="还没有 Hive。"
                 hint="为你的仓库建一个 Hive，再把本地 Agent 接进来。"
+                action={
+                  <button className="hg-btn hg-btn-primary" type="button" onClick={() => setCreateOpen(true)}>
+                    <Icon name="plus" size={16} />
+                    新建 Hive
+                  </button>
+                }
               />
             )
           ) : (
@@ -136,6 +150,16 @@ export default function HivesPage() {
           )}
         </>
       )}
+
+      {createOpen ? (
+        <CreateHiveDialog
+          onClose={() => setCreateOpen(false)}
+          onCreated={hiveId => {
+            setCreateOpen(false);
+            location.hash = `/hives/${hiveId}`;
+          }}
+        />
+      ) : null}
     </div>
   );
 }

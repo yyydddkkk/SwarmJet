@@ -1,12 +1,18 @@
-// Entry point for the "honey garden" console. Mounted only for #/hives (and the
-// #/icons reference page) — see web/src/main.tsx. The pages read and write the
-// Hive REST endpoints; fixtures are now used by Playwright only.
+// Entry point and shell for the "honey garden" console (ADR section 18).
+// After sign-in every route lives here: Hive list/pages, 接入 (#/setup), CLI 登录
+// (#/cli-login). Unknown and empty routes fall back to #/hives. The #/icons
+// reference page stays reachable directly but is not part of the navigation.
 import { useEffect, useState } from "react";
 import HivesPage from "./HivesPage";
 import HivePage from "./HivePage";
 import ForagerPage from "./ForagerPage";
+import SetupPage from "./SetupPage";
+import CliLoginPage from "./CliLoginPage";
+import LoginScreen from "./LoginScreen";
 import IconLab from "./IconLab";
-import { EmptyState } from "./components";
+import { BeeLoader, ErrorNotice } from "./components";
+import { hiveAPI } from "./api";
+import type { Principal } from "./types";
 import { Icon } from "./icons";
 
 import "./hive-console.css";
@@ -15,18 +21,22 @@ type Route =
   | { name: "hives" }
   | { name: "hive"; hiveId: string; section: string }
   | { name: "forager"; hiveId: string; foragerId: string; section: string }
-  | { name: "approvals" }
-  | { name: "system" }
+  | { name: "setup"; query: URLSearchParams }
+  | { name: "cli-login" }
   | { name: "icons" }
-  | { name: "unknown" };
+  | { name: "redirect" };
 
 function parseRoute(hash: string): Route {
-  const path = hash.replace(/^#/, "").split("?")[0] || "/hives";
+  const raw = hash.replace(/^#/, "");
+  const [rawPath, rawQuery = ""] = raw.split("?");
+  const path = rawPath || "/";
   const parts = path.split("/").filter(Boolean);
-  if (parts[0] === "approvals") return { name: "approvals" };
-  if (parts[0] === "system") return { name: "system" };
+  const query = new URLSearchParams(rawQuery);
+  if (path === "/") return { name: "redirect" };
+  if (parts[0] === "setup") return { name: "setup", query };
+  if (parts[0] === "cli-login") return { name: "cli-login" };
   if (parts[0] === "icons") return { name: "icons" };
-  if (parts[0] !== "hives") return { name: "unknown" };
+  if (parts[0] !== "hives") return { name: "redirect" };
   if (parts.length === 1) return { name: "hives" };
   if (parts[2] === "foragers" && parts[3]) {
     return {
@@ -49,19 +59,75 @@ function useRoute(): Route {
   return route;
 }
 
-const placeholders: Record<"approvals" | "system", { title: string; hint: string }> = {
-  approvals: {
-    title: "审批（全局）",
-    hint: "所有 Hive 的待审批会汇总到这里，导航栏显示计数。这一轮先放占位。",
-  },
-  system: {
-    title: "系统",
-    hint: "Node、MCP Token、网络与代理、成员、CLI 登录配置。这一轮先放占位。",
-  },
-};
+type SessionState =
+  | { state: "loading" }
+  | { state: "anonymous" }
+  | { state: "authenticated"; principal: Principal }
+  | { state: "error"; message: string };
 
 export default function HiveConsoleApp() {
   const route = useRoute();
+  const [session, setSession] = useState<SessionState>({ state: "loading" });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    setSession({ state: "loading" });
+    hiveAPI
+      .getSession()
+      .then(principal => {
+        if (active) setSession({ state: "authenticated", principal });
+      })
+      .catch(cause => {
+        if (!active) return;
+        if (cause instanceof Error && "status" in cause && (cause as { status: number }).status === 401) {
+          setSession({ state: "anonymous" });
+        } else {
+          setSession({
+            state: "error",
+            message: cause instanceof Error ? cause.message : String(cause),
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
+
+  // "#/" and every retired route land on the Hive list.
+  useEffect(() => {
+    if (route.name === "redirect") location.replace("#/hives");
+  }, [route]);
+
+  if (session.state === "loading") {
+    return (
+      <div className="hg-app hg-boot-screen">
+        <BeeLoader label="正在连接蜂巢控制台…" />
+      </div>
+    );
+  }
+
+  if (session.state === "error") {
+    return (
+      <div className="hg-app hg-boot-screen">
+        <ErrorNotice message={session.message} onRetry={() => setAttempt(value => value + 1)} />
+      </div>
+    );
+  }
+
+  if (session.state === "anonymous") {
+    return (
+      <LoginScreen
+        onLogin={() => {
+          const raw = location.hash.replace(/^#/, "");
+          if (!raw || raw === "/") location.hash = "/hives";
+          setAttempt(value => value + 1);
+        }}
+      />
+    );
+  }
+
+  const { principal } = session;
   const inHive = route.name === "hives" || route.name === "hive" || route.name === "forager";
 
   return (
@@ -86,26 +152,44 @@ export default function HiveConsoleApp() {
         </a>
         <nav className="hg-nav" aria-label="控制台导航">
           <a href="#/hives" className={inHive ? "is-active" : undefined} aria-current={inHive ? "page" : undefined}>
-            Hive（蜂巢）
+            Hive
           </a>
           <a
-            href="#/approvals"
-            className={route.name === "approvals" ? "is-active" : undefined}
-            aria-current={route.name === "approvals" ? "page" : undefined}
+            href="#/setup"
+            className={route.name === "setup" ? "is-active" : undefined}
+            aria-current={route.name === "setup" ? "page" : undefined}
           >
-            审批
+            接入
           </a>
           <a
-            href="#/system"
-            className={route.name === "system" ? "is-active" : undefined}
-            aria-current={route.name === "system" ? "page" : undefined}
+            href="#/cli-login"
+            className={route.name === "cli-login" ? "is-active" : undefined}
+            aria-current={route.name === "cli-login" ? "page" : undefined}
           >
-            系统
+            CLI 登录
           </a>
         </nav>
-        <p className="hg-topbar-note">
-          平台实时数据 · <a href="#/icons">图标规范</a>
-        </p>
+        <div className="hg-session">
+          <span className="hg-session-user">
+            <Icon name="user" size={16} />
+            {principal.displayName || principal.username || "管理员"}
+          </span>
+          <button
+            className="hg-btn hg-btn-small"
+            type="button"
+            onClick={async () => {
+              try {
+                await hiveAPI.logout();
+              } catch {
+                // The local session is dropped either way.
+              }
+              setSession({ state: "anonymous" });
+            }}
+          >
+            <Icon name="back" size={16} />
+            退出
+          </button>
+        </div>
       </header>
 
       <main id="hg-main" className="hg-main" tabIndex={-1}>
@@ -120,33 +204,20 @@ export default function HiveConsoleApp() {
             foragerId={route.foragerId}
             section={route.section}
           />
+        ) : route.name === "setup" ? (
+          <SetupPage key={route.query.toString()} query={route.query} />
+        ) : route.name === "cli-login" ? (
+          <CliLoginPage />
         ) : route.name === "icons" ? (
           <IconLab />
-        ) : route.name === "unknown" ? (
-          <EmptyState
-            title="页面不存在。"
-            hint="检查一下链接，或者回到 Hive 列表。"
-            action={
-              <a className="hg-btn" href="#/hives">
-                返回 Hive 列表
-              </a>
-            }
-          />
         ) : (
-          <div className="hg-page">
-            <header className="hg-page-head">
-              <div>
-                <h1>{placeholders[route.name].title}</h1>
-              </div>
-            </header>
-            <section className="hg-panel">
-              <div className="hg-panel-body">
-                <EmptyState title={`${placeholders[route.name].title}还没实现。`} hint={placeholders[route.name].hint} />
-              </div>
-            </section>
-          </div>
+          <BeeLoader label="正在返回 Hive 列表…" />
         )}
       </main>
+
+      <footer className="hg-footer">
+        SwarmJet <span aria-hidden="true">·</span> 本地 Agent 是主入口，网页控制台用来看进展、做审批、连接 Agent。
+      </footer>
     </div>
   );
 }
