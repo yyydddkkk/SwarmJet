@@ -55,13 +55,14 @@ func resolveActor(ctx context.Context, backend Backend, token domain.Token) (act
 var agentTools = map[domain.AgentRole]map[string]bool{
 	domain.RoleForager: {
 		"send":           true,
+		"spawn":          true,
 		"get_forager":    true,
 		"inbox":          true,
 		"update_handoff": true,
 	},
 	domain.RoleQueen: {
 		"send":                true,
-		"spawn_forager":       true,
+		"spawn":               true,
 		"cancel_forager":      true,
 		"get_forager":         true,
 		"read_forager_detail": true,

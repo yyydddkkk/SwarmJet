@@ -57,6 +57,32 @@ type PRRecorder interface {
 	SetAgentPR(ctx context.Context, id string, pr int64) error
 }
 
+// MethodologyReader is the round-4 store method for the Hive's active
+// methodology. It is optional so a store without the methodology migration
+// keeps the HiveConfig.Triggers fallback.
+type MethodologyReader interface {
+	ActiveMethodology(ctx context.Context, hiveID string) (domain.Methodology, []domain.MethodologyFile, error)
+}
+
+// Methodology event names the Router understands. They are stable strings so a
+// methodology can opt into platform events without the platform hard-coding a
+// workflow.
+const (
+	MethodologyEventPRHead      = "pr_head"      // platform-pushed opened/reopened/synchronize
+	MethodologyEventCheckFailed = "check_failed" // a failing CI conclusion
+)
+
+// eventRule is a methodology event or a legacy HiveConfig trigger in one
+// shape. Role and Preset are empty for methodology and legacy rules
+// respectively.
+type eventRule struct {
+	Event         string
+	Label         string
+	CommentPrefix string
+	Role          string
+	Preset        string
+}
+
 // Options configures optional Router behavior. The zero value is usable.
 type Options struct {
 	// AppSlug is the slug of the GitHub App the platform publishes with. When
@@ -136,13 +162,23 @@ func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
 	}
 	cfg := resolveConfig(hive.Config)
 
-	if ignored, decision, err := r.platformGenerated(ctx, hive.ID, e); err != nil {
+	// The platform's own PR pushes never wake the PR owner. They may still be
+	// routed by a methodology pr_head rule, which decides the target role.
+	platformPR, platformDecision, err := r.platformGenerated(ctx, hive.ID, e)
+	if err != nil {
 		return Decision{}, err
-	} else if ignored {
-		return decision, nil
 	}
-
-	if rule, ok := matchTrigger(cfg.Triggers, e); ok {
+	rules, err := r.eventRules(ctx, hive.ID, cfg)
+	if err != nil {
+		return Decision{}, err
+	}
+	if platformPR {
+		if rule, ok := matchRule(rules, e, true); ok {
+			return r.routeTrigger(ctx, hive, cfg, e, rule)
+		}
+		return platformDecision, nil
+	}
+	if rule, ok := matchRule(rules, e, false); ok {
 		return r.routeTrigger(ctx, hive, cfg, e, rule)
 	}
 
@@ -249,15 +285,16 @@ func (r *Router) shouldRecordPR(e Event, forager domain.Agent) bool {
 	return e.Action == "opened" || e.Action == "reopened"
 }
 
-// routeTrigger handles an event that matched a trigger rule. Authorization is
-// checked first: a denied trigger never starts a Forager and is filed in the Hive
-// Inbox with the reason attached.
-func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.HiveConfig, e Event, rule domain.TriggerRule) (Decision, error) {
-	if !triggerAuthorized(e.AuthorAssociation) {
+// routeTrigger handles an event that matched a methodology or HiveConfig rule.
+// Authorization applies to issue-triggered work only: platform events such as
+// CI failures are routed by the methodology rule itself.
+func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.HiveConfig, e Event, rule eventRule) (Decision, error) {
+	issueEvent := rule.Event == "issue_labeled" || rule.Event == "issue_comment"
+	if issueEvent && !triggerAuthorized(e.AuthorAssociation) {
 		reason := fmt.Sprintf("author %q has association %q, need OWNER, MEMBER or COLLABORATOR", e.Author, e.AuthorAssociation)
 		return r.toInbox(ctx, hive, e, reason)
 	}
-	if e.Number > 0 {
+	if issueEvent && e.Number > 0 {
 		forager, found, err := r.foragerByIssue(ctx, hive.ID, e.Number)
 		if err != nil {
 			return Decision{}, err
@@ -268,6 +305,16 @@ func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.
 	}
 
 	task := Digest(e)
+	issueNumber := int64(0)
+	if issueEvent {
+		issueNumber = e.Number
+	}
+	prNumber := int64(0)
+	revision := ""
+	if rule.Event == MethodologyEventPRHead || rule.Event == MethodologyEventCheckFailed {
+		prNumber = e.Number
+		revision = e.SHA
+	}
 	agent := domain.Agent{
 		HiveID:      hive.ID,
 		Role:        domain.RoleForager,
@@ -275,8 +322,11 @@ func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.
 		Preset:      rule.Preset,
 		CLI:         cfg.CLI,
 		Task:        task,
-		IssueNumber: e.Number,
+		IssueNumber: issueNumber,
+		PRNumber:    prNumber,
 		ChainID:     chainIDFor(e),
+		RoleName:    rule.Role,
+		Revision:    revision,
 	}
 	created, err := r.backend.CreateForager(ctx, agent)
 	if errors.Is(err, domain.ErrHiveLimit) || errors.Is(err, domain.ErrChainLimit) {
@@ -294,6 +344,7 @@ func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.
 		Kind:      domain.MessageTask,
 		ChainID:   created.ChainID,
 		Body:      task,
+		Trust:     domain.TrustExternal,
 		State:     domain.MessagePending,
 		CreatedAt: created.CreatedAt,
 	}
@@ -310,6 +361,40 @@ func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.
 		Target:     sent.To,
 		MessageID:  sent.ID,
 	}, nil
+}
+
+// eventRules returns the rules the Hive currently uses. A methodology replaces
+// HiveConfig.Triggers entirely, including when it declares no events; the
+// legacy triggers are only a fallback while no methodology is active.
+func (r *Router) eventRules(ctx context.Context, hiveID string, cfg domain.HiveConfig) ([]eventRule, error) {
+	if reader, ok := r.backend.(MethodologyReader); ok {
+		m, _, err := reader.ActiveMethodology(ctx, hiveID)
+		if err == nil {
+			rules := make([]eventRule, 0, len(m.Manifest.Events))
+			for _, rule := range m.Manifest.Events {
+				rules = append(rules, eventRule{
+					Event:         rule.Event,
+					Label:         rule.Label,
+					CommentPrefix: rule.CommentPrefix,
+					Role:          rule.Role,
+				})
+			}
+			return rules, nil
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			return nil, err
+		}
+	}
+	rules := make([]eventRule, 0, len(cfg.Triggers))
+	for _, rule := range cfg.Triggers {
+		rules = append(rules, eventRule{
+			Event:         rule.Event,
+			Label:         rule.Label,
+			CommentPrefix: rule.CommentPrefix,
+			Preset:        rule.Preset,
+		})
+	}
+	return rules, nil
 }
 
 // owningForager looks up a non-terminal Forager for the event, in the order the ADR
@@ -389,6 +474,7 @@ func (r *Router) deliverToForager(ctx context.Context, hive domain.Hive, e Event
 		Kind:    kind,
 		ChainID: forager.ChainID,
 		Body:    Digest(e),
+		Trust:   domain.TrustExternal,
 		State:   domain.MessagePending,
 	}
 	sent, err := r.backend.SendMessage(ctx, message)
@@ -419,6 +505,7 @@ func (r *Router) toInbox(ctx context.Context, hive domain.Hive, e Event, reason 
 		Kind:    domain.MessageEvent,
 		ChainID: chainIDFor(e),
 		Body:    body,
+		Trust:   domain.TrustExternal,
 		State:   domain.MessagePending,
 	}
 	sent, err := r.backend.SendMessage(ctx, message)
@@ -435,8 +522,10 @@ func (r *Router) toInbox(ctx context.Context, hive domain.Hive, e Event, reason 
 	}, nil
 }
 
-// matchTrigger returns the first trigger rule that matches the event.
-func matchTrigger(rules []domain.TriggerRule, e Event) (domain.TriggerRule, bool) {
+// matchRule returns the first rule that matches the event. platformPR says the
+// event was caused by the platform's own push, which is the only case pr_head
+// matches; owner delivery stays suppressed either way.
+func matchRule(rules []eventRule, e Event, platformPR bool) (eventRule, bool) {
 	for _, rule := range rules {
 		switch rule.Event {
 		case "issue_labeled":
@@ -459,9 +548,48 @@ func matchTrigger(rules []domain.TriggerRule, e Event) (domain.TriggerRule, bool
 				continue
 			}
 			return rule, true
+		case MethodologyEventPRHead:
+			if !platformPR || e.Type != EventPullRequest || !prHeadAction(e.Action) {
+				continue
+			}
+			return rule, true
+		case MethodologyEventCheckFailed:
+			if !checkFailed(e) {
+				continue
+			}
+			return rule, true
 		}
 	}
-	return domain.TriggerRule{}, false
+	return eventRule{}, false
+}
+
+// prHeadAction lists the platform push actions a pr_head rule may handle. The
+// "edited" action is still ignored but is not a new head.
+func prHeadAction(action string) bool {
+	switch action {
+	case "opened", "reopened", "synchronize":
+		return true
+	default:
+		return false
+	}
+}
+
+// checkFailed reports whether the event is a failing CI result. Only failure
+// classes count; successful checks are left to the merge machinery.
+func checkFailed(e Event) bool {
+	switch e.Type {
+	case EventCheckRun, EventCheckSuite:
+		switch strings.ToLower(strings.TrimSpace(e.Conclusion)) {
+		case "failure", "timed_out", "action_required", "startup_failure":
+			return true
+		}
+	case EventStatus:
+		switch strings.ToLower(strings.TrimSpace(e.State)) {
+		case "failure", "error":
+			return true
+		}
+	}
+	return false
 }
 
 // triggerAuthorized keeps the legacy intake rule: only repository members may

@@ -20,7 +20,6 @@ import (
 // the MCP service. It enforces the same message validation rules as the real
 // store contract:
 //
-//   - forager:* -> forager:*                returns domain.ErrPeerMessage
 //   - Hop > hive MaxHops                returns domain.ErrHopLimit
 //   - Body longer than MaxMessageBody   returns domain.ErrMessageTooLarge
 //   - same ID, same content             returns the stored message
@@ -81,6 +80,22 @@ func (m *MemoryBackend) SetClock(now func() time.Time) {
 	m.mu.Lock()
 	m.now = now
 	m.mu.Unlock()
+}
+
+// SetActiveMethodology installs meth as the Hive's active version without
+// validation, so tests can set up any manifest directly.
+func (m *MemoryBackend) SetActiveMethodology(meth domain.Methodology) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	list := m.methodologies[meth.HiveID]
+	for i := range list {
+		list[i].version.Active = false
+	}
+	if meth.Version == 0 {
+		meth.Version = len(list) + 1
+	}
+	meth.Active = true
+	m.methodologies[meth.HiveID] = append(list, memMethodology{version: meth})
 }
 
 // CreateToken mints a token and returns its plaintext once. It mirrors the
@@ -205,6 +220,12 @@ func (m *MemoryBackend) UpdateHive(ctx context.Context, h domain.Hive) (domain.H
 
 // CreateForager enforces the concurrent and per-chain forager limits.
 func (m *MemoryBackend) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent, error) {
+	return m.CreateForagerWithLimits(ctx, a, domain.Limits{})
+}
+
+// CreateForagerWithLimits overrides the HiveConfig limits with the active
+// methodology's limits when they are set.
+func (m *MemoryBackend) CreateForagerWithLimits(ctx context.Context, a domain.Agent, limits domain.Limits) (domain.Agent, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.Agent{}, err
 	}
@@ -215,6 +236,13 @@ func (m *MemoryBackend) CreateForager(ctx context.Context, a domain.Agent) (doma
 		return domain.Agent{}, domain.ErrNotFound
 	}
 	cfg := withConfigDefaults(h.Config)
+	maxConcurrent, maxPerChain := cfg.MaxConcurrentForagers, cfg.MaxForagersPerChain
+	if limits.MaxConcurrentAgents > 0 {
+		maxConcurrent = limits.MaxConcurrentAgents
+	}
+	if limits.MaxAgentsPerChain > 0 {
+		maxPerChain = limits.MaxAgentsPerChain
+	}
 
 	if a.ID == "" {
 		a.ID = m.newID("forager")
@@ -250,10 +278,10 @@ func (m *MemoryBackend) CreateForager(ctx context.Context, a domain.Agent) (doma
 			chained++
 		}
 	}
-	if active >= cfg.MaxConcurrentForagers {
+	if active >= maxConcurrent {
 		return domain.Agent{}, domain.ErrHiveLimit
 	}
-	if chained >= cfg.MaxForagersPerChain {
+	if chained >= maxPerChain {
 		return domain.Agent{}, domain.ErrChainLimit
 	}
 
@@ -376,8 +404,8 @@ func (m *MemoryBackend) SendMessage(ctx context.Context, msg domain.Message) (do
 	if msg.Hop > cfg.MaxHops {
 		return domain.Message{}, domain.ErrHopLimit
 	}
-	if isForagerAddress(msg.From) && isForagerAddress(msg.To) {
-		return domain.Message{}, domain.ErrPeerMessage
+	if msg.Trust == "" {
+		msg.Trust = defaultTrust(msg.From)
 	}
 
 	if msg.ID != "" {
@@ -541,8 +569,18 @@ func inboxKey(hiveID string, to domain.Address) string {
 	return hiveID + "\x00" + string(to)
 }
 
-func isForagerAddress(a domain.Address) bool {
-	return strings.HasPrefix(string(a), "forager:")
+// defaultTrust mirrors the store's fallback for callers that do not set a
+// provenance: local tokens are the user, Agent addresses are Agents and the
+// system address is the platform. Router messages set external explicitly.
+func defaultTrust(from domain.Address) domain.MessageTrust {
+	switch {
+	case strings.HasPrefix(string(from), "local:"):
+		return domain.TrustUser
+	case from == domain.AddressSystem:
+		return domain.TrustSystem
+	default:
+		return domain.TrustAgent
+	}
 }
 
 // foragerCountsTowardsLimit reports the states the contract counts against the
@@ -564,6 +602,7 @@ func sameMessage(a, b domain.Message) bool {
 		a.ChainID == b.ChainID &&
 		a.Hop == b.Hop &&
 		a.Body == b.Body &&
+		a.Trust == b.Trust &&
 		slices.Equal(a.Artifacts, b.Artifacts)
 }
 

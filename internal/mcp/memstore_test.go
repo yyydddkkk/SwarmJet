@@ -40,13 +40,18 @@ func TestMemoryBackendMessageValidation(t *testing.T) {
 	foragerA := newForager(t, backend, h.ID, "chain-1")
 	foragerB := newForager(t, backend, h.ID, "chain-1")
 
-	t.Run("peer message", func(t *testing.T) {
-		_, err := backend.SendMessage(ctx, domain.Message{
+	t.Run("peer message is allowed", func(t *testing.T) {
+		// Peer-to-peer is a capability now; the role permission is enforced by
+		// the MCP layer, not by the store.
+		sent, err := backend.SendMessage(ctx, domain.Message{
 			HiveID: h.ID, From: domain.ForagerAddress(foragerA.ID), To: domain.ForagerAddress(foragerB.ID),
 			Kind: domain.MessageReport, Body: "hi peer",
 		})
-		if !errors.Is(err, domain.ErrPeerMessage) {
-			t.Fatalf("err = %v, want ErrPeerMessage", err)
+		if err != nil {
+			t.Fatalf("peer message rejected: %v", err)
+		}
+		if sent.Trust != domain.TrustAgent {
+			t.Fatalf("trust = %q, want agent", sent.Trust)
 		}
 	})
 
