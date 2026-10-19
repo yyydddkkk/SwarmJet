@@ -57,20 +57,45 @@ type PRRecorder interface {
 	SetAgentPR(ctx context.Context, id string, pr int64) error
 }
 
+// Options configures optional Router behavior. The zero value is usable.
+type Options struct {
+	// AppSlug is the slug of the GitHub App the platform publishes with. When
+	// set, pull_request events caused by that App's bot account can be
+	// recognised from the sender alone. When empty the Router falls back to
+	// sender.type == "Bot" plus ownership of the event branch.
+	AppSlug string
+}
+
 // Router routes normalized GitHub events. It is safe for concurrent use when
 // the Backend is.
 type Router struct {
 	backend    Backend
 	prRecorder PRRecorder
+	appSlug    string
 }
 
-// New builds a Router over the given backend.
+// New builds a Router over the given backend with default options.
 func New(backend Backend) *Router {
-	r := &Router{backend: backend}
+	return NewWithOptions(backend, Options{})
+}
+
+// NewWithOptions builds a Router over the given backend and options.
+func NewWithOptions(backend Backend, opts Options) *Router {
+	r := &Router{backend: backend, appSlug: normalizeAppSlug(opts.AppSlug)}
 	if recorder, ok := backend.(PRRecorder); ok {
 		r.prRecorder = recorder
 	}
 	return r
+}
+
+// normalizeAppSlug accepts either "swarmjet" or "swarmjet[bot]" and returns the
+// bare slug used to build the bot login.
+func normalizeAppSlug(raw string) string {
+	slug := strings.TrimSpace(raw)
+	if len(slug) >= len("[bot]") && strings.EqualFold(slug[len(slug)-len("[bot]"):], "[bot]") {
+		slug = strings.TrimSpace(slug[:len(slug)-len("[bot]")])
+	}
+	return slug
 }
 
 // Route applies the deterministic routing rules from ADR section 9:
@@ -93,6 +118,12 @@ func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
 	}
 	cfg := resolveConfig(hive.Config)
 
+	if ignored, decision, err := r.platformGenerated(ctx, hive.ID, e); err != nil {
+		return Decision{}, err
+	} else if ignored {
+		return decision, nil
+	}
+
 	if rule, ok := matchTrigger(cfg.Triggers, e); ok {
 		return r.routeTrigger(ctx, hive, cfg, e, rule)
 	}
@@ -113,6 +144,78 @@ func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
 		return r.deliverToForager(ctx, hive, e, forager, domain.MessageEvent, reason)
 	}
 	return r.toInbox(ctx, hive, e, "")
+}
+
+// platformGenerated reports whether a pull_request event was caused by the
+// platform's own publisher. Publishing a branch or opening/updating a PR would
+// otherwise be delivered back to the Forager that just finished its turn, which
+// would make it run once more with nothing to do.
+//
+// The decision uses structured sender fields only, never the body:
+//   - with a configured App slug, the sender login must be "<slug>[bot]"
+//     (or a Bot whose login is the bare slug);
+//   - without a slug, any Bot sender is ignored only when the event branch is
+//     owned by one of this Hive's Foragers.
+//
+// Human comments, reviews and CI results are never affected: those event types
+// do not reach this helper.
+func (r *Router) platformGenerated(ctx context.Context, hiveID string, e Event) (bool, Decision, error) {
+	if e.Type != EventPullRequest || !platformPRAction(e.Action) {
+		return false, Decision{}, nil
+	}
+	login := strings.TrimSpace(e.SenderLogin)
+	appBot := strings.EqualFold(e.SenderType, "Bot")
+	if r.appSlug != "" {
+		appBot = strings.EqualFold(login, r.appSlug+"[bot]") ||
+			(appBot && strings.EqualFold(strings.TrimSuffix(login, "[bot]"), r.appSlug))
+	}
+	if !appBot {
+		return false, Decision{}, nil
+	}
+
+	foragerID := ""
+	if r.appSlug == "" {
+		// Without the App slug, branch ownership is the only structured signal
+		// that distinguishes our publisher from another bot.
+		branch := strings.TrimSpace(e.Branch)
+		if branch == "" {
+			return false, Decision{}, nil
+		}
+		forager, found, err := r.foragerByBranch(ctx, hiveID, branch)
+		if err != nil {
+			return false, Decision{}, err
+		}
+		if !found {
+			return false, Decision{}, nil
+		}
+		foragerID = forager.ID
+	}
+
+	sender := login
+	if sender == "" {
+		sender = "a bot"
+	} else {
+		sender = fmt.Sprintf("bot %q", sender)
+	}
+	reason := fmt.Sprintf("platform-generated pull_request.%s from %s; ignored so the publishing Forager does not run an empty turn", e.Action, sender)
+	return true, Decision{
+		Action:     ActionIgnored,
+		Reason:     reason,
+		Repository: e.Repository,
+		HiveID:     hiveID,
+		ForagerID:  foragerID,
+	}, nil
+}
+
+// platformPRAction lists the PR lifecycle actions the platform itself emits
+// when it publishes a Forager branch or updates the PR it opened.
+func platformPRAction(action string) bool {
+	switch action {
+	case "opened", "reopened", "synchronize", "edited":
+		return true
+	default:
+		return false
+	}
 }
 
 // shouldRecordPR links the Forager to a newly opened or reopened PR. It only

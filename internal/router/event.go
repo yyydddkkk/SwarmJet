@@ -47,15 +47,20 @@ type Event struct {
 	Label             string   `json:"label,omitempty"` // label added or removed by the event
 	Author            string   `json:"author,omitempty"`
 	AuthorAssociation string   `json:"authorAssociation,omitempty"`
-	Title             string   `json:"title,omitempty"`
-	URL               string   `json:"url,omitempty"`
-	Merged            bool     `json:"merged,omitempty"`
-	ReviewState       string   `json:"reviewState,omitempty"`
-	Conclusion        string   `json:"conclusion,omitempty"`
-	State             string   `json:"state,omitempty"`
-	Context           string   `json:"context,omitempty"`
-	SHA               string   `json:"sha,omitempty"`
-	Excerpt           string   `json:"excerpt,omitempty"`
+	// SenderLogin and SenderType are the raw webhook sender. They are kept
+	// separate from Author because the Router uses them to recognise events
+	// caused by the platform's own GitHub App bot.
+	SenderLogin string `json:"senderLogin,omitempty"`
+	SenderType  string `json:"senderType,omitempty"`
+	Title       string `json:"title,omitempty"`
+	URL         string `json:"url,omitempty"`
+	Merged      bool   `json:"merged,omitempty"`
+	ReviewState string `json:"reviewState,omitempty"`
+	Conclusion  string `json:"conclusion,omitempty"`
+	State       string `json:"state,omitempty"`
+	Context     string `json:"context,omitempty"`
+	SHA         string `json:"sha,omitempty"`
+	Excerpt     string `json:"excerpt,omitempty"`
 }
 
 // Normalize converts a raw GitHub webhook payload into an Event. It returns
@@ -100,6 +105,7 @@ func NormalizeDelivery(eventType, deliveryID string, payload []byte) (Event, boo
 
 type githubUser struct {
 	Login             string `json:"login"`
+	Type              string `json:"type"`
 	AuthorAssociation string `json:"author_association"`
 }
 
@@ -220,6 +226,8 @@ func normalizeIssues(payload []byte) (Event, bool) {
 		Title:             p.Issue.Title,
 		URL:               p.Issue.HTMLURL,
 		Excerpt:           excerptOf(p.Issue.Body),
+		SenderLogin:       p.Sender.Login,
+		SenderType:        p.Sender.Type,
 	}, true
 }
 
@@ -252,6 +260,8 @@ func normalizeIssueComment(payload []byte) (Event, bool) {
 		Title:             p.Issue.Title,
 		URL:               firstNonEmpty(p.Comment.HTMLURL, p.Issue.HTMLURL),
 		Excerpt:           excerptOf(p.Comment.Body),
+		SenderLogin:       p.Sender.Login,
+		SenderType:        p.Sender.Type,
 	}, true
 }
 
@@ -267,7 +277,7 @@ func normalizePullRequest(payload []byte) (Event, bool) {
 		return Event{}, false
 	}
 	switch p.Action {
-	case "opened", "reopened", "synchronize", "closed":
+	case "opened", "reopened", "synchronize", "edited", "closed":
 	default:
 		return Event{}, false
 	}
@@ -288,6 +298,8 @@ func normalizePullRequest(payload []byte) (Event, bool) {
 		URL:               p.PullRequest.HTMLURL,
 		Merged:            p.PullRequest.Merged,
 		Excerpt:           excerptOf(p.PullRequest.Body),
+		SenderLogin:       p.Sender.Login,
+		SenderType:        p.Sender.Type,
 	}, true
 }
 
@@ -321,6 +333,8 @@ func normalizePullRequestReview(payload []byte) (Event, bool) {
 		URL:               firstNonEmpty(p.Review.HTMLURL, p.PullRequest.HTMLURL),
 		ReviewState:       p.Review.State,
 		Excerpt:           excerptOf(p.Review.Body),
+		SenderLogin:       p.Sender.Login,
+		SenderType:        p.Sender.Type,
 	}, true
 }
 
@@ -353,6 +367,8 @@ func normalizePullRequestReviewComment(payload []byte) (Event, bool) {
 		Title:             p.PullRequest.Title,
 		URL:               firstNonEmpty(p.Comment.HTMLURL, p.PullRequest.HTMLURL),
 		Excerpt:           excerptOf(p.Comment.Body),
+		SenderLogin:       p.Sender.Login,
+		SenderType:        p.Sender.Type,
 	}, true
 }
 
@@ -373,16 +389,18 @@ func normalizeCheckSuite(payload []byte) (Event, bool) {
 		return Event{}, false
 	}
 	e := Event{
-		Type:       EventCheckSuite,
-		Action:     p.Action,
-		DeliveryID: payloadDeliveryID(payload),
-		Repository: p.Repository.FullName,
-		Branch:     p.CheckSuite.HeadBranch,
-		Author:     p.Sender.Login,
-		Context:    "check_suite",
-		Conclusion: p.CheckSuite.Conclusion,
-		SHA:        p.CheckSuite.HeadSHA,
-		URL:        commitURL(p.Repository, p.CheckSuite.HeadSHA),
+		Type:        EventCheckSuite,
+		Action:      p.Action,
+		DeliveryID:  payloadDeliveryID(payload),
+		Repository:  p.Repository.FullName,
+		Branch:      p.CheckSuite.HeadBranch,
+		Author:      p.Sender.Login,
+		SenderLogin: p.Sender.Login,
+		SenderType:  p.Sender.Type,
+		Context:     "check_suite",
+		Conclusion:  p.CheckSuite.Conclusion,
+		SHA:         p.CheckSuite.HeadSHA,
+		URL:         commitURL(p.Repository, p.CheckSuite.HeadSHA),
 	}
 	e.Number = firstPRNumber(p.CheckSuite.PullRequests)
 	return e, true
@@ -406,16 +424,18 @@ func normalizeCheckRun(payload []byte) (Event, bool) {
 	}
 	sha := firstNonEmpty(p.CheckRun.HeadSHA, p.CheckRun.CheckSuite.HeadSHA)
 	e := Event{
-		Type:       EventCheckRun,
-		Action:     p.Action,
-		DeliveryID: payloadDeliveryID(payload),
-		Repository: p.Repository.FullName,
-		Branch:     p.CheckRun.CheckSuite.HeadBranch,
-		Author:     p.Sender.Login,
-		Context:    firstNonEmpty(p.CheckRun.Name, "check_run"),
-		Conclusion: p.CheckRun.Conclusion,
-		SHA:        sha,
-		URL:        firstNonEmpty(p.CheckRun.HTMLURL, commitURL(p.Repository, sha)),
+		Type:        EventCheckRun,
+		Action:      p.Action,
+		DeliveryID:  payloadDeliveryID(payload),
+		Repository:  p.Repository.FullName,
+		Branch:      p.CheckRun.CheckSuite.HeadBranch,
+		Author:      p.Sender.Login,
+		SenderLogin: p.Sender.Login,
+		SenderType:  p.Sender.Type,
+		Context:     firstNonEmpty(p.CheckRun.Name, "check_run"),
+		Conclusion:  p.CheckRun.Conclusion,
+		SHA:         sha,
+		URL:         firstNonEmpty(p.CheckRun.HTMLURL, commitURL(p.Repository, sha)),
 	}
 	e.Number = firstPRNumber(p.CheckRun.PullRequests)
 	return e, true
@@ -438,17 +458,19 @@ func normalizeStatus(payload []byte) (Event, bool) {
 		branch = p.Branches[0].Name
 	}
 	e := Event{
-		Type:       EventStatus,
-		Action:     p.State,
-		DeliveryID: payloadDeliveryID(payload),
-		Repository: p.Repository.FullName,
-		Branch:     branch,
-		Author:     p.Sender.Login,
-		Context:    p.Context,
-		State:      p.State,
-		SHA:        p.SHA,
-		URL:        firstNonEmpty(p.TargetURL, commitURL(p.Repository, p.SHA)),
-		Excerpt:    excerptOf(p.Description),
+		Type:        EventStatus,
+		Action:      p.State,
+		DeliveryID:  payloadDeliveryID(payload),
+		Repository:  p.Repository.FullName,
+		Branch:      branch,
+		Author:      p.Sender.Login,
+		SenderLogin: p.Sender.Login,
+		SenderType:  p.Sender.Type,
+		Context:     p.Context,
+		State:       p.State,
+		SHA:         p.SHA,
+		URL:         firstNonEmpty(p.TargetURL, commitURL(p.Repository, p.SHA)),
+		Excerpt:     excerptOf(p.Description),
 	}
 	return e, true
 }
