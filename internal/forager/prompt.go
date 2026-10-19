@@ -122,19 +122,23 @@ func publishTitle(task string) string {
 
 // reportBody prefers the handoff summary and falls back to the last streamed
 // text. It is also used as the PR body.
-func reportBody(agent domain.Agent, output string) string {
+func reportBody(agent domain.Agent, output, stopReason string) string {
 	body := handoffSummary(agent.Handoff)
 	if body == "" {
 		body = strings.TrimSpace(output)
 	}
 	if body == "" {
-		body = "Turn finished."
+		reason := strings.TrimSpace(stopReason)
+		if reason == "" {
+			reason = "unknown"
+		}
+		body = fmt.Sprintf("Turn finished (stop reason: %s) with no output.", reason)
 	}
 	return truncateRunes(body, domain.MaxMessageBody)
 }
 
-func reportBodyWithError(agent domain.Agent, output string, err error) string {
-	body := reportBody(agent, output)
+func reportBodyWithError(agent domain.Agent, output, stopReason string, err error) string {
+	body := reportBody(agent, output, stopReason)
 	if err == nil {
 		return body
 	}

@@ -178,8 +178,8 @@ func (c *Client) handleRequest(method string, params json.RawMessage) (any, *rpc
 	if method != MethodRequestPermission {
 		return nil, &rpcError{Code: CodeMethodNotFound, Message: "method not found: " + method}
 	}
-	var req PermissionRequest
-	if err := json.Unmarshal(params, &req); err != nil {
+	req, err := decodePermissionRequest(params)
+	if err != nil {
 		return nil, &rpcError{Code: CodeInvalidParams, Message: "invalid permission request: " + err.Error()}
 	}
 	outcome := Cancelled()
@@ -190,4 +190,35 @@ func (c *Client) handleRequest(method string, params json.RawMessage) (any, *rpc
 		}
 	}
 	return PermissionResponse{Outcome: outcome}, nil
+}
+
+// decodePermissionRequest decodes each part of a session/request_permission
+// request independently. The tool call is descriptive only: an unexpected shape
+// for it (for example a content array the typed model does not cover) must not
+// stop the client from answering, otherwise the agent treats the request as a
+// rejection. sessionId and options are what the handler needs to choose an
+// option, so they are decoded on their own.
+func decodePermissionRequest(params json.RawMessage) (PermissionRequest, error) {
+	var parts struct {
+		SessionID json.RawMessage `json:"sessionId"`
+		ToolCall  json.RawMessage `json:"toolCall"`
+		Options   json.RawMessage `json:"options"`
+	}
+	if err := json.Unmarshal(params, &parts); err != nil {
+		return PermissionRequest{}, err
+	}
+	var req PermissionRequest
+	if len(parts.SessionID) > 0 {
+		_ = json.Unmarshal(parts.SessionID, &req.SessionID)
+	}
+	if len(parts.Options) > 0 {
+		if err := json.Unmarshal(parts.Options, &req.Options); err != nil {
+			return PermissionRequest{}, err
+		}
+	}
+	if len(parts.ToolCall) > 0 {
+		// Best effort: a partial tool call is still useful for logging.
+		_ = json.Unmarshal(parts.ToolCall, &req.ToolCall)
+	}
+	return req, nil
 }
