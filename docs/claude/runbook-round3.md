@@ -123,6 +123,7 @@ curl -fsS -b /tmp/sj-cookies http://127.0.0.1:8180/api/setup/status | python3 -m
 - 公网地址：`https://<随机>.trycloudflare.com`
 - webhook 已同步：是（创建 App 后几十秒内）
 - 最近错误：空
+- 补投（`tunnel.redelivery`）：最近一次运行时间、补投条数和错误。启动、隧道地址变化或恢复、以及每 10 分钟，平台会查询 GitHub 最近 3 天的 webhook 投递，对失败且没有成功记录的投递请求重投（每次最多 20 条）
 
 检查 cloudflared 和平台日志：
 
@@ -134,6 +135,14 @@ docker compose --env-file .env -f compose.yaml logs --tail=100 api | grep -E 'tu
 ```
 
 在 GitHub 上打开 App 设置，确认 webhook URL 是 `https://<隧道地址>/api/webhooks/github`，Content type 为 `application/json`，事件包含 Pull request、Pull request review、Pull request review comment、Issue comment、Issues、Check run、Status。
+
+隧道只转发 api 的 webhook 监听端口 `8081`，只服务 `/api/webhooks/github` 和 `/healthz`。验证控制台和 MCP 没有经隧道暴露：
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' https://<隧道地址>/            # 期望 404
+curl -s -o /dev/null -w '%{http_code}\n' https://<隧道地址>/mcp         # 期望 404
+curl -s -o /dev/null -w '%{http_code}\n' https://<隧道地址>/api/session # 期望 404
+```
 
 没有启用隧道时，手动把 webhook 指向上面的 `/api/webhooks/github`；`/api/setup/status` 的 `tunnel.enabled` 会是 `false`。
 
@@ -285,6 +294,7 @@ python3 install.py uninstall --purge
 | 安装脚本提示端口被占用 | `ss -ltnp \| grep 8180`；换 `--port`，或确认不是残留容器 |
 | `api` 启动即退出，提示缺少 `SWARMJET_MASTER_KEY` | `.env` 里必须是 64 位十六进制；不要留空 |
 | 接入页创建 App 后回调失败 | `PUBLIC_ORIGIN` 是否与浏览器地址一致；`SECURE_COOKIES` 是否匹配协议；state 是否超过 10 分钟 |
+| 隧道有地址但 webhook 不到达 | 隧道须转发 `http://api:8081`（`WEBHOOK_LISTEN_ADDRESS`）；`tunnel.redelivery.lastError` 看补投是否被限流 |
 | 隧道没有地址 | `docker compose --profile tunnel logs tunnel`；`SWARMJET_TUNNEL_URL` 是否为 `http://tunnel:2000` |
 | webhook 已同步仍收不到事件 | GitHub 上 App 的 webhook URL、secret、事件订阅；Router 日志中的签名错误 |
 | MCP 连不上 | Token 是否有效、URL 是否为 `/mcp`、SSH 隧道/公网入口是否可达 |

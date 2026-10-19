@@ -77,17 +77,24 @@ func (a *App) jwt() (string, error) {
 	return input + "." + enc(sig), err
 }
 func (a *App) request(ctx context.Context, method, path string, body, out any) error {
+	_, err := a.requestHeader(ctx, method, path, body, out)
+	return err
+}
+
+// requestHeader is request that also returns the response headers. A nil out
+// skips decoding the body.
+func (a *App) requestHeader(ctx context.Context, method, path string, body, out any) (http.Header, error) {
 	token, err := a.jwt()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	data, err := json.Marshal(body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, method, a.baseURL+path, bytes.NewReader(data))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -95,13 +102,30 @@ func (a *App) request(ctx context.Context, method, path string, body, out any) e
 	req.Header.Set("Content-Type", "application/json")
 	res, err := a.http.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("GitHub App API returned HTTP %d", res.StatusCode)
+		return res.Header, &APIError{Status: res.StatusCode, RetryAfter: res.Header.Get("Retry-After"), RateRemaining: res.Header.Get("X-RateLimit-Remaining")}
 	}
-	return json.NewDecoder(io.LimitReader(res.Body, 8<<20)).Decode(out)
+	if out == nil {
+		return res.Header, nil
+	}
+	return res.Header, json.NewDecoder(io.LimitReader(res.Body, 8<<20)).Decode(out)
+}
+
+// APIError is a non-2xx answer from the GitHub App API.
+type APIError struct {
+	Status        int
+	RetryAfter    string
+	RateRemaining string
+}
+
+func (e *APIError) Error() string { return fmt.Sprintf("GitHub App API returned HTTP %d", e.Status) }
+
+// RateLimited reports whether GitHub asked the caller to back off.
+func (e *APIError) RateLimited() bool {
+	return e.Status == http.StatusTooManyRequests || (e.Status == http.StatusForbidden && (e.RetryAfter != "" || e.RateRemaining == "0"))
 }
 func (a *App) GetInstallation(ctx context.Context, id int64) (Installation, error) {
 	var out Installation

@@ -17,6 +17,7 @@ x-app-environment: &app-environment
   GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
   # Set to http://tunnel:2000 when the optional tunnel profile is enabled.
   SWARMJET_TUNNEL_URL: ${SWARMJET_TUNNEL_URL:-}
+  WEBHOOK_LISTEN_ADDRESS: ${WEBHOOK_LISTEN_ADDRESS:-:8081}
   # Forager Cells. This base file never mounts the Docker socket; enabling
   # Cells requires the compose.cells.yaml overlay, which also sets this to 1.
   SWARMJET_CELLS: ${SWARMJET_CELLS:-0}
@@ -90,11 +91,13 @@ services:
   # Enable with `--profile tunnel` and set SWARMJET_TUNNEL_URL=http://tunnel:2000
   # (deploy/install.py does both). The platform reads /quicktunnel and syncs the
   # GitHub App webhook URL. The edge URL is temporary and changes on restart.
+  # It forwards only the webhook listener (api:8081): the console and /mcp on
+  # api:8080 are never reachable through the tunnel.
   tunnel:
     image: cloudflare/cloudflared:2026.10.1
     profiles: [tunnel]
     restart: unless-stopped
-    command: [tunnel, --no-autoupdate, --metrics, '0.0.0.0:2000', --url, http://api:8080]
+    command: [tunnel, --no-autoupdate, --metrics, '0.0.0.0:2000', --url, http://api:8081]
     ports:
       - '127.0.0.1:${TUNNEL_METRICS_PORT:-2000}:2000'
 

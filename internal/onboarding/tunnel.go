@@ -39,6 +39,8 @@ type TunnelStatus struct {
 	URL           string `json:"url"`
 	WebhookSynced bool   `json:"webhookSynced"`
 	LastError     string `json:"lastError"`
+	// Redelivery is filled in by Manager from the Redeliverer.
+	Redelivery RedeliveryStatus `json:"redelivery"`
 }
 
 // Tunnel reads the public hostname from cloudflared's metrics server and keeps
@@ -52,6 +54,7 @@ type Tunnel struct {
 	apps       TunnelAppSource
 	logger     *slog.Logger
 	wake       chan struct{}
+	ready      chan struct{}
 
 	mu            sync.Mutex
 	hostname      string
@@ -59,6 +62,7 @@ type Tunnel struct {
 	syncedKey     string
 	webhookSynced bool
 	lastError     string
+	down          bool
 }
 
 var tunnelHostnamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$`)
@@ -96,6 +100,7 @@ func NewTunnel(cfg TunnelConfig) (*Tunnel, error) {
 		apps:       cfg.Apps,
 		logger:     logger,
 		wake:       make(chan struct{}, 1),
+		ready:      make(chan struct{}, 1),
 	}, nil
 }
 
@@ -110,6 +115,23 @@ func (t *Tunnel) Wake() {
 	}
 	select {
 	case t.wake <- struct{}{}:
+	default:
+	}
+}
+
+// Ready receives a signal each time the webhook address was updated or the
+// tunnel came back after being unreachable, so missed deliveries can be
+// redelivered.
+func (t *Tunnel) Ready() <-chan struct{} {
+	if t == nil {
+		return nil
+	}
+	return t.ready
+}
+
+func (t *Tunnel) signalReady() {
+	select {
+	case t.ready <- struct{}{}:
 	default:
 	}
 }
@@ -222,8 +244,13 @@ func (t *Tunnel) SyncNow(ctx context.Context) error {
 
 	t.mu.Lock()
 	synced := t.webhookSynced && t.syncedKey == key
+	recovered := t.down
+	t.down = false
 	t.mu.Unlock()
 	if synced {
+		if recovered {
+			t.signalReady()
+		}
 		return nil
 	}
 
@@ -237,6 +264,7 @@ func (t *Tunnel) SyncNow(ctx context.Context) error {
 	t.webhookSynced = true
 	t.lastError = ""
 	t.mu.Unlock()
+	t.signalReady()
 	t.logger.Info("GitHub App webhook synchronized", "url", hookURL, "app_id", app.ID())
 	return nil
 }
@@ -274,5 +302,6 @@ func (t *Tunnel) trySync(ctx context.Context) {
 func (t *Tunnel) setLastError(message string) {
 	t.mu.Lock()
 	t.lastError = message
+	t.down = true
 	t.mu.Unlock()
 }

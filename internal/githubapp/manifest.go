@@ -176,3 +176,62 @@ func ConvertManifest(ctx context.Context, client *http.Client, baseURL, code str
 	}
 	return out, nil
 }
+
+// HookDelivery is one webhook delivery attempt recorded by GitHub.
+type HookDelivery struct {
+	ID          int64     `json:"id"`
+	GUID        string    `json:"guid"`
+	DeliveredAt time.Time `json:"delivered_at"`
+	Redelivery  bool      `json:"redelivery"`
+	Status      string    `json:"status"`
+	StatusCode  int       `json:"status_code"`
+}
+
+// Failed reports whether the delivery did not reach the receiver with a 2xx.
+func (d HookDelivery) Failed() bool {
+	return d.Status != "OK" || d.StatusCode < 200 || d.StatusCode >= 300
+}
+
+// ListHookDeliveries returns one page of App webhook deliveries, newest first.
+// cursor is empty for the first page; the returned next cursor is empty on the
+// last page.
+func (a *App) ListHookDeliveries(ctx context.Context, cursor string) ([]HookDelivery, string, error) {
+	path := "/app/hook/deliveries?per_page=100"
+	if cursor != "" {
+		path += "&cursor=" + url.QueryEscape(cursor)
+	}
+	var rows []HookDelivery
+	header, err := a.requestHeader(ctx, http.MethodGet, path, nil, &rows)
+	if err != nil {
+		return nil, "", err
+	}
+	return rows, nextCursor(header.Values("Link")), nil
+}
+
+// nextCursor extracts the cursor of the rel="next" link, if any.
+func nextCursor(links []string) string {
+	for _, header := range links {
+		for _, part := range strings.Split(header, ",") {
+			if !strings.Contains(part, `rel="next"`) {
+				continue
+			}
+			start, end := strings.Index(part, "<"), strings.Index(part, ">")
+			if start < 0 || end < start {
+				continue
+			}
+			if u, err := url.Parse(part[start+1 : end]); err == nil {
+				return u.Query().Get("cursor")
+			}
+		}
+	}
+	return ""
+}
+
+// RedeliverHook asks GitHub to deliver one webhook delivery again.
+func (a *App) RedeliverHook(ctx context.Context, deliveryID int64) error {
+	if deliveryID <= 0 {
+		return errors.New("delivery ID must be positive")
+	}
+	_, err := a.requestHeader(ctx, http.MethodPost, fmt.Sprintf("/app/hook/deliveries/%d/attempts", deliveryID), nil, nil)
+	return err
+}

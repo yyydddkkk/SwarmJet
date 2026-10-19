@@ -51,6 +51,7 @@ type ManagerConfig struct {
 	Box          *secretbox.Box
 	PublicOrigin string
 	Tunnel       *Tunnel
+	Redeliverer  *Redeliverer
 	HTTPClient   *http.Client
 	BaseURL      string
 	Now          func() time.Time
@@ -64,6 +65,7 @@ type Manager struct {
 	box          *secretbox.Box
 	publicOrigin string
 	tunnel       *Tunnel
+	redeliverer  *Redeliverer
 	httpClient   *http.Client
 	baseURL      string
 	now          func() time.Time
@@ -97,6 +99,7 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 		box:          cfg.Box,
 		publicOrigin: origin,
 		tunnel:       cfg.Tunnel,
+		redeliverer:  cfg.Redeliverer,
 		httpClient:   cfg.HTTPClient,
 		baseURL:      cfg.BaseURL,
 		now:          now,
@@ -345,7 +348,11 @@ func (m *Manager) GitHubStatus(ctx context.Context) GitHubStatus {
 
 // TunnelStatus returns the tunnel block; a disabled tunnel is zero-valued.
 func (m *Manager) TunnelStatus() TunnelStatus {
-	return m.tunnel.Status()
+	status := m.tunnel.Status()
+	if status.Enabled {
+		status.Redelivery = m.redeliverer.Status()
+	}
+	return status
 }
 
 func appName() (string, error) {

@@ -156,12 +156,22 @@ func runServe(ctx context.Context, s *store.Store) error {
 		}
 		go tunnel.Run(ctx)
 	}
+	redeliverCfg := onboarding.RedeliveryConfig{Apps: ghProvider, Logger: slog.Default()}
+	if tunnel != nil {
+		redeliverCfg.Trigger = tunnel.Ready()
+	}
+	redeliverer, err := onboarding.NewRedeliverer(redeliverCfg)
+	if err != nil {
+		return err
+	}
+	go redeliverer.Run(ctx)
 	setupManager, err := onboarding.NewManager(onboarding.ManagerConfig{
 		Provider:     ghProvider,
 		Store:        s,
 		Box:          box,
 		PublicOrigin: env("PUBLIC_ORIGIN", "http://localhost:8180"),
 		Tunnel:       tunnel,
+		Redeliverer:  redeliverer,
 		Logger:       slog.Default(),
 	})
 	if err != nil {
@@ -246,8 +256,9 @@ func runServe(ctx context.Context, s *store.Store) error {
 		}
 	}()
 
+	webhook := svc.GitHubWebhookDynamic(ghProvider.WebhookSecret)
 	routes := http.NewServeMux()
-	routes.Handle("/api/webhooks/github", svc.GitHubWebhookDynamic(ghProvider.WebhookSecret))
+	routes.Handle("/api/webhooks/github", webhook)
 	// MCP authenticates with a bearer token only; it never uses the console
 	// session (ADR section 12).
 	routes.Handle("/mcp", mcp.NewHandler(s, mcp.Options{Logger: slog.Default()}))
@@ -268,12 +279,49 @@ func runServe(ctx context.Context, s *store.Store) error {
 		defer cancel()
 		_ = server.Shutdown(c)
 	}()
+	// The tunnel forwards only this listener, so the console and /mcp stay off
+	// the public internet.
+	webhookServer := &http.Server{Addr: env("WEBHOOK_LISTEN_ADDRESS", ":8081"), Handler: metrics.HTTP(webhookRoutes(webhook)), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
+	go func() {
+		<-ctx.Done()
+		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = webhookServer.Shutdown(c)
+	}()
+	webhookErr := make(chan error, 1)
+	go func() {
+		slog.Info("webhook listening", "address", webhookServer.Addr)
+		if err := webhookServer.ListenAndServe(); err != http.ErrServerClosed {
+			webhookErr <- fmt.Errorf("webhook listener: %w", err)
+		}
+	}()
 	slog.Info("console listening", "address", server.Addr)
-	err = server.ListenAndServe()
+	errs := make(chan error, 1)
+	go func() { errs <- server.ListenAndServe() }()
+	select {
+	case err = <-errs:
+	case err = <-webhookErr:
+		_ = server.Close()
+	}
 	if err == http.ErrServerClosed {
 		return nil
 	}
 	return err
+}
+
+// webhookRoutes is the only surface reachable through the public tunnel:
+// GitHub webhooks and a health check. Every other path is a 404.
+func webhookRoutes(webhook http.Handler) http.Handler {
+	routes := http.NewServeMux()
+	routes.Handle("/api/webhooks/github", webhook)
+	routes.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	})
+	return routes
 }
 
 // listenAddress keeps LISTEN_ADDRESS for container deployments and accepts the
