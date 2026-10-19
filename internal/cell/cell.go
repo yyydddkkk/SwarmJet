@@ -24,10 +24,18 @@ type Spec struct {
 	MCPToken   string            // Agent-scoped token for MCPURL
 
 	// Round 4. Revision, when set, is the commit the workspace checks out
-	// detached; Branch then only names the local branch. ReadOnly marks a
-	// verifier Cell: nothing in it is ever published.
+	// detached; Branch then only names the local branch. ReadOnly means the
+	// role may not publish: the Publisher refuses the Spec.
 	Revision string
 	ReadOnly bool
+	// ConfigFiles are written read-only under the CLI's configuration
+	// directory, outside the workspace, so they are never committed. They
+	// carry the methodology and the platform's CLI settings overlay.
+	ConfigFiles map[string]string
+	// LLMBaseURL and LLMToken point the CLI at the platform's model proxy.
+	// The Cell never receives a provider credential.
+	LLMBaseURL string
+	LLMToken   string
 }
 
 // UpdateKind classifies streamed output of a turn.
