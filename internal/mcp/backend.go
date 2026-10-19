@@ -85,6 +85,9 @@ type Options struct {
 	SessionTimeout time.Duration
 	// Now is injectable for tests. Nil means time.Now.
 	Now func() time.Time
+	// Credentials writes model-provider credentials into the omp auth broker.
+	// nil makes set_model_credential report that it is not configured.
+	Credentials CredentialWriter
 }
 
 // withDefaults returns a copy of o with zero fields filled in.

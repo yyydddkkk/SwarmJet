@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
+	"github.com/yyydddkkk/SwarmJet/internal/llmproxy"
 	"github.com/yyydddkkk/SwarmJet/internal/onboarding"
 	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
@@ -51,6 +52,11 @@ type Config struct {
 	CLILoginReason string
 	// MCPURL is the endpoint embedded in generated local Agent configurations.
 	MCPURL string
+	// Models is the auth-broker/gateway client used by the credential and
+	// model endpoints. nil means the services are not part of this deployment.
+	Models *llmproxy.BrokerClient
+	// DefaultModel is the Hive's default provider/model selector.
+	DefaultModel string
 }
 
 type server struct {
@@ -111,6 +117,14 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 	// session may use the Hive and Forager endpoints.
 	if r.URL.Path == "/api/setup/status" || strings.HasPrefix(r.URL.Path, "/api/setup/github/") {
 		a.setup(w, r)
+		return
+	}
+	if r.URL.Path == "/api/models" || strings.HasPrefix(r.URL.Path, "/api/models/credentials/") {
+		a.models(w, r)
+		return
+	}
+	if r.URL.Path == "/api/usage" {
+		a.usage(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/runtime/") {

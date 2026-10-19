@@ -96,7 +96,7 @@ func (ts *toolset) authorize(tool string) error {
 		return nil
 	case domain.TokenDefault:
 		switch tool {
-		case "create_hive", "update_hive":
+		case "create_hive", "update_hive", "set_model_credential":
 			return fmt.Errorf("permission denied: %s requires an admin-scoped token (this token is %q)", tool, ts.token.Scope)
 		default:
 			return nil

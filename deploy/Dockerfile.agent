@@ -9,6 +9,9 @@ ARG CLAUDE_VERSION=2.1.278
 ARG DSH_VERSION=0.1.6-alpha.2
 ARG DST_VERSION=0.10.2
 ARG AGENT_CLIS=opencode
+# Shared by the Cell CLI and the auth broker/gateway services in
+# compose.cells.yaml, so all three run the exact same omp build.
+ARG OMP_VERSION=18.12.2
 ARG GLAB_VERSION=1.115.0
 ARG UV_VERSION=0.8.22
 ARG PNPM_VERSION=10.17.1
@@ -23,6 +26,10 @@ RUN apt-get update \
 RUN pip3 install --no-cache-dir --break-system-packages --index-url "${PYPI_INDEX}" "uv==${UV_VERSION}" \
  && npm install --global --registry "${NPM_REGISTRY}" "pnpm@${PNPM_VERSION}" \
  && uv --version && pnpm --version
+# Prebuilt omp binary, pinned and checksum-verified by the upstream installer.
+# Broker and gateway run from this same image (see compose.cells.yaml).
+RUN curl -fsSL https://omp.sh/install | PI_INSTALL_DIR=/usr/local/bin sh -s -- --binary --ref "v${OMP_VERSION}" \
+ && omp --version
 RUN set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     archive="glab_${GLAB_VERSION}_linux_${arch}.tar.gz"; \

@@ -17,7 +17,7 @@ import (
 var allToolNames = []string{
 	"list_hives", "get_hive", "create_hive", "update_hive", "send", "wait",
 	"spawn_forager", "cancel_forager", "get_forager", "read_forager_detail",
-	"update_handoff", "inbox", "claim", "offline_digest",
+	"update_handoff", "inbox", "claim", "offline_digest", "set_model_credential",
 }
 
 func allTools() map[string]bool {

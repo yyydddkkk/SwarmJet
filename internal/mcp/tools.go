@@ -109,6 +109,11 @@ func (ts *toolset) register(s *mcpsdk.Server) {
 		Description: "Summarize what happened since the given cursor: messages addressed to this token, plus Foragers whose state changed, and a new cursor to pass next time. Omit the cursor on first call. Read-only.",
 		Annotations: ro(),
 	}, ts.offlineDigest)
+
+	addTool(ts, s, &mcpsdk.Tool{
+		Name:        "set_model_credential",
+		Description: "Store a model provider API key (for example deepseek) in the platform's auth broker. Requires an admin-scoped token. The broker holds the key; the platform stores no plaintext and returns only a masked value. Model requests from Cells go through the platform's /llm proxy.",
+	}, ts.setModelCredential)
 }
 
 // --- views -----------------------------------------------------------------

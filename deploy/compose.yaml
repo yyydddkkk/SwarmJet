@@ -27,6 +27,12 @@ x-app-environment: &app-environment
   # Optional OpenCode auth.json content; the CLI login terminal result wins
   # when it is available. Passed only to the Cell CLI process.
   OPENCODE_AUTH_CONTENT: ${OPENCODE_AUTH_CONTENT:-}
+  # Model boundary. compose.cells.yaml starts the auth broker/gateway and fills
+  # these in; the base stack leaves them empty (no /llm endpoint).
+  SWARMJET_DEFAULT_MODEL: ${SWARMJET_DEFAULT_MODEL:-deepseek/deepseek-chat}
+  SWARMJET_LLM_GATEWAY_URL: ${SWARMJET_LLM_GATEWAY_URL:-}
+  SWARMJET_AUTH_BROKER_URL: ${SWARMJET_AUTH_BROKER_URL:-}
+  SWARMJET_OMP_CONFIG_DIR: ${SWARMJET_OMP_CONFIG_DIR:-}
 
 x-app: &app
   image: ${IMAGE:-swarmjet:local}
