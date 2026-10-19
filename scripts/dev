@@ -1,8 +1,0 @@
-#!/bin/sh
-set -eu
-cd "$(dirname "$0")/.."
-mkdir -p .cache/dev
-go_binary=${GO_BINARY:-go}
-"$go_binary" build -o .cache/dev/devctl.next ./cmd/dev
-mv .cache/dev/devctl.next .cache/dev/devctl
-exec .cache/dev/devctl "$@"

@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/yyydddkkk/SwarmJet/internal/agentcli"
 	"io"
 	"net/http"
 	"os"
@@ -19,7 +20,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"github.com/yyydddkkk/SwarmJet/internal/agentcli"
 	"sync"
 	"time"
 )
@@ -81,18 +81,16 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	if r.Method != http.MethodGet && !(r.Method == http.MethodPost && (r.URL.Path == "/verify" || r.URL.Path == "/network-test" || r.URL.Path == "/runner-test")) {
+	if r.Method != http.MethodGet && !(r.Method == http.MethodPost && (r.URL.Path == "/verify" || r.URL.Path == "/runner-test")) {
 		w.Header().Set("Allow", "GET, POST")
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "不支持此请求方法"})
 		return
 	}
-	if s.initErr != nil && r.URL.Path != "/network-test" {
+	if s.initErr != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "运行环境尚未正确配置"})
 		return
 	}
 	switch r.URL.Path {
-	case "/network-test":
-		s.checkNetwork(w, r)
 	case "/status":
 		s.status(w, r)
 	case "/models":

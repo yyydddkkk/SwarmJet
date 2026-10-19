@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -32,14 +35,29 @@ import (
 
 // memoryQueue is the in-memory River stand-in. The test calls DeliverMessage
 // explicitly so it exercises the real store and the real MessageSink contract
-// without starting a queue worker.
+// without starting a queue worker. Webhook jobs are recorded so the test can
+// drive the same service entry the production queue worker uses.
 type memoryQueue struct {
-	mu  sync.Mutex
-	ids []string
+	mu       sync.Mutex
+	ids      []string
+	webhooks []jobs.Webhook
 }
 
-func (q *memoryQueue) InsertWebhook(context.Context, pgx.Tx, jobs.Webhook) error { return nil }
-func (q *memoryQueue) InsertCommand(context.Context, pgx.Tx, jobs.Command) error { return nil }
+func (q *memoryQueue) InsertWebhook(_ context.Context, _ pgx.Tx, job jobs.Webhook) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.webhooks = append(q.webhooks, job)
+	return nil
+}
+
+func (q *memoryQueue) takeWebhooks() []jobs.Webhook {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := append([]jobs.Webhook(nil), q.webhooks...)
+	q.webhooks = nil
+	return out
+}
+
 func (q *memoryQueue) InsertMessage(_ context.Context, _ pgx.Tx, job jobs.Message) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -419,21 +437,46 @@ func TestRound2Loop(t *testing.T) {
 		t.Fatalf("report target = %q, want local:%s", waited.Messages[0].To, adminToken.ID)
 	}
 
-	// d. A pull_request_review webhook for this PR goes through the real Router
-	// and starts a second turn on the same Forager.
+	// d. The pull_request_review webhook enters through the retained service
+	// entry: GitHub signature verification and queueing, then the same
+	// HandleWebhookJob the River worker calls. The real Router starts a second
+	// turn on the same Forager.
 	reviewPayload := []byte(`{
 		"action": "submitted",
 		"review": {"body": "Please also mention the review in the next turn.", "state": "commented", "user": {"login": "reviewer", "author_association": "OWNER"}, "html_url": "https://github.com/acme/round2-e2e/pull/77#pullrequestreview-1"},
 		"pull_request": {"number": 77, "title": "Round 2 e2e", "html_url": "https://github.com/acme/round2-e2e/pull/77", "head": {"ref": "` + spawned.Forager.Branch + `"}},
 		"repository": {"full_name": "acme/round2-e2e"}
 	}`)
-	svc := &service.Service{Store: s}
-	if err := svc.HandleWebhookJob(ctx, jobs.Webhook{
-		Provider:   "github",
-		DeliveryID: "round2-review-1",
-		EventType:  "pull_request_review",
-		Payload:    reviewPayload,
-	}); err != nil {
+	const webhookSecret = "round2-test-webhook-secret"
+	svc := &service.Service{Store: s, Webhooks: s}
+	webhookServer := httptest.NewServer(svc.GitHubWebhook(webhookSecret))
+	t.Cleanup(webhookServer.Close)
+	mac := hmac.New(sha256.New, []byte(webhookSecret))
+	_, _ = mac.Write(reviewPayload)
+	webhookReq, err := http.NewRequest(http.MethodPost, webhookServer.URL, bytes.NewReader(reviewPayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	webhookReq.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	webhookReq.Header.Set("X-GitHub-Delivery", "round2-review-1")
+	webhookReq.Header.Set("X-GitHub-Event", "pull_request_review")
+	resp, err := http.DefaultClient.Do(webhookReq)
+	if err != nil {
+		t.Fatalf("post review webhook: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("review webhook status = %d, want 202", resp.StatusCode)
+	}
+	queued := s.Jobs.(*memoryQueue).takeWebhooks()
+	if len(queued) != 1 {
+		t.Fatalf("queued %d webhook jobs, want 1", len(queued))
+	}
+	if queued[0].EventType != "pull_request_review" || queued[0].DeliveryID != "round2-review-1" {
+		t.Fatalf("queued webhook = %+v", queued[0])
+	}
+	if err := svc.HandleWebhookJob(ctx, queued[0]); err != nil {
 		t.Fatalf("route review webhook: %v", err)
 	}
 	deliverPending(t, s, hiveID, domain.ForagerAddress(foragerID))

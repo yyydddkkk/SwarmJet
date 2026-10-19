@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -13,35 +14,31 @@ import (
 )
 
 // routeHiveDelivery sends a GitHub delivery through the deterministic Router
-// when its repository belongs to a Hive. routed=false means no Hive owns the
-// repository, so the caller must keep using the legacy issue scanner.
-//
-// Once a repository belongs to a Hive the legacy scanner never sees it: an
-// event the Router does not model is ignored, not rescanned.
-func (s *Service) routeHiveDelivery(ctx context.Context, job jobs.Webhook) (router.Decision, bool, error) {
+// when its repository belongs to a Hive. A repository that no Hive owns is
+// ignored with a log line: the legacy issue scanner is gone.
+func (s *Service) routeHiveDelivery(ctx context.Context, job jobs.Webhook) (router.Decision, error) {
 	if job.Provider != "github" || s.Store == nil {
-		return router.Decision{}, false, nil
+		return router.Decision{Action: router.ActionIgnored, Reason: "unsupported provider"}, nil
 	}
 	repository := githubRepositoryFullName(job.Payload)
 	if repository == "" {
-		return router.Decision{}, false, nil
+		return router.Decision{Action: router.ActionIgnored, Reason: "event has no repository"}, nil
 	}
 	if _, err := s.Store.HiveByRepository(ctx, repository); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return router.Decision{Action: router.ActionIgnored, Repository: repository, Reason: "no Hive for repository"}, false, nil
+			return router.Decision{Action: router.ActionIgnored, Repository: repository, Reason: "no Hive for repository"}, nil
 		}
-		return router.Decision{}, true, err
+		return router.Decision{Repository: repository}, err
 	}
 	r := s.hiveRouter()
 	if r == nil {
-		return router.Decision{}, false, nil
+		return router.Decision{Action: router.ActionIgnored, Repository: repository, Reason: "router unavailable"}, nil
 	}
 	event, ok := router.NormalizeDelivery(job.EventType, job.DeliveryID, job.Payload)
 	if !ok {
-		return router.Decision{Action: router.ActionIgnored, Repository: repository, Reason: "unsupported or irrelevant GitHub event"}, true, nil
+		return router.Decision{Action: router.ActionIgnored, Repository: repository, Reason: "unsupported or irrelevant GitHub event"}, nil
 	}
-	decision, err := r.Route(ctx, event)
-	return decision, true, err
+	return r.Route(ctx, event)
 }
 
 // hiveRouter lazily resolves the Router exactly once. Every read goes through
@@ -74,6 +71,17 @@ func githubRepositoryFullName(payload []byte) string {
 	return strings.TrimSpace(event.Repository.FullName)
 }
 
+// HandleWebhookJob routes one queued delivery. Malformed deliveries are
+// cancelled; everything else is acknowledged or retried by the queue.
+func (s *Service) HandleWebhookJob(ctx context.Context, job jobs.Webhook) error {
+	if job.Provider != "github" || job.DeliveryID == "" || len(job.DeliveryID) > 200 {
+		return fmt.Errorf("%w: %w", jobs.ErrCancel, ErrInvalidWebhookDelivery)
+	}
+	decision, err := s.routeHiveDelivery(ctx, job)
+	logHiveDelivery(job, decision, err)
+	return err
+}
+
 // logHiveDelivery records the Router's decision as structured fields, so a
 // delivery can be traced from GitHub to the Inbox message it produced.
 func logHiveDelivery(job jobs.Webhook, decision router.Decision, err error) {
@@ -93,6 +101,10 @@ func logHiveDelivery(job jobs.Webhook, decision router.Decision, err error) {
 	}
 	if err != nil {
 		slog.Warn("hive event routing failed", append(attrs, "error", err)...)
+		return
+	}
+	if decision.Action == router.ActionIgnored {
+		slog.Info("hive event ignored", attrs...)
 		return
 	}
 	slog.Info("hive event routed", attrs...)
