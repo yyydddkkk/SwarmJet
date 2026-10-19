@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -32,8 +33,16 @@ var schemaUpgrade4 string
 
 //go:embed schema_upgrade_5.sql
 var schemaUpgrade5 string
+
+//go:embed schema_upgrade_6.sql
+var schemaUpgrade6 string
 var ErrConflict = errors.New("conflict: stale version or active task already exists")
 var ErrNotFound = errors.New("not found")
+
+// ErrMessageQueueUnavailable is returned when a message is written but the
+// Store has no delivery queue configured. The transaction rolls back, so the
+// message can never be silently stranded in pending.
+var ErrMessageQueueUnavailable = errors.New("store: message delivery queue unavailable")
 
 // imageGuardLock once guarded Agent image deletion. Project, task, admission and
 // environment writes still take it, so dropping it is a separate concurrency change.
@@ -61,6 +70,10 @@ type Store struct {
 	// wakes waiters; the Cell runtime installs a sink here next round. A nil
 	// sink leaves delivery at the database boundary.
 	MessageSink func(context.Context, domain.Message) error
+
+	// listener guards the single shared LISTEN connection used by WaitInbox.
+	listenerMu sync.Mutex
+	listener   *inboxListener
 }
 
 func (s *Store) HasSource(ctx context.Context, base string, issue domain.Issue) (bool, error) {
@@ -117,7 +130,15 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 	}
 	return &Store{Pool: p}, nil
 }
-func (s *Store) Close() { s.Pool.Close() }
+func (s *Store) Close() {
+	s.listenerMu.Lock()
+	listener := s.listener
+	s.listenerMu.Unlock()
+	if listener != nil {
+		listener.stop()
+	}
+	s.Pool.Close()
+}
 func (s *Store) Migrate(ctx context.Context) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -134,7 +155,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err = tx.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil {
 		return err
 	}
-	if version > 5 {
+	if version > 6 {
 		return fmt.Errorf("database schema version %d is newer than this application supports", version)
 	}
 	if version < 2 {
@@ -166,6 +187,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO schema_version(version) VALUES(5) ON CONFLICT DO NOTHING`); err != nil {
+			return err
+		}
+	}
+	if version < 6 {
+		if _, err = tx.Exec(ctx, schemaUpgrade6); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO schema_version(version) VALUES(6) ON CONFLICT DO NOTHING`); err != nil {
 			return err
 		}
 	}

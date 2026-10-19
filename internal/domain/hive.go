@@ -89,6 +89,7 @@ type Agent struct {
 	PRNumber    int64      `json:"prNumber,omitempty"`
 	NodeID      string     `json:"nodeId,omitempty"`
 	ChainID     string     `json:"chainId,omitempty"`
+	SessionRef  string     `json:"sessionRef,omitempty"` // CLI session to resume; empty starts a new one
 	Handoff     *Handoff   `json:"handoff,omitempty"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
@@ -159,11 +160,13 @@ type TokenScope string
 const (
 	TokenDefault TokenScope = "default" // spawn and view
 	TokenAdmin   TokenScope = "admin"   // also configure Hives and credentials
+	TokenAgent   TokenScope = "agent"   // minted for one Agent; acts as that Agent's address
 )
 
 type Token struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
 	Scope     TokenScope `json:"scope"`
+	AgentID   string     `json:"agentId,omitempty"` // set only for TokenAgent
 	CreatedAt time.Time  `json:"createdAt"`
 }

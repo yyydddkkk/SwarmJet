@@ -6,12 +6,38 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 )
+
+// memoryJobs is the in-memory delivery queue used by tests instead of the
+// real River client. SendMessage fails loudly when no queue is installed; this
+// keeps database tests exercising the same contract as production.
+type memoryJobs struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (m *memoryJobs) InsertWebhook(context.Context, pgx.Tx, jobs.Webhook) error { return nil }
+func (m *memoryJobs) InsertCommand(context.Context, pgx.Tx, jobs.Command) error { return nil }
+func (m *memoryJobs) InsertMessage(_ context.Context, _ pgx.Tx, job jobs.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.messages = append(m.messages, job.ID)
+	return nil
+}
+
+func (m *memoryJobs) delivered() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.messages...)
+}
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
@@ -39,7 +65,7 @@ func testStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Store{Pool: pool}
+	s := &Store{Pool: pool, Jobs: &memoryJobs{}}
 	t.Cleanup(func() {
 		s.Close()
 		_, err := admin.Pool.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
