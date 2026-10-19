@@ -212,6 +212,11 @@ func (a *server) authorizeRoute(w http.ResponseWriter, r *http.Request) bool {
 	if path == "tasks" {
 		return true // Query and create paths resolve their project in the handler.
 	}
+	// Hive/Forager management is platform-admin only this round. Per-Hive roles
+	// will replace this gate when Hive membership exists.
+	if path == "hives" || strings.HasPrefix(path, "hives/") || strings.HasPrefix(path, "foragers/") {
+		return a.requirePlatformAdmin(w, r)
+	}
 	if path == "gitlab-identities" {
 		return true // Identity handlers use the authenticated principal.
 	}

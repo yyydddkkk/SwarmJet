@@ -1,6 +1,6 @@
 // Entry point for the "honey garden" console. Mounted only for #/hives (and the
-// #/icons reference page) — see web/src/main.tsx — and fed by the fake fixtures,
-// so it never touches the existing pages or the API.
+// #/icons reference page) — see web/src/main.tsx. The pages read and write the
+// Hive REST endpoints; fixtures are now used by Playwright only.
 import { useEffect, useState } from "react";
 import HivesPage from "./HivesPage";
 import HivePage from "./HivePage";
@@ -104,7 +104,7 @@ export default function HiveConsoleApp() {
           </a>
         </nav>
         <p className="hg-topbar-note">
-          假数据预览 · <a href="#/icons">图标规范</a>
+          平台实时数据 · <a href="#/icons">图标规范</a>
         </p>
       </header>
 

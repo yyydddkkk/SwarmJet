@@ -205,6 +205,46 @@ export function EmptyState({
   );
 }
 
+/** Readable failure surface for a failed read or write. */
+export function ErrorNotice({
+  message,
+  onRetry,
+  auth = false,
+  admin = false,
+}: {
+  message: string;
+  onRetry?: () => void;
+  auth?: boolean;
+  admin?: boolean;
+}) {
+  return (
+    <div className="hg-error" role="alert">
+      <div className="hg-error-text">
+        <strong>{admin ? "需要平台管理员权限。" : "请求没有成功。"}</strong>
+        <p>{message}</p>
+      </div>
+      <div className="hg-error-actions">
+        {auth ? (
+          <a className="hg-btn" href="/">
+            去登录
+          </a>
+        ) : null}
+        {admin ? (
+          <a className="hg-btn" href="/">
+            返回主控制台
+          </a>
+        ) : null}
+        {onRetry ? (
+          <button className="hg-btn" type="button" onClick={onRetry}>
+            <Icon name="refresh" size={16} />
+            重试
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Pixel loader: the 32-grid bee in two wing positions, flipped by CSS `steps()`
  * with a 2px bob on top. `prefers-reduced-motion` parks it on the first frame.
