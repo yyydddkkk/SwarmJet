@@ -20,7 +20,7 @@ import (
 
 const hiveColumns = `id,name,repository,queen_enabled,config,version,created_at,updated_at`
 
-const agentColumns = `id,hive_id,role,state,preset,cli,task,branch,issue_number,pr_number,node_id,chain_id,handoff,created_at,updated_at`
+const agentColumns = `id,hive_id,role,state,preset,cli,task,branch,issue_number,pr_number,node_id,chain_id,cli_session_ref,handoff,created_at,updated_at`
 
 // newOpaqueID returns 128 random bits as hex. It is used for Hive, Agent and
 // Token identifiers. Message IDs use newMessageID instead so that they sort in
@@ -203,7 +203,7 @@ func scanAgent(row pgx.Row) (domain.Agent, error) {
 	var role, state string
 	var handoff []byte
 	err := row.Scan(&a.ID, &a.HiveID, &role, &state, &a.Preset, &a.CLI, &a.Task, &a.Branch,
-		&a.IssueNumber, &a.PRNumber, &a.NodeID, &a.ChainID, &handoff, &a.CreatedAt, &a.UpdatedAt)
+		&a.IssueNumber, &a.PRNumber, &a.NodeID, &a.ChainID, &a.SessionRef, &handoff, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return domain.Agent{}, domainErr(err)
 	}
@@ -283,9 +283,9 @@ func (s *Store) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent
 			return domain.Agent{}, err
 		}
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO agents(`+agentColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+	if _, err = tx.Exec(ctx, `INSERT INTO agents(`+agentColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		a.ID, a.HiveID, string(a.Role), string(a.State), a.Preset, a.CLI, a.Task, a.Branch,
-		a.IssueNumber, a.PRNumber, a.NodeID, a.ChainID, handoff, a.CreatedAt, a.UpdatedAt); err != nil {
+		a.IssueNumber, a.PRNumber, a.NodeID, a.ChainID, a.SessionRef, handoff, a.CreatedAt, a.UpdatedAt); err != nil {
 		return domain.Agent{}, domainErr(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -373,6 +373,31 @@ func (s *Store) UpdateHandoff(ctx context.Context, id string, h domain.Handoff) 
 		return err
 	}
 	tag, err := s.Pool.Exec(ctx, `UPDATE agents SET handoff=$2,updated_at=now() WHERE id=$1`, id, body)
+	if err != nil {
+		return domainErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// SetAgentSession persists the CLI session ID so the next Start can resume it.
+// An empty sessionRef clears the saved session.
+func (s *Store) SetAgentSession(ctx context.Context, id, sessionRef string) error {
+	tag, err := s.Pool.Exec(ctx, `UPDATE agents SET cli_session_ref=$2,updated_at=now() WHERE id=$1`, id, sessionRef)
+	if err != nil {
+		return domainErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// SetAgentPR records the pull request a Forager published.
+func (s *Store) SetAgentPR(ctx context.Context, id string, pr int64) error {
+	tag, err := s.Pool.Exec(ctx, `UPDATE agents SET pr_number=$2,updated_at=now() WHERE id=$1`, id, pr)
 	if err != nil {
 		return domainErr(err)
 	}

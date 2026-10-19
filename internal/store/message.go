@@ -109,6 +109,13 @@ func (s *Store) SendMessage(ctx context.Context, m domain.Message) (domain.Messa
 		return domain.Message{}, err
 	}
 	defer tx.Rollback(ctx)
+	// seq is assigned at INSERT time but Inbox readers walk it by commit order.
+	// Serializing inserts per Hive makes the two orders identical: a reader can
+	// never observe a later seq and then skip a concurrent transaction that
+	// committed an earlier one. The lock is released with this transaction.
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "inbox:"+m.HiveID); err != nil {
+		return domain.Message{}, err
+	}
 	tag, err := tx.Exec(ctx, `INSERT INTO messages(`+messageColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(id) DO NOTHING`,
 		m.ID, m.HiveID, string(m.From), string(m.To), string(m.Kind), m.ChainID, m.Hop, m.Body, artifacts, string(m.State), m.CreatedAt)
 	if err != nil {
@@ -147,10 +154,11 @@ type messageInserter interface {
 }
 
 func (s *Store) insertMessageJob(ctx context.Context, tx pgx.Tx, id string) error {
-	if inserter, ok := s.Jobs.(messageInserter); ok && inserter != nil {
-		return inserter.InsertMessage(ctx, tx, jobs.Message{ID: id})
+	inserter, ok := s.Jobs.(messageInserter)
+	if !ok || inserter == nil {
+		return ErrMessageQueueUnavailable
 	}
-	return nil
+	return inserter.InsertMessage(ctx, tx, jobs.Message{ID: id})
 }
 
 // messageSeqForID resolves an Inbox cursor to the message's insertion
@@ -184,6 +192,31 @@ func (s *Store) Inbox(ctx context.Context, hiveID string, to domain.Address, aft
 	query += fmt.Sprintf(` ORDER BY seq ASC LIMIT $%d`, len(args)+1)
 	args = append(args, limit)
 	rows, err := s.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var messages []domain.Message
+	for rows.Next() {
+		m, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, m)
+	}
+	return messages, rows.Err()
+}
+
+// Unhandled returns the messages waiting for one address: pending or delivered,
+// in insertion order. Handled messages are omitted so a resumed Agent never
+// replays finished work.
+func (s *Store) Unhandled(ctx context.Context, hiveID string, to domain.Address, limit int) ([]domain.Message, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT `+messageColumns+` FROM messages
+		WHERE hive_id=$1 AND to_addr=$2 AND state IN ('pending','delivered')
+		ORDER BY seq ASC LIMIT $3`, hiveID, string(to), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -254,9 +287,12 @@ func (s *Store) MarkMessageHandled(ctx context.Context, id string) error {
 
 // WaitInbox blocks until a message newer than afterID exists for the address or
 // ctx ends. It compares insertion sequence, so a caller-supplied cursor works;
-// a cursor that does not exist returns domain.ErrNotFound. It listens before
-// re-checking, which closes the race where the message commits between the
-// first check and LISTEN.
+// a cursor that does not exist returns domain.ErrNotFound.
+//
+// Waiters share one Store-wide LISTEN connection instead of each holding a pool
+// connection. The listener wakes the matching (Hive, address) waiters; every
+// waiter also re-checks periodically, so a missed notification during a
+// reconnect only delays the wake instead of losing it.
 func (s *Store) WaitInbox(ctx context.Context, hiveID string, to domain.Address, afterID string) error {
 	exists, err := s.inboxHasAfter(ctx, hiveID, to, afterID)
 	if err != nil {
@@ -268,23 +304,28 @@ func (s *Store) WaitInbox(ctx context.Context, hiveID string, to domain.Address,
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	conn, err := s.Pool.Acquire(ctx)
-	if err != nil {
+	listener := s.inboxListener()
+	if err = listener.waitReady(ctx); err != nil {
 		return err
 	}
-	defer conn.Release()
-	if _, err = conn.Exec(ctx, "LISTEN "+inboxChannel); err != nil {
-		return err
-	}
-	defer func() { _, _ = conn.Exec(context.Background(), "UNLISTEN "+inboxChannel) }()
+	waiter := &inboxWaiter{hiveID: hiveID, to: to, wake: make(chan struct{}, 1)}
+	listener.add(waiter)
+	defer listener.remove(waiter)
+	// The shared listener is active before the waiter is registered, so a
+	// message committed after this re-check must produce a notification.
 	if exists, err = s.inboxHasAfter(ctx, hiveID, to, afterID); err != nil {
 		return err
 	} else if exists {
 		return nil
 	}
+	ticker := time.NewTicker(inboxRecheckInterval)
+	defer ticker.Stop()
 	for {
-		if _, err = conn.Conn().WaitForNotification(ctx); err != nil {
-			return err
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-waiter.wake:
+		case <-ticker.C:
 		}
 		exists, err = s.inboxHasAfter(ctx, hiveID, to, afterID)
 		if err != nil {
