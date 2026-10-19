@@ -330,8 +330,15 @@ func TestQueenScopeTools(t *testing.T) {
 			t.Fatalf("cross-hive detail: isError=%v text=%q", res.IsError, toolErrorText(res))
 		}
 		cancelled := decode[cancelForagerOutput](t, callTool(t, session, "cancel_forager", map[string]any{"agentId": env.peer.ID}))
-		if cancelled.Forager.State != string(domain.AgentCancelled) {
-			t.Fatalf("cancel_forager = %+v", cancelled.Forager)
+		if cancelled.Message.Kind != string(domain.MessageControl) || cancelled.Message.Body != "cancel" {
+			t.Fatalf("cancel message = %+v", cancelled.Message)
+		}
+		if cancelled.Message.From != string(domain.AddressQueen) ||
+			cancelled.Message.To != string(domain.ForagerAddress(env.peer.ID)) {
+			t.Fatalf("cancel message addresses = %+v", cancelled.Message)
+		}
+		if cancelled.Forager.State == string(domain.AgentCancelled) {
+			t.Fatalf("cancel_forager changed the state directly: %+v", cancelled.Forager)
 		}
 		res = callTool(t, session, "cancel_forager", map[string]any{"agentId": env.otherForager.ID})
 		if !res.IsError || !strings.Contains(toolErrorText(res), "can only access Hive") {
@@ -371,6 +378,65 @@ func TestQueenScopeTools(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestCancelForagerSendsControlMessage(t *testing.T) {
+	env := newAgentScopeEnv(t)
+	ctx := context.Background()
+	cases := []struct {
+		name  string
+		token string
+		from  domain.Address
+	}{
+		{"default", env.userToken, domain.LocalAddress(env.user.ID)},
+		{"admin", env.adminToken, domain.LocalAddress(env.admin.ID)},
+		{"queen", env.queenToken, domain.AddressQueen},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			forager, err := env.backend.CreateForager(ctx, domain.Agent{HiveID: env.hive.ID, Task: "cancel me"})
+			if err != nil {
+				t.Fatalf("CreateForager: %v", err)
+			}
+			session := env.connect(tc.token)
+			out := decode[cancelForagerOutput](t, callTool(t, session, "cancel_forager", map[string]any{"agentId": forager.ID}))
+			if out.Message.Kind != string(domain.MessageControl) || out.Message.Body != "cancel" {
+				t.Fatalf("cancel message = %+v", out.Message)
+			}
+			if out.Message.From != string(tc.from) || out.Message.To != string(domain.ForagerAddress(forager.ID)) {
+				t.Fatalf("cancel message addresses = %+v", out.Message)
+			}
+			if out.Forager.State == string(domain.AgentCancelled) {
+				t.Fatalf("cancel_forager transitioned the state directly: %+v", out.Forager)
+			}
+			msgs, err := env.backend.Inbox(ctx, env.hive.ID, domain.ForagerAddress(forager.ID), "", 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			controls := 0
+			for _, m := range msgs {
+				if m.Kind != domain.MessageControl {
+					continue
+				}
+				controls++
+				if m.Body != "cancel" || m.From != tc.from {
+					t.Fatalf("control message = %+v", m)
+				}
+			}
+			if controls != 1 {
+				t.Fatalf("control messages = %d, want 1 (%+v)", controls, msgs)
+			}
+			// Once the supervisor has driven the Forager terminal, a second
+			// request is rejected instead of being queued.
+			if err := env.backend.TransitionAgent(ctx, forager.ID, domain.AgentCreating, domain.AgentCancelled); err != nil {
+				t.Fatal(err)
+			}
+			res := callTool(t, session, "cancel_forager", map[string]any{"agentId": forager.ID})
+			if !res.IsError || !strings.Contains(toolErrorText(res), "terminal") {
+				t.Fatalf("terminal cancel: isError=%v text=%q", res.IsError, toolErrorText(res))
+			}
+		})
+	}
 }
 
 func TestRequestIDMakesSpawnAndSendIdempotent(t *testing.T) {

@@ -2,9 +2,9 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
@@ -114,66 +114,24 @@ func TestGitHubWebhookHiveRepositorySkipsLegacyScanForUnmodelledEvent(t *testing
 	}
 }
 
-// routingBackend is a Router backend that also implements PRRecorder. The real
-// store gains SetAgentPR in the parallel data-layer task, so this fake keeps the
-// wiring test independent of that landing.
-type routingBackend struct {
-	hive     domain.Hive
-	forager  domain.Agent
-	messages []domain.Message
-}
-
-func (b *routingBackend) HiveByRepository(_ context.Context, repository string) (domain.Hive, error) {
-	if repository != b.hive.Repository {
-		return domain.Hive{}, domain.ErrNotFound
-	}
-	return b.hive, nil
-}
-
-func (b *routingBackend) ForagerByIssue(context.Context, string, int64) (domain.Agent, error) {
-	return domain.Agent{}, domain.ErrNotFound
-}
-
-func (b *routingBackend) ForagerByPR(context.Context, string, int64) (domain.Agent, error) {
-	return domain.Agent{}, domain.ErrNotFound
-}
-
-func (b *routingBackend) ForagerByBranch(_ context.Context, hiveID, branch string) (domain.Agent, error) {
-	if hiveID == b.forager.HiveID && branch == b.forager.Branch {
-		return b.forager, nil
-	}
-	return domain.Agent{}, domain.ErrNotFound
-}
-
-func (b *routingBackend) CreateForager(_ context.Context, a domain.Agent) (domain.Agent, error) {
-	return domain.Agent{}, errors.New("unexpected CreateForager")
-}
-
-func (b *routingBackend) SendMessage(_ context.Context, m domain.Message) (domain.Message, error) {
-	b.messages = append(b.messages, m)
-	return m, nil
-}
-
-func (b *routingBackend) SetAgentPR(_ context.Context, id string, pr int64) error {
-	if id != b.forager.ID {
-		return domain.ErrNotFound
-	}
-	b.forager.PRNumber = pr
-	return nil
-}
-
-func TestGitHubWebhookPRRecordsForagerPRNumber(t *testing.T) {
+func TestGitHubWebhookRecordsPRThroughStore(t *testing.T) {
 	s := webhookTestStore(t)
 	ctx := context.Background()
 	hive, err := s.CreateHive(ctx, domain.Hive{Name: "alpha", Repository: "acme/hive"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	backend := &routingBackend{
-		hive:    hive,
-		forager: domain.Agent{ID: "forager-1", HiveID: hive.ID, Role: domain.RoleForager, State: domain.AgentActive, Branch: "swarm/acme-hive/forager-1", ChainID: "chain-1"},
+	forager, err := s.CreateForager(ctx, domain.Agent{
+		HiveID:  hive.ID,
+		Role:    domain.RoleForager,
+		State:   domain.AgentActive,
+		Branch:  "swarm/acme-hive/forager-1",
+		ChainID: "chain-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateForager: %v", err)
 	}
-	svc := &Service{Store: s, HiveRouter: router.New(backend)}
+	svc := &Service{Store: s}
 	payload := []byte(`{
 		"action": "opened",
 		"number": 34,
@@ -185,13 +143,78 @@ func TestGitHubWebhookPRRecordsForagerPRNumber(t *testing.T) {
 	if err := svc.HandleWebhookJob(ctx, job); err != nil {
 		t.Fatalf("HandleWebhookJob: %v", err)
 	}
-	if backend.forager.PRNumber != 34 {
-		t.Fatalf("PRNumber = %d, want 34", backend.forager.PRNumber)
+	got, err := s.Agent(ctx, forager.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(backend.messages) != 1 || backend.messages[0].To != domain.ForagerAddress("forager-1") {
-		t.Fatalf("messages = %+v", backend.messages)
+	if got.PRNumber != 34 {
+		t.Fatalf("PRNumber = %d, want 34", got.PRNumber)
 	}
-	if backend.messages[0].Kind != domain.MessageEvent {
-		t.Fatalf("message kind = %q", backend.messages[0].Kind)
+	msgs, err := s.Inbox(ctx, hive.ID, domain.ForagerAddress(forager.ID), "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 || msgs[0].Kind != domain.MessageEvent {
+		t.Fatalf("forager inbox = %+v", msgs)
+	}
+	if !strings.Contains(msgs[0].Body, "pull_request.opened") {
+		t.Fatalf("message body = %q", msgs[0].Body)
+	}
+}
+
+// TestHiveRouterIsBuiltOnceConcurrently guards the sync.Once contract: the first
+// calls from many goroutines must all observe the same Router. -race is the real
+// assertion here.
+func TestHiveRouterIsBuiltOnceConcurrently(t *testing.T) {
+	svc := &Service{Store: &store.Store{}}
+	const workers = 64
+	routers := make([]*router.Router, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			routers[i] = svc.hiveRouter()
+		}(i)
+	}
+	wg.Wait()
+	if routers[0] == nil {
+		t.Fatal("hiveRouter returned nil")
+	}
+	for i, got := range routers {
+		if got != routers[0] {
+			t.Fatalf("worker %d observed a different Router", i)
+		}
+	}
+}
+
+func TestHiveRouterUsesInjectedRouter(t *testing.T) {
+	injected := router.New(router.NewMemoryBackend())
+	svc := &Service{Store: &store.Store{}, HiveRouter: injected}
+	const workers = 32
+	routers := make([]*router.Router, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			routers[i] = svc.hiveRouter()
+		}(i)
+	}
+	wg.Wait()
+	for i, got := range routers {
+		if got != injected {
+			t.Fatalf("worker %d did not observe the injected Router", i)
+		}
+	}
+}
+
+func TestHiveRouterWithoutStoreIsNil(t *testing.T) {
+	svc := &Service{}
+	if got := svc.hiveRouter(); got != nil {
+		t.Fatalf("hiveRouter = %v, want nil", got)
+	}
+	if got := svc.hiveRouter(); got != nil {
+		t.Fatalf("second hiveRouter = %v, want nil", got)
 	}
 }

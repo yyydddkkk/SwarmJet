@@ -44,16 +44,20 @@ func (s *Service) routeHiveDelivery(ctx context.Context, job jobs.Webhook) (rout
 	return decision, true, err
 }
 
-// hiveRouter lazily builds the Router over the Hive store. A test may inject one.
+// hiveRouter lazily resolves the Router exactly once. Every read goes through
+// the Once: the injected field is never touched outside it, and concurrent first
+// calls share the same built Router.
 func (s *Service) hiveRouter() *router.Router {
-	if s.HiveRouter != nil {
-		return s.HiveRouter
-	}
-	if s.Store == nil {
-		return nil
-	}
-	s.hiveRouterOnce.Do(func() { s.HiveRouter = router.New(s.Store) })
-	return s.HiveRouter
+	s.hiveRouterOnce.Do(func() {
+		if s.HiveRouter != nil {
+			s.hiveRoutes = s.HiveRouter
+			return
+		}
+		if s.Store != nil {
+			s.hiveRoutes = router.New(s.Store)
+		}
+	})
+	return s.hiveRoutes
 }
 
 // githubRepositoryFullName reads the owner/name a Hive is keyed by. GitHub puts

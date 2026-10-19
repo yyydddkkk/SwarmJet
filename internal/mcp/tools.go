@@ -73,7 +73,7 @@ func (ts *toolset) register(s *mcpsdk.Server) {
 
 	addTool(ts, s, &mcpsdk.Tool{
 		Name:        "cancel_forager",
-		Description: "Cancel a Forager that is not in a terminal state by moving it to `cancelled`.",
+		Description: "Request cancellation of a Forager that is not in a terminal state by sending a kind=control message with body `cancel` to its Inbox. The Forager supervisor interrupts the current turn, destroys the Cell and revokes its token. The state changes asynchronously, so the returned Forager still shows its previous state.",
 	}, ts.cancelForager)
 
 	addTool(ts, s, &mcpsdk.Tool{
@@ -648,7 +648,8 @@ type cancelForagerInput struct {
 }
 
 type cancelForagerOutput struct {
-	Forager agentView `json:"forager"`
+	Forager agentView   `json:"forager"`
+	Message messageView `json:"message"`
 }
 
 func (ts *toolset) cancelForager(ctx context.Context, _ *mcpsdk.CallToolRequest, in cancelForagerInput) (*mcpsdk.CallToolResult, cancelForagerOutput, error) {
@@ -668,11 +669,22 @@ func (ts *toolset) cancelForager(ctx context.Context, _ *mcpsdk.CallToolRequest,
 	if terminalAgentState(a.State) {
 		return nil, cancelForagerOutput{}, fmt.Errorf("forager %s is already in terminal state %s", a.ID, a.State)
 	}
-	if err := ts.backend.TransitionAgent(ctx, a.ID, a.State, domain.AgentCancelled); err != nil {
+	// Cancellation is a message, not a state write: the supervisor only scans
+	// non-terminal Foragers, so flipping the state here would hide the Forager
+	// and leave its Cell and token behind. The supervisor handles the control
+	// message by cancelling the turn, destroying the Cell and revoking the token.
+	msg, err := ts.backend.SendMessage(ctx, domain.Message{
+		HiveID:  a.HiveID,
+		From:    ts.actor.address(),
+		To:      domain.ForagerAddress(a.ID),
+		Kind:    domain.MessageControl,
+		ChainID: a.ChainID,
+		Body:    "cancel",
+	})
+	if err != nil {
 		return nil, cancelForagerOutput{}, err
 	}
-	a.State = domain.AgentCancelled
-	return nil, cancelForagerOutput{Forager: ts.viewAgent(a)}, nil
+	return nil, cancelForagerOutput{Forager: ts.viewAgent(a), Message: ts.viewMessage(msg)}, nil
 }
 
 type getForagerInput struct {

@@ -38,6 +38,7 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"github.com/yyydddkkk/SwarmJet/internal/pipeline"
 	"github.com/yyydddkkk/SwarmJet/internal/repochange"
+	"github.com/yyydddkkk/SwarmJet/internal/router"
 	"github.com/yyydddkkk/SwarmJet/internal/runtimeadmin"
 	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
 	"github.com/yyydddkkk/SwarmJet/internal/service"
@@ -53,8 +54,12 @@ var buildVersion = "dev"
 var buildCommit = "unknown"
 
 // The control plane serves MCP straight from the Hive store; there is no
-// in-memory backend in production.
-var _ mcp.Backend = (*store.Store)(nil)
+// in-memory backend in production. The Router may also link a Forager to the PR
+// it opened once the same store implements SetAgentPR.
+var (
+	_ mcp.Backend       = (*store.Store)(nil)
+	_ router.PRRecorder = (*store.Store)(nil)
+)
 
 func env(k, d string) string {
 	if v := os.Getenv(k); v != "" {

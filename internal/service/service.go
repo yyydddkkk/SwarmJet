@@ -57,10 +57,13 @@ type Service struct {
 	webhookScans       *scanCoalescer
 	scanGroupOnce      sync.Once
 
-	// HiveRouter sends GitHub events for Hive repositories through the
-	// deterministic Router. Nil builds one over Store on first use.
+	// HiveRouter optionally injects a Router (tests); it must be set before the
+	// Service starts handling deliveries. hiveRouter reads it only inside the
+	// Once and stores the result in hiveRoutes, so concurrent first calls race
+	// neither on the injected field nor on the built Router.
 	HiveRouter     *router.Router
 	hiveRouterOnce sync.Once
+	hiveRoutes     *router.Router
 }
 
 func (s *Service) intakeOptions(projectID string, claim bool) intake.Options {

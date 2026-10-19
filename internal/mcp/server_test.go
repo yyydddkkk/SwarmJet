@@ -436,12 +436,37 @@ func TestGetReadAndCancelForager(t *testing.T) {
 	cancelled := decode[cancelForagerOutput](t, callTool(t, session, "cancel_forager", map[string]any{
 		"agentId": spawned.Forager.ID,
 	}))
-	if cancelled.Forager.State != string(domain.AgentCancelled) {
-		t.Fatalf("cancel_forager = %+v", cancelled.Forager)
+	if cancelled.Message.Kind != string(domain.MessageControl) || cancelled.Message.Body != "cancel" {
+		t.Fatalf("cancel message = %+v", cancelled.Message)
+	}
+	if cancelled.Message.From != string(domain.LocalAddress(env.user.ID)) ||
+		cancelled.Message.To != string(domain.ForagerAddress(spawned.Forager.ID)) {
+		t.Fatalf("cancel message addresses = %+v", cancelled.Message)
+	}
+	if cancelled.Forager.State == string(domain.AgentCancelled) {
+		t.Fatalf("cancel_forager changed the state directly: %+v", cancelled.Forager)
+	}
+	inbox, err := env.backend.Inbox(context.Background(), h.ID, domain.ForagerAddress(spawned.Forager.ID), "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var control *domain.Message
+	for i := range inbox {
+		if inbox[i].Kind == domain.MessageControl {
+			control = &inbox[i]
+		}
+	}
+	if control == nil || control.Body != "cancel" || control.From != domain.LocalAddress(env.user.ID) {
+		t.Fatalf("forager inbox = %+v", inbox)
+	}
+
+	// A Forager that already reached a terminal state is rejected explicitly.
+	if err := env.backend.TransitionAgent(context.Background(), spawned.Forager.ID, domain.AgentCreating, domain.AgentCancelled); err != nil {
+		t.Fatal(err)
 	}
 	again := callTool(t, session, "cancel_forager", map[string]any{"agentId": spawned.Forager.ID})
 	if !again.IsError || !strings.Contains(toolErrorText(again), "terminal") {
-		t.Fatalf("second cancel: isError=%v text=%q", again.IsError, toolErrorText(again))
+		t.Fatalf("cancel of a terminal forager: isError=%v text=%q", again.IsError, toolErrorText(again))
 	}
 }
 
