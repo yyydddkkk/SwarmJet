@@ -16,6 +16,13 @@ x-app-environment: &app-environment
   GITHUB_APP_PRIVATE_KEY_FILE: ${GITHUB_APP_PRIVATE_KEY_FILE:-}
   # Must be identical for api (seals tokens) and worker (decrypts them).
   SWARMJET_MASTER_KEY: ${SWARMJET_MASTER_KEY:-}
+  # Round-2 Cells. This base file never mounts the Docker socket; enabling
+  # Cells requires the compose.cells.yaml overlay, which also sets this to 1.
+  SWARMJET_CELLS: ${SWARMJET_CELLS:-0}
+  SWARMJET_FORAGER_MODEL: ${SWARMJET_FORAGER_MODEL:-opencode/big-pickle}
+  SWARMJET_CELL_MCP_URL: ${SWARMJET_CELL_MCP_URL:-http://swarmjet:8080/mcp}
+  # Optional OpenCode auth.json content; passed only to the Cell CLI process.
+  OPENCODE_AUTH_CONTENT: ${OPENCODE_AUTH_CONTENT:-}
 x-app: &app
   image: ${IMAGE:-swarmjet:local}
   restart: unless-stopped

@@ -42,7 +42,7 @@ class InstallTests(unittest.TestCase):
             installer.initialize(path, HERE / ".env.example", "/srv/test", "opencode")
             self.assertEqual(path.read_text(), "POSTGRES_PASSWORD=existing\n")
 
-    def exercise(self, fail_build=False):
+    def exercise(self, fail_build=False, cells=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".env.example").write_bytes((HERE / ".env.example").read_bytes())
@@ -63,11 +63,14 @@ class InstallTests(unittest.TestCase):
                     raise subprocess.CalledProcessError(1, argv)
                 return subprocess.CompletedProcess(argv, 0, output)
 
+            argv = ["install.py", "--data-dir", str(root / "data")]
+            if cells:
+                argv.append("--cells")
             with patch.object(installer, "__file__", str(root / "install.py")), \
                  patch.object(installer.shutil, "which", return_value="/usr/bin/docker"), \
                  patch.object(installer.subprocess, "run", side_effect=run), \
                  patch.dict(installer.os.environ, {"DOCKER_HOST": "unix:///var/run/docker.sock"}), \
-                 patch("sys.argv", ["install.py", "--data-dir", str(root / "data")]), \
+                 patch("sys.argv", argv), \
                  contextlib.redirect_stdout(io.StringIO()):
                 if fail_build:
                     with self.assertRaises(subprocess.CalledProcessError):
@@ -81,6 +84,10 @@ class InstallTests(unittest.TestCase):
                     self.assertEqual(calls[-2][-2:], ["swarmjet", "doctor"])
                     self.assertIn(str(root / "compose.override.yaml"), calls[-1])
                     self.assertIn("compose.local-node.yaml", calls[-1])
+                    if cells:
+                        self.assertIn("compose.cells.yaml", calls[-1])
+                    else:
+                        self.assertNotIn("compose.cells.yaml", calls[-1])
                 self.assertFalse(any("down" in call for call in calls))
 
     def test_start_and_health_check(self):
@@ -88,6 +95,9 @@ class InstallTests(unittest.TestCase):
 
     def test_build_failure_does_not_start_services(self):
         self.exercise(fail_build=True)
+
+    def test_cells_overlay_is_opt_in(self):
+        self.exercise(cells=True)
 
 
 if __name__ == "__main__":

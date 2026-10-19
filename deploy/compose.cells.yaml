@@ -1,0 +1,24 @@
+# Overlay for running Forager Cells inside the serve process.
+#
+#   docker compose -f deploy/compose.yaml -f deploy/compose.cells.yaml up -d
+#
+# This mounts the host Docker socket into serve. That is root-equivalent on the
+# host, so only add this file on a server whose administrators are trusted.
+services:
+  api:
+    environment:
+      SWARMJET_CELLS: '1'
+      # The cell must join the same network as serve to reach its /mcp.
+      SWARMJET_CELL_NETWORK: ${SWARMJET_CELL_NETWORK:-${COMPOSE_PROJECT_NAME:-swarmjet}_default}
+    networks:
+      default:
+        aliases:
+          - swarmjet
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same absolute path as the host and writable: Cell workspaces live below
+      # DATA_DIR. Compose merges this entry with the base one by target, so the
+      # final service has one DATA_DIR mount and it is writable.
+      - type: bind
+        source: ${DATA_DIR:?Set absolute DATA_DIR}
+        target: ${DATA_DIR:?Set absolute DATA_DIR}

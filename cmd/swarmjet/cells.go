@@ -1,0 +1,234 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/yyydddkkk/SwarmJet/internal/cell"
+	"github.com/yyydddkkk/SwarmJet/internal/cell/docker"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/forager"
+	"github.com/yyydddkkk/SwarmJet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/github"
+	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
+)
+
+const (
+	defaultCellMCPURL = "http://swarmjet:8080/mcp"
+	// tokenRefreshMargin leaves room for a clone or push that starts just
+	// before the installation token expires.
+	tokenRefreshMargin = time.Minute
+)
+
+// cellStack owns the Forager supervisor and the Cell runtime in the serve
+// process. The supervisor must share the process with the River delivery jobs:
+// store.MessageSink hands a delivered message straight to it.
+type cellStack struct {
+	Supervisor *forager.Supervisor
+	Runtime    *docker.Runtime
+	Publisher  *docker.Publisher
+
+	logger *slog.Logger
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// newCellStack builds the runtime, publisher and supervisor. It fails fast when
+// Cells are enabled without the GitHub App or without the Docker socket: those
+// would otherwise only surface after a Forager had already been woken.
+func newCellStack(s *store.Store, app *githubapp.App, dataDir string, logger *slog.Logger) (*cellStack, error) {
+	if app == nil {
+		return nil, errors.New("SWARMJET_CELLS=1 requires GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE")
+	}
+	if err := requireCellDocker(); err != nil {
+		return nil, err
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	repos := newGitHubRepositories(app)
+
+	image := env("AGENT_IMAGE", "swarmjet-agent:local")
+	network := env("SWARMJET_CELL_NETWORK", "")
+	model := env("SWARMJET_FORAGER_MODEL", forager.DefaultModel)
+	mcpURL := env("SWARMJET_CELL_MCP_URL", defaultCellMCPURL)
+
+	runtime := docker.NewRuntime(dataDir)
+	runtime.Config.Image = image
+	runtime.Config.DockerNetwork = network
+	runtime.Tokens = repos.Token
+	runtime.Logger = logger
+
+	publisher := &docker.Publisher{
+		DataDir:    dataDir,
+		Tokens:     repos.Token,
+		Repository: repos.Resolve,
+		Pulls:      repos,
+	}
+
+	supervisor, err := forager.New(forager.Options{
+		Store:     s,
+		Runtime:   runtime,
+		Publisher: publisher,
+		Model:     model,
+		MCPURL:    mcpURL,
+		CLIEnv:    cellCLIEnv,
+		// Streamed output is debug-only this round. Never log Update.Text:
+		// it may contain repository content or model output.
+		OnUpdate: func(agent domain.Agent, update cell.Update) {
+			logger.Debug("cell update",
+				"agent", agent.ID,
+				"kind", update.Kind,
+				"title", update.Title,
+				"chars", len([]rune(update.Text)),
+			)
+		},
+		Logger: logger,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &cellStack{Supervisor: supervisor, Runtime: runtime, Publisher: publisher, logger: logger}, nil
+}
+
+// requireCellDocker checks the local Docker socket before any Forager can be
+// woken. The base deploy/compose.yaml deliberately does not mount the socket;
+// enabling Cells requires deploy/compose.cells.yaml.
+func requireCellDocker() error {
+	path := "/var/run/docker.sock"
+	if host := os.Getenv("DOCKER_HOST"); host != "" {
+		switch {
+		case strings.HasPrefix(host, "unix://"):
+			path = strings.TrimPrefix(host, "unix://")
+		case strings.HasPrefix(host, "unix:"):
+			path = strings.TrimPrefix(host, "unix:")
+		default:
+			// A TCP or SSH Docker endpoint does not depend on the local socket.
+			return nil
+		}
+	}
+	if path == "" {
+		return errors.New("SWARMJET_CELLS=1 requires a Docker socket; 启用 Cell 需要叠加 deploy/compose.cells.yaml")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("SWARMJET_CELLS=1 requires the Docker socket at %s; 启用 Cell 需要叠加 deploy/compose.cells.yaml: %w", path, err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("SWARMJET_CELLS=1 requires a Docker socket at %s; 启用 Cell 需要叠加 deploy/compose.cells.yaml", path)
+	}
+	return nil
+}
+
+// cellCLIEnv passes the deployment's optional OpenCode credential into the
+// Cell. The runtime injects it only into the CLI process and redacts it from
+// errors; it is never written to disk or logged.
+func cellCLIEnv(context.Context, domain.Hive) (map[string]string, error) {
+	value := os.Getenv("OPENCODE_AUTH_CONTENT")
+	if value == "" {
+		return nil, nil
+	}
+	return map[string]string{"OPENCODE_AUTH_CONTENT": value}, nil
+}
+
+// Start launches the supervisor. It must be called after MessageSink is set and
+// before the River queue starts delivering messages.
+func (c *cellStack) Start(ctx context.Context) {
+	child, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+	c.done = make(chan struct{})
+	go func() {
+		defer close(c.done)
+		if err := c.Supervisor.Run(child); err != nil && child.Err() == nil {
+			c.logger.Error("forager supervisor stopped", "error", err)
+		}
+	}()
+}
+
+// Stop cancels the supervisor and waits for in-flight turns to unwind.
+func (c *cellStack) Stop() {
+	if c.cancel != nil {
+		c.cancel()
+	}
+	if c.done != nil {
+		<-c.done
+	}
+}
+
+// githubRepositories resolves repositories and mints repository-scoped
+// installation tokens. Only expiring tokens and the repository ID mapping live
+// here, in memory; nothing is persisted or logged.
+type githubRepositories struct {
+	app *githubapp.App
+
+	mu     sync.Mutex
+	names  map[int64]string
+	tokens map[string]githubapp.Token
+}
+
+func newGitHubRepositories(app *githubapp.App) *githubRepositories {
+	return &githubRepositories{
+		app:    app,
+		names:  map[int64]string{},
+		tokens: map[string]githubapp.Token{},
+	}
+}
+
+// Resolve implements docker.RepositoryResolver.
+func (r *githubRepositories) Resolve(ctx context.Context, fullName string) (int64, error) {
+	id, err := r.app.RepositoryID(ctx, fullName)
+	if err != nil {
+		return 0, err
+	}
+	r.mu.Lock()
+	r.names[id] = fullName
+	r.mu.Unlock()
+	return id, nil
+}
+
+// Token implements docker.TokenSource for both the first clone and publishing.
+func (r *githubRepositories) Token(ctx context.Context, fullName string) (string, error) {
+	r.mu.Lock()
+	token, ok := r.tokens[fullName]
+	r.mu.Unlock()
+	if ok && time.Until(token.ExpiresAt) > tokenRefreshMargin {
+		return token.Token, nil
+	}
+	token, err := r.app.RepositoryToken(ctx, fullName)
+	if err != nil {
+		return "", err
+	}
+	r.mu.Lock()
+	if r.tokens == nil {
+		r.tokens = map[string]githubapp.Token{}
+	}
+	r.tokens[fullName] = token
+	r.mu.Unlock()
+	return token.Token, nil
+}
+
+// CreateOrUpdatePR implements docker.PullRequests using internal/github. The
+// Publisher resolves the repository immediately before calling this method, so
+// the full name is already known; the client is built with a token that covers
+// exactly that repository.
+func (r *githubRepositories) CreateOrUpdatePR(ctx context.Context, id int64, source, target, title, body string) (forge.MergeRequest, error) {
+	r.mu.Lock()
+	fullName := r.names[id]
+	r.mu.Unlock()
+	if fullName == "" {
+		return forge.MergeRequest{}, fmt.Errorf("cell: repository id %d is unknown; resolve it first", id)
+	}
+	token, err := r.Token(ctx, fullName)
+	if err != nil {
+		return forge.MergeRequest{}, err
+	}
+	client := github.New(func(context.Context) (string, error) { return token, nil })
+	return client.CreateOrUpdatePR(ctx, id, source, target, title, body)
+}
