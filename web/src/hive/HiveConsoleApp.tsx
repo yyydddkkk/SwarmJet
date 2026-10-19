@@ -7,7 +7,8 @@ import HivePage from "./HivePage";
 import ForagerPage from "./ForagerPage";
 import IconLab from "./IconLab";
 import { EmptyState } from "./components";
-import { BeeIcon } from "./icons";
+import { Icon } from "./icons";
+
 import "./hive-console.css";
 
 type Route =
@@ -78,7 +79,7 @@ export default function HiveConsoleApp() {
       <header className="hg-topbar">
         <a className="hg-brand" href="#/hives">
           <span className="hg-brand-mark" aria-hidden="true">
-            <BeeIcon size={20} />
+            <Icon name="bee" size={32} />
           </span>
           <span className="hg-brand-name">SwarmJet</span>
           <span className="hg-brand-note">蜂巢控制台</span>

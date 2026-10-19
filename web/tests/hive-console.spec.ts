@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 // Desktop only (ADR section 18). Screenshots land in test-results/ at 1440px.
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -86,21 +86,156 @@ test("Forager detail implements the conversation and handoff sections", async ({
   await page.screenshot({ path: testInfo.outputPath("forager-handoff-1440.png"), fullPage: true });
 });
 
-test("Icon lab shows both bee variants at 16/20/32/64 on light and dark surfaces", async ({ page }, testInfo) => {
+// Pixel reference page: the whole design spec — eight Forager states, the Queen
+// on and off, six hashed body colours, the 29 icons at 16 and 32px, the loader
+// and the empty state — on a light and on a dark surface.
+test("Pixel reference shows the whole design spec on light and dark surfaces", async ({ page }, testInfo) => {
   await page.goto("/#/icons");
 
-  await expect(page.getByRole("heading", { name: "图标规范", level: 1 })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "浅色背景", level: 2 })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "深色背景", level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "像素规范", level: 1 })).toBeVisible();
+  const surfaces = page.locator(".hg-icon-lab-panel");
+  await expect(surfaces).toHaveCount(4);
 
-  const light = page.locator(".hg-icon-lab-panel").first();
-  const dark = page.locator(".hg-icon-lab-panel").nth(1);
-  await expect(light.locator(".hg-bee")).toHaveCount(4);
-  await expect(light.locator(".hg-bee-line")).toHaveCount(4);
-  await expect(dark.locator(".hg-bee")).toHaveCount(4);
-  await expect(dark.locator(".hg-bee-line")).toHaveCount(4);
-  await expect(page.getByText("16px", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("64px", { exact: true }).first()).toBeVisible();
+  const avatarSurfaces = [surfaces.nth(0), surfaces.nth(1)];
+  const iconSurfaces = [surfaces.nth(2), surfaces.nth(3)];
 
+  for (const surface of avatarSurfaces) {
+    const states = surface.locator('[aria-label="Forager 状态"] .hg-px-cell');
+    await expect(states).toHaveCount(8);
+    for (const name of ["creating", "active", "parked", "needs_you", "hibernated", "completed", "failed", "cancelled"]) {
+      await expect(
+        states.locator(".hg-px-cell-label").filter({ hasText: new RegExp(`^${name}$`) }),
+      ).toHaveCount(1);
+    }
+    // Queen on, Queen off, and the component that applies the off palette.
+    await expect(surface.locator('[aria-label="Queen"] .hg-px-cell')).toHaveCount(3);
+    await expect(surface.locator('[aria-label="身体颜色"] .hg-px-cell')).toHaveCount(6);
+  }
+
+  for (const surface of iconSurfaces) {
+    const icons = surface.locator('[aria-label="图标集"] .hg-icon');
+    await expect(icons).toHaveCount(29 * 2); // 16px + 32px
+    await expect(surface.locator('[aria-label="图标集"] .hg-px-cell')).toHaveCount(29);
+    for (const name of ["hive", "swarm", "crown", "bee"]) {
+      await expect(
+        surface.locator('[aria-label="图标集"] .hg-px-cell-label').filter({ hasText: new RegExp(`^${name}$`) }),
+      ).toHaveCount(1);
+    }
+    await expect(surface.locator(".hg-loader")).toBeVisible();
+    await expect(surface.locator("[aria-label='空状态'] .hg-empty-pixels")).toHaveCount(1);
+  }
+
+  // Only the four whole-pixel sizes are ever used.
+  const sizes = await page.locator("#pixel-icons svg, #forager-avatars svg").evaluateAll(nodes =>
+    nodes.map(node => Number(node.getAttribute("width"))),
+  );
+  expect(sizes.every(size => [16, 32, 48, 64].includes(size))).toBe(true);
+
+  await page.locator("#forager-avatars").screenshot({ path: testInfo.outputPath("forager-avatars-1440.png") });
+  await page.locator("#pixel-icons").screenshot({ path: testInfo.outputPath("pixel-icons-1440.png") });
   await page.screenshot({ path: testInfo.outputPath("icon-lab-1440.png"), fullPage: true });
+});
+
+/** Colour + geometry of a drawn sprite: enough to tell two states apart. */
+const pixelSignature = (handle: Locator) =>
+  handle.evaluate((node: HTMLElement) =>
+    [...node.querySelectorAll("svg g[fill]")]
+      .map(group => {
+        const fill = group.getAttribute("fill") ?? "";
+        const cells = [...group.querySelectorAll("rect")]
+          .map(rect => `${rect.getAttribute("x")},${rect.getAttribute("y")}`)
+          .sort()
+          .join(" ");
+        return `${fill}:${cells}`;
+      })
+      .sort()
+      .join("|"),
+  );
+
+test("A Forager keeps the same bee, and every state draws a different one", async ({ page }) => {
+  await page.goto("/#/hives/swarmjet");
+
+  // Same Forager, same size, in the Swarm rail and in the conversation stream.
+  const same = page.locator('.hg-px-avatar[aria-label="Forager forager-7f3a"]');
+  await expect(same).toHaveCount(2);
+  const [rail, stream] = await same.all();
+  const railSignature = await pixelSignature(rail);
+  expect(railSignature).toBe(await pixelSignature(stream));
+
+  // The body colour is a literal hex (state overrides are the only other ones),
+  // so the same id has to come back with the same body fill.
+  const bodyColor = (handle: Locator) =>
+    handle.evaluate((node: HTMLElement) => {
+      const fills = [...node.querySelectorAll("svg g[fill]")].map(group => group.getAttribute("fill") ?? "");
+      return fills.find(fill => /^#[0-9a-f]{6}$/i.test(fill)) ?? "";
+    });
+  expect(await bodyColor(rail)).toMatch(/^#[0-9a-f]{6}$/i);
+  expect(await bodyColor(stream)).toBe(await bodyColor(rail));
+
+  // Different Foragers are allowed to share a colour, but they are not forced to.
+  const other = page.locator('.hg-px-avatar[aria-label="Forager forager-2b91"]').first();
+  expect(await pixelSignature(other)).not.toBe(railSignature);
+
+  // Eight states, eight distinct drawings on the reference page.
+  await page.goto("/#/icons");
+  const states = page
+    .locator("#forager-avatars .hg-icon-lab-panel")
+    .first()
+    .locator('[aria-label="Forager 状态"] .hg-px-cell');
+  await expect(states).toHaveCount(8);
+  const drawn = await states.locator("svg").evaluateAll(nodes =>
+    nodes.map(node => {
+      const groups = [...node.querySelectorAll("g[fill]")].map(group => {
+        const fill = group.getAttribute("fill") ?? "";
+        const cells = [...group.querySelectorAll("rect")]
+          .map(rect => `${rect.getAttribute("x")},${rect.getAttribute("y")}`)
+          .sort()
+          .join(" ");
+        return `${fill}:${cells}`;
+      });
+      return groups.sort().join("|");
+    }),
+  );
+  expect(new Set(drawn).size).toBe(8);
+});
+
+test("The bee loader flaps between two wing frames", async ({ page }) => {
+  await page.goto("/#/icons");
+  const loader = page.locator(".hg-loader").first();
+  await expect(loader).toBeVisible();
+  await expect(loader.locator(".hg-loader-frame")).toHaveCount(2);
+  const names = await loader.locator(".hg-loader-frame").evaluateAll(nodes =>
+    nodes.map(node => getComputedStyle(node).animationName),
+  );
+  expect(names[0]).not.toBe("none");
+  expect(names[1]).not.toBe("none");
+});
+
+test.describe("reduced motion", () => {
+  test.use({ reducedMotion: "reduce" });
+
+  test("The loader parks on its first frame when motion is reduced", async ({ page }) => {
+    await page.goto("/#/icons");
+    const loader = page.locator(".hg-loader").first();
+    await expect(loader).toBeVisible();
+
+    const state = await loader.evaluate(node => {
+      const bob = node.querySelector<HTMLElement>(".hg-loader-bee");
+      const up = node.querySelector<HTMLElement>(".hg-loader-frame-up");
+      const down = node.querySelector<HTMLElement>(".hg-loader-frame-down");
+      return {
+        bob: bob ? getComputedStyle(bob).animationName : "missing",
+        up: up ? getComputedStyle(up).animationName : "missing",
+        down: down ? getComputedStyle(down).animationName : "missing",
+        upVisibility: up ? getComputedStyle(up).visibility : "missing",
+        downVisibility: down ? getComputedStyle(down).visibility : "missing",
+      };
+    });
+
+    expect(state.bob).toBe("none");
+    expect(state.up).toBe("none");
+    expect(state.down).toBe("none");
+    expect(state.upVisibility).toBe("visible");
+    expect(state.downVisibility).toBe("hidden");
+  });
 });

@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { hiveOverviews } from "../fixtures/hive-console";
 import { EmptyState, StatusBadge } from "./components";
-import { BeeIcon, Icon } from "./icons";
+import { Icon } from "./icons";
 
 export default function HivesPage() {
   const [query, setQuery] = useState("");
@@ -60,7 +60,7 @@ export default function HivesPage() {
                 >
                   <header className="hg-hive-card-head">
                     <span className={`hg-hive-mark hg-hive-mark-${index % 3}`} aria-hidden="true">
-                      <BeeIcon size={24} />
+                      <Icon name="bee" size={32} />
                     </span>
                     <div>
                       <h2>{hive.name}</h2>

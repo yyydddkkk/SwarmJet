@@ -11,13 +11,13 @@ import type { Agent, ConversationEntry, Hive } from "./types";
 import {
   EmptyState,
   BeeLoader,
-  HexAvatar,
   Panel,
   StatusBadge,
   Tabs,
   stateLabels,
 } from "./components";
-import { BeeLineIcon, Icon } from "./icons";
+import { Icon } from "./icons";
+import { ForagerAvatar, QueenAvatar, foragerNeedsYou } from "./pixel";
 import { ConversationStream } from "./ConversationStream";
 
 const sections = [
@@ -90,7 +90,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
 
       <header className="hg-page-head hg-hive-head">
         <span className="hg-hive-mark hg-hive-mark-0" aria-hidden="true">
-          <Icon name="hive" size={24} />
+          <Icon name="hive" size={32} />
         </span>
         <div className="hg-hive-head-text">
           <h1>{hive.name}</h1>
@@ -119,7 +119,12 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
         />
       ) : active === "swarm" ? (
         <div className="hg-conversation single">
-          <SwarmPanel hive={hive} foragers={foragers} maxConcurrent={hive.config.maxConcurrentForagers} />
+          <SwarmPanel
+            hive={hive}
+            foragers={foragers}
+            entries={entries}
+            maxConcurrent={hive.config.maxConcurrentForagers}
+          />
         </div>
       ) : (
         <Panel title={placeholders[active]?.title ?? "占位"}>
@@ -224,7 +229,7 @@ function ConversationSection({
         )}
       </div>
       <aside className="hg-conversation-side">
-        <SwarmPanel hive={hive} foragers={foragers} maxConcurrent={maxConcurrent} />
+        <SwarmPanel hive={hive} foragers={foragers} entries={entries} maxConcurrent={maxConcurrent} />
       </aside>
     </div>
   );
@@ -263,7 +268,7 @@ function QueenComposer({ onSend }: { onSend: (body: string) => void }) {
       <div className="hg-composer-foot">
         <span className="hg-composer-hint">发送后 Queen 会拆成 Task 派给 Forager。</span>
         <button className="hg-btn hg-btn-primary" type="submit">
-          <Icon name="send" size={15} />
+          <Icon name="send" size={16} />
           发送
         </button>
       </div>
@@ -330,7 +335,7 @@ function DispatchForm({ hive }: { hive: Hive }) {
           </select>
         </label>
         <button className="hg-btn hg-btn-primary" type="submit">
-          <BeeLineIcon size={15} />
+          <Icon name="bee" size={16} />
           派出 Forager
         </button>
       </div>
@@ -351,10 +356,12 @@ function DispatchForm({ hive }: { hive: Hive }) {
 function SwarmPanel({
   hive,
   foragers,
+  entries,
   maxConcurrent,
 }: {
   hive: Hive;
   foragers: Agent[];
+  entries: ConversationEntry[];
   maxConcurrent: number;
 }) {
   const [notice, setNotice] = useState("");
@@ -364,7 +371,7 @@ function SwarmPanel({
 
   return (
     <Panel
-      title={<span className="hg-panel-title"><Icon name="swarm" size={17} />Swarm（蜂群）</span>}
+      title={<span className="hg-panel-title"><Icon name="swarm" size={16} />Swarm（蜂群）</span>}
       subtitle={`${busy}/${maxConcurrent} 个并发槽在用`}
       extra={
         <button
@@ -372,13 +379,13 @@ function SwarmPanel({
           type="button"
           onClick={() => setNotice("已记录：接上 MCP 服务后会真的建一只 Forager。")}
         >
-          <Icon name="plus" size={15} />
+          <Icon name="plus" size={16} />
           派一只 Forager
         </button>
       }
     >
       <div className="hg-queen-row">
-        <HexAvatar role="queen" state={hive.queenEnabled ? "active" : "disabled"} size={34} />
+        <QueenAvatar size={32} off={!hive.queenEnabled} />
         <div>
           <strong>Queen（蜂王）</strong>
           <p className="hg-muted">
@@ -395,13 +402,18 @@ function SwarmPanel({
             const detail = foragerDetailById(forager.id);
             const content = (
               <>
-                <HexAvatar role="forager" state={forager.state} size={30} />
+                <ForagerAvatar
+                  id={forager.id}
+                  state={forager.state}
+                  needsYou={foragerNeedsYou(forager, entries)}
+                  size={32}
+                />
                 <div className="hg-swarm-item-main">
                   <span className="hg-swarm-id">{forager.id}</span>
                   <p className="hg-swarm-task">{forager.task}</p>
                   {forager.branch ? (
                     <code className="hg-branch">
-                      <Icon name="branch" size={12} />
+                      <Icon name="branch" size={16} />
                       {forager.branch}
                     </code>
                   ) : null}
