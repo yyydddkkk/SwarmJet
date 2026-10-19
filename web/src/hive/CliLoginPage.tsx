@@ -51,23 +51,34 @@ export default function CliLoginPage() {
             </StatusItem>
           </StatusGrid>
 
-          {!status.data.cells.enabled ? (
-            <Callout tone="amber" title="Cell 未启用，登录终端不可用">
-              <p>
-                CLI 登录需要 Cell 运行环境。用 <code>compose.cells.yaml</code> 叠加启动服务并挂载 Docker
-                socket 后，刷新本页即可使用。只部署控制台时，可以继续用{" "}
-                <code>OPENCODE_AUTH_CONTENT</code> 环境变量提供登录内容。
-              </p>
-            </Callout>
-          ) : !status.data.cliLogin.available ? (
-            <Callout tone="coral" title="登录服务未就绪">
-              <p>
-                Cell 已启用，但 CLI 登录终端还没有可用处理器。确认 <code>serve</code> 已挂载{" "}
-                <code>/api/runtime/*</code>，并检查 Docker 与数据目录权限后重试。
-              </p>
-            </Callout>
+          {!status.data.cliLogin.available ? (
+            !status.data.cells.enabled ? (
+              <Callout tone="amber" title="Cell 未启用，登录终端不可用">
+                <p>
+                  CLI 登录需要 Docker 与 Cell 运行环境。用 <code>compose.cells.yaml</code> 叠加启动服务并挂载
+                  Docker socket 后，刷新本页即可使用。只部署控制台时，可以继续用{" "}
+                  <code>OPENCODE_AUTH_CONTENT</code> 环境变量提供登录内容。
+                </p>
+              </Callout>
+            ) : (
+              <Callout tone="coral" title="登录服务未就绪">
+                <p>
+                  Cell 已启用，但 <code>serve</code> 没有可用的 CLI 登录处理器。确认{" "}
+                  <code>/api/runtime/*</code> 已挂载，并检查 Docker 与数据目录权限后重试。
+                </p>
+              </Callout>
+            )
           ) : (
-            <CliTerminal available={status.data.cliLogin.available} />
+            <>
+              {!status.data.cells.enabled ? (
+                <Callout tone="neutral" title="Cell 未启用">
+                  <p>
+                    登录终端仍然可用，登录结果会保存下来；以后启用 Cell 时，新的 Forager 会自动使用它。
+                  </p>
+                </Callout>
+              ) : null}
+              <CliTerminal available={status.data.cliLogin.available} />
+            </>
           )}
         </Panel>
       ) : null}

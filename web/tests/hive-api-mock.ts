@@ -38,6 +38,7 @@ export type MockOptions = {
   manifestAction?: string;
   principal?: Principal;
   tokenConnect?: Partial<CreatedToken["connect"]>;
+  loginFailure?: { status: number; message: string };
 };
 
 export type MockCall = {
@@ -168,8 +169,22 @@ const defaultRepositories: GithubRepository[] = [
 ];
 
 const defaultTokens: TokenSummary[] = [
-  { id: "token-1", name: "工作笔记本", scope: "default", createdAt: "2026-10-16T09:00:00Z" },
+  {
+    id: "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+    name: "工作笔记本",
+    scope: "default",
+    createdAt: "2026-10-16T09:00:00Z",
+  },
 ];
+
+/** Token IDs and plaintexts follow the store: 16 random bytes / 32 bytes in hex. */
+function opaqueID(n: number): string {
+  return n.toString(16).padStart(32, "0");
+}
+
+function tokenSecret(n: number): string {
+  return n.toString(16).padStart(64, "0");
+}
 
 export function createMockState(options: MockOptions = {}): MockState {
   return {
@@ -243,6 +258,9 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
       return json(route, 200, state.principal);
     }
     if (path === "/api/login" && method === "POST") {
+      if (options.loginFailure) {
+        return json(route, options.loginFailure.status, { error: options.loginFailure.message });
+      }
       state.authenticated = true;
       return route.fulfill({ status: 204 });
     }
@@ -261,6 +279,25 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
           url: "http://127.0.0.1:8180",
           redirect_url: "http://127.0.0.1:8180/api/setup/github/callback",
           public: false,
+          hook_attributes: {
+            url: "http://127.0.0.1:8180/api/webhooks/github",
+            active: true,
+          },
+          default_permissions: {
+            contents: "write",
+            pull_requests: "write",
+            issues: "write",
+            checks: "read",
+            metadata: "read",
+          },
+          default_events: [
+            "pull_request",
+            "pull_request_review",
+            "pull_request_review_comment",
+            "issue_comment",
+            "issues",
+            "check_run",
+          ],
         },
       });
     }
@@ -271,7 +308,8 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
       if (method === "GET") return json(route, 200, { tokens: state.tokens });
       if (method === "POST") {
         const body = request.postDataJSON() as { name: string; scope: TokenScope };
-        const id = `token-${state.nextTokenID++}`;
+        const sequence = state.nextTokenID++;
+        const id = opaqueID(0x1000 + sequence);
         const token: TokenSummary = {
           id,
           name: body.name,
@@ -279,11 +317,11 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
           createdAt: now(),
         };
         state.tokens.push(token);
-        const plaintext = `sjt_test_${id}`;
+        const plaintext = tokenSecret(0x2000 + sequence);
         const connect = {
           mcpUrl: "http://127.0.0.1:8180/mcp",
           claudeCode: `claude mcp add --transport http swarmjet http://127.0.0.1:8180/mcp --header "Authorization: Bearer ${plaintext}"`,
-          codex: `[mcp_servers.swarmjet]\nurl = "http://127.0.0.1:8180/mcp"\nhttp_headers = { Authorization = "Bearer ${plaintext}" }`,
+          codex: `[mcp_servers.swarmjet]\nurl = "http://127.0.0.1:8180/mcp"\nhttp_headers = { Authorization = "Bearer ${plaintext}" }\n`,
           json: {
             mcpServers: {
               swarmjet: {

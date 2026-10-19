@@ -102,7 +102,9 @@ async function request<T>(
     } catch {
       // The body was not JSON; keep the status-based message.
     }
-    if (response.status === 401) {
+    // A failed login carries its own message; only other 401s mean the session
+    // expired. /session is expected to 401 while signed out.
+    if (response.status === 401 && path !== "/login" && path !== "/session") {
       message = "会话已过期或未登录，请重新登录。";
     }
     if (response.status === 403) {

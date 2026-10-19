@@ -20,6 +20,21 @@ test("the administrator signs in and lands on the Hive list", async ({ page }, t
   await expect(page).toHaveURL(/#\/hives$/);
 });
 
+test("a failed sign-in shows the server message instead of a fake expiry", async ({ page }) => {
+  await mockHiveAPI(page, {
+    unauthenticated: true,
+    loginFailure: { status: 401, message: "invalid username or password" },
+  });
+  await page.goto("/#/hives");
+
+  await page.getByLabel("用户名").fill("admin");
+  await page.getByLabel("密码").fill("wrong-password");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+
+  await expect(page.getByRole("alert")).toContainText("invalid username or password");
+  await expect(page.getByRole("alert")).not.toContainText("会话已过期");
+});
+
 test("the top navigation has exactly Hive, 接入 and CLI 登录", async ({ page }) => {
   await mockHiveAPI(page);
   await page.goto("/#/hives");

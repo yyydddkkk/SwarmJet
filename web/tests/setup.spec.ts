@@ -178,6 +178,7 @@ test("tokens can be revoked after a confirmation", async ({ page }) => {
   await page.goto("/#/setup");
 
   await expect(page.getByText("工作笔记本", { exact: true })).toBeVisible();
+  const tokenID = state.tokens[0].id;
   await page.getByRole("button", { name: "吊销连接 工作笔记本" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
@@ -187,7 +188,7 @@ test("tokens can be revoked after a confirmation", async ({ page }) => {
   await expect(page.getByRole("status").filter({ hasText: "已吊销连接「工作笔记本」" })).toBeVisible();
   const deletes = state.calls.filter(call => call.method === "DELETE");
   expect(deletes).toHaveLength(1);
-  expect(deletes[0].path).toBe("/api/tokens/token-1");
+  expect(deletes[0].path).toBe(`/api/tokens/${tokenID}`);
 });
 
 test("creating a token shows the plaintext once, plus copyable client configs", async ({ page }, testInfo) => {
@@ -203,7 +204,8 @@ test("creating a token shows the plaintext once, plus copyable client configs", 
 
   await expect(page.getByText("关闭后无法再次查看", { exact: true })).toBeVisible();
   const plaintext = await page.getByTestId("token-plaintext").innerText();
-  expect(plaintext).toMatch(/^sjt_test_token-/);
+  // The store mints 32 random bytes, so the one-time plaintext is 64 hex chars.
+  expect(plaintext).toMatch(/^[0-9a-f]{64}$/);
   await page.screenshot({
     path: testInfo.outputPath("setup-token-created-1440.png"),
     fullPage: true,

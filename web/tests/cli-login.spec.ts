@@ -53,3 +53,17 @@ test("an unavailable login service is explained instead of showing a blank termi
   await expect(page.getByText("登录服务未就绪", { exact: true })).toBeVisible();
   await expect(page.getByTestId("cli-terminal")).toHaveCount(0);
 });
+
+test("a working login service is shown even when Cells are off", async ({ page }) => {
+  await mockHiveAPI(page, {
+    setup: {
+      cells: { enabled: false, dockerAvailable: true },
+      cliLogin: { available: true, loggedIn: false },
+    },
+  });
+  await page.goto("/#/cli-login");
+
+  // available comes from the CLI login handler (Docker), not from the Cell flag.
+  await expect(page.getByText(/登录终端仍然可用/)).toBeVisible();
+  await expect(page.getByTestId("cli-terminal")).toBeVisible();
+});
