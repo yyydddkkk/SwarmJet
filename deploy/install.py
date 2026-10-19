@@ -9,6 +9,9 @@ On a fresh machine (no checkout; pulls the published images):
 
     curl -fsSL https://raw.githubusercontent.com/yyydddkkk/SwarmJet/main/deploy/install.py | python3 -
 
+Set SWARMJET_REF (or --ref) to download the Compose files from a branch or
+tag other than main, for example `SWARMJET_REF=dev` before the first release.
+
 The script only needs Python 3 (standard library) and Docker with the Compose
 plugin. It never prints generated passwords unless --show-password is passed.
 """
@@ -33,6 +36,7 @@ REPOSITORY = "yyydddkkk/SwarmJet"
 REGISTRY = "ghcr.io/yyydddkkk/swarmjet"
 RAW_BASE = f"https://raw.githubusercontent.com/{REPOSITORY}"
 DEFAULT_VERSION = "latest"
+DEFAULT_REF = "main"
 TUNNEL_URL = "http://tunnel:2000"
 DEFAULT_PORT = 8180
 DEFAULT_PROJECT = "swarmjet"
@@ -408,6 +412,11 @@ def stack_running(project: str) -> bool:
     return any(name.startswith(f"{project}-") or name == project for name in names)
 
 
+def volume_exists(name: str) -> bool:
+    result = run(["docker", "volume", "inspect", name], capture=True, check=False)
+    return result.returncode == 0
+
+
 def compose_files(directory: Path, values: dict):
     files = [directory / "compose.yaml"]
     if values.get("SWARMJET_CELLS") == "1":
@@ -449,8 +458,26 @@ def download(url: str, destination: Path) -> None:
     os.replace(temporary, destination)
 
 
-def ensure_sources(directory: Path, version: str, overwrite: bool = False) -> None:
-    ref = "main" if not version or version == DEFAULT_VERSION else version
+def is_release_ref(ref: str) -> bool:
+    return bool(re.match(r"^v\d", ref or ""))
+
+
+def resolve_ref(explicit, version=None) -> str:
+    """Pick the Git ref used for raw files: --ref, SWARMJET_REF, then main."""
+    ref = (explicit or os.environ.get("SWARMJET_REF", "")).strip()
+    if ref:
+        return ref
+    if version and version != DEFAULT_VERSION:
+        return version
+    return DEFAULT_REF
+
+
+def is_quick_tunnel(value: str) -> bool:
+    return ".trycloudflare.com" in (value or "")
+
+
+def ensure_sources(directory: Path, ref: str, overwrite: bool = False) -> None:
+    ref = ref or DEFAULT_REF
     for remote, local in SOURCES:
         target = directory / local
         if target.exists() and not overwrite:
@@ -468,13 +495,13 @@ def copy_sources(source: Path, destination: Path) -> None:
         shutil.copy2(origin, target)
 
 
-def prepare_sources(directory: Path, version: str, repo: bool) -> None:
+def prepare_sources(directory: Path, ref: str, repo: bool) -> None:
     if repo:
         return
     here = script_dir()
     if here != directory and is_repo_directory(here):
         copy_sources(here, directory)
-    ensure_sources(directory, version)
+    ensure_sources(directory, ref)
 
 
 def wait_for_tunnel(values: dict, timeout: float = 30.0):
@@ -600,9 +627,10 @@ def install(args) -> int:
     if source == "repo" and not repo:
         raise InstallError("当前不在仓库中运行，无法本地构建；请改用 --image-source ghcr。")
 
+    ref = resolve_ref(args.ref, args.version)
     version = args.version
     if source == "ghcr":
-        version = version or tag_from_image(existing.get("IMAGE", "")) or DEFAULT_VERSION
+        version = version or (ref if is_release_ref(ref) else "") or tag_from_image(existing.get("IMAGE", "")) or DEFAULT_VERSION
         version = ask_text("镜像版本", version, args.yes)
     image, agent_image = image_values(source, version or DEFAULT_VERSION)
     explicit_images = bool(args.image or args.agent_image or args.image_source or args.version)
@@ -633,6 +661,8 @@ def install(args) -> int:
         overrides["HTTP_PORT"] = str(args.port)
     if args.listen_host:
         overrides["LISTEN_HOST"] = args.listen_host
+    if args.project_name:
+        overrides["COMPOSE_PROJECT_NAME"] = args.project_name
     if args.public_origin:
         overrides["PUBLIC_ORIGIN"] = args.public_origin
     if args.admin_username:
@@ -662,6 +692,11 @@ def install(args) -> int:
     ensure_data_dir(values["DATA_DIR"])
     ensure_env_mode(env_path)
     project = values.get("COMPOSE_PROJECT_NAME") or DEFAULT_PROJECT
+    if not existing and volume_exists(f"{project}_postgres-data"):
+        raise InstallError(
+            f"检测到已有 PostgreSQL 数据卷 {project}_postgres-data，但当前没有 .env；"
+            "新生成的数据库密码无法打开它。请恢复原 .env，或用 --project-name 换一个项目名（不会删除旧数据卷）。"
+        )
     if not port_available(values.get("LISTEN_HOST", "127.0.0.1"), int(values["HTTP_PORT"])):
         if not stack_running(project):
             raise InstallError(
@@ -669,7 +704,7 @@ def install(args) -> int:
             )
     write_env(env_path, values)
     say(f"配置已写入 {env_path}（权限 0600）。")
-    prepare_sources(directory, version or DEFAULT_VERSION, repo)
+    prepare_sources(directory, ref, repo)
 
     if source == "repo":
         say("构建平台与 Agent 镜像……")
@@ -690,7 +725,9 @@ def install(args) -> int:
             tunnel = False
             write_env(env_path, values)
         else:
-            if auto_origin and tunnel_url:
+            if tunnel_url and (auto_origin or is_quick_tunnel(values.get("PUBLIC_ORIGIN", ""))):
+                if values.get("PUBLIC_ORIGIN") != tunnel_url:
+                    say(f"隧道地址为 {tunnel_url}，更新 PUBLIC_ORIGIN。")
                 values["PUBLIC_ORIGIN"] = tunnel_url
                 write_env(env_path, values)
 
@@ -720,9 +757,10 @@ def upgrade(args) -> int:
     if source == "repo" and not repo:
         raise InstallError("当前不在仓库中运行，无法本地构建；请改用 --image-source ghcr。")
     if source == "ghcr":
-        version = args.version or tag_from_image(values.get("IMAGE", "")) or DEFAULT_VERSION
+        ref = resolve_ref(args.ref, args.version)
+        version = args.version or (ref if is_release_ref(ref) else "") or tag_from_image(values.get("IMAGE", "")) or DEFAULT_VERSION
         if not repo:
-            ensure_sources(directory, version, overwrite=True)
+            ensure_sources(directory, ref, overwrite=True)
         values["IMAGE"] = f"{REGISTRY}:{version}"
         values["AGENT_IMAGE"] = f"{REGISTRY}/agent:{version}"
     else:
@@ -891,8 +929,13 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--listen-host", help="控制台监听地址")
     install_parser.add_argument("--public-origin", help="PUBLIC_ORIGIN，例如 https://swarmjet.example.com")
     install_parser.add_argument("--admin-username", help="管理员用户名")
+    install_parser.add_argument("--project-name", help="Compose 项目名，默认 swarmjet；用于避开旧数据卷")
     install_parser.add_argument("--image-source", choices=("repo", "ghcr"), help="本地构建或拉取 GHCR 镜像")
     install_parser.add_argument("--version", help="GHCR 镜像版本，默认 latest")
+    install_parser.add_argument(
+        "--ref",
+        help="下载 Compose 文件的 Git 分支或标签，默认 main；也可用 SWARMJET_REF",
+    )
     install_parser.add_argument("--image", help="覆盖平台镜像")
     install_parser.add_argument("--agent-image", help="覆盖 Agent 镜像")
     add_bool(install_parser, "cells", "cells", "启用 Forager Cell（挂 Docker socket）")
@@ -905,6 +948,10 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade_parser.add_argument("--dir")
     upgrade_parser.add_argument("--image-source", choices=("repo", "ghcr"))
     upgrade_parser.add_argument("--version")
+    upgrade_parser.add_argument(
+        "--ref",
+        help="下载 Compose 文件的 Git 分支或标签，默认 main；也可用 SWARMJET_REF",
+    )
     upgrade_parser.add_argument("--yes", "-y", action="store_true")
     upgrade_parser.add_argument("--show-password", action="store_true")
     upgrade_parser.set_defaults(func=upgrade)

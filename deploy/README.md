@@ -12,7 +12,13 @@ python3 deploy/install.py
 
 # 不下载仓库（拉取 GHCR 发布镜像；需要 v* 标签）
 curl -fsSL https://raw.githubusercontent.com/yyydddkkk/SwarmJet/main/deploy/install.py | python3 -
+
+# 正式发布前用 SWARMJET_REF=dev：新代码只在 dev 上，让脚本和 Compose 都从 dev 下载
+curl -fsSL https://raw.githubusercontent.com/yyydddkkk/SwarmJet/dev/deploy/install.py \
+  | SWARMJET_REF=dev python3 -
 ```
+
+`SWARMJET_REF` 决定下载 Compose 文件的 Git 分支或标签，默认 `main`；也可以用 `--ref` 覆盖。它不决定镜像版本：GHCR 镜像仍由 `--version` 选择（默认 `latest`）。`dev` 分支还没有 GHCR 发布镜像时，请在仓库内用 `python3 deploy/install.py` 本地构建。
 
 安装脚本会生成随机数据库密码、管理员密码和 `SWARMJET_MASTER_KEY`，写入权限 `0600` 的 `.env`；创建数据目录；检查 Docker、Compose、端口；构建或拉取镜像；启动迁移和服务；等待健康检查。
 
@@ -54,7 +60,7 @@ python3 deploy/install.py uninstall   # 删除容器和网络，保留数据
 python3 deploy/install.py uninstall --purge  # 二次确认后删除数据卷和 DATA_DIR
 ```
 
-其他常用参数：`--dir` 指定安装目录，`--image-source repo|ghcr`、`--version`、`--image`、`--agent-image`、`--show-password`。脚本检测到上一轮部署留下的 Temporal/Worker 容器或旧数据卷时只提示，不会自动删除。
+其他常用参数：`--dir` 指定安装目录，`--ref` 指定下载 Compose 的分支或标签（也可用 `SWARMJET_REF`），`--project-name` 指定 Compose 项目名（默认 `swarmjet`，可用于避开旧数据卷），`--image-source repo|ghcr`、`--version`、`--image`、`--agent-image`、`--show-password`。脚本检测到上一轮部署留下的 Temporal/Worker 容器或旧数据卷时只提示，不会自动删除。
 
 `connect` 会在 `api` 容器里执行 `swarmjet connect`，打印一次性 Token 和对应客户端配置。如果本机有 `claude` 命令，会询问是否直接执行 `claude mcp add`。
 
@@ -235,6 +241,7 @@ Prometheus 抓取 `api:9090` 和 `postgres-exporter:9187`，规则只对抓取�
 | 现象 | 检查 |
 |---|---|
 | 安装脚本提示端口被占用 | `ss -ltnp \| grep 8180`；换 `--port` 或停掉占用进程 |
+| `migrate` 报 `password authentication failed` | 同名的旧 `swarmjet_postgres-data` 卷与新生成的密码不匹配。恢复原 `.env`，或安装时加 `--project-name <新名字>`；不要删除旧卷 |
 | `api` 启动即退出，提示缺少 `SWARMJET_MASTER_KEY` | 在 `.env` 填写 64 位十六进制；不要用空值 |
 | 控制台能登录但 MCP 连不上 | Token 是否有效、URL 是否为 `http://127.0.0.1:8180/mcp`、SSH 隧道是否在 |
 | 接入页创建 App 后回调报错 | `PUBLIC_ORIGIN` 是否与浏览器地址一致；`SECURE_COOKIES` 是否与 HTTPS 匹配 |

@@ -160,10 +160,12 @@ class ArgumentTests(unittest.TestCase):
     def test_subcommands(self):
         parser = installer.build_parser()
         self.assertIs(parser.parse_args(["status"]).func, installer.status)
-        install = parser.parse_args(["install", "--yes", "--no-cells", "--tunnel"])
+        install = parser.parse_args(["install", "--yes", "--no-cells", "--tunnel", "--ref", "dev", "--project-name", "swarmjet-e2e"])
         self.assertTrue(install.yes)
         self.assertFalse(install.cells)
         self.assertTrue(install.tunnel)
+        self.assertEqual(install.ref, "dev")
+        self.assertEqual(install.project_name, "swarmjet-e2e")
         connect = parser.parse_args(["connect", "--client", "codex"])
         self.assertEqual(connect.client, "codex")
         uninstall = parser.parse_args(["uninstall", "--purge", "--yes"])
@@ -183,6 +185,23 @@ class ArgumentTests(unittest.TestCase):
         self.assertEqual(installer.image_values("repo", "latest"), ("swarmjet:local", "swarmjet-agent:local"))
         self.assertEqual(installer.tag_from_image("ghcr.io/yyydddkkk/swarmjet:v1.2.3"), "v1.2.3")
 
+    def test_ref_resolution_and_download_url(self):
+        with patch.dict(installer.os.environ, {}, clear=True):
+            self.assertEqual(installer.resolve_ref(None), "main")
+            self.assertEqual(installer.resolve_ref(None, "v1.2.3"), "v1.2.3")
+            self.assertFalse(installer.is_release_ref("dev"))
+            self.assertTrue(installer.is_release_ref("v1.2.3"))
+        with patch.dict(installer.os.environ, {"SWARMJET_REF": "dev"}, clear=True):
+            self.assertEqual(installer.resolve_ref(None), "dev")
+            self.assertEqual(installer.resolve_ref("v1.2.3"), "v1.2.3")
+            self.assertEqual(installer.resolve_ref(None, "v1.2.3"), "dev")
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(installer, "download") as download:
+                installer.ensure_sources(Path(directory), "dev")
+            urls = [call.args[0] for call in download.call_args_list]
+            self.assertTrue(any("/dev/deploy/compose.yaml" in url for url in urls))
+            self.assertTrue(any("/dev/deploy/install.py" in url for url in urls))
+
 
 class InstallFlowTests(unittest.TestCase):
     def fake_run(self, calls):
@@ -201,6 +220,7 @@ class InstallFlowTests(unittest.TestCase):
                  patch.object(installer, "check_docker"), \
                  patch.object(installer, "run", side_effect=self.fake_run(calls)), \
                  patch.object(installer, "port_available", return_value=True), \
+                 patch.object(installer, "volume_exists", return_value=False), \
                  patch.object(installer, "stack_running", return_value=False), \
                  patch.object(installer, "warn_legacy"), \
                  contextlib.redirect_stdout(io.StringIO()):
@@ -247,6 +267,7 @@ class InstallFlowTests(unittest.TestCase):
                  patch.object(installer, "check_docker"), \
                  patch.object(installer, "run", side_effect=self.fake_run(calls)), \
                  patch.object(installer, "port_available", return_value=True), \
+                 patch.object(installer, "volume_exists", return_value=False), \
                  patch.object(installer, "stack_running", return_value=False), \
                  patch.object(installer, "warn_legacy"), \
                  patch.object(installer, "download") as download, \
@@ -263,6 +284,27 @@ class InstallFlowTests(unittest.TestCase):
             self.assertEqual(parsed["AGENT_IMAGE"], "ghcr.io/yyydddkkk/swarmjet/agent:v1.2.3")
             self.assertTrue(any("pull" in call for call in calls))
             self.assertFalse(any("build" in call for call in calls))
+
+    def test_existing_postgres_volume_without_env_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            deploy = make_repo(root)
+            calls = []
+            with patch.object(installer, "script_dir", return_value=deploy), \
+                 patch.object(installer, "check_docker"), \
+                 patch.object(installer, "run", side_effect=self.fake_run(calls)), \
+                 patch.object(installer, "volume_exists", return_value=True), \
+                 patch.object(installer, "port_available", return_value=True), \
+                 patch.object(installer, "stack_running", return_value=False), \
+                 contextlib.redirect_stdout(io.StringIO()), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                code = installer.main([
+                    "install", "--dir", str(deploy), "--data-dir", str(root / "data"),
+                    "--yes", "--no-cells", "--no-tunnel", "--image-source", "repo",
+                ])
+            self.assertEqual(code, 1)
+            self.assertFalse((deploy / ".env").exists())
+            self.assertFalse(any("build" in call or "up" in call for call in calls))
 
 
 class UninstallTests(unittest.TestCase):

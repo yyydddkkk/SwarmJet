@@ -24,6 +24,15 @@ curl -fsSL https://raw.githubusercontent.com/yyydddkkk/SwarmJet/main/deploy/inst
 
 `--yes` 使用全部默认值：数据目录 `~/swarmjet/data`、端口 `8180`、启用 Cell 和隧道、拉取 GHCR `latest`。想交互选择时去掉 `--yes`。
 
+正式发布前，新代码只在 `dev` 上；用 `SWARMJET_REF=dev` 让脚本和 Compose 文件从 `dev` 下载：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yyydddkkk/SwarmJet/dev/deploy/install.py \
+  | SWARMJET_REF=dev python3 - --yes --cells --tunnel
+```
+
+`dev` 还没有 GHCR 发布镜像时，改用下面的仓库内构建方式。发布后把 URL 和 `SWARMJET_REF` 换回 `main`。
+
 ### 1.2 仓库内构建方式
 
 ```sh

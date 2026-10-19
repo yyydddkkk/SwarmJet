@@ -10,6 +10,8 @@ SwarmJet 是一个可自托管的云端 Agent 集群。一个 **Hive** 绑定一
 curl -fsSL https://raw.githubusercontent.com/yyydddkkk/SwarmJet/main/deploy/install.py | python3 -
 ```
 
+> 正式发布前用 `SWARMJET_REF=dev`：`curl -fsSL https://raw.githubusercontent.com/yyydddkkk/SwarmJet/dev/deploy/install.py | SWARMJET_REF=dev python3 -`。`SWARMJET_REF`（或 `--ref`）决定下载 Compose 文件的 Git 分支或标签，默认 `main`；镜像版本仍由 `--version` 决定。`dev` 还没有 GHCR 发布镜像时，请在仓库内用下面的命令本地构建。
+
 在仓库里也可以本地构建：
 
 ```sh
