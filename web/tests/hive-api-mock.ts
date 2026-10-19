@@ -3,7 +3,19 @@
 // state, so tests can mutate it and watch the five-second polls pick it up.
 import type { Page, Route } from "@playwright/test";
 import { hiveAgents, hiveOverviews } from "../src/fixtures/hive-console";
-import type { Agent, Hive, HiveOverview, Message, MessageKind } from "../src/hive/types";
+import type {
+  Agent,
+  CreatedToken,
+  GithubRepository,
+  Hive,
+  HiveOverview,
+  Message,
+  MessageKind,
+  Principal,
+  SetupStatus,
+  TokenScope,
+  TokenSummary,
+} from "../src/hive/types";
 
 export type MockFailure = Partial<
   Record<"hives" | "hive" | "foragers" | "forager" | "messages" | "send" | "spawn" | "cancel", number>
@@ -12,6 +24,20 @@ export type MockFailure = Partial<
 export type MockOptions = {
   failures?: MockFailure;
   errorMessage?: string;
+  /** Per-section overrides for GET /api/setup/status. */
+  setup?: {
+    github?: Partial<SetupStatus["github"]>;
+    tunnel?: Partial<SetupStatus["tunnel"]>;
+    cells?: Partial<SetupStatus["cells"]>;
+    cliLogin?: Partial<SetupStatus["cliLogin"]>;
+  };
+  repositories?: GithubRepository[];
+  tokens?: TokenSummary[];
+  /** Start signed out; POST /api/login flips it. */
+  unauthenticated?: boolean;
+  manifestAction?: string;
+  principal?: Principal;
+  tokenConnect?: Partial<CreatedToken["connect"]>;
 };
 
 export type MockCall = {
@@ -27,6 +53,13 @@ export type MockState = {
   localAddress: string;
   nextID: number;
   calls: MockCall[];
+  setup: SetupStatus;
+  repositories: GithubRepository[];
+  tokens: TokenSummary[];
+  authenticated: boolean;
+  manifestAction: string;
+  principal: Principal;
+  nextTokenID: number;
 };
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -109,7 +142,36 @@ function seedMessages(): Message[] {
   ];
 }
 
-export function createMockState(): MockState {
+const defaultSetup: SetupStatus = {
+  github: {
+    configured: true,
+    source: "database",
+    appId: 12345,
+    appSlug: "swarmjet-demo",
+    htmlUrl: "https://github.com/apps/swarmjet-demo",
+    installUrl: "https://github.com/apps/swarmjet-demo/installations/new",
+    installations: 2,
+  },
+  tunnel: { enabled: false, url: "", webhookSynced: false, lastError: "" },
+  cells: {
+    enabled: true,
+    image: "ghcr.io/yyydddkkk/swarmjet:test",
+    model: "opencode/free",
+    dockerAvailable: true,
+  },
+  cliLogin: { available: true, loggedIn: false, cli: "opencode" },
+};
+
+const defaultRepositories: GithubRepository[] = [
+  { fullName: "yyydddkkk/SwarmJet", private: false, defaultBranch: "dev" },
+  { fullName: "yyydddkkk/orders-api", private: true, defaultBranch: "main" },
+];
+
+const defaultTokens: TokenSummary[] = [
+  { id: "token-1", name: "工作笔记本", scope: "default", createdAt: "2026-10-16T09:00:00Z" },
+];
+
+export function createMockState(options: MockOptions = {}): MockState {
   return {
     hives: clone(hiveOverviews),
     agents: clone(hiveAgents),
@@ -117,6 +179,25 @@ export function createMockState(): MockState {
     localAddress: "local:web-admin",
     nextID: 1,
     calls: [],
+    setup: {
+      github: { ...defaultSetup.github, ...options.setup?.github },
+      tunnel: { ...defaultSetup.tunnel, ...options.setup?.tunnel },
+      cells: { ...defaultSetup.cells, ...options.setup?.cells },
+      cliLogin: { ...defaultSetup.cliLogin, ...options.setup?.cliLogin },
+    },
+    repositories: clone(options.repositories ?? defaultRepositories),
+    tokens: clone(options.tokens ?? defaultTokens),
+    authenticated: !options.unauthenticated,
+    manifestAction: options.manifestAction ?? "https://github.example/apps/new?state=test-state",
+    principal: clone(
+      options.principal ?? {
+        id: "admin-1",
+        username: "admin",
+        displayName: "管理员",
+        platformAdmin: true,
+      },
+    ),
+    nextTokenID: 2,
   };
 }
 
@@ -138,7 +219,7 @@ function now(): string {
 }
 
 export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promise<MockState> {
-  const state = createMockState();
+  const state = createMockState(options);
   const failure = options.failures ?? {};
   const failureMessage = options.errorMessage ?? "模拟的接口故障";
 
@@ -156,6 +237,75 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
       body: request.postData() ? request.postDataJSON() : undefined,
     });
     const fail = (status: number) => json(route, status, { error: failureMessage });
+
+    if (path === "/api/session" && method === "GET") {
+      if (!state.authenticated) return json(route, 401, { error: "not signed in" });
+      return json(route, 200, state.principal);
+    }
+    if (path === "/api/login" && method === "POST") {
+      state.authenticated = true;
+      return route.fulfill({ status: 204 });
+    }
+    if (path === "/api/logout" && method === "POST") {
+      state.authenticated = false;
+      return route.fulfill({ status: 204 });
+    }
+    if (path === "/api/setup/status" && method === "GET") {
+      return json(route, 200, state.setup);
+    }
+    if (path === "/api/setup/github/manifest" && method === "POST") {
+      return json(route, 200, {
+        action: state.manifestAction,
+        manifest: {
+          name: "swarmjet-test",
+          url: "http://127.0.0.1:8180",
+          redirect_url: "http://127.0.0.1:8180/api/setup/github/callback",
+          public: false,
+        },
+      });
+    }
+    if (path === "/api/setup/github/repositories" && method === "GET") {
+      return json(route, 200, { repositories: state.repositories });
+    }
+    if (path === "/api/tokens") {
+      if (method === "GET") return json(route, 200, { tokens: state.tokens });
+      if (method === "POST") {
+        const body = request.postDataJSON() as { name: string; scope: TokenScope };
+        const id = `token-${state.nextTokenID++}`;
+        const token: TokenSummary = {
+          id,
+          name: body.name,
+          scope: body.scope,
+          createdAt: now(),
+        };
+        state.tokens.push(token);
+        const plaintext = `sjt_test_${id}`;
+        const connect = {
+          mcpUrl: "http://127.0.0.1:8180/mcp",
+          claudeCode: `claude mcp add --transport http swarmjet http://127.0.0.1:8180/mcp --header "Authorization: Bearer ${plaintext}"`,
+          codex: `[mcp_servers.swarmjet]\nurl = "http://127.0.0.1:8180/mcp"\nhttp_headers = { Authorization = "Bearer ${plaintext}" }`,
+          json: {
+            mcpServers: {
+              swarmjet: {
+                type: "http",
+                url: "http://127.0.0.1:8180/mcp",
+                headers: { Authorization: `Bearer ${plaintext}` },
+              },
+            },
+          },
+          ...options.tokenConnect,
+        };
+        return json(route, 201, { token, plaintext, connect });
+      }
+    }
+    const tokenMatch = path.match(/^\/api\/tokens\/([^/]+)$/);
+    if (tokenMatch && method === "DELETE") {
+      const tokenID = decodeURIComponent(tokenMatch[1]);
+      const before = state.tokens.length;
+      state.tokens = state.tokens.filter(token => token.id !== tokenID);
+      if (state.tokens.length === before) return json(route, 404, { error: "not found" });
+      return route.fulfill({ status: 204 });
+    }
 
     if (path === "/api/hives") {
       if (method === "GET") {
