@@ -12,6 +12,16 @@ export type HiveConfig = {
   turnTimeoutMinutes: number;
   foragerMaxLifetimeHours: number;
   triggers: TriggerRule[];
+  verify?: VerifyConfig;
+};
+
+/** Round-4 verification and merge policy. Missing fields use the server defaults. */
+export type VerifyConfig = {
+  mode?: "on" | "off" | string;
+  model?: string;
+  maxRounds?: number;
+  autoMerge?: boolean;
+  mergeMethod?: "squash" | "merge" | "rebase" | string;
 };
 
 export type TriggerEvent = "issue_labeled" | "issue_comment";
@@ -60,6 +70,74 @@ export type Handoff = {
   risks: string;
   next: string;
   artifacts?: ArtifactRef[];
+};
+
+// ---- Round-4 verdicts and merge readiness ----
+
+export type VerdictResult = "pass" | "pass_notes" | "fail" | "blocked";
+
+export type Finding = {
+  severity: "critical" | "warning" | "nit" | string;
+  location?: string;
+  finding: string;
+  evidence?: string;
+};
+
+export type Verdict = {
+  id: string;
+  hiveId: string;
+  prNumber: number;
+  headSha: string;
+  ownerId?: string;
+  verifierId?: string;
+  result: VerdictResult;
+  summary: string;
+  findings?: Finding[];
+  commentUrl?: string;
+  superseded: boolean;
+  createdAt: string;
+};
+
+export type MergeCheck = {
+  name: string;
+  status: string;
+  conclusion: string;
+  url?: string;
+  output?: string;
+  outputTruncated?: boolean;
+  untrusted?: boolean;
+};
+
+export type MergePull = {
+  number: number;
+  state: string;
+  draft: boolean;
+  merged: boolean;
+  url?: string;
+  headSha?: string;
+  baseRef?: string;
+  baseRepository?: string;
+  mergeable?: boolean | null;
+  mergeableState?: string;
+};
+
+export type MergeReadiness = {
+  ready: boolean;
+  headSha?: string;
+  pull: MergePull;
+  verdict?: Verdict;
+  verdictFound?: boolean;
+  checks: MergeCheck[];
+  reasons: string[];
+};
+
+export type ForagerMergeResponse = {
+  foragerId: string;
+  hiveId: string;
+  prNumber: number;
+  readiness?: MergeReadiness | null;
+  verdicts: Verdict[];
+  error?: string;
 };
 
 export type Agent = {

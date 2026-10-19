@@ -103,6 +103,48 @@ test("Forager detail uses the real conversation and handoff", async ({ page }, t
   await page.screenshot({ path: testInfo.outputPath("forager-handoff-1440.png"), fullPage: true });
 });
 
+test("Forager merge tab shows verdict history and readiness", async ({ page }, testInfo) => {
+  await mockHiveAPI(page);
+  await page.goto("/#/hives/swarmjet/foragers/forager-7f3a/merge");
+
+  await expect(page.getByRole("heading", { name: "验证与合并", level: 2 })).toBeVisible();
+  await expect(page.getByText("可合并", { exact: true })).toBeVisible();
+  await expect(page.getByText("PASS", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("a41c9de", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("已作废", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "在 GitHub 查看" }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "CI 检查", level: 3 })).toBeVisible();
+
+  await page.screenshot({ path: testInfo.outputPath("forager-merge-1440.png"), fullPage: true });
+});
+
+test("Hive settings save the five verify fields", async ({ page }, testInfo) => {
+  const state = await mockHiveAPI(page);
+  await page.goto("/#/hives/swarmjet/settings");
+
+  await expect(page.getByRole("heading", { name: "验证与合并", level: 2 })).toBeVisible();
+  await expect(page.getByLabel("验证模式")).toHaveValue("on");
+  await expect(page.getByLabel("最大轮次")).toHaveValue("3");
+  await expect(page.getByLabel("合并方式")).toHaveValue("squash");
+
+  await page.getByLabel("自动合并（autoMerge）").check();
+  await page.getByRole("button", { name: "保存设置" }).click();
+  await expect(page.locator(".hg-form-status")).toContainText("已保存验证与合并设置");
+
+  const patch = state.calls.filter(
+    call => call.method === "PATCH" && call.path === "/api/hives/swarmjet/verify",
+  );
+  expect(patch).toHaveLength(1);
+  expect(patch[0].body).toMatchObject({
+    mode: "on",
+    maxRounds: 3,
+    autoMerge: true,
+    mergeMethod: "squash",
+  });
+
+  await page.screenshot({ path: testInfo.outputPath("hive-settings-1440.png"), fullPage: true });
+});
+
 test("Hive Inbox shows unhandled external events", async ({ page }) => {
   await mockHiveAPI(page);
   await page.goto("/#/hives/swarmjet/inbox");

@@ -19,6 +19,7 @@ const baseConfig: HiveConfig = {
   turnTimeoutMinutes: 120,
   foragerMaxLifetimeHours: 168,
   triggers: [],
+  verify: { mode: "on", model: "", maxRounds: 3, autoMerge: false, mergeMethod: "squash" },
 };
 
 export const hives: Hive[] = [

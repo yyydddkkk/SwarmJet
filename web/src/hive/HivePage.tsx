@@ -3,7 +3,7 @@
 // conversation and the Swarm rail poll every five seconds (ADR section 18).
 import { useId, useState } from "react";
 import { hiveAPI } from "./api";
-import type { Agent, ConversationEntry, Hive } from "./types";
+import type { Agent, ConversationEntry, Hive, VerifyConfig } from "./types";
 import {
   BeeLoader,
   EmptyState,
@@ -249,6 +249,8 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
             emptyHint="没有待处理的外部事件。"
           />
         </Panel>
+      ) : active === "settings" ? (
+        <VerifySettings hive={hive} onSaved={hiveRes.reload} />
       ) : (
         <Panel title={placeholders[active]?.title ?? "占位"}>
           <EmptyState
@@ -542,6 +544,138 @@ function SwarmPanel({
           {notice}
         </p>
       ) : null}
+    </Panel>
+  );
+}
+
+type VerifyForm = {
+  mode: string;
+  model: string;
+  maxRounds: number;
+  autoMerge: boolean;
+  mergeMethod: string;
+};
+
+function verifyForm(config?: VerifyConfig): VerifyForm {
+  return {
+    mode: config?.mode || "on",
+    model: config?.model || "",
+    maxRounds: config?.maxRounds ?? 3,
+    autoMerge: config?.autoMerge ?? false,
+    mergeMethod: config?.mergeMethod || "squash",
+  };
+}
+
+// Round-4 settings: the five verify.* fields from the shared contract. The
+// server resolves defaults, so leaving the model empty means "use the Forager
+// model" and maxRounds 0 means the default (3).
+function VerifySettings({ hive, onSaved }: { hive: Hive; onSaved: () => void }) {
+  const [form, setForm] = useState<VerifyForm>(() => verifyForm(hive.config.verify));
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+
+  const update = <K extends keyof VerifyForm>(key: K, value: VerifyForm[K]) => {
+    setForm(current => ({ ...current, [key]: value }));
+  };
+
+  return (
+    <Panel
+      title="验证与合并"
+      subtitle="控制独立验证 Forager 和平台合并入口。默认只通知派活的人，不自动合并。"
+    >
+      <form
+        className="hg-verify-form"
+        onSubmit={event => {
+          event.preventDefault();
+          setSaving(true);
+          setStatus("");
+          setError("");
+          hiveAPI
+            .updateVerifyConfig(hive.id, {
+              mode: form.mode,
+              model: form.model.trim(),
+              maxRounds: Number(form.maxRounds) || 0,
+              autoMerge: form.autoMerge,
+              mergeMethod: form.mergeMethod,
+            })
+            .then(() => {
+              setStatus("已保存验证与合并设置。");
+              onSaved();
+            })
+            .catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
+            .finally(() => setSaving(false));
+        }}
+      >
+        <div className="hg-form-grid">
+          <label className="hg-field">
+            <span>验证模式</span>
+            <select value={form.mode} onChange={event => update("mode", event.target.value)}>
+              <option value="on">开启（每个新 head 派验证 Forager）</option>
+              <option value="off">关闭</option>
+            </select>
+          </label>
+          <label className="hg-field">
+            <span>验证模型</span>
+            <input
+              value={form.model}
+              onChange={event => update("model", event.target.value)}
+              placeholder="留空沿用 Forager 模型"
+              maxLength={200}
+            />
+          </label>
+          <label className="hg-field">
+            <span>最大轮次</span>
+            <input
+              type="number"
+              min={0}
+              max={50}
+              value={form.maxRounds}
+              onChange={event => update("maxRounds", Number(event.target.value))}
+            />
+          </label>
+          <label className="hg-field">
+            <span>合并方式</span>
+            <select
+              value={form.mergeMethod}
+              onChange={event => update("mergeMethod", event.target.value)}
+            >
+              <option value="squash">Squash</option>
+              <option value="merge">Merge commit</option>
+              <option value="rebase">Rebase</option>
+            </select>
+          </label>
+        </div>
+        <label className="hg-checkbox">
+          <input
+            type="checkbox"
+            checked={form.autoMerge}
+            onChange={event => update("autoMerge", event.target.checked)}
+          />
+          <span>
+            <strong>自动合并（autoMerge）</strong>
+            <small>
+              关闭时，PR 满足条件后只通知派活的人“可以合并”；打开后平台在检查通过时直接合并。
+              不管开关如何，GitHub 的分支保护和 approval 要求都不会被绕过。
+            </small>
+          </span>
+        </label>
+        <div className="hg-form-grid">
+          <button className="hg-btn hg-btn-primary" type="submit" disabled={saving}>
+            {saving ? "保存中…" : "保存设置"}
+          </button>
+        </div>
+        {error ? (
+          <p className="hg-form-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {status ? (
+          <p className="hg-form-status" role="status">
+            {status}
+          </p>
+        ) : null}
+      </form>
     </Panel>
   );
 }

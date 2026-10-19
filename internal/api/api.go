@@ -51,6 +51,9 @@ type Config struct {
 	CLILoginReason string
 	// MCPURL is the endpoint embedded in generated local Agent configurations.
 	MCPURL string
+	// Merge powers the round-4 readiness and verdict endpoints. nil disables
+	// /api/hives/{id}/verify and /api/foragers/{id}/merge.
+	Merge MergeStatus
 }
 
 type server struct {
@@ -123,6 +126,9 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/tokens/") {
 		a.tokenItem(w, r, strings.TrimPrefix(r.URL.Path, "/api/tokens/"))
+		return
+	}
+	if a.round4(w, r) {
 		return
 	}
 	if r.URL.Path == "/api/hives" || strings.HasPrefix(r.URL.Path, "/api/hives/") ||

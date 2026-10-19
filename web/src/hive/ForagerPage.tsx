@@ -4,17 +4,26 @@
 import { useId, useState } from "react";
 import { hiveAPI } from "./api";
 import type { ForagerDetailResponse } from "./api";
-import type { ConversationEntry } from "./types";
-import { BeeLoader, EmptyState, ErrorNotice, Panel, StatusBadge, Tabs } from "./components";
+import type {
+  Agent,
+  Check,
+  CheckStatus,
+  ConversationEntry,
+  ForagerMergeResponse,
+  MergeCheck,
+  Verdict,
+} from "./types";
+import { BeeLoader, CheckList, EmptyState, ErrorNotice, Panel, StatusBadge, Tabs } from "./components";
 import { ForagerAvatar, foragerNeedsYou } from "./pixel";
 import { Icon } from "./icons";
 import { ConversationStream } from "./ConversationStream";
-import { messageEntries, mergeMessages } from "./format";
+import { formatTimestamp, messageEntries, mergeMessages } from "./format";
 import { useResource } from "./use-resource";
 
 const sections = [
   { id: "conversation", label: "对话" },
   { id: "handoff", label: "交接摘要" },
+  { id: "merge", label: "验证与合并" },
   { id: "diff", label: "Diff" },
   { id: "timeline", label: "时间线" },
   { id: "terminal", label: "终端" },
@@ -59,6 +68,11 @@ export default function ForagerPage({
   );
   const localAddress = detailRes.data?.localAddress ?? "";
   const messageHiveID = detailRes.data?.forager.hiveId || hiveId;
+  const mergeRes = useResource(
+    signal => hiveAPI.getForagerMerge(foragerId, signal),
+    [foragerId],
+    5000,
+  );
   const conversationRes = useResource(
     async signal => {
       if (!localAddress) return [];
@@ -118,10 +132,15 @@ export default function ForagerPage({
       conversationError={conversationRes.error}
       conversationErrorStatus={conversationRes.errorStatus}
       onRetryConversation={conversationRes.reload}
+      merge={mergeRes.data}
+      mergeError={mergeRes.error}
+      mergeErrorStatus={mergeRes.errorStatus}
+      onRetryMerge={mergeRes.reload}
       section={section}
       onChanged={() => {
         detailRes.reload();
         conversationRes.reload();
+        mergeRes.reload();
       }}
     />
   );
@@ -133,6 +152,10 @@ function ForagerDetail({
   conversationError,
   conversationErrorStatus,
   onRetryConversation,
+  merge,
+  mergeError,
+  mergeErrorStatus,
+  onRetryMerge,
   section,
   onChanged,
 }: {
@@ -141,6 +164,10 @@ function ForagerDetail({
   conversationError: string;
   conversationErrorStatus: number | undefined;
   onRetryConversation: () => void;
+  merge: ForagerMergeResponse | undefined;
+  mergeError: string;
+  mergeErrorStatus: number | undefined;
+  onRetryMerge: () => void;
   section: string;
   onChanged: () => void;
 }) {
@@ -304,6 +331,14 @@ function ForagerDetail({
             />
           )}
         </Panel>
+      ) : active === "merge" ? (
+        <MergePanel
+          agent={agent}
+          merge={merge}
+          error={mergeError}
+          errorStatus={mergeErrorStatus}
+          onRetry={onRetryMerge}
+        />
       ) : (
         <Panel title={placeholders[active]?.title ?? "占位"}>
           <EmptyState
@@ -312,6 +347,159 @@ function ForagerDetail({
           />
         </Panel>
       )}
+    </div>
+  );
+}
+
+function MergePanel({
+  agent,
+  merge,
+  error,
+  errorStatus,
+  onRetry,
+}: {
+  agent: Agent;
+  merge: ForagerMergeResponse | undefined;
+  error: string;
+  errorStatus: number | undefined;
+  onRetry: () => void;
+}) {
+  const readiness = merge?.readiness;
+  return (
+    <Panel
+      title="验证与合并"
+      subtitle={
+        agent.prNumber
+          ? `PR #${agent.prNumber} 的独立验证结论，以及平台合并门禁的判断。`
+          : "这只 Forager 还没有关联 PR。"
+      }
+    >
+      {!agent.prNumber ? (
+        <EmptyState
+          title="还没有 PR。"
+          hint="Forager 发布分支并打开 PR 后，这里会出现结论历史和可合并状态。"
+        />
+      ) : null}
+      {error ? (
+        <ErrorNotice
+          message={error}
+          onRetry={onRetry}
+          auth={errorStatus === 401}
+          admin={errorStatus === 403}
+        />
+      ) : null}
+      {merge?.error ? (
+        <p className="hg-form-error" role="alert">
+          无法读取合并状态：{merge.error}
+        </p>
+      ) : null}
+      {readiness ? (
+        <div className="hg-merge-body">
+          <div className="hg-merge-status">
+            <span className={`hg-badge hg-tone-${readiness.ready ? "mint" : "coral"}`}>
+              {readiness.ready ? "可合并" : "尚不可合并"}
+            </span>
+            <code className="hg-merge-sha">{readiness.headSha?.slice(0, 7) || "—"}</code>
+            <span className="hg-muted">
+              PR 状态 {readiness.pull.state}
+              {readiness.pull.draft ? " · draft" : ""}
+            </span>
+          </div>
+          {readiness.reasons.length ? (
+            <ul className="hg-merge-reasons">
+              {readiness.reasons.map(reason => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="hg-form-status">所有合并条件都已满足。</p>
+          )}
+          <section className="hg-merge-section">
+            <h3>CI 检查</h3>
+            <CheckList checks={mergeChecks(readiness.checks)} empty="这个 head 上还没有检查结果。" />
+          </section>
+          <section className="hg-merge-section">
+            <h3>结论历史</h3>
+            <VerdictTable verdicts={merge?.verdicts ?? []} />
+          </section>
+        </div>
+      ) : agent.prNumber && !error && !merge?.error ? (
+        <BeeLoader label="正在读取合并状态…" />
+      ) : null}
+    </Panel>
+  );
+}
+
+function mergeChecks(checks: MergeCheck[]): Check[] {
+  return checks.map(check => {
+    const passed = ["success", "neutral", "skipped"].includes(check.conclusion);
+    const pending = check.status !== "completed";
+    const status: CheckStatus = pending ? "pending" : passed ? "passed" : "failed";
+    return {
+      name: check.name,
+      status,
+      detail: pending ? check.status : check.conclusion,
+    };
+  });
+}
+
+const verdictLabels: Record<string, string> = {
+  pass: "PASS",
+  pass_notes: "PASS+NOTES",
+  fail: "FAIL",
+  blocked: "BLOCKED",
+};
+
+const verdictTones: Record<string, "mint" | "amber" | "coral" | "neutral"> = {
+  pass: "mint",
+  pass_notes: "amber",
+  fail: "coral",
+  blocked: "neutral",
+};
+
+function VerdictTable({ verdicts }: { verdicts: Verdict[] }) {
+  if (!verdicts.length) {
+    return <EmptyState title="还没有结论。" hint="验证 Forager 给出结论后，这里会按 head SHA 记录。" />;
+  }
+  return (
+    <div className="hg-verdict-table-wrap">
+      <table className="hg-verdict-table">
+        <thead>
+          <tr>
+            <th scope="col">结论</th>
+            <th scope="col">提交</th>
+            <th scope="col">时间</th>
+            <th scope="col">评论</th>
+            <th scope="col">状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          {verdicts.map(verdict => (
+            <tr key={verdict.id} className={verdict.superseded ? "hg-verdict-superseded" : undefined}>
+              <td>
+                <span className={`hg-badge hg-tone-${verdictTones[verdict.result] ?? "neutral"}`}>
+                  {verdictLabels[verdict.result] ?? verdict.result}
+                </span>
+                <span className="hg-verdict-summary">{verdict.summary}</span>
+              </td>
+              <td>
+                <code>{verdict.headSha.slice(0, 7)}</code>
+              </td>
+              <td>{formatTimestamp(verdict.createdAt)}</td>
+              <td>
+                {verdict.commentUrl ? (
+                  <a href={verdict.commentUrl} target="_blank" rel="noreferrer">
+                    在 GitHub 查看
+                  </a>
+                ) : (
+                  <span className="hg-muted">—</span>
+                )}
+              </td>
+              <td>{verdict.superseded ? "已作废" : "有效"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

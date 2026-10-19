@@ -2209,3 +2209,101 @@ body {
     display: none;
   }
 }
+
+/* ---- Round 4: verification verdicts and merge readiness ---- */
+
+.hg-merge-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hg-merge-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.hg-merge-sha {
+  padding: 2px 7px;
+  border: 2px solid var(--hg-line-soft);
+  border-radius: var(--hg-radius-chip);
+  background: var(--hg-paper);
+  font-size: 12px;
+}
+
+.hg-merge-reasons {
+  margin: 0;
+  padding: 10px 14px 10px 30px;
+  border: 2px solid var(--hg-coral-soft);
+  border-radius: var(--hg-radius-control);
+  background: var(--hg-coral-soft);
+  color: var(--hg-coral-ink);
+  font-size: 13px;
+}
+
+.hg-merge-reasons li + li {
+  margin-top: 4px;
+}
+
+.hg-merge-section h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.hg-verdict-table-wrap {
+  overflow-x: auto;
+}
+
+.hg-verdict-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.hg-verdict-table th,
+.hg-verdict-table td {
+  padding: 8px 10px;
+  border-bottom: 2px solid var(--hg-line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.hg-verdict-table th {
+  color: var(--hg-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hg-verdict-table a {
+  color: var(--hg-mint-ink);
+  text-decoration: underline;
+}
+
+.hg-verdict-superseded {
+  opacity: 0.55;
+}
+
+.hg-verdict-summary {
+  display: block;
+  max-width: 420px;
+  margin-top: 4px;
+  color: var(--hg-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.hg-verify-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hg-verify-form .hg-form-grid {
+  margin-top: 0;
+}
+
+.hg-verify-form .hg-checkbox {
+  max-width: 720px;
+}

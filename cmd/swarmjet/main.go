@@ -19,6 +19,7 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
 	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 	"github.com/yyydddkkk/SwarmJet/internal/mcp"
+	"github.com/yyydddkkk/SwarmJet/internal/merge"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"github.com/yyydddkkk/SwarmJet/internal/onboarding"
 	"github.com/yyydddkkk/SwarmJet/internal/router"
@@ -195,6 +196,12 @@ func runServe(ctx context.Context, s *store.Store) error {
 	// The CLI login terminal runs in this process and shares the Cell data
 	// directory, so a successful login is immediately available to Cells.
 	cliLogin, cliLoginReason := newCLILoginHandler(data)
+	mergeGate := merge.NewGate(
+		round4Verdicts{s: s},
+		s,
+		mergeGitHubSource{repos: newGitHubRepositories(ghProvider)},
+		merge.Options{},
+	)
 	handler := api.New(s, api.Config{
 		GitHubApp:       ghApp,
 		Box:             box,
@@ -212,6 +219,7 @@ func runServe(ctx context.Context, s *store.Store) error {
 		CLILoginReason:  cliLoginReason,
 		CLILoginStatus:  cliLoginStatus(cliLogin, data),
 		MCPURL:          publicMCPURL(),
+		Merge:           mergeGate,
 	})
 	svc := &service.Service{Store: s, Webhooks: s, AppSlugSource: ghProvider.Slug}
 
@@ -224,6 +232,7 @@ func runServe(ctx context.Context, s *store.Store) error {
 		}
 		metrics.Message(queue, result)
 	}
+	var mergeScheduler *merge.Scheduler
 	queue, err := jobs.Open(s.Pool, jobs.Handlers{
 		Webhook: func(ctx context.Context, job jobs.Webhook) error {
 			err := svc.HandleWebhookJob(ctx, job)
@@ -235,10 +244,22 @@ func runServe(ctx context.Context, s *store.Store) error {
 			recordJob("message", err)
 			return err
 		},
+		MergeCheck: func(ctx context.Context, job jobs.MergeCheck) error {
+			if mergeScheduler == nil {
+				return nil
+			}
+			err := mergeScheduler.Handle(ctx, job)
+			recordJob("merge", err)
+			return err
+		},
 	}, jobs.Config{})
 	if err != nil {
 		return err
 	}
+	mergeScheduler = merge.NewScheduler(s, mergeGate, queue, merge.Options{})
+	// The Router's OnChecks/OnHead callbacks (task B) attach in
+	// mergeRouterOptions; the merge scheduler is the merge-check endpoint.
+	svc.HiveRouter = router.NewWithOptions(s, mergeRouterOptions(ghProvider.Slug, mergeScheduler))
 	s.Jobs = queue
 	go func() {
 		if err := queue.Start(ctx); err != nil && ctx.Err() == nil {
@@ -250,7 +271,7 @@ func runServe(ctx context.Context, s *store.Store) error {
 	routes.Handle("/api/webhooks/github", svc.GitHubWebhookDynamic(ghProvider.WebhookSecret))
 	// MCP authenticates with a bearer token only; it never uses the console
 	// session (ADR section 12).
-	routes.Handle("/mcp", mcp.NewHandler(s, mcp.Options{Logger: slog.Default()}))
+	routes.Handle("/mcp", mcp.NewHandler(s, mcp.Options{Logger: slog.Default(), Merge: mergeGate}))
 	routes.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.Pool.Ping(r.Context()); err != nil {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)

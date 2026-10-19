@@ -4,6 +4,7 @@
 import type {
   Agent,
   CreatedToken,
+  ForagerMergeResponse,
   GithubRepository,
   Hive,
   HiveOverview,
@@ -13,6 +14,7 @@ import type {
   SetupStatus,
   TokenScope,
   TokenSummary,
+  VerifyConfig,
 } from "./types";
 
 export type HiveListResponse = {
@@ -64,6 +66,12 @@ export type CreateHiveInput = {
   config?: Partial<Hive["config"]>;
 };
 
+export type VerifyResponse = {
+  hive?: Hive;
+  hiveId?: string;
+  verify: VerifyConfig;
+};
+
 export type GithubManifestResponse = {
   action: string;
   manifest: Record<string, unknown>;
@@ -81,7 +89,7 @@ export class HiveAPIError extends Error {
 
 async function request<T>(
   path: string,
-  method: "GET" | "POST" | "DELETE" = "GET",
+  method: "GET" | "POST" | "PATCH" | "DELETE" = "GET",
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
@@ -214,6 +222,24 @@ export const hiveAPI = {
       `/foragers/${segment(foragerId)}`,
       "GET",
       undefined,
+      signal,
+    );
+  },
+
+  getForagerMerge(foragerId: string, signal?: AbortSignal) {
+    return request<ForagerMergeResponse>(
+      `/foragers/${segment(foragerId)}/merge`,
+      "GET",
+      undefined,
+      signal,
+    );
+  },
+
+  updateVerifyConfig(hiveId: string, input: VerifyConfig, signal?: AbortSignal) {
+    return request<VerifyResponse>(
+      `/hives/${segment(hiveId)}/verify`,
+      "PATCH",
+      input,
       signal,
     );
   },

@@ -48,6 +48,13 @@ func (j *hiveTestJobs) ids() []string {
 // the breakglass admin. The tests exercise the real HTTP stack and real store.
 func newHiveAPITest(t *testing.T) (*store.Store, http.Handler, *http.Cookie) {
 	t.Helper()
+	return newHiveAPIWithMerge(t, nil)
+}
+
+// newHiveAPIWithMerge is newHiveAPITest with an injectable merge gate for the
+// round-4 endpoints.
+func newHiveAPIWithMerge(t *testing.T, mergeStatus MergeStatus) (*store.Store, http.Handler, *http.Cookie) {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL not set")
@@ -84,6 +91,7 @@ func newHiveAPITest(t *testing.T) (*store.Store, http.Handler, *http.Cookie) {
 		Password:      "secret",
 		AllowedOrigin: "https://console.test",
 		SecureCookies: true,
+		Merge:         mergeStatus,
 	})
 	cookie := hiveTestLogin(t, handler)
 	return s, handler, cookie

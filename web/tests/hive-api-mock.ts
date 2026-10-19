@@ -143,8 +143,15 @@ function seedMessages(): Message[] {
   ];
 }
 
-const defaultSetup: SetupStatus = {
-  github: {
+const defaultVerify = {
+  mode: "on",
+  model: "",
+  maxRounds: 3,
+  autoMerge: false,
+  mergeMethod: "squash",
+};
+
+const defaultSetup: SetupStatus = {  github: {
     configured: true,
     source: "database",
     appId: 12345,
@@ -377,6 +384,7 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
             turnTimeoutMinutes: 120,
             foragerMaxLifetimeHours: 168,
             triggers: [],
+            verify: defaultVerify,
             ...body.config,
           } as Hive["config"],
           version: 1,
@@ -401,6 +409,27 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
           },
         ];
         return json(route, 201, { hive, localAddress: state.localAddress });
+      }
+    }
+
+    const verifyMatch = path.match(/^\/api\/hives\/([^/]+)\/verify$/);
+    if (verifyMatch) {
+      const hiveID = decodeURIComponent(verifyMatch[1]);
+      const overview = state.hives.find(item => item.hive.id === hiveID);
+      if (!overview) return json(route, 404, { error: "not found" });
+      const current = { ...defaultVerify, ...(overview.hive.config.verify ?? {}) };
+      if (method === "GET") {
+        return json(route, 200, { hiveId: hiveID, verify: current });
+      }
+      if (method === "PATCH") {
+        const body = request.postDataJSON() as Partial<typeof defaultVerify>;
+        overview.hive.config.verify = { ...current, ...body };
+        overview.hive.version += 1;
+        overview.hive.updatedAt = now();
+        return json(route, 200, {
+          hive: overview.hive,
+          verify: { ...current, ...body },
+        });
       }
     }
 
@@ -534,6 +563,83 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
           forager,
           hive: overview.hive,
           localAddress: state.localAddress,
+        });
+      }
+      return json(route, 404, { error: "not found" });
+    }
+
+    const foragerMergeMatch = path.match(/^\/api\/foragers\/([^/]+)\/merge$/);
+    if (foragerMergeMatch && method === "GET") {
+      const foragerID = decodeURIComponent(foragerMergeMatch[1]);
+      for (const [hiveID, agents] of Object.entries(state.agents)) {
+        const forager = agents.find(agent => agent.id === foragerID && agent.role === "forager");
+        if (!forager) continue;
+        if (!forager.prNumber) {
+          return json(route, 200, {
+            foragerId: forager.id,
+            hiveId: hiveID,
+            prNumber: 0,
+            readiness: null,
+            verdicts: [],
+          });
+        }
+        const headSHA = "a41c9de9c3b5e2f1074c0a2b8d6f4e1c9a7b3d20";
+        const verdicts = [
+          {
+            id: `verdict-${forager.prNumber}-current`,
+            hiveId: hiveID,
+            prNumber: forager.prNumber,
+            headSha: headSHA,
+            ownerId: forager.id,
+            verifierId: "verifier-current",
+            result: "pass",
+            summary: "构建、单测和手动调用都通过；没有发现阻塞问题。",
+            commentUrl: `https://github.com/${forager.hiveId}/pull/${forager.prNumber}#issuecomment-1`,
+            superseded: false,
+            createdAt: "2026-10-16T10:40:00Z",
+          },
+          {
+            id: `verdict-${forager.prNumber}-old`,
+            hiveId: hiveID,
+            prNumber: forager.prNumber,
+            headSha: "7be22d1f0c9a4b6e8d2f5a1c3e7b9d0f2a4c6e80",
+            ownerId: forager.id,
+            verifierId: "verifier-old",
+            result: "pass_notes",
+            summary: "行为正确，但建议补一条空结果提示。",
+            commentUrl: `https://github.com/${forager.hiveId}/pull/${forager.prNumber}#issuecomment-0`,
+            superseded: true,
+            createdAt: "2026-10-15T22:15:00Z",
+          },
+        ];
+        return json(route, 200, {
+          foragerId: forager.id,
+          hiveId: hiveID,
+          prNumber: forager.prNumber,
+          readiness: {
+            ready: true,
+            headSha: headSHA,
+            pull: {
+              number: forager.prNumber,
+              state: "open",
+              draft: false,
+              merged: false,
+              url: `https://github.com/${hiveID}/pull/${forager.prNumber}`,
+              headSha: headSHA,
+              baseRef: "dev",
+              baseRepository: `yyydddkkk/${hiveID}`,
+              mergeable: true,
+              mergeableState: "clean",
+            },
+            verdict: verdicts[0],
+            verdictFound: true,
+            checks: [
+              { name: "lint", status: "completed", conclusion: "success" },
+              { name: "unit", status: "completed", conclusion: "success" },
+            ],
+            reasons: [],
+          },
+          verdicts,
         });
       }
       return json(route, 404, { error: "not found" });
