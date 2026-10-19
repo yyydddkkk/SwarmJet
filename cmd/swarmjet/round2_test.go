@@ -23,6 +23,7 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/cell"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/forager"
+	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
 	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 	"github.com/yyydddkkk/SwarmJet/internal/mcp"
 	"github.com/yyydddkkk/SwarmJet/internal/service"
@@ -491,6 +492,17 @@ func TestCellsRequireGitHubApp(t *testing.T) {
 		t.Fatal("SWARMJET_CELLS=1 without a GitHub App must fail at startup")
 	} else if !strings.Contains(err.Error(), "GITHUB_APP_ID") {
 		t.Fatalf("error does not name the missing configuration: %v", err)
+	}
+}
+
+func TestCellsRequireDockerSocket(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix:///nonexistent/swarmjet-docker.sock")
+	_, err := newCellStack(&store.Store{}, &githubapp.App{}, t.TempDir(), nil)
+	if err == nil {
+		t.Fatal("SWARMJET_CELLS=1 without a Docker socket must fail at startup")
+	}
+	if !strings.Contains(err.Error(), "启用 Cell 需要叠加 deploy/compose.cells.yaml") {
+		t.Fatalf("error does not point at the cells overlay: %v", err)
 	}
 }
 

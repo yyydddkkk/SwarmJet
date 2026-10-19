@@ -16,14 +16,11 @@ x-app-environment: &app-environment
   GITHUB_APP_PRIVATE_KEY_FILE: ${GITHUB_APP_PRIVATE_KEY_FILE:-}
   # Must be identical for api (seals tokens) and worker (decrypts them).
   SWARMJET_MASTER_KEY: ${SWARMJET_MASTER_KEY:-}
-  # Round-2 Cells. Disabled by default: with SWARMJET_CELLS=0 messages are
-  # stored and delivered exactly as before, but no process executes them.
+  # Round-2 Cells. This base file never mounts the Docker socket; enabling
+  # Cells requires the compose.cells.yaml overlay, which also sets this to 1.
   SWARMJET_CELLS: ${SWARMJET_CELLS:-0}
   SWARMJET_FORAGER_MODEL: ${SWARMJET_FORAGER_MODEL:-opencode/big-pickle}
   SWARMJET_CELL_MCP_URL: ${SWARMJET_CELL_MCP_URL:-http://swarmjet:8080/mcp}
-  # Docker network the Cell joins. The API also answers to the "swarmjet" alias
-  # on this network, so the MCP URL above resolves from inside the Cell.
-  SWARMJET_CELL_NETWORK: ${SWARMJET_CELL_NETWORK:-${COMPOSE_PROJECT_NAME:-swarmjet}_default}
   # Optional OpenCode auth.json content; passed only to the Cell CLI process.
   OPENCODE_AUTH_CONTENT: ${OPENCODE_AUTH_CONTENT:-}
 x-app: &app
@@ -138,19 +135,11 @@ services:
       EXECUTION_MODE: ${EXECUTION_MODE:-local}
     ports:
       - '${LISTEN_HOST:-127.0.0.1}:${HTTP_PORT:-8180}:8080'
-    networks:
-      default:
-        aliases:
-          - swarmjet
     volumes:
-      # Cells are created by this process, so it needs the host Docker socket.
-      # That is root-equivalent on the host; see deploy/README.md.
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Same absolute path on the host and inside the container: the Cell
-      # workspace is a bind mount below DATA_DIR and the Publisher reads it.
       - type: bind
         source: ${DATA_DIR:?Set absolute DATA_DIR}
         target: ${DATA_DIR:?Set absolute DATA_DIR}
+        read_only: true
     healthcheck:
       test: [CMD, curl, --fail, --silent, http://localhost:8080/healthz]
       interval: 10s

@@ -89,9 +89,27 @@ func TestRepositoryInstallationRejectsOtherAccount(t *testing.T) {
 
 func TestRepositoryNameValidation(t *testing.T) {
 	app := &App{baseURL: "http://127.0.0.1:1", http: &http.Client{Timeout: time.Second}}
-	for _, name := range []string{"", "owner", "owner/", "/repo", "owner/repo/extra", "owner/re po", "owner/repo?x=1", "owner/repo#frag", "owner\\repo/name"} {
+	for _, name := range []string{
+		"", "owner", "owner/", "/repo", "owner/repo/extra",
+		"owner/re po", "owner/repo?x=1", "owner/repo#frag", "owner\\repo/name",
+		"owner/..", "../repo", "owner/.", "./repo", "owner/re:po", "owner/re*po",
+	} {
 		if _, err := app.RepositoryToken(context.Background(), name); err == nil {
 			t.Fatalf("accepted repository name %q", name)
+		}
+	}
+}
+
+func TestSplitRepositoryAcceptsGitHubCharacters(t *testing.T) {
+	for _, name := range []string{
+		"owner/repo",
+		"Owner-1/repo.name",
+		"owner_1/repo-name_test",
+		"a/b",
+	} {
+		owner, repo, err := splitRepository(name)
+		if err != nil || owner+"/"+repo != name {
+			t.Fatalf("splitRepository(%q) = %q, %q, %v", name, owner, repo, err)
 		}
 	}
 }

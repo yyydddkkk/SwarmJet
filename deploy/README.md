@@ -2,7 +2,7 @@
 
 部署包含控制台 API、Temporal Worker、PostgreSQL 18、Temporal Server 1.32.0 和 Temporal UI 2.54.1。业务执行器是独立的 Agent CLI 镜像，默认不会作为常驻服务启动。这里使用持久化生产 Server，不使用 `temporal server start-dev`。
 
-所有部署文件集中在 `deploy/`：`compose.yaml` 是唯一的服务定义，`compose.build.yaml` 只补充源码构建配置，`compose.local-node.yaml` 在本机运行一个执行节点，两个 Dockerfile 分别构建应用与执行器镜像。构建上下文仍是仓库根目录。
+所有部署文件集中在 `deploy/`：`compose.yaml` 是基础服务定义，`compose.build.yaml` 只补充源码构建配置，`compose.local-node.yaml` 在本机运行一个执行节点，`compose.cells.yaml` 是仅在启用 Forager Cells 时叠加的可选覆盖（会给 serve 挂 Docker socket）。两个 Dockerfile 分别构建应用与执行器镜像。构建上下文仍是仓库根目录。
 
 ## 单机快速部署（源码构建）
 
@@ -12,11 +12,13 @@
 sudo python3 deploy/install.py
 # 需要多个执行器时，在首次部署指定（初始化始终需要 opencode）：
 # sudo python3 deploy/install.py --agent-clis opencode,codex,claude
+# 需要启用 Forager Cells 时（会给 serve 挂 Docker socket，宿主 root 权限）：
+# sudo python3 deploy/install.py --cells
 ```
 
-脚本自动生成权限为 `0600` 的 `deploy/.env`、独立的数据库和管理员密码、运行终端密钥及连接加密主密钥，创建 `/srv/swarmjet/data`，构建应用与 Agent 镜像，并通过 Compose 完成迁移、启动和健康检查。宿主机需要 Docker、Python 3 和 OpenSSL，不需要 Go、Node.js 或 Agent CLI。可用 `--data-dir /绝对路径` 修改首次部署的数据目录。脚本要求本机 Docker socket，支持 `deploy/compose.override.yaml`。
+脚本自动生成权限为 `0600` 的 `deploy/.env`、独立的数据库和管理员密码、运行终端密钥及连接加密主密钥，创建 `/srv/swarmjet/data`，构建应用与 Agent 镜像，并通过 Compose 完成迁移、启动和健康检查。宿主机需要 Docker、Python 3 和 OpenSSL，不需要 Go、Node.js 或 Agent CLI。可用 `--data-dir /绝对路径` 修改首次部署的数据目录。脚本要求本机 Docker socket，支持 `deploy/compose.override.yaml`。加 `--cells` 时会叠加 `compose.cells.yaml`，给 serve 挂 Docker socket；默认不叠加。
 
-脚本组合 `compose.yaml`、`compose.build.yaml` 和 `compose.local-node.yaml`：任务在同一主机上的执行节点 `local` 中运行。新节点默认使用 `AGENT_IMAGE`（源码安装时为本机构建的 `swarmjet-agent:local`），可在 Node 管理中改为任意镜像地址。
+脚本组合 `compose.yaml`、`compose.build.yaml` 和 `compose.local-node.yaml`（`--cells` 时再加 `compose.cells.yaml`）：任务在同一主机上的执行节点 `local` 中运行。新节点默认使用 `AGENT_IMAGE`（源码安装时为本机构建的 `swarmjet-agent:local`），可在 Node 管理中改为任意镜像地址。
 
 控制台默认只监听服务器本机。在自己的电脑执行 `ssh -N -L 8180:127.0.0.1:8180 用户名@服务器`，然后打开 `http://localhost:8180`。应急管理员账号为 `admin`，密码在服务器 `deploy/.env` 的 `ADMIN_PASSWORD` 中。登录后在“Runner 环境”选择 Node、启用已安装的 Agent 并配置模型认证，再添加 GitLab 项目。
 
@@ -41,6 +43,8 @@ docker compose -f compose.yaml -f compose.build.yaml -f compose.local-node.yaml 
 docker compose -f compose.yaml -f compose.build.yaml -f compose.local-node.yaml up -d --wait
 ```
 
+需要 Forager Cells 时，在 `up` 命令追加 `-f compose.cells.yaml`；它会挂载 Docker socket 并启用 serve 内的监管者，见下文。
+
 `deploy/Dockerfile` 默认使用 Docker Hub 官方基础镜像，并固定版本。可在仓库根目录通过 build args 覆盖镜像来源：
 
 ```sh
@@ -53,7 +57,7 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
   --build-arg AGENT_BASE_IMAGE=node:22.23.1-bookworm-slim .
 ```
 
-`DATA_DIR` 必须是存在的绝对宿主机路径。API、Worker 和 Docker 创建的执行容器使用同一路径；不能把宿主机 `/srv/swarmjet/data` 改挂成容器 `/data`。Worker 通过宿主 Docker socket 创建同级容器，绝对 `.git` 路径也依赖这个约定。启用第二轮 Cell 后，API（serve）也会挂载同一个可写 `DATA_DIR` 和 Docker socket，见下文“第二轮 Cell 运行时”。
+`DATA_DIR` 必须是存在的绝对宿主机路径。API、Worker 和 Docker 创建的执行容器使用同一路径；不能把宿主机 `/srv/swarmjet/data` 改挂成容器 `/data`。Worker 通过宿主 Docker socket 创建同级容器，绝对 `.git` 路径也依赖这个约定。默认的 API（serve）数据挂载只读，且没有 Docker socket；只有叠加 `compose.cells.yaml` 才会改成可写并挂 socket，见下文“第二轮 Cell 运行时”。
 
 访问 `http://localhost:8180`，使用 `.env` 的管理员账号登录。项目配置需要真实 GitLab URL、Meta-Repo、仓库与目标分支、模型 `provider/model`、验收 Compose 与必需检查。项目中配置的 agent image 必须与已构建的 `AGENT_IMAGE` 一致。保存凭证的环境变量名，例如 `GITLAB_TOKEN` 与 `GITLAB_MERGE_TOKEN`，不要把 token 粘贴进项目字段。
 
@@ -84,6 +88,8 @@ docker compose -f compose.yaml -f compose.local-node.yaml --profile tools pull
 docker compose -f compose.yaml -f compose.local-node.yaml up -d --wait
 ```
 
+需要 Forager Cells 时，在 `pull` 和 `up` 命令都追加 `-f compose.cells.yaml`；基础文件本身不会给 serve 挂 Docker socket。
+
 升级时修改 `.env` 中的 `IMAGE` 和 `AGENT_IMAGE`，重复上面两条命令。Compose 按依赖顺序先完成 Temporal schema 更新、namespace 初始化和应用 migration，再更新 API、Worker 和本地节点。它不会删除数据卷；已有执行容器和 Temporal 历史不会因为替换 Worker 而删除。节点的 Agent 镜像在 Node 管理中单独更新。远程 Node 的程序镜像在其部署目录中修改 `node.env` 的 `IMAGE` 后执行 `docker compose --env-file node.env -f compose.node.yaml pull` 和 `up -d`。
 
 首次初始化由 PostgreSQL 建立 `swarmjet`、`temporal`、`temporal_visibility` 三个数据库，随后对应工具建立 schema。升级已有数据库前先备份；不要给新版 Temporal 强行降级数据库 schema。更换主版本应遵循官方升级路径，不能仅修改镜像 tag 跳过中间升级要求。`TEMPORAL_NAMESPACE` 默认 `swarmjet`，历史保留 7 天。
@@ -92,7 +98,7 @@ docker compose -f compose.yaml -f compose.local-node.yaml up -d --wait
 
 默认 API 与 Temporal UI 仅绑定宿主 `127.0.0.1`。生产反向代理应提供 HTTPS，并把 `PUBLIC_ORIGIN` 设成用户访问的精确 origin、`SECURE_COOKIES=true`。不要代理绕过登录的 `/api` 路由。Temporal UI 位于 `http://localhost:8333`，仅用于查看 Workflow 历史和排障，Compose 已禁用其中的写操作；日常任务命令应通过 SwarmJet 控制台执行。该 UI 没有本应用的登录保护，远程运维使用 SSH 转发或带认证的代理。Temporal gRPC 和 PostgreSQL 不发布宿主端口，Temporal 无认证模式只用于这个隔离的 Compose 网络。
 
-只把显式模型变量放入 `AGENT_ENV_ALLOWLIST`。API / Worker 需要 GitLab 读取与状态同步权限；开发 token 可以创建任务分支/MR，但应由 GitLab 保护分支规则禁止合并目标。另一个 merge token 只在合并阶段注入 agent。Worker 的 Docker socket 属于高权限边界；部署主机和管理员必须可信，不能把它挂入 API 或 agent。
+只把显式模型变量放入 `AGENT_ENV_ALLOWLIST`。API / Worker 需要 GitLab 读取与状态同步权限；开发 token 可以创建任务分支/MR，但应由 GitLab 保护分支规则禁止合并目标。另一个 merge token 只在合并阶段注入 agent。Worker 的 Docker socket 属于高权限边界；部署主机和管理员必须可信。只有显式叠加 `compose.cells.yaml` 时才会给 API 挂 Docker socket，见“第二轮 Cell 运行时”；不要把它挂给 agent 容器。
 
 Git HTTPS 认证使用 `/usr/local/bin/swarmjet-askpass`，用户名为 `oauth2`、密码从 `GITLAB_TOKEN` 读取。控制台只保存 credential reference。OpenCode provider key 可以从显式环境变量读取，也可以用 `OPENCODE_CONFIG_CONTENT` 设置包含 `{env:VARIABLE_NAME}` 的配置。
 
@@ -142,14 +148,34 @@ Token 放在本地环境变量或密码管理器里，不要提交到仓库。�
 
 第二轮把 Forager 监管者和 Cell 运行时接进了 serve 进程。监管者必须在 serve 里运行，因为消息投递 Job 也在 serve 里执行：Job 把消息交给监管者，监管者启动或唤醒 Cell、驱动 OpenCode（ACP）、发布分支并开 PR。默认关闭；关闭时消息照常写入，只是没有人执行。
 
+**基础 `compose.yaml` 不会给 serve 挂 Docker socket，`DATA_DIR` 仍是只读。** 只有需要运行 Cell 时才叠加 `deploy/compose.cells.yaml`：
+
 ```sh
-# deploy/.env
-SWARMJET_CELLS=1
+cd deploy
+docker compose -f compose.yaml -f compose.cells.yaml up -d --wait
+```
+
+或使用安装脚本（首次安装和更新都适用）：
+
+```sh
+sudo python3 deploy/install.py --cells
+```
+
+`compose.cells.yaml` 只做四件事：
+
+- 把 serve 的环境变量 `SWARMJET_CELLS` 设为 `1`；
+- 给 serve 挂 `/var/run/docker.sock`；
+- 用同路径绑定覆盖 `DATA_DIR` 为可写（最终只有一个 `DATA_DIR` 挂载）；
+- 给 `api` 加 `swarmjet` 网络别名，并设置 `SWARMJET_CELL_NETWORK` 的默认值。
+
+Cell 相关变量（其余可以留在 `deploy/.env`）：
+
+```sh
 # 可选：沿用 AGENT_IMAGE（默认 swarmjet-agent:local）
 AGENT_IMAGE=swarmjet-agent:local
 # 默认 opencode/big-pickle；必须是 provider/model
 SWARMJET_FORAGER_MODEL=opencode/big-pickle
-# Cell 内访问 serve 的 MCP；compose 给 api 加了 swarmjet 别名
+# Cell 内访问 serve 的 MCP；compose.cells.yaml 给 api 加了 swarmjet 别名
 SWARMJET_CELL_MCP_URL=http://swarmjet:8080/mcp
 # Cell 加入的 Docker 网络，默认 <COMPOSE_PROJECT_NAME>_default
 SWARMJET_CELL_NETWORK=swarmjet_default
@@ -159,29 +185,36 @@ OPENCODE_AUTH_CONTENT=
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `SWARMJET_CELLS` | `0` | 设为 `1` 才启动监管者。为 `1` 时必须配置 GitHub App，否则 serve 启动失败并给出明确错误。 |
+| `SWARMJET_CELLS` | `0` | 由 `compose.cells.yaml` 设为 `1`。为 `1` 时必须配置 GitHub App 和 Docker socket，否则 serve 启动失败并给出明确错误。 |
 | `AGENT_IMAGE` | `swarmjet-agent:local` | Cell 镜像，需包含 `opencode`。 |
 | `SWARMJET_FORAGER_MODEL` | `opencode/big-pickle` | Forager 每轮固定使用的模型；不要依赖 CLI 默认模型。 |
-| `SWARMJET_CELL_MCP_URL` | `http://swarmjet:8080/mcp` | Cell 内可达的 `/mcp` 地址；compose 中 `api` 在默认网络上还有 `swarmjet` 别名。 |
+| `SWARMJET_CELL_MCP_URL` | `http://swarmjet:8080/mcp` | Cell 内可达的 `/mcp` 地址；`compose.cells.yaml` 中 `api` 在默认网络上还有 `swarmjet` 别名。 |
 | `SWARMJET_CELL_NETWORK` | `<项目名>_default` | Cell 容器加入的 Docker 网络。Cell 必须和 serve 在同一网络才能访问 `/mcp`。 |
 | `OPENCODE_AUTH_CONTENT` | 空 | 可选模型凭证；只作为 `docker exec -e` 传给 CLI，不写文件、不入镜像、不写日志。 |
 
-**权限变化（重要）**：启用后 serve 服务挂载了宿主机的 `/var/run/docker.sock`。这等同于给 serve 进程宿主机的 root 级权限：容器可以创建、停止、删除宿主上的容器，也可以读写宿主路径。这是本轮单机部署的取舍，不是长期安全边界。只应在自己控制、管理员可信的服务器上启用，不要把 Docker socket 暴露给 agent 容器，也不要让不可信用户获得 serve 的 MCP Token。`DATA_DIR` 与宿主机使用相同绝对路径，Cell 工作区以绑定目录形式落在 `DATA_DIR/cells/<agent-id>/workspace`；发布器在平台侧读取该目录并推送一个受控分支，Cell 内不持有 Git 凭证。
+**权限变化（重要）**：叠加 `compose.cells.yaml` 后，serve 服务挂载了宿主机的 `/var/run/docker.sock`。这等同于给 serve 进程宿主机的 root 级权限：容器可以创建、停止、删除宿主上的容器，也可以读写宿主路径。这是本轮单机部署的取舍，不是长期安全边界。只应在自己控制、管理员可信的服务器上启用，不要把 Docker socket 暴露给 agent 容器，也不要让不可信用户获得 serve 的 MCP Token。`DATA_DIR` 与宿主机使用相同绝对路径，Cell 工作区以绑定目录形式落在 `DATA_DIR/cells/<agent-id>/workspace`；发布器在平台侧读取该目录并推送一个受控分支，Cell 内不持有 Git 凭证。
 
 启用步骤：
 
 1. 配置 GitHub App（见上一节），确保 App 安装在目标仓库上，并设置 `GITHUB_APP_ID`、`GITHUB_APP_PRIVATE_KEY_FILE` 和 `GITHUB_WEBHOOK_SECRET`。
-2. 在 `deploy/.env` 设置 `SWARMJET_CELLS=1`，按需设置上面的变量，然后 `docker compose up -d --wait`。
+2. 用上面的命令叠加 `compose.cells.yaml`；按需设置 Cell 变量。不要只把基础 compose 的 `SWARMJET_CELLS` 改成 `1`：没有 socket 时 serve 会直接报错并提示缺少叠加文件。
 3. 用 `swarmjet token create --scope admin` 创建管理员 Token，通过 MCP 建 Hive 并 `spawn_forager`；或按 `docs/claude/runbook-round2.md` 手动验收。
-4. 查看 `docker compose logs -f api`，确认出现 `forager cells enabled`，并观察 Cell 容器 `swarmjet-cell-<agent-id>`。
+4. 查看 `docker compose -f compose.yaml -f compose.cells.yaml logs -f api`，确认出现 `forager cells enabled`，并观察 Cell 容器 `swarmjet-cell-<agent-id>`。
 
-关闭时把 `SWARMJET_CELLS` 改回 `0` 并重启 serve：现有 Cell 不会被新消息唤醒，消息仍留在数据库里。需要清理残留时按标签 `swarmjet.cell=true` 查找容器。
+关闭时用不带叠加文件的基础 compose 重新创建 serve：
+
+```sh
+cd deploy
+docker compose -f compose.yaml up -d api
+```
+
+现有 Cell 不会被新消息唤醒，消息仍留在数据库里。需要清理残留时按标签 `swarmjet.cell=true` 查找容器。
 
 ## 额外环境变量与保留期
 
 ### 执行器配置终端
 
-设置 `RUNTIME_ADMIN_SECRET` 为独立随机值（至少 32 个字符，例如 `openssl rand -hex 32`），重启 API/Worker 后，控制台的“执行器环境”可以打开配置终端。API 通过私有网络连接 Worker 的 8091 端口；该端口不发布到宿主机，API 本身仍然没有 Docker socket。
+设置 `RUNTIME_ADMIN_SECRET` 为独立随机值（至少 32 个字符，例如 `openssl rand -hex 32`），重启 API/Worker 后，控制台的“执行器环境”可以打开配置终端。API 通过私有网络连接 Worker 的 8091 端口；该端口不发布到宿主机，未叠加 `compose.cells.yaml` 时 API 本身没有 Docker socket。
 
 配置终端使用部署的 `AGENT_IMAGE`，只挂载 `DATA_DIR/runtime-profiles/default/home`。按需打包后，在“执行器环境”勾选需要启用的 Agent 并保存。新安装/升级后没有隐式启用项，管理员需要明确选择；已有任务继续运行，新的接单使用新列表。
 

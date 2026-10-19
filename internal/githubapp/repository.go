@@ -77,16 +77,33 @@ func (a *App) RepositoryID(ctx context.Context, fullName string) (int64, error) 
 // splitRepository validates owner/name before it becomes part of an API path.
 func splitRepository(fullName string) (string, string, error) {
 	parts := strings.Split(fullName, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	if len(parts) != 2 {
 		return "", "", errors.New("invalid GitHub repository name")
 	}
 	owner, name := parts[0], parts[1]
-	if strings.ContainsAny(fullName, "?#\\ \t\r\n") ||
-		strings.ContainsAny(owner, "?#\\ \t\r\n") ||
-		strings.ContainsAny(name, "?#\\ \t\r\n") {
+	if !validRepositoryPart(owner) || !validRepositoryPart(name) {
 		return "", "", errors.New("invalid GitHub repository name")
 	}
 	return owner, name, nil
+}
+
+// validRepositoryPart accepts the characters GitHub allows in an owner or
+// repository name and rejects the path segments "." and "..".
+func validRepositoryPart(part string) bool {
+	if part == "" || part == "." || part == ".." {
+		return false
+	}
+	for _, r := range part {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // requestWithToken performs an installation-token request. It deliberately

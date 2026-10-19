@@ -2,7 +2,7 @@
 
 本文验收第二轮的最小闭环：本地 Agent 通过 MCP 派活 → Forager 在 Docker Cell 里由 OpenCode（ACP）执行 → 平台把分支推上 GitHub 并开 PR → PR 上的事件经 Router 回到 Forager。
 
-> 本轮只支持单机部署。serve 进程会挂载宿主 Docker socket，拥有宿主机 root 级权限。只在你自己控制、管理员可信的服务器上启用。
+> 本轮只支持单机部署。启用 Cells 需要叠加 `deploy/compose.cells.yaml`，届时 serve 会挂载宿主 Docker socket，拥有宿主机 root 级权限。只在你自己控制、管理员可信的服务器上启用。
 
 ## 0. 准备
 
@@ -48,15 +48,16 @@ webhook 只负责唤醒 Router；Router 按仓库找到 Hive 后，把事件写�
 
 ## 3. 启用 Cells
 
-在 `deploy/.env` 增加：
+基础 `deploy/compose.yaml` 不会给 serve 挂 Docker socket，`DATA_DIR` 仍是只读。启用 Cells 需要叠加 `deploy/compose.cells.yaml`，它会把 `SWARMJET_CELLS` 设为 `1`、挂 socket，并把 `DATA_DIR` 覆盖为可写。
+
+先按需在 `deploy/.env` 设置 Cell 变量：
 
 ```sh
-SWARMJET_CELLS=1
 # 沿用 AGENT_IMAGE；如镜像名不同请改成实际值
 AGENT_IMAGE=swarmjet-agent:local
 # Forager 模型；默认是免费模型
 SWARMJET_FORAGER_MODEL=opencode/big-pickle
-# Cell 内访问 serve 的 MCP；compose 中 api 有 swarmjet 别名
+# Cell 内访问 serve 的 MCP；compose.cells.yaml 给 api 加了 swarmjet 别名
 SWARMJET_CELL_MCP_URL=http://swarmjet:8080/mcp
 # Cell 加入的 Docker 网络；默认 <COMPOSE_PROJECT_NAME>_default
 SWARMJET_CELL_NETWORK=swarmjet_default
@@ -64,23 +65,23 @@ SWARMJET_CELL_NETWORK=swarmjet_default
 OPENCODE_AUTH_CONTENT=
 ```
 
-然后重启 serve：
+然后叠加文件重启 serve：
 
 ```sh
 cd deploy
-docker compose up -d --wait api
-docker compose logs --tail=50 api | grep -E 'forager cells enabled|GitHub App'
+docker compose -f compose.yaml -f compose.cells.yaml up -d --wait api
+docker compose -f compose.yaml -f compose.cells.yaml logs --tail=50 api | grep -E 'forager cells enabled|GitHub App'
 ```
 
-如果 `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY_FILE` 没有配置，serve 会在启动时报错退出，这是预期行为：不要在发布时才失败。
+如果 `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY_FILE` 没有配置，或没有叠加 `compose.cells.yaml` 导致 `/var/run/docker.sock` 不可用，serve 会在启动时报错退出，这是预期行为：不要等到第一个 Forager 被唤醒才失败。
 
-> 安全提醒：从这里开始，`api` 容器挂载了 `/var/run/docker.sock`，可以创建/删除宿主容器并读写宿主路径。不要把 Docker socket 再挂进任何 agent 容器；MCP Token 只发给可信的本地 Agent。
+> 安全提醒：从叠加 `compose.cells.yaml` 开始，`api` 容器挂载了 `/var/run/docker.sock`，可以创建/删除宿主容器并读写宿主路径。不要把 Docker socket 再挂进任何 agent 容器；MCP Token 只发给可信的本地 Agent。
 
 ## 4. 创建管理员 Token
 
 ```sh
 cd deploy
-docker compose exec -T api swarmjet token create --name round2-admin --scope admin
+docker compose -f compose.yaml -f compose.cells.yaml exec -T api swarmjet token create --name round2-admin --scope admin
 ```
 
 命令只打印一次明文。把它保存到本地密码管理器；数据库只保存哈希。
@@ -142,7 +143,7 @@ Codex 的等价配置见 `deploy/README.md` 的“给本地 Claude Code / Codex 
 
 ```sh
 # 服务器执行
-docker compose logs -f api | grep -E 'cell update|forager|cell:'
+docker compose -f compose.yaml -f compose.cells.yaml logs -f api | grep -E 'cell update|forager|cell:'
 docker ps --filter 'label=swarmjet.cell=true'
 ```
 
@@ -171,7 +172,7 @@ GitHub 会发送 `pull_request_review` / `pull_request_review_comment` webhook�
 观察：
 
 ```sh
-docker compose logs -f api | grep -E 'hive event routed|forager|cell update'
+docker compose -f compose.yaml -f compose.cells.yaml logs -f api | grep -E 'hive event routed|forager|cell update'
 ```
 
 预期日志中 `hive event routed` 的 `forager_id` 等于第 6 步的 `<FORAGER_ID>`，`action=delivered`。Forager 状态会再次 `active → parked`，`get_forager` 能看到 PR 编号和更新后的交接摘要。
@@ -202,13 +203,21 @@ docker volume ls | grep swarmjet-cell
 
 ## 10. 关闭 Cells
 
-验收完成后，把 `deploy/.env` 的 `SWARMJET_CELLS` 改回 `0` 并重启 `api`。关闭后消息仍会写入数据库，但没有进程执行；现有 Cell 容器不会被自动删除，可按 `swarmjet.cell=true` 标签排查。
+验收完成后，用不带叠加文件的基础 compose 重新创建 serve：
+
+```sh
+cd deploy
+docker compose -f compose.yaml up -d api
+```
+
+关闭后消息仍会写入数据库，但没有进程执行；现有 Cell 容器不会被自动删除，可按 `swarmjet.cell=true` 标签排查。
 
 ## 常见问题
 
 | 现象 | 检查 |
 |---|---|
 | serve 启动即失败，提示需要 GitHub App | 配置 `GITHUB_APP_ID`、`GITHUB_APP_PRIVATE_KEY_FILE`；PEM 必须可读且是 RSA 私钥。 |
+| serve 启动即失败，提示缺少 Docker socket / 需要叠加 `deploy/compose.cells.yaml` | 不要只改 `SWARMJET_CELLS=1`；用 `-f compose.yaml -f compose.cells.yaml` 启动，或运行 `install.py --cells`。 |
 | Cell 创建成功但 MCP 连不上 | `SWARMJET_CELL_NETWORK` 是否等于 compose 默认网络名；`SWARMJET_CELL_MCP_URL` 是否用 `http://swarmjet:8080/mcp`。 |
 | Cell 内没有模型输出 | 确认镜像包含 `opencode`；`SWARMJET_FORAGER_MODEL` 是 `provider/model`；需要认证时设置 `OPENCODE_AUTH_CONTENT`。 |
 | 分支没有推送/没有 PR | 检查测试仓库默认分支、App 的 Contents/Pull requests 权限，以及日志中是否有 `refusing to publish the base branch`。 |

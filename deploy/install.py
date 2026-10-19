@@ -46,6 +46,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", default="/srv/swarmjet/data", help="首次生成配置时的数据目录")
     parser.add_argument("--agent-clis", default="opencode", help="首次安装的 CLI，如 opencode,codex,claude")
+    parser.add_argument("--cells", action="store_true", help="叠加 compose.cells.yaml，在 serve 中启用 Forager Cells（挂载 Docker socket，宿主 root 权限）")
     args = parser.parse_args()
     if not Path(args.data_dir).is_absolute() or any(c in args.data_dir for c in "\r\n$#'\"\\ \t"):
         parser.error("--data-dir 必须是无空白或 dotenv 特殊字符的绝对路径")
@@ -70,6 +71,8 @@ def main():
     initialize(directory / ".env", directory / ".env.example", args.data_dir, args.agent_clis)
     compose = ["docker", "compose", "--env-file", str(directory / ".env"),
                "-f", "compose.yaml", "-f", "compose.build.yaml", "-f", "compose.local-node.yaml"]
+    if args.cells:
+        compose += ["-f", "compose.cells.yaml"]
     override = directory / "compose.override.yaml"
     if override.exists():
         compose += ["-f", str(override)]
@@ -89,6 +92,8 @@ def main():
     if not data.is_absolute():
         raise RuntimeError("DATA_DIR 必须为绝对路径。")
     data.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if args.cells:
+        print("已叠加 compose.cells.yaml：serve 将挂载 Docker socket（等同宿主 root 权限）。", flush=True)
     print("构建应用与 Agent 镜像……", flush=True)
     run(compose + ["--profile", "tools", "build"])
     print("初始化数据库、Temporal 并启动服务……", flush=True)

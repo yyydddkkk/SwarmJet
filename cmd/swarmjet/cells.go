@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,11 +41,14 @@ type cellStack struct {
 }
 
 // newCellStack builds the runtime, publisher and supervisor. It fails fast when
-// Cells are enabled without the GitHub App: a missing App would otherwise only
-// surface after a Forager had already been woken.
+// Cells are enabled without the GitHub App or without the Docker socket: those
+// would otherwise only surface after a Forager had already been woken.
 func newCellStack(s *store.Store, app *githubapp.App, dataDir string, logger *slog.Logger) (*cellStack, error) {
 	if app == nil {
 		return nil, errors.New("SWARMJET_CELLS=1 requires GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_FILE")
+	}
+	if err := requireCellDocker(); err != nil {
+		return nil, err
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -92,6 +96,35 @@ func newCellStack(s *store.Store, app *githubapp.App, dataDir string, logger *sl
 		return nil, err
 	}
 	return &cellStack{Supervisor: supervisor, Runtime: runtime, Publisher: publisher, logger: logger}, nil
+}
+
+// requireCellDocker checks the local Docker socket before any Forager can be
+// woken. The base deploy/compose.yaml deliberately does not mount the socket;
+// enabling Cells requires deploy/compose.cells.yaml.
+func requireCellDocker() error {
+	path := "/var/run/docker.sock"
+	if host := os.Getenv("DOCKER_HOST"); host != "" {
+		switch {
+		case strings.HasPrefix(host, "unix://"):
+			path = strings.TrimPrefix(host, "unix://")
+		case strings.HasPrefix(host, "unix:"):
+			path = strings.TrimPrefix(host, "unix:")
+		default:
+			// A TCP or SSH Docker endpoint does not depend on the local socket.
+			return nil
+		}
+	}
+	if path == "" {
+		return errors.New("SWARMJET_CELLS=1 requires a Docker socket; 启用 Cell 需要叠加 deploy/compose.cells.yaml")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("SWARMJET_CELLS=1 requires the Docker socket at %s; 启用 Cell 需要叠加 deploy/compose.cells.yaml: %w", path, err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("SWARMJET_CELLS=1 requires a Docker socket at %s; 启用 Cell 需要叠加 deploy/compose.cells.yaml", path)
+	}
+	return nil
 }
 
 // cellCLIEnv passes the deployment's optional OpenCode credential into the
