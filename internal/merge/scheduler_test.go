@@ -94,6 +94,34 @@ func TestSchedulerAutoMergeDisabledNotifiesOnce(t *testing.T) {
 	}
 }
 
+func TestSchedulerNotifiesTheBranchOwnersDispatcher(t *testing.T) {
+	store := &fakeStore{
+		hive:        testHive(),
+		owner:       domain.Agent{ID: "verifier-1", ChainID: "wrong-chain"},
+		branchOwner: domain.Agent{ID: "forager-1", ChainID: "chain-1"},
+		inbox: map[domain.Address][]domain.Message{
+			domain.ForagerAddress("forager-1"): {{
+				ID: "task-1", HiveID: "hive-1", From: "local:human",
+				To: domain.ForagerAddress("forager-1"), Kind: domain.MessageTask, Body: "fix it",
+			}},
+		},
+	}
+	readiness := readyReadiness()
+	readiness.Pull.HeadRef = "feat"
+	scheduler := NewScheduler(store, fakeChecker{readiness: readiness}, &fakeMerger{},
+		fakePolicies{policy: domain.MergePolicy{Auto: false}}, &fakeInserter{})
+	if err := scheduler.Handle(context.Background(), jobs.MergeCheck{HiveID: "hive-1", PR: 7, SHA: "head"}); err != nil {
+		t.Fatal(err)
+	}
+	messages := store.sent()
+	if len(messages) != 1 || messages[0].To != domain.LocalAddress("human") {
+		t.Fatalf("messages = %+v, want the branch owner's dispatcher", messages)
+	}
+	if messages[0].ChainID != "chain-1" {
+		t.Fatalf("chain = %q, want the branch owner's chain", messages[0].ChainID)
+	}
+}
+
 func TestSchedulerIgnoresStaleJob(t *testing.T) {
 	store := &fakeStore{hive: testHive()}
 	merger := &fakeMerger{}

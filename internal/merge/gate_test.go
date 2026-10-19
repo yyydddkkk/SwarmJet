@@ -95,6 +95,16 @@ func TestCheckRuleReasons(t *testing.T) {
 			wantReason: "from the pull request author",
 		},
 		{
+			name: "author attestation by IDs", policy: requireAllPolicy(),
+			latest: func() domain.Attestation {
+				a := passAttestation()
+				a.IsAuthor = false
+				a.AuthorID = a.AttesterID
+				return a
+			}(),
+			wantReason: "from the pull request author",
+		},
+		{
 			name: "required check failed", policy: requireAllPolicy(),
 			mutate: func(s *gitHubStub) {
 				s.required = []any{map[string]any{"context": "test", "app_id": 7}}

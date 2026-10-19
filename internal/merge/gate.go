@@ -90,6 +90,11 @@ func (s *Service) Check(ctx context.Context, hive domain.Hive, pr int64) (Readin
 		default:
 			readiness.AttestationFound = true
 			readiness.Attestation = attestation
+			// IsAuthor is computed by the platform when recording, but derive it
+			// again here so a malformed or stale row can never bypass
+			// requireNonAuthor.
+			isAuthor := attestation.IsAuthor ||
+				(attestation.AuthorID != "" && attestation.AuthorID == attestation.AttesterID)
 			switch {
 			case attestation.HeadSHA != pull.HeadSHA:
 				readiness.Reasons = append(readiness.Reasons, fmt.Sprintf(
@@ -97,7 +102,7 @@ func (s *Service) Check(ctx context.Context, hive domain.Hive, pr int64) (Readin
 					shortSHA(attestation.HeadSHA), shortSHA(pull.HeadSHA)))
 			case !policyAccepts(policy, attestation.Result):
 				readiness.Reasons = append(readiness.Reasons, fmt.Sprintf("latest attestation is %s", attestation.Result))
-			case policy.RequireNonAuthor && attestation.IsAuthor:
+			case policy.RequireNonAuthor && isAuthor:
 				readiness.Reasons = append(readiness.Reasons, "latest attestation is from the pull request author")
 			}
 		}

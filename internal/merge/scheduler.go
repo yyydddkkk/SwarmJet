@@ -107,7 +107,7 @@ func (s *Scheduler) Handle(ctx context.Context, job jobs.MergeCheck) error {
 // notifyReady sends the single "可以合并" report per (PR, SHA). The stable
 // message id makes retries and repeated job deliveries idempotent.
 func (s *Scheduler) notifyReady(ctx context.Context, hive domain.Hive, readiness Readiness) error {
-	to, chainID, err := s.dispatcher(ctx, hive, readiness.Pull.Number)
+	to, chainID, err := s.dispatcher(ctx, hive, readiness.Pull.Number, readiness.Pull.HeadRef)
 	if err != nil {
 		return err
 	}
@@ -135,8 +135,11 @@ func (s *Scheduler) notifyReady(ctx context.Context, hive domain.Hive, readiness
 
 // dispatcher reports who should hear "可以合并": the sender of the PR owner's
 // newest task, then the Queen when enabled, then the Hive Inbox.
-func (s *Scheduler) dispatcher(ctx context.Context, hive domain.Hive, pr int64) (domain.Address, string, error) {
-	owner, err := s.store.PRAuthor(ctx, hive.ID, pr)
+func (s *Scheduler) dispatcher(ctx context.Context, hive domain.Hive, pr int64, headRef string) (domain.Address, string, error) {
+	owner, err := s.store.PRAuthorByBranch(ctx, hive.ID, headRef)
+	if errors.Is(err, domain.ErrNotFound) {
+		owner, err = s.store.PRAuthor(ctx, hive.ID, pr)
+	}
 	if err == nil && owner.ID != "" {
 		sender, sendErr := s.latestTaskSender(ctx, hive.ID, domain.ForagerAddress(owner.ID))
 		if sendErr != nil {
