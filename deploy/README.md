@@ -117,6 +117,7 @@ ssh -N -L 8180:127.0.0.1:8180 用户名@服务器
 | `OPENCODE_AUTH_CONTENT` | 否 | 可选 OpenCode 凭证；CLI 登录终端的结果优先 |
 | `GITHUB_APP_ID`、`GITHUB_APP_PRIVATE_KEY_FILE`、`GITHUB_WEBHOOK_SECRET` | 否 | 第二轮手动方式；设置后优先于数据库里的 App |
 | `SWARMJET_TUNNEL_URL` | 否 | 隧道指标地址，例如 `http://tunnel:2000` |
+| `WEBHOOK_LISTEN_ADDRESS` | 否 | api 的 webhook 专用监听地址，默认 `:8081`；隧道转发到这里 |
 | `TUNNEL_METRICS_PORT`、`PROMETHEUS_PORT`、`ALERTMANAGER_PORT` | 否 | 本机回环端口 |
 
 第三轮已删除 `TEMPORAL_*`、`GITLAB_*`、`SMTP_*`、`NODE_*`、`EXECUTION_MODE`、`MIHOMO_*`、`RUNTIME_ADMIN_*`、`TASK_CONCURRENCY`、`INTEGRATION_ENV_ALLOWLIST`、`AGENT_ENV_ALLOWLIST`、`INIT_VERIFY_IMAGE`、`FAILED_KEEP_DAYS`、`REPORT_KEEP_DAYS`、`PLATFORM_IMAGE`。旧 `.env` 中残留这些键不会生效，可以删除。
@@ -192,7 +193,9 @@ docker compose --env-file .env -f compose.yaml up -d api
 docker compose --env-file .env -f compose.yaml --profile tunnel up -d
 ```
 
-并在 `.env` 设置 `SWARMJET_TUNNEL_URL=http://tunnel:2000`。平台后台读取 `http://tunnel:2000/quicktunnel` 得到公网地址，然后用 App JWT 调用 GitHub 的 `PATCH /app/hook/config` 更新 webhook URL。快速隧道地址是临时的，重启 cloudflared 后会变化；平台检测到变化会再次同步。隧道只把 `api:8080` 暴露出去，PostgreSQL 和指标端口不公开。
+并在 `.env` 设置 `SWARMJET_TUNNEL_URL=http://tunnel:2000`。平台后台读取 `http://tunnel:2000/quicktunnel` 得到公网地址，然后用 App JWT 调用 GitHub 的 `PATCH /app/hook/config` 更新 webhook URL。快速隧道地址是临时的，重启 cloudflared 后会变化；平台检测到变化会再次同步。隧道只转发 `api:8081`，这是 api 单独的 webhook 监听端口（`WEBHOOK_LISTEN_ADDRESS`，默认 `:8081`），只服务 `/api/webhooks/github` 和 `/healthz`，其余路径一律 404；控制台和 `/mcp` 所在的 `8080` 不经隧道暴露，PostgreSQL 和指标端口也不公开。
+
+隧道关闭期间 GitHub 投递失败的 webhook 不会自动重试。平台在启动时、隧道地址变化或恢复时以及每 10 分钟，用 App JWT 查询最近 3 天的 `GET /app/hook/deliveries`，对没有成功投递的 guid 调用 `POST /app/hook/deliveries/{id}/attempts` 请求重投（每次最多 20 条，遇到速率限制即停止）。重投按 delivery id 幂等，不会重复处理；结果见 `/api/setup/status` 的 `tunnel.redelivery`。
 
 没有 GitHub App 时隧道仍可启动，但同步状态会显示未配置；创建 App 后自动重试。
 
