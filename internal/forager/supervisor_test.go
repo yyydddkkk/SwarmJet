@@ -1,12 +1,14 @@
 package forager
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -211,6 +213,74 @@ func TestFirstMessageStartsCellRunsTurnAndParks(t *testing.T) {
 	}
 	if starts := f.runtime.destroyCount(testAgentID); starts != 0 {
 		t.Errorf("Destroy calls = %d, want 0", starts)
+	}
+}
+
+// syncBuffer is a log sink safe for the actor goroutines and the test reader.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestTurnLogsOutcomeWithoutBodies(t *testing.T) {
+	logs := &syncBuffer{}
+	f := newFixture(t, func(o *Options) {
+		o.Logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		o.CLIEnv = func(context.Context, domain.Hive) (map[string]string, error) {
+			return map[string]string{"OPENCODE_AUTH_CONTENT": "test-secret"}, nil
+		}
+	})
+	f.runtime.script(testAgentID).updates = []cell.Update{
+		{Kind: cell.UpdateText, Text: "Implemented the widget fix."},
+	}
+	f.notify(f.taskMessage("m1", "Fix the widget"))
+	f.wantState(testAgentID, domain.AgentParked)
+
+	out := logs.String()
+	for _, want := range []string{
+		"forager: turn started", "forager: turn finished",
+		"stop_reason=end_turn", "pr=42", "messages=1",
+		"input_tokens=0", "output_tokens=0", "publish_error=",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("logs missing %q:\n%s", want, out)
+		}
+	}
+	for _, secret := range []string{"test-secret", "Implemented the widget fix.", "agent-token-1", "Fix the widget"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("logs leak %q:\n%s", secret, out)
+		}
+	}
+}
+
+func TestTurnWithoutOutputReportsStopReason(t *testing.T) {
+	f := newFixture(t, nil)
+	agent := f.store.agentCopy(testAgentID)
+	agent.Handoff = nil
+	f.store.setAgent(agent)
+
+	f.notify(f.taskMessage("m1", "Fix the widget"))
+	f.wantState(testAgentID, domain.AgentParked)
+
+	reports := f.store.reportsFrom(testAgentID)
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d, want 1", len(reports))
+	}
+	want := "Turn finished (stop reason: end_turn) with no output."
+	if reports[0].Body != want {
+		t.Fatalf("report body = %q, want %q", reports[0].Body, want)
 	}
 }
 

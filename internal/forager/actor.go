@@ -201,18 +201,22 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		timeout = 120 * time.Minute
 	}
 
+	a.sup.log.Info("forager: turn started", "agent", agent.ID, "hive", agent.HiveID, "messages", len(consumed), "first_turn", firstTurn)
 	var lastText string
+	var turn cell.TurnResult
 	for attempt := 1; ; attempt++ {
 		var outcome promptOutcome
-		lastText, _, err, outcome = a.prompt(ctx, agent, session, text, timeout)
+		lastText, turn, err, outcome = a.prompt(ctx, agent, session, text, timeout)
 		if a.isTerminal() {
 			return false
 		}
 		switch outcome {
 		case promptCancelled:
+			a.sup.log.Info("forager: turn ended", "agent", agent.ID, "hive", agent.HiveID, "outcome", "cancelled", "stop_reason", turn.StopReason, "messages", len(consumed))
 			a.terminate(ctx, domain.AgentCancelled, "cancelled by control message", consumed, lastText)
 			return false
 		case promptTimedOut:
+			a.sup.log.Info("forager: turn ended", "agent", agent.ID, "hive", agent.HiveID, "outcome", "timed_out", "stop_reason", turn.StopReason, "messages", len(consumed))
 			a.terminate(ctx, domain.AgentFailed, fmt.Sprintf("turn timed out after %s", timeout), consumed, lastText)
 			return false
 		case promptAborted:
@@ -249,9 +253,11 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		latest = agent
 	}
 	title := publishTitle(latest.Task)
-	body := reportBody(latest, lastText)
+	body := reportBody(latest, lastText, turn.StopReason)
 	pr, publishErr := a.sup.opts.Publisher.Publish(ctx, spec, title, body)
+	publishErrText := ""
 	if publishErr != nil {
+		publishErrText = publishErr.Error()
 		a.sup.log.Warn("forager: publish failed", "agent", agent.ID, "error", publishErr)
 	}
 	if pr != 0 && pr != latest.PRNumber {
@@ -259,7 +265,12 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 			a.sup.log.Warn("forager: save PR failed", "agent", agent.ID, "error", err)
 		}
 	}
-	a.report(ctx, latest, consumed, reportBodyWithError(latest, lastText, publishErr))
+	a.sup.log.Info("forager: turn finished",
+		"agent", agent.ID, "hive", agent.HiveID,
+		"stop_reason", turn.StopReason,
+		"input_tokens", turn.InputTokens, "output_tokens", turn.OutputTokens,
+		"messages", len(consumed), "pr", pr, "publish_error", publishErrText)
+	a.report(ctx, latest, consumed, reportBodyWithError(latest, lastText, turn.StopReason, publishErr))
 	if _, err := a.transitionTo(ctx, domain.AgentParked); err != nil {
 		if !errors.Is(err, errTerminal) {
 			a.sup.log.Warn("forager: mark parked failed", "agent", agent.ID, "error", err)
