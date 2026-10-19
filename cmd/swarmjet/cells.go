@@ -211,6 +211,14 @@ func (r *githubRepositories) app(ctx context.Context) (*githubapp.App, error) {
 
 // Resolve implements docker.RepositoryResolver.
 func (r *githubRepositories) Resolve(ctx context.Context, fullName string) (int64, error) {
+	r.mu.Lock()
+	for id, name := range r.names {
+		if name == fullName {
+			r.mu.Unlock()
+			return id, nil
+		}
+	}
+	r.mu.Unlock()
 	app, err := r.app(ctx)
 	if err != nil {
 		return 0, err

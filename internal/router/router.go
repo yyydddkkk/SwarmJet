@@ -68,6 +68,14 @@ type Options struct {
 	// precedence over AppSlug. The Provider uses it so an App created at
 	// runtime is recognised without rebuilding the Router.
 	AppSlugSource func(context.Context) string
+	// OnHead is called for a pull_request opened/reopened/synchronize caused by
+	// the platform's own publisher. Those events are still not delivered to the
+	// owner; the callback lets the platform supersede conclusions on old heads.
+	OnHead func(ctx context.Context, hive domain.Hive, owner domain.Agent, pr int64, sha string) error
+	// OnChecks is called whenever a check_suite or check_run completes, whether
+	// it succeeded or failed. The Router itself still decides whether the event
+	// wakes the owner: only failure-class conclusions are delivered.
+	OnChecks func(ctx context.Context, hive domain.Hive, pr int64, sha string, conclusion string) error
 }
 
 // Router routes normalized GitHub events. It is safe for concurrent use when
@@ -77,6 +85,8 @@ type Router struct {
 	prRecorder    PRRecorder
 	appSlug       string
 	appSlugSource func(context.Context) string
+	onHead        func(context.Context, domain.Hive, domain.Agent, int64, string) error
+	onChecks      func(context.Context, domain.Hive, int64, string, string) error
 }
 
 // New builds a Router over the given backend with default options.
@@ -90,6 +100,8 @@ func NewWithOptions(backend Backend, opts Options) *Router {
 		backend:       backend,
 		appSlug:       normalizeAppSlug(opts.AppSlug),
 		appSlugSource: opts.AppSlugSource,
+		onHead:        opts.OnHead,
+		onChecks:      opts.OnChecks,
 	}
 	if recorder, ok := backend.(PRRecorder); ok {
 		r.prRecorder = recorder
@@ -139,11 +151,30 @@ func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
 	if ignored, decision, err := r.platformGenerated(ctx, hive.ID, e); err != nil {
 		return Decision{}, err
 	} else if ignored {
+		if err := r.platformHeadChanged(ctx, hive, e); err != nil {
+			return Decision{}, err
+		}
 		return decision, nil
 	}
 
 	if rule, ok := matchTrigger(cfg.Triggers, e); ok {
 		return r.routeTrigger(ctx, hive, cfg, e, rule)
+	}
+
+	if e.Type == EventCheckRun || e.Type == EventCheckSuite {
+		if r.onChecks != nil {
+			if err := r.onChecks(ctx, hive, e.Number, e.SHA, e.Conclusion); err != nil {
+				return Decision{}, err
+			}
+		}
+		if !checkWakesOwner(e.Conclusion) {
+			return Decision{
+				Action:     ActionIgnored,
+				Reason:     fmt.Sprintf("check conclusion %q does not wake the owner", e.Conclusion),
+				Repository: e.Repository,
+				HiveID:     hive.ID,
+			}, nil
+		}
 	}
 
 	forager, found, err := r.owningForager(ctx, hive.ID, e)
@@ -231,6 +262,47 @@ func (r *Router) platformGenerated(ctx context.Context, hiveID string, e Event) 
 func platformPRAction(action string) bool {
 	switch action {
 	case "opened", "reopened", "synchronize", "edited":
+		return true
+	default:
+		return false
+	}
+}
+
+// platformHeadChanged calls OnHead for a new PR head published by the platform.
+// The event itself is still reported as ignored and is never delivered to the
+// owner: "edited" is only a metadata change and carries no new commit.
+func (r *Router) platformHeadChanged(ctx context.Context, hive domain.Hive, e Event) error {
+	if r.onHead == nil || e.Type != EventPullRequest || !headChangedAction(e.Action) {
+		return nil
+	}
+	if strings.TrimSpace(e.SHA) == "" {
+		return nil
+	}
+	owner, found, err := r.owningForager(ctx, hive.ID, e)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	return r.onHead(ctx, hive, owner, e.Number, e.SHA)
+}
+
+func headChangedAction(action string) bool {
+	switch action {
+	case "opened", "reopened", "synchronize":
+		return true
+	default:
+		return false
+	}
+}
+
+// checkWakesOwner implements the CI delivery rule: only a failure-class
+// conclusion is an actionable event for the owner. Success, neutral, skipped,
+// cancelled and startup-only conclusions are recorded as ignored instead.
+func checkWakesOwner(conclusion string) bool {
+	switch strings.ToLower(strings.TrimSpace(conclusion)) {
+	case "failure", "timed_out", "action_required", "startup_failure":
 		return true
 	default:
 		return false

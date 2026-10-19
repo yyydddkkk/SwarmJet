@@ -15,10 +15,12 @@ import (
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/api"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/forager"
 	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
 	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 	"github.com/yyydddkkk/SwarmJet/internal/mcp"
+	"github.com/yyydddkkk/SwarmJet/internal/merge"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"github.com/yyydddkkk/SwarmJet/internal/onboarding"
 	"github.com/yyydddkkk/SwarmJet/internal/router"
@@ -196,6 +198,17 @@ func runServe(ctx context.Context, s *store.Store) error {
 		slog.Info("forager cells enabled", "model", env("SWARMJET_FORAGER_MODEL", forager.DefaultModel))
 	}
 
+	// The merge service reads the Hive repository through the same dynamic App
+	// provider as the Cells, so a newly created App works without a restart.
+	mergeRepos := newGitHubRepositories(ghProvider)
+	mergeService := merge.New(merge.Options{
+		Store:        s,
+		Attestations: s,
+		Methodology:  methodologyStore{s: s},
+		GitHub:       mergeGitHubSource{repos: mergeRepos},
+	})
+	var mergeScheduler *merge.Scheduler
+
 	password := required("ADMIN_PASSWORD")
 	if len(password) < 12 {
 		return fmt.Errorf("ADMIN_PASSWORD must contain at least 12 characters")
@@ -222,6 +235,7 @@ func runServe(ctx context.Context, s *store.Store) error {
 		CLILoginReason:  cliLoginReason,
 		CLILoginStatus:  cliLoginStatus(cliLogin, data),
 		MCPURL:          publicMCPURL(),
+		Merge:           mergeService,
 	})
 	svc := &service.Service{Store: s, Webhooks: s, AppSlugSource: ghProvider.Slug}
 
@@ -245,11 +259,25 @@ func runServe(ctx context.Context, s *store.Store) error {
 			recordJob("message", err)
 			return err
 		},
+		MergeCheck: func(ctx context.Context, job jobs.MergeCheck) error {
+			err := mergeScheduler.Handle(ctx, job)
+			recordJob("merge", err)
+			return err
+		},
 	}, jobs.Config{})
 	if err != nil {
 		return err
 	}
 	s.Jobs = queue
+	mergeScheduler = merge.NewScheduler(s, mergeService, mergeService, mergeService, queue)
+	mergeService.SetInserter(queue)
+	svc.HiveRouter = router.NewWithOptions(s, router.Options{
+		AppSlugSource: ghProvider.Slug,
+		OnChecks:      mergeScheduler.OnChecks,
+		OnHead: func(ctx context.Context, hive domain.Hive, _ domain.Agent, pr int64, sha string) error {
+			return s.SupersedeAttestations(ctx, hive.ID, pr, sha)
+		},
+	})
 	go func() {
 		if err := queue.Start(ctx); err != nil && ctx.Err() == nil {
 			slog.Error("job queue stopped", "error", err)
@@ -261,7 +289,7 @@ func runServe(ctx context.Context, s *store.Store) error {
 	routes.Handle("/api/webhooks/github", webhook)
 	// MCP authenticates with a bearer token only; it never uses the console
 	// session (ADR section 12).
-	routes.Handle("/mcp", mcp.NewHandler(s, mcp.Options{Logger: slog.Default()}))
+	routes.Handle("/mcp", mcp.NewHandler(s, mcp.Options{Logger: slog.Default(), Merge: mergeService}))
 	routes.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.Pool.Ping(r.Context()); err != nil {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)

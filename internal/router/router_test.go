@@ -259,7 +259,7 @@ func TestRouteFallsBackToBranch(t *testing.T) {
 		ChainID: "chain-1",
 	})
 	r := New(b)
-	event := loadEvent(t, EventCheckRun, "testdata/check_run_completed.json")
+	event := loadEvent(t, EventCheckSuite, "testdata/check_suite_completed.json")
 	event.DeliveryID = "delivery-run"
 	event.Number = 0 // force the branch lookup
 
