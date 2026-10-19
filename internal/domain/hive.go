@@ -45,6 +45,17 @@ type HiveConfig struct {
 	TurnTimeoutMinutes      int           `json:"turnTimeoutMinutes"`      // default 120
 	ForagerMaxLifetimeHours int           `json:"foragerMaxLifetimeHours"` // default 168
 	Triggers                []TriggerRule `json:"triggers"`
+	Verify                  VerifyConfig  `json:"verify"`
+}
+
+// VerifyConfig controls independent verification and merging of Forager PRs.
+// Zero values mean "use the default".
+type VerifyConfig struct {
+	Mode        string `json:"mode,omitempty"`        // "on" (default) or "off"
+	Model       string `json:"model,omitempty"`       // verifier model; default is the Forager model
+	MaxRounds   int    `json:"maxRounds,omitempty"`   // FAIL verdicts per owner before stopping; default 3
+	AutoMerge   bool   `json:"autoMerge,omitempty"`   // default false: only notify when mergeable
+	MergeMethod string `json:"mergeMethod,omitempty"` // "squash" (default), "merge" or "rebase"
 }
 
 // TriggerRule starts a Forager for a matching GitHub event.
@@ -62,6 +73,15 @@ const (
 	RoleForager AgentRole = "forager"
 )
 
+// ForagerKind separates the Forager that owns a task from the read-only
+// Foragers that verify its PR. Empty means KindWorker.
+type ForagerKind string
+
+const (
+	KindWorker   ForagerKind = "worker"
+	KindVerifier ForagerKind = "verifier"
+)
+
 type AgentState string
 
 const (
@@ -77,22 +97,25 @@ const (
 
 // Agent is a Queen or a Forager.
 type Agent struct {
-	ID          string     `json:"id"`
-	HiveID      string     `json:"hiveId"`
-	Role        AgentRole  `json:"role"`
-	State       AgentState `json:"state"`
-	Preset      string     `json:"preset,omitempty"`
-	CLI         string     `json:"cli"`
-	Task        string     `json:"task,omitempty"` // Forager only
-	Branch      string     `json:"branch,omitempty"`
-	IssueNumber int64      `json:"issueNumber,omitempty"`
-	PRNumber    int64      `json:"prNumber,omitempty"`
-	NodeID      string     `json:"nodeId,omitempty"`
-	ChainID     string     `json:"chainId,omitempty"`
-	SessionRef  string     `json:"sessionRef,omitempty"` // CLI session to resume; empty starts a new one
-	Handoff     *Handoff   `json:"handoff,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
+	ID          string      `json:"id"`
+	HiveID      string      `json:"hiveId"`
+	Role        AgentRole   `json:"role"`
+	State       AgentState  `json:"state"`
+	Preset      string      `json:"preset,omitempty"`
+	CLI         string      `json:"cli"`
+	Task        string      `json:"task,omitempty"` // Forager only
+	Branch      string      `json:"branch,omitempty"`
+	IssueNumber int64       `json:"issueNumber,omitempty"`
+	PRNumber    int64       `json:"prNumber,omitempty"`
+	NodeID      string      `json:"nodeId,omitempty"`
+	ChainID     string      `json:"chainId,omitempty"`
+	SessionRef  string      `json:"sessionRef,omitempty"` // CLI session to resume; empty starts a new one
+	Kind        ForagerKind `json:"kind,omitempty"`       // Forager only; empty means worker
+	VerifySHA   string      `json:"verifySha,omitempty"`  // verifier only: the PR head commit it checks
+	OwnerID     string      `json:"ownerId,omitempty"`    // verifier only: the worker whose PR it checks
+	Handoff     *Handoff    `json:"handoff,omitempty"`
+	CreatedAt   time.Time   `json:"createdAt"`
+	UpdatedAt   time.Time   `json:"updatedAt"`
 }
 
 // Handoff is the fixed-field summary a Forager updates after each turn.
@@ -108,6 +131,40 @@ type Handoff struct {
 type ArtifactRef struct {
 	Kind string `json:"kind"` // branch, commit, pr, report, handoff
 	Ref  string `json:"ref"`
+}
+
+// VerdictResult is a verifier's conclusion about one PR head commit.
+type VerdictResult string
+
+const (
+	VerdictPass      VerdictResult = "pass"
+	VerdictPassNotes VerdictResult = "pass_notes"
+	VerdictFail      VerdictResult = "fail"
+	VerdictBlocked   VerdictResult = "blocked" // the verifier could not finish; never a pass
+)
+
+// Verdict is keyed by PR and head commit: a new head supersedes it.
+type Verdict struct {
+	ID         string        `json:"id"`
+	HiveID     string        `json:"hiveId"`
+	PRNumber   int64         `json:"prNumber"`
+	HeadSHA    string        `json:"headSha"`
+	OwnerID    string        `json:"ownerId"`
+	VerifierID string        `json:"verifierId"`
+	Result     VerdictResult `json:"result"`
+	Summary    string        `json:"summary"`
+	Findings   []Finding     `json:"findings,omitempty"`
+	CommentURL string        `json:"commentUrl,omitempty"`
+	Superseded bool          `json:"superseded"`
+	CreatedAt  time.Time     `json:"createdAt"`
+}
+
+// Finding is one problem a verifier can show with evidence.
+type Finding struct {
+	Severity string `json:"severity"` // critical, warning or nit
+	Location string `json:"location,omitempty"`
+	Finding  string `json:"finding"`
+	Evidence string `json:"evidence,omitempty"`
 }
 
 type MessageKind string

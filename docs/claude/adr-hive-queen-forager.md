@@ -17,11 +17,11 @@ SwarmJet 最初是一个"Issue 触发、Temporal 驱动的线性开发流水线"
 
 ## 2. 定位
 
-> 在你自己的服务器上部署 SwarmJet，为每个仓库建一个 Hive。你本地的 Claude Code 选一个 Hive，和它的 Queen 对话；Queen 指挥一群 Forager，每只 Forager 在自己的 Cell 里干活；Guard 守住合并的底线；Queen 定期 Dream，把经验整理成记忆。
+> 在你自己的服务器上部署 SwarmJet，为每个仓库建一个 Hive。你本地的 Claude Code 选一个 Hive，和它的 Queen 对话；Queen 指挥一群 Forager，每只 Forager 在自己的 Cell 里干活；独立的验证 Forager 守住合并的底线；Queen 定期 Dream，把经验整理成记忆。
 
 - **目标用户**：有自己服务器、本地已经在用 Claude Code 或 Codex、希望后台并行跑任务、又不想把代码和凭证交给 SaaS 的个人开发者和小团队。
 - **性质**：开源、自托管。不是 SaaS，也不是云厂商。部署、凭证、成本和风险都由部署者自己承担。
-- **差异化**：自托管；中立（任何本地 Agent 都能指挥，云端可以跑不同的 CLI）；集群内有协调者，本地离线时照常响应；Guard 强制守住底线。
+- **差异化**：自托管；中立（任何本地 Agent 都能指挥，云端可以跑不同的 CLI）；集群内有协调者，本地离线时照常响应；每个 PR 都经过独立验证才能合并。
 - **演示场景**：晚上在终端里说"把这 5 个 Issue 并行修了"，然后合上电脑。第二天早上看到 5 个 PR，每个都经过独立审查、CI 全绿；中途 GitHub 上来的新 Issue，Queen 也已经接手。
 
 ## 3. 决策摘要
@@ -35,7 +35,7 @@ SwarmJet 最初是一个"Issue 触发、Temporal 驱动的线性开发流水线"
 | D5 | Forager 之间不能直接发消息（初定），协作只经由 Queen 和 Git。 |
 | D6 | 事件先经确定性的 Router：有归属的交给归属 Forager，匹配触发规则的新建 Forager，其余进 Hive Inbox，由 Queen（若开启）或人处理。 |
 | D7 | 消息层使用 PostgreSQL（Inbox 表）+ River（投递）+ `LISTEN/NOTIFY`（唤醒），不引入新的中间件。 |
-| D8 | 去掉 Temporal 和旧流水线。工作顺序由 Skill/Playbook 描述，底线由 Guard 强制。 |
+| D8 | 去掉 Temporal 和旧流水线。工作顺序由 Skill/Playbook 描述，底线由独立验证和平台合并入口强制（第 10 节）。 |
 | D9 | Forager 和 Queen 都是长期运行的 CLI 进程，跑在 Docker 容器（Cell）里，通过结构化协议驱动，不模拟终端，不使用一次性无头执行。第一个支持的 CLI 是 OpenCode。 |
 | D10 | Queen 定期 Dream：压缩上下文、整理记忆、以 PR 形式沉淀文档。 |
 | D11 | 只支持 GitHub。GitLab 和旧的任务页、Issue/MR 工作台删除。 |
@@ -52,7 +52,7 @@ SwarmJet 最初是一个"Issue 触发、Temporal 驱动的线性开发流水线"
 | **Forager** | 采集蜂 | 一个云端 Agent 实例，领一件活：拥有一个分支，产出一个 PR，可持续对话直到完成（原名 Drone，因 drone 是雄蜂而改名） |
 | **Cell** | 蜂房 | Forager（或 Queen）的隔离运行环境：Docker 容器加持久卷 |
 | **Swarm** | 蜂群 | 一个 Hive 中所有的 Forager |
-| **Guard** | 守卫蜂 | 平台强制执行的底线规则，任何指挥者都绕不过 |
+| **验证 Forager** | 验证蜂 | 只读的 Forager，独立验证别人的 PR 并给出结论（原 Guard，第 10 节） |
 | **Dream** | 做梦 | Queen 的定期离线整理 |
 | Task | 任务 | 派给 Forager 的那件活本身（派活说明的内容），不再指旧流水线的实体 |
 | Inbox | 收件箱 | 每个 Forager、Queen 以及 Hive 本身都有的持久消息队列 |
@@ -77,7 +77,7 @@ SwarmJet 实例
  ├─ API + MCP 服务 + 网页控制台
  ├─ Router ◀── Connector（GitHub webhook / 轮询）
  ├─ Inbox（PostgreSQL）+ River 投递 + LISTEN/NOTIFY 唤醒
- ├─ Guard（合并门闩、凭证隔离、受保护分支）
+ ├─ 验证与合并（验证 Forager、结论记录、合并入口）
  └─ Hive × N
       ├─ Queen ── Cell（容器 + 卷）── CLI 长期进程
       └─ Swarm
@@ -94,7 +94,7 @@ SwarmJet 实例
 | 存放位置 | 内容 | 理由 |
 |---|---|---|
 | 仓库文件 | `AGENTS.md` / `CLAUDE.md`、`.claude/skills/*/SKILL.md`、`.claude/agents/*.md`（预设）、项目文档 | 版本随代码，修改走 PR 审查，本地和云端共用 |
-| 数据库 | 模型凭证、Git 凭证、权限、Guard 配置、并发与预算、生命周期参数、触发规则、Queen 开关 | 硬约束，Agent 不能通过改文件提权 |
+| 数据库 | 模型凭证、Git 凭证、权限、验证与合并配置、并发与预算、生命周期参数、触发规则、Queen 开关 | 硬约束，Agent 不能通过改文件提权 |
 
 **触发规则**（Router 使用）：事件类型 + 过滤条件 → 动作。第一版支持：
 - Issue 打上指定标签 → 用指定预设新建 Forager；
@@ -142,7 +142,7 @@ SwarmJet 实例
 
 **消息送达**：Forager 空闲时，Inbox 中的新消息作为新一轮对话发给 CLI；正在执行时排队，等本轮结束再送达。只有取消类指令立即打断。
 
-**工具权限**：容器是隔离边界，常规的读写文件和执行命令按策略自动批准；推送受保护分支、合并等操作由 Guard 处理，必要时转为 Approval。
+**工具权限**：容器是隔离边界，常规的读写文件和执行命令按策略自动批准；推送受保护分支、合并等操作只能经平台的合并入口完成（第 10 节）。
 
 **人工接管**：网页上可以打开 Forager 的实时会话和终端，查看并插话。
 
@@ -213,19 +213,22 @@ Hive Inbox 中的事件有认领租约，Queen 和本地 Agent 同时在线时�
 
 **GitHub 是镜像，不是消息总线**：关键节点（Forager 开始、PR 就绪、需要人工）同步到 Issue 和 PR 上给人看；GitHub 上人的回复经 Connector 进入 Router。消息的权威来源始终是 Inbox。
 
-## 10. Guard
+## 10. 独立验证与合并
 
-内置以下规则。Hive 可以调整参数，但不能全部关闭：
+> 2026-10-19 修订：原计划的 Guard 模块取消。CI 门禁交给 GitHub，审查由独立的验证 Forager 完成，平台只保留"结论记录"和"合并入口"两样东西。参考 cursor/plugins 的 pstack。实现见 `docs/claude/round4-prompts.md`。
 
-| Guard | 规则 |
+| 规则 | 做法 |
 |---|---|
-| 独立审查 | PR 合并前，必须有一个**不同于作者 Forager** 的审查 Forager 给出批准，且批准针对当前提交 |
-| CI | 目标分支要求的检查全部通过 |
-| 合并凭证隔离 | 只有平台的合并步骤持有合并凭证；Forager 和 Queen 都拿不到 |
-| 分支归属 | Forager 只能推送自己的分支；禁止推送受保护分支 |
-| 合并证据 | 合并前核对：审查过的提交、CI 结果和目标分支状态一致（沿用现有合并证据逻辑） |
+| 独立验证 | PR 每有一个新的 head 提交，平台派一个**没写过这段代码**的只读验证 Forager，在 Cell 里把改动真正跑一遍，给出 PASS、PASS+NOTES、FAIL 或 BLOCKED |
+| 结论绑定提交 | 结论按 PR 号 + head SHA 记录；新的推送让旧结论作废 |
+| 结论落到 GitHub | 平台用 App 身份发 PR 评论；不使用 GitHub 的 Approve（App 是作者，不能批准自己的 PR） |
+| 跟进 | FAIL 的发现和 CI 失败交回写代码的 Forager 修复；打回次数达到 Hive 上限就停下并通知人 |
+| CI | 由 GitHub 运行，平台只读取必需检查的结果 |
+| 合并凭证隔离 | 只有平台的合并入口持有合并权限；Forager 和 Queen 都拿不到，Forager 的 Token 不能调用合并 |
+| 分支归属 | Forager 只能推送自己的分支；验证 Forager 什么都不推送 |
+| 合并条件 | 当前 head 有 PASS 或 PASS+NOTES，必需检查全部通过，没有冲突；合并时锁定 SHA |
 
-合并本身由平台执行：满足 Guard 后，按 Hive 配置自动合并或等待人工合并。
+合并本身由平台执行：默认只通知派活的人"可以合并"，Hive 打开自动合并后由平台直接合并。
 
 ## 11. Dream
 
@@ -254,7 +257,7 @@ Hive Inbox 中的事件有认领租约，Queen 和本地 Agent 同时在线时�
 | 工具 | 说明 | 默认 Token | 管理员 Token | Queen |
 |---|---|---|---|---|
 | `list_hives` / `get_hive` | 列出和查看 Hive | ✓ | ✓ | 仅本 Hive |
-| `create_hive` / `update_hive` | 新建和配置 Hive（含凭证、Guard、上限） | | ✓ | |
+| `create_hive` / `update_hive` | 新建和配置 Hive（含凭证、验证与合并、上限） | | ✓ | |
 | `send` | 发消息，默认发给 Queen；可指定 Forager 或 Hive Inbox | ✓ | ✓ | ✓ |
 | `wait` | 长轮询等待新消息或状态变化，最多约 60 秒 | ✓ | ✓ | |
 | `spawn_forager` / `cancel_forager` | 新建和取消 Forager | ✓ | ✓ | ✓ |
@@ -272,7 +275,7 @@ Hive Inbox 中的事件有认领租约，Queen 和本地 Agent 同时在线时�
 - **消息一律是数据**：Router 只看结构化字段（事件类型、仓库、标签、作者权限），不解析正文中的"指令"；Inbox 中的内容对 Agent 而言是待处理的信息，不是系统指令。
 - **Token 作用域**：默认 Token 只能派活和查看；管理员 Token 才能改配置和凭证。
 - **凭证**：Git 推送经平台代理，Cell 内只有短期的 Forager 级凭证，且只能推送自己的分支；模型凭证按 Hive 配置。
-- **Guard** 是最后一道防线：无论谁在指挥，合并规则都由平台强制。
+- **合并入口**是最后一道防线：无论谁在指挥，合并条件都由平台强制（第 10 节）。
 
 ## 14. 可观测性
 
@@ -298,7 +301,7 @@ Hive Inbox 中的事件有认领租约，Queen 和本地 Agent 同时在线时�
 | `internal/agent/fakeagent` | 扩展为 Forager/Queen 的假 CLI，用于确定性测试 |
 | `internal/runtimeadmin` | CLI 登录终端、Forager 人工接管终端 |
 | `internal/github`、`internal/githubapp` | Connector 与合并操作 |
-| `internal/pipeline` 中的合并证据、复核指引 | Guard 与审查流程 |
+| `internal/pipeline` 中的合并证据、复核指引 | 合并入口与验证流程 |
 | `internal/jobs`（River） | Inbox 投递、生命周期步骤、定时任务（Dream、超时检查） |
 | `internal/execution`、`nodeenvironment` | Node 协议与 Node 上的 Cell 管理 |
 | `internal/secretbox`、`credentials`、`networkconfig`、`mihomo` | 凭证加密、网络出口 |
@@ -338,7 +341,7 @@ Queen 和 Forager 共用 `agents` 表，以 role 区分；每个 Hive 恰好有�
 
 1. **看**：Hive 里在发生什么，Queen 做了哪些决定，每只 Forager 进展到哪一步；
 2. **插手**：直接和 Queen 或某只 Forager 对话，处理审批，必要时接管终端；
-3. **配置**：Hive 设置、凭证、Guard、触发规则、上限，以及全局的 Node 和 Token；
+3. **配置**：Hive 设置、凭证、验证与合并、触发规则、上限，以及全局的 Node 和 Token；
 4. **上手**：首次部署后引导用户建 Hive、配凭证、连接本地 Agent。
 
 第一版只做桌面端，不针对手机适配。
@@ -357,10 +360,10 @@ Hive 页
  ├─ 时间线        按 chain_id 展开的因果树
  ├─ Inbox        无法路由的事件：认领、指派给 Forager、忽略
  ├─ 记忆          Situation、Queen 私有记忆、Dream 报告、待合并的记忆 PR
- └─ 设置          仓库、CLI 与模型凭证、Queen 开关、触发规则、Guard、上限
+ └─ 设置          仓库、CLI 与模型凭证、Queen 开关、触发规则、验证与合并、上限
 
 Forager 详情页
- └─ 顶部：状态、分支、PR、CI、Guard 检查
+ └─ 顶部：状态、分支、PR、CI、验证结论
     分区：对话 / 交接摘要 / Diff / 时间线 / 终端（接管）
 ```
 
@@ -383,7 +386,7 @@ Forager 详情页
 | 品牌强调 | 蜂蜜 `#F2B53A` | Queen、主要按钮、品牌元素（按钮上的文字用深棕 `#3A2A05`） |
 | 正常状态 | 薄荷 `#7CC4A4` | Forager 运行中、完成、检查通过 |
 | 注意 | 深琥珀 | 待审批、需要注意 |
-| 错误 | 柔和珊瑚红 | 失败、被 Guard 拦下 |
+| 错误 | 柔和珊瑚红 | 失败、验证 FAIL、无法合并 |
 | 文字 | 墨色 `#3A3A33` | 正文，不用纯黑 |
 
 具体的深琥珀和珊瑚红色值在实现时补全，要求对比度满足 WCAG AA。
