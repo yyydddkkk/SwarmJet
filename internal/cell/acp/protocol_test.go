@@ -21,6 +21,22 @@ const promptResultJSON = `{"stopReason":"end_turn","usage":{"inputTokens":3381,`
 
 const cancelledPromptResultJSON = `{"stopReason":"cancelled","_meta":{}}`
 
+// editPermissionParamsJSON is a session/request_permission for a file edit. Its
+// toolCall.content is an ARRAY (a diff), unlike the message chunks where content
+// is a single object. The toolCall was captured from opencode 1.18.31.
+const editPermissionParamsJSON = `{"sessionId":"ses_edit_fixture",` +
+	`"toolCall":{"toolCallId":"719d5cb6-b5bb-4dd8-b408-240a01ad86b6","title":"/workspace/probe.txt",` +
+	`"kind":"edit","status":"pending","locations":[{"path":"/workspace/probe.txt"}],` +
+	`"rawInput":{"filepath":"/workspace/probe.txt","diff":"Index: /workspace/probe.txt\n--- /workspace/probe.txt\n+++ /workspace/probe.txt\n@@ -1,1 +1,2 @@\n-probe\n+probe\n+probe2\n"},` +
+	`"content":[{"type":"diff","path":"/workspace/probe.txt","oldText":"probe","newText":"probe\nprobe2"}]},` +
+	`"options":[{"optionId":"once","kind":"allow_once","name":"Allow once"},` +
+	`{"optionId":"reject","kind":"reject_once","name":"Reject"}]}`
+
+// toolCallArrayContentJSON is a tool_call session/update whose content is an array.
+const toolCallArrayContentJSON = `{"sessionId":"ses_edit_fixture","update":{"sessionUpdate":"tool_call",` +
+	`"toolCallId":"call_edit_1","title":"/workspace/probe.txt","kind":"edit","status":"pending",` +
+	`"content":[{"type":"diff","path":"/workspace/probe.txt","oldText":"probe","newText":"probe\nprobe2"}]}}`
+
 const permissionParamsJSON = `{"sessionId":"ses_ebc20527affe24GdWWv6aXZhdB",` +
 	`"toolCall":{"toolCallId":"call_e8b02d7c588245c2bf89040a","title":"echo permission-check",` +
 	`"kind":"execute","status":"pending","rawInput":{"command":"echo permission-check"}},` +
@@ -141,6 +157,59 @@ func TestPermissionRequestSelect(t *testing.T) {
 	empty := PermissionRequest{}
 	if _, ok := empty.Select(PermissionAllowOnce); ok {
 		t.Fatal("Select on a request with no options must report false")
+	}
+}
+
+func TestEditPermissionRequestWithArrayContentSelectsAllowOnce(t *testing.T) {
+	var req PermissionRequest
+	if err := json.Unmarshal([]byte(editPermissionParamsJSON), &req); err != nil {
+		t.Fatalf("unmarshal edit permission: %v", err)
+	}
+	if req.ToolCall.Kind != "edit" || req.ToolCall.Title != "/workspace/probe.txt" {
+		t.Fatalf("tool call = %+v", req.ToolCall)
+	}
+	if len(req.ToolCall.Content) == 0 || req.ToolCall.Content[0] != '[' {
+		t.Fatalf("array content must stay raw, got %s", req.ToolCall.Content)
+	}
+	if req.ToolCall.Text() != "" {
+		t.Fatalf("tool call text = %q, want empty", req.ToolCall.Text())
+	}
+	opt, ok := req.Select(PermissionAllowOnce)
+	if !ok || opt.OptionID != "once" {
+		t.Fatalf("select allow_once = %+v, %v", opt, ok)
+	}
+}
+
+func TestToolCallWithArrayContentDecodesAsNotification(t *testing.T) {
+	var n SessionNotification
+	if err := json.Unmarshal([]byte(toolCallArrayContentJSON), &n); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	u, err := n.Decode()
+	if err != nil {
+		t.Fatalf("decode tool_call with array content: %v", err)
+	}
+	if u.SessionUpdate != UpdateToolCall || u.ToolCallID != "call_edit_1" || u.Kind != "edit" {
+		t.Fatalf("update = %+v", u)
+	}
+	if !strings.Contains(string(u.Content), `"type":"diff"`) {
+		t.Fatalf("content = %s", u.Content)
+	}
+	if u.Text() != "" {
+		t.Fatalf("text = %q, want empty for tool content", u.Text())
+	}
+}
+
+func TestMessageChunkTextFromSingleBlockContent(t *testing.T) {
+	u := SessionUpdate{SessionUpdate: UpdateAgentMessageChunk, Content: []byte(`  {"type":"text","text":"hi"}`)}
+	if got := u.Text(); got != "hi" {
+		t.Fatalf("text = %q, want hi", got)
+	}
+	for _, raw := range []string{``, `null`, `[{"type":"text","text":"x"}]`, `{bad`} {
+		u := SessionUpdate{Content: []byte(raw)}
+		if got := u.Text(); got != "" {
+			t.Fatalf("content %q: text = %q, want empty", raw, got)
+		}
 	}
 }
 

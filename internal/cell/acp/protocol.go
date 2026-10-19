@@ -1,6 +1,9 @@
 package acp
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // This file mirrors the subset of the Agent Client Protocol (ACP) that the
 // spike exercises. Field names follow the ACP JSON schema.
@@ -259,17 +262,21 @@ const (
 // updates without a typed representation (for example a plan) can still be
 // surfaced.
 type SessionUpdate struct {
-	SessionUpdate string          `json:"sessionUpdate"`
-	Content       *ContentBlock   `json:"content,omitempty"`
-	ToolCallID    string          `json:"toolCallId,omitempty"`
-	Title         string          `json:"title,omitempty"`
-	Kind          string          `json:"kind,omitempty"`
-	Status        string          `json:"status,omitempty"`
-	RawInput      json.RawMessage `json:"rawInput,omitempty"`
-	RawOutput     json.RawMessage `json:"rawOutput,omitempty"`
-	Locations     []ToolLocation  `json:"locations,omitempty"`
-	Meta          json.RawMessage `json:"_meta,omitempty"`
-	Raw           json.RawMessage `json:"-"`
+	SessionUpdate string `json:"sessionUpdate"`
+	// Content is kept raw because ACP uses two shapes: message chunks carry a
+	// single ContentBlock object, while tool_call, tool_call_update and the
+	// toolCall of a permission request carry an ARRAY of tool content (for
+	// example a diff). Use Text() for the message case.
+	Content    json.RawMessage `json:"content,omitempty"`
+	ToolCallID string          `json:"toolCallId,omitempty"`
+	Title      string          `json:"title,omitempty"`
+	Kind       string          `json:"kind,omitempty"`
+	Status     string          `json:"status,omitempty"`
+	RawInput   json.RawMessage `json:"rawInput,omitempty"`
+	RawOutput  json.RawMessage `json:"rawOutput,omitempty"`
+	Locations  []ToolLocation  `json:"locations,omitempty"`
+	Meta       json.RawMessage `json:"_meta,omitempty"`
+	Raw        json.RawMessage `json:"-"`
 }
 
 // ToolLocation is a file path touched by a tool call.
@@ -293,10 +300,17 @@ func (n SessionNotification) Decode() (SessionUpdate, error) {
 
 // Text returns the text of a content chunk, or "" when the update carries none.
 func (u SessionUpdate) Text() string {
-	if u.Content == nil {
+	raw := bytes.TrimSpace(u.Content)
+	// Only the single-block form carries message text; tool content arrays
+	// are not text chunks and yield "".
+	if len(raw) == 0 || raw[0] != '{' {
 		return ""
 	}
-	return u.Content.Text
+	var block ContentBlock
+	if err := json.Unmarshal(raw, &block); err != nil {
+		return ""
+	}
+	return block.Text
 }
 
 // Permission option kinds.

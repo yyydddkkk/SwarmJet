@@ -127,16 +127,21 @@ func (a *fakeAgent) handlePrompt(msg rpcMessage) {
 		SessionID: p.SessionID,
 		Update:    json.RawMessage(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"po"}}`),
 	})
-	if strings.Contains(text, "perm") {
+	if strings.Contains(text, "perm") || strings.Contains(text, "edit") {
 		reqID := json.RawMessage(`9001`)
-		a.sendRequest(reqID, MethodRequestPermission, PermissionRequest{
+		var params any = PermissionRequest{
 			SessionID: p.SessionID,
 			ToolCall:  SessionUpdate{ToolCallID: "call_1", Title: "bash", Kind: "execute", Status: ToolStatusPending},
 			Options: []PermissionOption{
 				{OptionID: "once", Kind: PermissionAllowOnce, Name: "Allow once"},
 				{OptionID: "reject", Kind: PermissionRejectOnce, Name: "Reject"},
 			},
-		})
+		}
+		if strings.Contains(text, "edit") {
+			// The captured OpenCode edit request, whose tool call content is an array.
+			params = json.RawMessage(editPermissionParamsJSON)
+		}
+		a.sendRequest(reqID, MethodRequestPermission, params)
 		for {
 			reply, ok := a.read()
 			if !ok {
@@ -353,6 +358,64 @@ func TestPermissionRequestUsesHandler(t *testing.T) {
 	}
 	if agent.lastPermission == nil || agent.lastPermission.Outcome.Outcome != "selected" || agent.lastPermission.Outcome.OptionID != "once" {
 		t.Fatalf("agent saw %+v, want selected/once", agent.lastPermission)
+	}
+}
+
+func TestEditPermissionIsAllowedEndToEnd(t *testing.T) {
+	client, agent := newFakeAgentPair(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	session, err := client.NewSession(ctx, "/workspace", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := newUpdateRecorder()
+	result, err := client.Prompt(ctx, session.SessionID, []ContentBlock{TextBlock("edit probe.txt")}, rec.sink)
+	if err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if result.StopReason != StopEndTurn {
+		t.Fatalf("stopReason = %q", result.StopReason)
+	}
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+	if agent.permissionRequests != 1 {
+		t.Fatalf("handler called %d times, want 1", agent.permissionRequests)
+	}
+	if agent.lastPermission == nil || agent.lastPermission.Outcome.Outcome != "selected" || agent.lastPermission.Outcome.OptionID != "once" {
+		t.Fatalf("agent saw %+v, want selected/once", agent.lastPermission)
+	}
+}
+
+func TestPermissionDecisionSurvivesUnexpectedToolCallShape(t *testing.T) {
+	clientEnd, agentEnd := net.Pipe()
+	defer clientEnd.Close()
+	defer agentEnd.Close()
+	var seen PermissionRequest
+	client := NewClient(clientEnd, WithPermissionHandler(func(_ context.Context, req PermissionRequest) (PermissionOutcome, error) {
+		seen = req
+		if opt, ok := req.Select(PermissionAllowOnce); ok {
+			return Selected(opt), nil
+		}
+		return Cancelled(), nil
+	}))
+	// The toolCall is an object of the wrong type for SessionUpdate, so it cannot
+	// decode. The sessionId and options must still reach the handler.
+	params := json.RawMessage(`{"sessionId":"ses_x","toolCall":"unexpected",` +
+		`"options":[{"optionId":"once","kind":"allow_once"}]}`)
+	result, rpcErr := client.handleRequest(MethodRequestPermission, params)
+	if rpcErr != nil {
+		t.Fatalf("handleRequest rejected the request: %v", rpcErr)
+	}
+	response, ok := result.(PermissionResponse)
+	if !ok || response.Outcome.Outcome != "selected" || response.Outcome.OptionID != "once" {
+		t.Fatalf("outcome = %+v, want selected/once", result)
+	}
+	if seen.SessionID != "ses_x" || len(seen.Options) != 1 {
+		t.Fatalf("handler saw %+v", seen)
 	}
 }
 
