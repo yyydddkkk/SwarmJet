@@ -267,7 +267,7 @@ func normalizePullRequest(payload []byte) (Event, bool) {
 		return Event{}, false
 	}
 	switch p.Action {
-	case "opened", "synchronize", "closed":
+	case "opened", "reopened", "synchronize", "closed":
 	default:
 		return Event{}, false
 	}

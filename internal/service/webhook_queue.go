@@ -94,6 +94,12 @@ func (s *Service) HandleWebhookJob(ctx context.Context, job jobs.Webhook) error 
 	if (job.Provider != "gitlab" && job.Provider != "github") || job.DeliveryID == "" || len(job.DeliveryID) > 200 {
 		return fmt.Errorf("%w: %w", jobs.ErrCancel, ErrInvalidWebhookDelivery)
 	}
+	// A repository that belongs to a Hive is routed deterministically and never
+	// reaches the legacy scanner; everything else keeps the old behaviour.
+	if decision, routed, err := s.routeHiveDelivery(ctx, job); routed {
+		logHiveDelivery(job, decision, err)
+		return err
+	}
 	kind, repoID := webhookRepository(job.Provider, job.Payload)
 	key := job.Provider + ":" + strconv.FormatInt(repoID, 10)
 	err := s.repositoryScans().Do(ctx, key, func(ctx context.Context) error {

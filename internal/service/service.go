@@ -18,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"go.temporal.io/sdk/client"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/forge"
 	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
@@ -26,7 +25,9 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/labels"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"github.com/yyydddkkk/SwarmJet/internal/pipeline"
+	"github.com/yyydddkkk/SwarmJet/internal/router"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
+	"go.temporal.io/sdk/client"
 )
 
 // InitReadiness reports whether a managed project has completed initialization
@@ -37,24 +38,29 @@ type InitReadiness interface {
 }
 
 type Service struct {
-	ForgeClient      func(domain.Project, bool) (forge.Client, error)
-	DataDir          string
-	Store              *store.Store
-	Metrics            *observability.Metrics
-	Webhooks           interface {
+	ForgeClient func(domain.Project, bool) (forge.Client, error)
+	DataDir     string
+	Store       *store.Store
+	Metrics     *observability.Metrics
+	Webhooks    interface {
 		AcceptWebhook(context.Context, string, string, string, []byte) error
 	}
 	GitLabSigningToken string
 	Temporal           client.Client
-	ResolveCredential             func(string) (string, error)
-	ProjectCredential             func(domain.Project, bool) (string, error)
-	Initializer                   InitReadiness
-	RequireNode                   bool
-	Wake                          chan struct{}
-	LabelsWake                    chan struct{}
-	scanMu         sync.Mutex
-	webhookScans   *scanCoalescer
-	scanGroupOnce  sync.Once
+	ResolveCredential  func(string) (string, error)
+	ProjectCredential  func(domain.Project, bool) (string, error)
+	Initializer        InitReadiness
+	RequireNode        bool
+	Wake               chan struct{}
+	LabelsWake         chan struct{}
+	scanMu             sync.Mutex
+	webhookScans       *scanCoalescer
+	scanGroupOnce      sync.Once
+
+	// HiveRouter sends GitHub events for Hive repositories through the
+	// deterministic Router. Nil builds one over Store on first use.
+	HiveRouter     *router.Router
+	hiveRouterOnce sync.Once
 }
 
 func (s *Service) intakeOptions(projectID string, claim bool) intake.Options {

@@ -181,6 +181,20 @@ func (m *MemoryBackend) CreateForager(ctx context.Context, a domain.Agent) (doma
 	return m.addForagerLocked(a), nil
 }
 
+// SetAgentPR records the PR a Forager opened. It implements PRRecorder.
+func (m *MemoryBackend) SetAgentPR(ctx context.Context, id string, pr int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.agents[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	a.PRNumber = pr
+	a.UpdatedAt = time.Now().UTC()
+	m.agents[id] = a
+	return nil
+}
+
 // SendMessage implements Backend: validate, dedupe by ID, then append. A
 // repeated ID with identical content returns the stored message; a repeated ID
 // with different content returns domain.ErrConflict.

@@ -17,12 +17,14 @@ import (
 type tokenContextKey struct{}
 
 // NewHandler returns an http.Handler that serves the SwarmJet MCP endpoint over
-// the Streamable HTTP transport. It is not mounted on the API server this round;
-// wiring is deferred to the next round.
+// the Streamable HTTP transport. It is mounted at /mcp by the control plane and
+// deliberately bypasses the web console session: the only credential is a
+// bearer token (ADR section 12).
 //
 // Every request must carry "Authorization: Bearer <token>". The token is
 // resolved through Backend.TokenByPlaintext and its scope gates the tools:
-// create_hive and update_hive need an admin token (ADR section 12).
+// create_hive and update_hive need an admin token, and an agent token acts as
+// the Agent it was minted for (ADR section 12).
 func NewHandler(backend Backend, opts Options) http.Handler {
 	if backend == nil {
 		panic("mcp: nil backend")
@@ -35,7 +37,7 @@ func NewHandler(backend Backend, opts Options) http.Handler {
 			// SDK answer 400 rather than panic.
 			return nil
 		}
-		return newServer(backend, o, tok)
+		return newServer(r.Context(), backend, o, tok)
 	}, &mcpsdk.StreamableHTTPOptions{
 		Logger:         o.Logger,
 		SessionTimeout: o.SessionTimeout,
@@ -43,13 +45,14 @@ func NewHandler(backend Backend, opts Options) http.Handler {
 	return &authHandler{backend: backend, logger: o.Logger, next: streamable}
 }
 
-func newServer(backend Backend, opts Options, tok domain.Token) *mcpsdk.Server {
+func newServer(ctx context.Context, backend Backend, opts Options, tok domain.Token) *mcpsdk.Server {
 	s := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:        opts.Name,
 		Version:     opts.Version,
 		Description: "SwarmJet Hive control plane: talk to a Queen, spawn and inspect Foragers.",
 	}, &mcpsdk.ServerOptions{Logger: opts.Logger})
 	ts := &toolset{backend: backend, opts: opts, token: tok}
+	ts.actor, ts.actorErr = resolveActor(ctx, backend, tok)
 	ts.register(s)
 	return s
 }

@@ -93,6 +93,22 @@ func (m *MemoryBackend) CreateToken(_ context.Context, name string, scope domain
 	return plaintext, t, nil
 }
 
+// CreateAgentToken mints an agent-scoped token for an existing Agent. The
+// plaintext is returned once and only its hash is kept, matching the store
+// contract.
+func (m *MemoryBackend) CreateAgentToken(_ context.Context, agentID string) (string, domain.Token, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.agents[agentID]; !ok {
+		return "", domain.Token{}, domain.ErrNotFound
+	}
+	plaintext := "swj_" + randomHex(24)
+	hash := sha256.Sum256([]byte(plaintext))
+	t := domain.Token{ID: m.newID("tok"), Name: "agent:" + agentID, Scope: domain.TokenAgent, AgentID: agentID, CreatedAt: m.now()}
+	m.tokens[hex.EncodeToString(hash[:])] = t
+	return plaintext, t, nil
+}
+
 // CreateHive stores a hive and creates its disabled Queen record.
 func (m *MemoryBackend) CreateHive(ctx context.Context, h domain.Hive) (domain.Hive, error) {
 	if err := ctx.Err(); err != nil {
@@ -310,6 +326,24 @@ func (m *MemoryBackend) TransitionAgent(ctx context.Context, id string, from, to
 		return domain.ErrConflict
 	}
 	a.State = to
+	a.UpdatedAt = m.now()
+	m.agents[id] = a
+	return nil
+}
+
+// UpdateHandoff replaces an Agent's handoff summary.
+func (m *MemoryBackend) UpdateHandoff(ctx context.Context, id string, h domain.Handoff) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.agents[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	handoff := h
+	a.Handoff = &handoff
 	a.UpdatedAt = m.now()
 	m.agents[id] = a
 	return nil
