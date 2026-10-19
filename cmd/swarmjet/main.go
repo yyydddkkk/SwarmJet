@@ -68,7 +68,7 @@ func run() error {
 		mode = os.Args[1]
 	}
 	if mode == "help" || mode == "--help" {
-		fmt.Println("swarmjet serve | migrate | version | token create --name <name> --scope default|admin")
+		fmt.Println("swarmjet serve | migrate | version | token create --name <name> --scope default|admin | connect --client claude|codex|json [--name <name>] [--url <mcp-url>]")
 		return nil
 	}
 	if mode == "version" {
@@ -87,6 +87,9 @@ func run() error {
 	}
 	if mode == "token" {
 		return runToken(ctx, s, os.Args[2:])
+	}
+	if mode == "connect" {
+		return runConnect(ctx, s, os.Args[2:], os.Stdout, os.Stderr)
 	}
 	if mode != "serve" {
 		return fmt.Errorf("unknown mode %s", mode)
@@ -189,6 +192,9 @@ func runServe(ctx context.Context, s *store.Store) error {
 	}
 	adminUser := required("ADMIN_USERNAME")
 	staticDir := env("STATIC_DIR", "web/dist")
+	// The CLI login terminal runs in this process and shares the Cell data
+	// directory, so a successful login is immediately available to Cells.
+	cliLogin, cliLoginReason := newCLILoginHandler(data)
 	handler := api.New(s, api.Config{
 		GitHubApp:       ghApp,
 		Box:             box,
@@ -202,6 +208,10 @@ func runServe(ctx context.Context, s *store.Store) error {
 		CellsImage:      env("AGENT_IMAGE", "swarmjet-agent:local"),
 		CellsModel:      env("SWARMJET_FORAGER_MODEL", forager.DefaultModel),
 		DockerAvailable: onboarding.DockerAvailable,
+		CLILogin:        cliLogin,
+		CLILoginReason:  cliLoginReason,
+		CLILoginStatus:  cliLoginStatus(cliLogin, data),
+		MCPURL:          publicMCPURL(),
 	})
 	svc := &service.Service{Store: s, Webhooks: s, AppSlugSource: ghProvider.Slug}
 

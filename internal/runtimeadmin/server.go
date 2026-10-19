@@ -38,6 +38,7 @@ type server struct {
 	dirs           ProfileDirs
 	name, identity string
 	secret         [32]byte
+	inProcess      bool
 	dockerMu       sync.Mutex
 	terminal       chan struct{}
 	initErr        error
@@ -74,15 +75,26 @@ func New(cfg Config) http.Handler {
 	s.cfg.Env = safe
 	return s
 }
+
+// NewInProcess mounts the CLI login handler inside the serve process. In that
+// position the console session already authenticates the caller, so the
+// private X-SwarmJet-Runtime-Secret header is neither needed nor exposed.
+func NewInProcess(cfg Config) http.Handler {
+	handler := New(cfg).(*server)
+	handler.inProcess = true
+	return handler
+}
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	provided := sha256.Sum256([]byte(r.Header.Get("X-SwarmJet-Runtime-Secret")))
-	if s.cfg.Secret == "" || subtle.ConstantTimeCompare(provided[:], s.secret[:]) != 1 {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "运行环境鉴权失败"})
-		return
+	if !s.inProcess {
+		provided := sha256.Sum256([]byte(r.Header.Get("X-SwarmJet-Runtime-Secret")))
+		if s.cfg.Secret == "" || subtle.ConstantTimeCompare(provided[:], s.secret[:]) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "运行环境鉴权失败"})
+			return
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	if r.Method != http.MethodGet && !(r.Method == http.MethodPost && (r.URL.Path == "/verify" || r.URL.Path == "/runner-test")) {
-		w.Header().Set("Allow", "GET, POST")
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET")
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "不支持此请求方法"})
 		return
 	}
@@ -97,10 +109,6 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.models(w, r)
 	case "/terminal":
 		s.serveTerminal(w, r)
-	case "/verify":
-		s.verify(w, r)
-	case "/runner-test":
-		s.testRunner(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "接口不存在"})
 	}
@@ -439,43 +447,6 @@ func (s *server) models(w http.ResponseWriter, r *http.Request) {
 }
 
 func runtimeUser() string { return strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()) }
-
-type verifyRequest struct {
-	Model string `json:"model"`
-}
-
-// verify performs one minimal real model call. A detected model catalog is not
-// proof that a credential or quota is usable, so the console must exercise the
-// exact model before a project is enabled.
-func (s *server) verify(w http.ResponseWriter, r *http.Request) {
-	var req verifyRequest
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req) != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式无效。"})
-		return
-	}
-	model := strings.TrimSpace(req.Model)
-	if !modelID.MatchString(model) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "模型标识无效，请使用 provider/model 格式。"})
-		return
-	}
-	if err := s.ensure(r.Context()); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
-	defer cancel()
-	started := time.Now()
-	_, err := s.dockerTimeout(ctx, 95*time.Second, nil, "exec", "--workdir", "/runtime-home", s.name, "opencode", "run", "-m", model, "Reply with the single word OK.")
-	if ctx.Err() == context.DeadlineExceeded {
-		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "模型验证超时（90 秒），请检查网络、代理或服务商状态。"})
-		return
-	}
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "模型调用失败，请确认登录有效且该模型可用。"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "model": model, "message": "最小实际调用成功。", "durationSeconds": int(time.Since(started).Seconds())})
-}
 
 // TerminalActive allows the node's versioned handler to preserve open terminals.
 func (s *server) TerminalActive() bool { return len(s.terminal) > 0 }

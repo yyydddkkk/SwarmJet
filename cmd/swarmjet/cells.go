@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/forge"
 	"github.com/yyydddkkk/SwarmJet/internal/github"
 	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
+	"github.com/yyydddkkk/SwarmJet/internal/runtimeadmin"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
@@ -136,15 +138,25 @@ func requireCellDocker() error {
 	return nil
 }
 
-// cellCLIEnv passes the deployment's optional OpenCode credential into the
-// Cell. The runtime injects it only into the CLI process and redacts it from
-// errors; it is never written to disk or logged.
+// cellCLIEnv passes OpenCode credentials into the Cell. The CLI login terminal
+// writes auth.json into the shared profile; that login wins over the deployment
+// environment, which remains a fallback for older installs. It is read on every
+// Start so logging in does not require restarting serve. The content is only
+// ever passed to the Cell, never logged or written by this process.
 func cellCLIEnv(context.Context, domain.Hive) (map[string]string, error) {
-	value := os.Getenv("OPENCODE_AUTH_CONTENT")
-	if value == "" {
-		return nil, nil
+	if dataDir, err := filepath.Abs(env("DATA_DIR", "./data")); err == nil {
+		auth, err := runtimeadmin.OpenCodeAuth(dataDir)
+		if err == nil {
+			return map[string]string{"OPENCODE_AUTH_CONTENT": string(auth)}, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("CLI login state is unreadable; falling back to OPENCODE_AUTH_CONTENT", "error", err)
+		}
 	}
-	return map[string]string{"OPENCODE_AUTH_CONTENT": value}, nil
+	if value := os.Getenv("OPENCODE_AUTH_CONTENT"); value != "" {
+		return map[string]string{"OPENCODE_AUTH_CONTENT": value}, nil
+	}
+	return nil, nil
 }
 
 // Start launches the supervisor. It must be called after MessageSink is set and
