@@ -45,7 +45,7 @@ python3 deploy/install.py --yes \
 
 结束时脚本打印控制台地址、管理员账号和密码位置；密码默认不显示，加 `--show-password` 才在终端输出。密码也可以从 `.env` 的 `ADMIN_PASSWORD` 读取。
 
-> 用隧道安装时，脚本会把 `PUBLIC_ORIGIN` 自动设为读取到的临时隧道地址；地址变化后需要更新 `.env` 并重启 `api`。
+> 隧道只用于接收 GitHub webhook，平台会自动把隧道地址同步到 GitHub App；控制台始终用本机地址（`PUBLIC_ORIGIN`，默认 `http://localhost:<端口>`）登录。不要把 `PUBLIC_ORIGIN` 设成临时隧道地址：它重启后会变，而控制台只接受与 `PUBLIC_ORIGIN` 一致的登录请求。旧版脚本写入过隧道地址的，运行 `install` 或 `upgrade` 会自动改回本机地址。
 
 ## 安装脚本子命令
 

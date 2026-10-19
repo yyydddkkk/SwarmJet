@@ -49,12 +49,12 @@ python3 deploy/install.py --yes --cells --tunnel --image-source repo
 
 ```text
 SwarmJet 安装完成。
-控制台：https://<随机>.trycloudflare.com
+控制台：http://localhost:8180
 管理员：admin
 密码：保存在 /home/<user>/swarmjet/.env 的 ADMIN_PASSWORD（加 --show-password 可显示）
 下一步：打开控制台的“接入”页，一键创建 GitHub App；再为 Claude Code / Codex 创建连接。
 数据目录：/home/<user>/swarmjet/data；SWARMJET_MASTER_KEY 请单独备份。
-隧道地址：https://<随机>.trycloudflare.com（临时地址，重启后可能变化）
+Webhook 隧道：https://<随机>.trycloudflare.com（只用于接收 GitHub webhook，平台会自动同步到 GitHub App；临时地址，重启后可能变化。请用上面的控制台地址登录）
 ```
 
 检查配置权限和服务：
@@ -111,7 +111,7 @@ curl -fsS -b /tmp/sj-cookies http://127.0.0.1:8180/api/setup/status | python3 -m
 
 如果回调失败，确认：
 
-- `PUBLIC_ORIGIN` 与浏览器实际地址一致（隧道安装时脚本已自动写入隧道地址）。
+- `PUBLIC_ORIGIN` 与浏览器实际地址一致（默认 `http://localhost:<端口>`；不要用临时隧道地址，隧道只接收 webhook）。
 - `SECURE_COOKIES` 与实际协议一致（HTTPS 时设 `true`）。
 - 浏览器仍保留管理员会话。
 

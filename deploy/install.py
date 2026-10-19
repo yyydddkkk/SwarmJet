@@ -476,6 +476,23 @@ def is_quick_tunnel(value: str) -> bool:
     return ".trycloudflare.com" in (value or "")
 
 
+def local_origin(port) -> str:
+    return f"http://localhost:{port}"
+
+
+def console_origin(existing: str, port) -> str:
+    """Keep a configured origin, but never a quick-tunnel address.
+
+    The tunnel only carries GitHub webhooks. Its address changes whenever the
+    tunnel restarts, and the console rejects logins whose Origin differs from
+    PUBLIC_ORIGIN, so a quick-tunnel origin would lock the administrator out.
+    Older installers wrote it; repair it to the local console address.
+    """
+    if existing and not is_quick_tunnel(existing):
+        return existing
+    return local_origin(port)
+
+
 def ensure_sources(directory: Path, ref: str, overwrite: bool = False) -> None:
     ref = ref or DEFAULT_REF
     for remote, local in SOURCES:
@@ -563,7 +580,7 @@ def print_summary(
 ) -> None:
     say()
     say(f"SwarmJet {action}完成。")
-    say(f"控制台：{values.get('PUBLIC_ORIGIN') or 'http://localhost:' + str(values.get('HTTP_PORT'))}")
+    say(f"控制台：{values.get('PUBLIC_ORIGIN') or local_origin(values.get('HTTP_PORT'))}")
     say(f"管理员：{values.get('ADMIN_USERNAME')}")
     if show_password:
         say(f"密码：{values.get('ADMIN_PASSWORD')}")
@@ -572,7 +589,7 @@ def print_summary(
     say("下一步：打开控制台的“接入”页，一键创建 GitHub App；再为 Claude Code / Codex 创建连接。")
     say(f"数据目录：{values.get('DATA_DIR')}；SWARMJET_MASTER_KEY 请单独备份。")
     if tunnel_url:
-        say(f"隧道地址：{tunnel_url}（临时地址，重启后可能变化）")
+        say(f"Webhook 隧道：{tunnel_url}（只用于接收 GitHub webhook，平台会自动同步到 GitHub App；临时地址，重启后可能变化。请用上面的控制台地址登录）")
     say(f"管理命令：python3 {self_hint()} status --dir {directory}")
 
 
@@ -643,16 +660,15 @@ def install(args) -> int:
         agent_image = args.agent_image
 
     admin_username = args.admin_username or existing.get("ADMIN_USERNAME") or "admin"
-    auto_origin = False
     if args.public_origin:
         public_origin = args.public_origin
     elif existing.get("PUBLIC_ORIGIN"):
-        public_origin = existing["PUBLIC_ORIGIN"]
+        public_origin = console_origin(existing["PUBLIC_ORIGIN"], port)
     elif tunnel:
-        public_origin = f"http://localhost:{port}"
-        auto_origin = True
+        # The tunnel is for webhooks only; the console stays on this host.
+        public_origin = local_origin(port)
     else:
-        public_origin = ask_text("控制台公开地址", f"http://localhost:{port}", args.yes)
+        public_origin = ask_text("控制台公开地址", local_origin(port), args.yes)
 
     overrides = {}
     if args.data_dir:
@@ -665,6 +681,9 @@ def install(args) -> int:
         overrides["COMPOSE_PROJECT_NAME"] = args.project_name
     if args.public_origin:
         overrides["PUBLIC_ORIGIN"] = args.public_origin
+    elif is_quick_tunnel(existing.get("PUBLIC_ORIGIN", "")):
+        # Existing values win in build_values, so the repair must be explicit.
+        overrides["PUBLIC_ORIGIN"] = public_origin
     if args.admin_username:
         overrides["ADMIN_USERNAME"] = args.admin_username
     if args.cells is not None:
@@ -725,11 +744,10 @@ def install(args) -> int:
             tunnel = False
             write_env(env_path, values)
         else:
-            if tunnel_url and (auto_origin or is_quick_tunnel(values.get("PUBLIC_ORIGIN", ""))):
-                if values.get("PUBLIC_ORIGIN") != tunnel_url:
-                    say(f"隧道地址为 {tunnel_url}，更新 PUBLIC_ORIGIN。")
-                values["PUBLIC_ORIGIN"] = tunnel_url
-                write_env(env_path, values)
+            # The tunnel address is only used for GitHub webhooks; the platform
+            # syncs it to the GitHub App itself. PUBLIC_ORIGIN stays local.
+            if tunnel_url:
+                say(f"隧道地址为 {tunnel_url}（仅用于接收 GitHub webhook）。")
 
     say("启动服务并等待健康检查……")
     run(compose_base(directory, values) + ["up", "-d", "--wait", "--wait-timeout", "300"])
@@ -752,6 +770,9 @@ def upgrade(args) -> int:
     if not env_path.exists():
         raise InstallError(f"未找到 {env_path}；请先运行 install。")
     values = read_env(env_path)
+    if is_quick_tunnel(values.get("PUBLIC_ORIGIN", "")):
+        values["PUBLIC_ORIGIN"] = console_origin(values["PUBLIC_ORIGIN"], values.get("HTTP_PORT", DEFAULT_PORT))
+        say(f"PUBLIC_ORIGIN 曾被设为临时隧道地址，已改回 {values['PUBLIC_ORIGIN']}。")
     repo = is_repo_directory(script_dir()) and directory == script_dir().resolve()
     source = args.image_source or ("repo" if repo else "ghcr")
     if source == "repo" and not repo:
@@ -797,7 +818,7 @@ def status(args) -> int:
             check=False,
         )
         say(f"api 健康：{(health.stdout or 'unknown').strip()}")
-    say(f"控制台：{values.get('PUBLIC_ORIGIN') or 'http://localhost:' + str(values.get('HTTP_PORT'))}")
+    say(f"控制台：{values.get('PUBLIC_ORIGIN') or local_origin(values.get('HTTP_PORT'))}")
     if values.get("SWARMJET_TUNNEL_URL"):
         say("隧道：已启用（公网地址可在控制台“接入”页查看）")
     return 0
@@ -875,6 +896,21 @@ def claude_command(output: str) -> str:
     return ""
 
 
+def local_mcp_url(values: dict) -> str:
+    """MCP endpoint of this install as reachable from the host.
+
+    swarmjet connect runs inside the api container, where it cannot know the
+    published host port, so the installer passes it explicitly.
+    """
+    host = (values.get("LISTEN_HOST") or "127.0.0.1").strip()
+    if host in ("", "0.0.0.0", "::", "[::]"):
+        host = "127.0.0.1"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    port = values.get("HTTP_PORT") or DEFAULT_PORT
+    return f"http://{host}:{port}/mcp"
+
+
 def connect(args) -> int:
     directory = resolve_directory(args)
     values = read_env(directory / ".env")
@@ -891,8 +927,7 @@ def connect(args) -> int:
     ]
     if args.name:
         argv += ["--name", args.name]
-    if args.url:
-        argv += ["--url", args.url]
+    argv += ["--url", args.url or local_mcp_url(values)]
     result = run(argv, capture=True)
     if result.stdout:
         say(result.stdout.rstrip())

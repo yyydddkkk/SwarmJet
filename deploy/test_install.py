@@ -203,6 +203,30 @@ class ArgumentTests(unittest.TestCase):
             self.assertTrue(any("/dev/deploy/install.py" in url for url in urls))
 
 
+class ConnectTests(unittest.TestCase):
+    def test_local_mcp_url_uses_installed_port_and_host(self):
+        self.assertEqual(installer.local_mcp_url({"HTTP_PORT": "8190"}), "http://127.0.0.1:8190/mcp")
+        self.assertEqual(installer.local_mcp_url({"HTTP_PORT": "9000", "LISTEN_HOST": "0.0.0.0"}), "http://127.0.0.1:9000/mcp")
+        self.assertEqual(installer.local_mcp_url({"HTTP_PORT": "9000", "LISTEN_HOST": "10.0.0.5"}), "http://10.0.0.5:9000/mcp")
+        self.assertEqual(installer.local_mcp_url({}), f"http://127.0.0.1:{installer.DEFAULT_PORT}/mcp")
+
+    def test_connect_passes_the_installed_mcp_url(self):
+        with tempfile.TemporaryDirectory() as directory:
+            deploy = Path(directory)
+            (deploy / ".env").write_text("COMPOSE_PROJECT_NAME=sj-test\nHTTP_PORT=8190\n")
+            calls = []
+            def run(argv, **kwargs):
+                calls.append(list(argv))
+                return completed(argv)
+            with patch.object(installer, "run", side_effect=run), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                code = installer.main(["connect", "--dir", str(deploy), "--client", "json"])
+            self.assertEqual(code, 0)
+            argv = calls[-1]
+            self.assertIn("--url", argv)
+            self.assertEqual(argv[argv.index("--url") + 1], "http://127.0.0.1:8190/mcp")
+
+
 class InstallFlowTests(unittest.TestCase):
     def fake_run(self, calls):
         def run(argv, **kwargs):
@@ -246,6 +270,58 @@ class InstallFlowTests(unittest.TestCase):
             self.assertTrue(any("up" in call and "--wait" in call for call in calls))
             self.assertFalse(any("pull" in call for call in calls))
             self.assertFalse(any("--no-deps" in call for call in calls))
+
+    def run_install(self, deploy, data, extra, existing_env=None):
+        if existing_env is not None:
+            (deploy / ".env").write_text(existing_env)
+            (deploy / ".env").chmod(0o600)
+        calls = []
+        with patch.object(installer, "script_dir", return_value=deploy), \
+             patch.object(installer, "check_docker"), \
+             patch.object(installer, "run", side_effect=self.fake_run(calls)), \
+             patch.object(installer, "port_available", return_value=True), \
+             patch.object(installer, "volume_exists", return_value=False), \
+             patch.object(installer, "stack_running", return_value=False), \
+             patch.object(installer, "warn_legacy"), \
+             patch.object(installer, "wait_for_tunnel", return_value="https://abc-def.trycloudflare.com"), \
+             contextlib.redirect_stdout(io.StringIO()) as out:
+            code = installer.main([
+                "install", "--dir", str(deploy), "--data-dir", str(data),
+                "--port", "18190", "--image-source", "repo", "--yes", "--no-cells",
+            ] + extra)
+        self.assertEqual(code, 0)
+        return installer.read_env(deploy / ".env"), out.getvalue()
+
+    def test_tunnel_install_keeps_local_console_origin(self):
+        # The tunnel only carries webhooks. A quick-tunnel PUBLIC_ORIGIN would
+        # reject local logins and break once the tunnel address changes.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            deploy = make_repo(root)
+            parsed, output = self.run_install(deploy, root / "data", ["--tunnel"])
+            self.assertEqual(parsed["PUBLIC_ORIGIN"], "http://localhost:18190")
+            self.assertEqual(parsed["SWARMJET_TUNNEL_URL"], "http://tunnel:2000")
+            self.assertIn("控制台：http://localhost:18190", output)
+            self.assertIn("Webhook 隧道：https://abc-def.trycloudflare.com", output)
+
+    def test_install_repairs_quick_tunnel_origin_from_older_installer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            deploy = make_repo(root)
+            parsed, _ = self.run_install(
+                deploy, root / "data", ["--tunnel"],
+                existing_env="PUBLIC_ORIGIN=https://old-name.trycloudflare.com\nHTTP_PORT=18190\n",
+            )
+            self.assertEqual(parsed["PUBLIC_ORIGIN"], "http://localhost:18190")
+
+    def test_install_keeps_explicit_public_origin_with_tunnel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            deploy = make_repo(root)
+            parsed, _ = self.run_install(
+                deploy, root / "data", ["--tunnel", "--public-origin", "https://swarmjet.example.com"],
+            )
+            self.assertEqual(parsed["PUBLIC_ORIGIN"], "https://swarmjet.example.com")
 
     def test_noninteractive_standalone_install_pulls_images(self):
         with tempfile.TemporaryDirectory() as directory:
