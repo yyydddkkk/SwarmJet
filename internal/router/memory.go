@@ -16,23 +16,25 @@ import (
 // Router demo. It enforces the same message validation rules the real store
 // must enforce, so routing behaviour is identical.
 type MemoryBackend struct {
-	mu           sync.Mutex
-	hives        map[string]domain.Hive
-	hiveByRepo   map[string]string
-	agents       map[string]domain.Agent
-	agentOrder   []string
-	messages     []domain.Message
-	messagesByID map[string]domain.Message
-	seq          int
+	mu            sync.Mutex
+	hives         map[string]domain.Hive
+	hiveByRepo    map[string]string
+	agents        map[string]domain.Agent
+	agentOrder    []string
+	messages      []domain.Message
+	messagesByID  map[string]domain.Message
+	methodologies map[string]domain.Methodology
+	seq           int
 }
 
 // NewMemoryBackend returns an empty backend.
 func NewMemoryBackend() *MemoryBackend {
 	return &MemoryBackend{
-		hives:        map[string]domain.Hive{},
-		hiveByRepo:   map[string]string{},
-		agents:       map[string]domain.Agent{},
-		messagesByID: map[string]domain.Message{},
+		hives:         map[string]domain.Hive{},
+		hiveByRepo:    map[string]string{},
+		agents:        map[string]domain.Agent{},
+		messagesByID:  map[string]domain.Message{},
+		methodologies: map[string]domain.Methodology{},
 	}
 }
 
@@ -226,9 +228,6 @@ func (m *MemoryBackend) SendMessage(ctx context.Context, msg domain.Message) (do
 }
 
 func (m *MemoryBackend) validateLocked(msg domain.Message) error {
-	if isForagerAddress(msg.From) && isForagerAddress(msg.To) {
-		return domain.ErrPeerMessage
-	}
 	maxHops := resolveConfig(domain.HiveConfig{}).MaxHops
 	if hive, ok := m.hives[msg.HiveID]; ok {
 		maxHops = resolveConfig(hive.Config).MaxHops
@@ -298,8 +297,23 @@ func (m *MemoryBackend) newestNonTerminal(match func(domain.Agent) bool) (domain
 	return candidates[0], nil
 }
 
-func isForagerAddress(a domain.Address) bool {
-	return len(a) > len("forager:") && string(a[:len("forager:")]) == "forager:"
+// SetActiveMethodology installs a Hive's current methodology in the fake
+// backend. It mirrors the store's ActiveMethodology read.
+func (m *MemoryBackend) SetActiveMethodology(meth domain.Methodology) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.methodologies[meth.HiveID] = meth
+}
+
+// ActiveMethodology returns the installed methodology or domain.ErrNotFound.
+func (m *MemoryBackend) ActiveMethodology(_ context.Context, hiveID string) (domain.Methodology, []domain.MethodologyFile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	meth, ok := m.methodologies[hiveID]
+	if !ok {
+		return domain.Methodology{}, nil, domain.ErrNotFound
+	}
+	return meth, nil, nil
 }
 
 // sameMessageContent compares the semantic payload of two messages, ignoring
@@ -312,5 +326,6 @@ func sameMessageContent(a, b domain.Message) bool {
 		a.ChainID == b.ChainID &&
 		a.Hop == b.Hop &&
 		a.Body == b.Body &&
+		a.Trust == b.Trust &&
 		reflect.DeepEqual(a.Artifacts, b.Artifacts)
 }

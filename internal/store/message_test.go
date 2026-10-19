@@ -17,8 +17,8 @@ func TestSendMessageValidation(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	h := newTestHive(t, s, "acme/a")
-	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.ForagerAddress("a"), To: domain.ForagerAddress("b"), Kind: domain.MessageEvent}); !errors.Is(err, domain.ErrPeerMessage) {
-		t.Fatalf("peer message accepted: %v", err)
+	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.ForagerAddress("a"), To: domain.ForagerAddress("b"), Kind: domain.MessageEvent}); err != nil {
+		t.Fatalf("peer message rejected: %v", err)
 	}
 	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.AddressSystem, To: domain.AddressHive, Kind: domain.MessageEvent, Hop: 11}); !errors.Is(err, domain.ErrHopLimit) {
 		t.Fatalf("hop limit not enforced: %v", err)

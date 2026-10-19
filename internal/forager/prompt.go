@@ -69,6 +69,17 @@ func dedupeMessages(msgs []domain.Message) []domain.Message {
 	return out
 }
 
+// messageTrust is the provenance shown before every message in a turn. An
+// empty value means agent, matching the store contract for older rows.
+func messageTrust(m domain.Message) domain.MessageTrust {
+	switch m.Trust {
+	case domain.TrustUser, domain.TrustAgent, domain.TrustExternal, domain.TrustSystem:
+		return m.Trust
+	default:
+		return domain.TrustAgent
+	}
+}
+
 // buildPrompt renders the fixed turn input. Inbox contents are explicitly
 // framed as data, never as platform instructions.
 func buildPrompt(agent domain.Agent, hive domain.Hive, msgs []domain.Message, firstTurn bool) string {
@@ -93,7 +104,7 @@ func buildPrompt(agent domain.Agent, hive domain.Hive, msgs []domain.Message, fi
 		if shown >= MaxPromptMessages {
 			break
 		}
-		block := fmt.Sprintf("\n### %s from %s\n%s\n", m.Kind, m.From, strings.TrimSpace(m.Body))
+		block := fmt.Sprintf("\n### %s from %s\ntrust: %s\n%s\n", m.Kind, m.From, messageTrust(m), strings.TrimSpace(m.Body))
 		size := utf8.RuneCountInString(block)
 		if used+size > MaxPromptChars {
 			break

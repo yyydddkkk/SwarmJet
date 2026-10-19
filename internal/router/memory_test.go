@@ -19,17 +19,16 @@ func TestMemoryBackendMessageValidation(t *testing.T) {
 		return b, hive
 	}
 
-	t.Run("forager to forager is rejected", func(t *testing.T) {
+	t.Run("forager to forager is allowed", func(t *testing.T) {
 		b, hive := newBackend(t)
-		_, err := b.SendMessage(ctx, domain.Message{
+		if _, err := b.SendMessage(ctx, domain.Message{
 			HiveID: hive.ID,
 			From:   domain.ForagerAddress("a"),
 			To:     domain.ForagerAddress("b"),
 			Kind:   domain.MessageEvent,
 			Body:   "hello",
-		})
-		if !errors.Is(err, domain.ErrPeerMessage) {
-			t.Fatalf("err = %v, want ErrPeerMessage", err)
+		}); err != nil {
+			t.Fatalf("peer message rejected: %v", err)
 		}
 	})
 

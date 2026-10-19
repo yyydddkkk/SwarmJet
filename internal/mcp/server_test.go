@@ -172,7 +172,7 @@ func TestToolListContainsEveryContractTool(t *testing.T) {
 	}
 	want := []string{
 		"list_hives", "get_hive", "create_hive", "update_hive", "send", "wait",
-		"spawn_forager", "cancel_forager", "get_forager", "read_forager_detail",
+		"spawn", "spawn_forager", "cancel_forager", "get_forager", "read_forager_detail",
 		"update_handoff", "inbox", "claim", "offline_digest",
 	}
 	for _, name := range want {
