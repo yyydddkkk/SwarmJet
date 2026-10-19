@@ -8,7 +8,7 @@ import type {
   QueenAction,
 } from "./types";
 import { GithubMark, Icon } from "./icons";
-import { ForagerAvatar, LoaderBee, PixelIcon, QueenAvatar } from "./pixel";
+import { EmptyHiveArt, ForagerAvatar, LoaderBee } from "./pixel";
 
 export type Tone = "mint" | "amber" | "coral" | "neutral";
 
@@ -50,7 +50,7 @@ const checkLabel: Record<CheckStatus, string> = {
 };
 
 function ActionMark({ kind }: { kind: QueenAction["kind"] }) {
-  if (kind === "spawn_forager") return <PixelIcon name="bee-16" size={16} />;
+  if (kind === "spawn_forager") return <Icon name="bee" size={16} />;
   return <Icon name={kind === "cancel_forager" ? "close" : "shield"} size={16} />;
 }
 
@@ -195,7 +195,7 @@ export function EmptyState({
     <div className="hg-empty">
       <div className="hg-empty-body">
         <span className="hg-empty-art" aria-hidden="true">
-          <PixelIcon name="comb-32" size={96} />
+          <EmptyHiveArt />
         </span>
         <p className="hg-empty-title">{title}</p>
         {hint ? <p className="hg-empty-hint">{hint}</p> : null}

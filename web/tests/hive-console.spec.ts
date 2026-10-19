@@ -86,74 +86,117 @@ test("Forager detail implements the conversation and handoff sections", async ({
   await page.screenshot({ path: testInfo.outputPath("forager-handoff-1440.png"), fullPage: true });
 });
 
-// Pixel-icon reference page: every icon at 16/32/48, both bee grids, the Queen's
-// crown, twelve hashed Forager avatars and the loader — light and dark surface.
-test("Pixel reference lists the icon set, both bee grids and twelve Forager avatars", async ({ page }, testInfo) => {
+// Pixel reference page: the whole design spec — eight Forager states, the Queen
+// on and off, six hashed body colours, the 29 icons at 16 and 32px, the loader
+// and the empty state — on a light and on a dark surface.
+test("Pixel reference shows the whole design spec on light and dark surfaces", async ({ page }, testInfo) => {
   await page.goto("/#/icons");
 
   await expect(page.getByRole("heading", { name: "像素规范", level: 1 })).toBeVisible();
   const surfaces = page.locator(".hg-icon-lab-panel");
   await expect(surfaces).toHaveCount(4);
 
-  for (const surface of [surfaces.nth(0), surfaces.nth(1)]) {
-    // 29 icons, each drawn at all three whole-pixel steps.
-    await expect(surface.locator('[aria-label="图标集"] .hg-px-cell')).toHaveCount(29);
-    await expect(surface.locator('[aria-label="图标集"] .hg-icon')).toHaveCount(29 * 3);
-    await expect(surface.getByText("hive", { exact: true })).toBeVisible();
-    await expect(surface.getByText("swarm", { exact: true })).toBeVisible();
-    await expect(surface.getByText("refresh", { exact: true })).toBeVisible();
+  const avatarSurfaces = [surfaces.nth(0), surfaces.nth(1)];
+  const iconSurfaces = [surfaces.nth(2), surfaces.nth(3)];
+
+  for (const surface of avatarSurfaces) {
+    const states = surface.locator('[aria-label="Forager 状态"] .hg-px-cell');
+    await expect(states).toHaveCount(8);
+    for (const name of ["creating", "active", "parked", "needs_you", "hibernated", "completed", "failed", "cancelled"]) {
+      await expect(
+        states.locator(".hg-px-cell-label").filter({ hasText: new RegExp(`^${name}$`) }),
+      ).toHaveCount(1);
+    }
+    // Queen on, Queen off, and the component that applies the off palette.
+    await expect(surface.locator('[aria-label="Queen"] .hg-px-cell')).toHaveCount(3);
+    await expect(surface.locator('[aria-label="身体颜色"] .hg-px-cell')).toHaveCount(6);
   }
 
-  const light = surfaces.nth(0);
-  await expect(light.locator(".hg-px-cell-label").filter({ hasText: new RegExp(`^bee-16$`) })).toBeVisible();
-  await expect(light.locator(".hg-px-cell-label").filter({ hasText: new RegExp(`^queen-16$`) })).toBeVisible();
-  await expect(light.locator(".hg-px-cell-label").filter({ hasText: new RegExp(`^bee-32$`) })).toBeVisible();
-  await expect(light.locator(".hg-px-cell-label").filter({ hasText: new RegExp(`^queen-32$`) })).toBeVisible();
-  await expect(light.locator(".hg-px-cell-label").filter({ hasText: new RegExp(`^comb-32$`) })).toBeVisible();
-  await expect(light.locator(".hg-loader")).toBeVisible();
-  // bee-16 / queen-16 / bee-32 / queen-32 at three steps each, plus the comb.
-  await expect(light.locator(".hg-px")).toHaveCount(13);
-  const drawn = await light.locator(".hg-px").evaluateAll(nodes =>
+  for (const surface of iconSurfaces) {
+    const icons = surface.locator('[aria-label="图标集"] .hg-icon');
+    await expect(icons).toHaveCount(29 * 2); // 16px + 32px
+    await expect(surface.locator('[aria-label="图标集"] .hg-px-cell')).toHaveCount(29);
+    for (const name of ["hive", "swarm", "crown", "bee"]) {
+      await expect(
+        surface.locator('[aria-label="图标集"] .hg-px-cell-label').filter({ hasText: new RegExp(`^${name}$`) }),
+      ).toHaveCount(1);
+    }
+    await expect(surface.locator(".hg-loader")).toBeVisible();
+    await expect(surface.locator("[aria-label='空状态'] .hg-empty-pixels")).toHaveCount(1);
+  }
+
+  // Only the four whole-pixel sizes are ever used.
+  const sizes = await page.locator("#pixel-icons svg, #forager-avatars svg").evaluateAll(nodes =>
     nodes.map(node => Number(node.getAttribute("width"))),
   );
-  expect(drawn.sort((a, b) => a - b)).toEqual([16, 16, 32, 32, 32, 32, 48, 48, 64, 64, 96, 96, 96]);
+  expect(sizes.every(size => [16, 32, 48, 64].includes(size))).toBe(true);
 
-  await expect(page.locator("#pixel-icons")).toBeVisible();
-  await page.locator("#pixel-icons").screenshot({ path: testInfo.outputPath("pixel-icons-1440.png") });
   await page.locator("#forager-avatars").screenshot({ path: testInfo.outputPath("forager-avatars-1440.png") });
+  await page.locator("#pixel-icons").screenshot({ path: testInfo.outputPath("pixel-icons-1440.png") });
   await page.screenshot({ path: testInfo.outputPath("icon-lab-1440.png"), fullPage: true });
 });
 
-const avatarSignature = (handle: Locator) =>
-  handle.evaluate((node: HTMLElement) => `${node.style.getPropertyValue("--hg-px-body")}|${node.innerHTML}`);
+/** Colour + geometry of a drawn sprite: enough to tell two states apart. */
+const pixelSignature = (handle: Locator) =>
+  handle.evaluate((node: HTMLElement) =>
+    [...node.querySelectorAll("svg g[fill]")]
+      .map(group => {
+        const fill = group.getAttribute("fill") ?? "";
+        const cells = [...group.querySelectorAll("rect")]
+          .map(rect => `${rect.getAttribute("x")},${rect.getAttribute("y")}`)
+          .sort()
+          .join(" ");
+        return `${fill}:${cells}`;
+      })
+      .sort()
+      .join("|"),
+  );
 
-test("Forager avatars are stable per id and different across ids", async ({ page }) => {
+test("A Forager keeps the same bee, and every state draws a different one", async ({ page }) => {
   await page.goto("/#/hives/swarmjet");
 
-  // Same Forager, same size, two places: the Swarm rail and the conversation.
+  // Same Forager, same size, in the Swarm rail and in the conversation stream.
   const same = page.locator('.hg-px-avatar[aria-label="Forager forager-7f3a"]');
   await expect(same).toHaveCount(2);
   const [rail, stream] = await same.all();
-  const railSignature = await avatarSignature(rail);
-  expect(railSignature).toBe(await avatarSignature(stream));
+  const railSignature = await pixelSignature(rail);
+  expect(railSignature).toBe(await pixelSignature(stream));
 
-  // A different Forager gets a different bee.
+  // The body colour is a literal hex (state overrides are the only other ones),
+  // so the same id has to come back with the same body fill.
+  const bodyColor = (handle: Locator) =>
+    handle.evaluate((node: HTMLElement) => {
+      const fills = [...node.querySelectorAll("svg g[fill]")].map(group => group.getAttribute("fill") ?? "");
+      return fills.find(fill => /^#[0-9a-f]{6}$/i.test(fill)) ?? "";
+    });
+  expect(await bodyColor(rail)).toMatch(/^#[0-9a-f]{6}$/i);
+  expect(await bodyColor(stream)).toBe(await bodyColor(rail));
+
+  // Different Foragers are allowed to share a colour, but they are not forced to.
   const other = page.locator('.hg-px-avatar[aria-label="Forager forager-2b91"]').first();
-  expect(await avatarSignature(other)).not.toBe(railSignature);
+  expect(await pixelSignature(other)).not.toBe(railSignature);
 
-  // Twelve ids, twelve distinct looks: colour, stripes, accessory and facing all
-  // come off the hash, and nothing else feeds into the drawing.
+  // Eight states, eight distinct drawings on the reference page.
   await page.goto("/#/icons");
-  const cells = page.locator("#forager-avatars .hg-icon-lab-panel").first().locator(".hg-px-cell");
-  await expect(cells).toHaveCount(12);
-  const signatures = await cells.evaluateAll(nodes =>
+  const states = page
+    .locator("#forager-avatars .hg-icon-lab-panel")
+    .first()
+    .locator('[aria-label="Forager 状态"] .hg-px-cell');
+  await expect(states).toHaveCount(8);
+  const drawn = await states.locator("svg").evaluateAll(nodes =>
     nodes.map(node => {
-      const avatar = node.querySelector<HTMLElement>(".hg-px-avatar");
-      return `${avatar?.style.getPropertyValue("--hg-px-body")}|${avatar?.innerHTML}`;
+      const groups = [...node.querySelectorAll("g[fill]")].map(group => {
+        const fill = group.getAttribute("fill") ?? "";
+        const cells = [...group.querySelectorAll("rect")]
+          .map(rect => `${rect.getAttribute("x")},${rect.getAttribute("y")}`)
+          .sort()
+          .join(" ");
+        return `${fill}:${cells}`;
+      });
+      return groups.sort().join("|");
     }),
   );
-  expect(new Set(signatures).size).toBe(12);
-  expect(signatures.every(Boolean)).toBe(true);
+  expect(new Set(drawn).size).toBe(8);
 });
 
 test("The bee loader flaps between two wing frames", async ({ page }) => {
@@ -184,8 +227,8 @@ test.describe("reduced motion", () => {
         bob: bob ? getComputedStyle(bob).animationName : "missing",
         up: up ? getComputedStyle(up).animationName : "missing",
         down: down ? getComputedStyle(down).animationName : "missing",
-        downVisibility: down ? getComputedStyle(down).visibility : "missing",
         upVisibility: up ? getComputedStyle(up).visibility : "missing",
+        downVisibility: down ? getComputedStyle(down).visibility : "missing",
       };
     });
 

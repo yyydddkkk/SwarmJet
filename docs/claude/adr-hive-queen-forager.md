@@ -410,13 +410,16 @@ Forager 详情页
 
 像素风只作点缀：正文、代码、diff、日志和表格保持原有字体与排版，只有图标、logo、头像、空状态和加载动画用像素画，不做复古游戏风。
 
-- 所有像素图都是内联 SVG，每个像素一个 `<rect>`（相邻同色像素合并成一个 path），根节点带 `shape-rendering="crispEdges"`，viewBox 用整数网格；
-- 只在整数倍尺寸下显示：16×16 网格的图用于 16/32/48px，32×32 网格用于 32/64/96px；传别的尺寸在开发模式下告警，不静默变糊；
-- 调色板固定 6～8 色，全部取自 `hive-console.css` 的 token：蜂蜜黄、深黄（阴影）、深棕近黑（描边、条纹、眼睛）、奶白、浅蓝白（翅膀）、粉（腮红）、金（皇冠）。深色底只换 token：描边转奶白，眼睛高光转深色；
-- 图标集是 16×16 的单色像素图，用 `currentColor`；`swarm` 画成几只极简小蜂，`hive` 画成像素六边形；
-- Forager 头像由 id 的 FNV-1a 哈希决定：身体主色（6 种暖色）、条纹 2～3 条、配饰（无、眼镜、帽子、领结、耳机，每种只占 2～6 个像素）、朝向左右；状态继续由状态徽标表达，不用头像颜色；
-- Queen 用像素皇冠表示，不再画戴皇冠的蜜蜂；
-- 空状态是 32×32 的一格蜂巢加一只蜂，加载动画是 bee-32 的两帧扇翅加 1～2px 浮动，`prefers-reduced-motion` 时停在第一帧；
+- 图案的唯一来源是 `docs/claude/design/pixel-icons.json`（网格、图例、调色板、覆盖色都在里面），`web/src/hive/pixel-icons.ts` 由它生成，改图案只改规范文件再重新生成，不在组件里手画；
+- 所有图案都是 16×16 字符网格，一个字符一个 1×1 `<rect>`，SVG 用 `viewBox="0 0 16 16"` 和 `shape-rendering="crispEdges"`；`"."` 透明，`"#"` 用 `currentColor`，其余字符按图例取色；
+- 只在 16/32/48/64px 下显示；传别的尺寸在开发模式下告警，不静默变糊；
+- 图例共 12 个字符、10 种颜色，全部落到 `hive-console.css` 的 `--hg-px-*` token：`y` 身体、`d` 条纹与眼睛、`a` 触角与尾刺、`w` 翅膀、`z` 睡眠、`r` 待你处理、`g/o/h/m` 皇冠。深色底只换 token（`a` 转奶白，`w/z/r` 提亮），不另存一套图；
+- Forager 有 8 张图：`forager.<状态>` 对应 creating、active、parked、hibernated、completed、failed、cancelled，`needs_you` 用在有待审批或待回答消息的 Forager 上；`stateOverrides` 覆盖对应状态的颜色（creating 偏淡、cancelled 转灰）；
+- 头像由 id 的 FNV-1a 哈希从 6 种身体色里选一种，只替换 `y`，表情由状态决定；不再有配饰、条纹数、朝向的变体，状态仍由状态徽标表达；
+- Queen 只用 `queen` 皇冠网格，未开启时套用 `queenOff` 配色；
+- 通用图标是 `icons` 里的 29 个 16×16 单色像素图，沿用原来的名字和调用方式，`bee` 用作 logo 与导航里的蜂标志；
+- 加载动画保留两帧扇翅：基于 `forager.active`，第二帧把第 3～6 行的翅膀像素上移一行，再加 1～2px 浮动，`prefers-reduced-motion` 时停在第一帧；
+- 空状态由 `icons.hive` 加 `forager.parked` 组合，不再画单独的蜂巢插画；
 - 不用像素字体排正文；像素字体最多用在 logo 字样上，且要先评估中文显示效果，拿不准就不用；
 - 圆角统一收到 2～4px，卡片和按钮用 2px 实线边框；主要按钮和选中的卡片用错位硬阴影 `box-shadow: 2px 2px 0 <深棕 token>`，按下时位移 1px、阴影减为 1px；不用渐变、不用模糊阴影；
 - 配色沿用"蜂蜜花园"，不新增颜色体系。

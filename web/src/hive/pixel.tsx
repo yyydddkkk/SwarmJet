@@ -1,215 +1,133 @@
-// The pixel rendering convention for the Hive console (ADR section 18).
+// Pixel rendering for the Hive console (ADR section 18, "pixel accents").
 //
-// Rules every pixel drawing in this folder follows:
-//   1. inline SVG only, one <rect> per pixel — adjacent pixels of the same
-//      colour are merged into a single run inside one <path>, so a whole sprite
-//      is a handful of paths;
-//   2. the root <svg> carries shape-rendering="crispEdges" and an integer-grid
-//      viewBox, and the component is only ever drawn at an integer multiple of
-//      the grid (16x16 -> 16/32/48, 32x32 -> 32/64/96). Anything else warns in
-//      development instead of quietly going blurry;
-//   3. colours come from the --hg-px-* tokens in hive-console.css, so dark mode
-//      is a token swap and the artwork itself stays colour-free;
-//   4. no pixel font: prose, code, diffs, logs and tables keep the normal fonts.
+// Rules, all of them enforced by the shape of the data in pixel-icons.ts:
+//   - every drawing is a 16x16 character grid; one character paints one 1x1 <rect>
+//     inside an SVG with viewBox="0 0 16 16" and shape-rendering="crispEdges";
+//   - "." is transparent and "#" is currentColor;
+//   - every other character resolves to a --hg-px-* token from hive-console.css,
+//     so the dark surface is a token swap and the artwork never carries colours
+//     (the state overrides the spec pins to literal values are the only exception);
+//   - a sprite is only ever drawn at 16, 32, 48 or 64px. Anything else warns in
+//     development instead of quietly going blurry.
 import { useMemo, type CSSProperties, type ReactNode } from "react";
 import {
-  BEE_16,
-  BEE_16_THREE,
-  BEE_32,
-  BEE_32_FLAP,
-  BEE_32_THREE,
-  COMB_32,
-  QUEEN_16,
-  QUEEN_32,
-  type PixelSprite,
-} from "./pixel-art";
+  FORAGER_BODY_COLORS,
+  FORAGER_GRIDS,
+  GRID,
+  ICON_GRIDS,
+  LEGEND,
+  QUEEN_GRID,
+  QUEEN_OFF,
+  STATE_OVERRIDES,
+  type ForagerSprite,
+  type LegendChar,
+  type PaintChar,
+} from "./pixel-icons";
+import type { AgentState } from "./types";
 
-export type PixelToken =
-  | "ink"
-  | "body"
-  | "shade"
-  | "wing"
-  | "wingHi"
-  | "wingEdge"
-  | "blush"
-  | "gold"
-  | "goldShade"
-  | "shine";
+/** The only sizes pixel art is allowed to be drawn at (16px grid x 1/2/3/4). */
+export const PIXEL_SIZES = [16, 32, 48, 64] as const;
+export type PixelSize = (typeof PIXEL_SIZES)[number];
 
-/** One ASCII character per palette role. See pixel-art.ts for the legend. */
-const GLYPH: Record<string, PixelToken> = {
-  "#": "ink",
-  y: "body",
-  d: "shade",
-  w: "wing",
-  W: "wingHi",
-  b: "wingEdge",
-  p: "blush",
-  g: "gold",
-  G: "goldShade",
-  i: "shine",
+/** Character -> token. "#" follows the text colour, everything else is themed. */
+const CHAR_TOKEN: Record<PaintChar, string> = {
+  "#": "currentColor",
+  y: "var(--hg-px-y)",
+  d: "var(--hg-px-d)",
+  a: "var(--hg-px-a)",
+  w: "var(--hg-px-w)",
+  z: "var(--hg-px-z)",
+  r: "var(--hg-px-r)",
+  g: "var(--hg-px-g)",
+  o: "var(--hg-px-o)",
+  h: "var(--hg-px-h)",
+  m: "var(--hg-px-m)",
 };
 
-const TOKEN_VAR: Record<PixelToken, string> = {
-  ink: "--hg-px-ink",
-  body: "--hg-px-body",
-  shade: "--hg-px-shade",
-  wing: "--hg-px-wing",
-  wingHi: "--hg-px-wing-hi",
-  wingEdge: "--hg-px-wing-edge",
-  blush: "--hg-px-blush",
-  gold: "--hg-px-gold",
-  goldShade: "--hg-px-gold-shade",
-  shine: "--hg-px-shine",
-};
-
-export type Runner = { token: PixelToken; d: string };
-
-/**
- * Turns a pixel grid into one merged path per palette role. Horizontal runs of
- * the same colour collapse into a single `M x y h n v1 h -n z` block, so a
- * 32x32 sprite costs a few hundred bytes instead of a thousand <rect> nodes.
- */
-export function pixelRuns(rows: string[]): Runner[] {
-  const runs = new Map<PixelToken, string[]>();
-  rows.forEach((row, y) => {
-    let x = 0;
-    while (x < row.length) {
-      const glyph = row[x];
-      if (glyph === "." || !GLYPH[glyph]) {
-        x += 1;
-        continue;
-      }
-      let end = x;
-      while (end + 1 < row.length && row[end + 1] === glyph) end += 1;
-      const token = GLYPH[glyph];
-      const list = runs.get(token) ?? [];
-      list.push(`M${x} ${y}h${end - x + 1}v1h-${end - x + 1}z`);
-      runs.set(token, list);
-      x = end + 1;
-    }
-  });
-  return [...runs].map(([token, d]) => ({ token, d: d.join("") }));
-}
+export type ColorOverrides = Partial<Record<LegendChar, string>>;
 
 const warned = new Set<string>();
 
-/** Integer-multiple guard: pixel art only lines up on whole grid steps. */
-export function assertGridSize(label: string, grid: number, size: number): void {
+/** Integer-scale guard: a 16px grid only lines up on multiples of 16. */
+export function assertPixelSize(label: string, size: number): void {
   if (!import.meta.env?.DEV) return;
-  if (size > 0 && size % grid === 0) return;
+  if ((PIXEL_SIZES as readonly number[]).includes(size)) return;
   const key = `${label}@${size}`;
   if (warned.has(key)) return;
   warned.add(key);
   console.warn(
-    `[pixel] ${label} is drawn on a ${grid}x${grid} grid and only stays crisp at a multiple of ` +
-      `${grid}px (16x16 -> 16/32/48, 32x32 -> 32/64/96). Received ${size}px.`,
+    `[pixel] ${label} is drawn on a ${GRID}x${GRID} grid; use ${PIXEL_SIZES.join("/")}px ` +
+      `so every grid cell stays a whole pixel. Received ${size}px.`,
   );
 }
 
-export function PixelSvg({
-  sprite,
+type Cell = [x: number, y: number];
+type CharCells = [PaintChar, Cell[]];
+
+/** Groups painted cells by character, dropping transparent ones. */
+export function groupCells(rows: readonly string[]): CharCells[] {
+  const groups = new Map<PaintChar, Cell[]>();
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x += 1) {
+      const char = row[x] as LegendChar;
+      if (char === "." || !(char in LEGEND)) continue;
+      const paint = char as PaintChar;
+      const list = groups.get(paint) ?? [];
+      list.push([x, y]);
+      groups.set(paint, list);
+    }
+  });
+  return [...groups];
+}
+
+/**
+ * One <rect> per grid character. Cells are grouped per character so the fill is
+ * declared once per colour instead of ~150 times per sprite.
+ */
+export function PixelArt({
+  rows,
   size,
+  colors,
   className,
   title,
-  monochrome = false,
-  style,
 }: {
-  sprite: PixelSprite;
+  rows: readonly string[];
   size: number;
+  colors?: ColorOverrides;
   className?: string;
   title?: string;
-  /** Icons are single-colour and follow currentColor; sprites use the tokens. */
-  monochrome?: boolean;
-  style?: CSSProperties;
 }) {
-  const { grid, rows } = sprite;
-  const runs = useMemo(() => pixelRuns(rows), [rows]);
+  const groups = useMemo(() => groupCells(rows), [rows]);
   return (
     <svg
       className={className}
       width={size}
       height={size}
-      viewBox={`0 0 ${grid} ${grid}`}
+      viewBox={`0 0 ${GRID} ${GRID}`}
       shapeRendering="crispEdges"
-      style={style}
       role={title ? "img" : undefined}
       aria-label={title}
       aria-hidden={title ? undefined : true}
       focusable="false"
     >
-      {runs.map(run => (
-        <path
-          key={run.token}
-          fill={monochrome ? "currentColor" : `var(${TOKEN_VAR[run.token]})`}
-          d={run.d}
-        />
+      {groups.map(([char, cells]) => (
+        <g key={char} fill={colors?.[char] ?? CHAR_TOKEN[char]}>
+          {cells.map(([x, y]) => (
+            <rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" />
+          ))}
+        </g>
       ))}
     </svg>
   );
 }
 
-export type PixelIconName = "bee-16" | "bee-32" | "queen-16" | "queen-32" | "comb-32";
-
-const SPRITES: Record<PixelIconName, PixelSprite> = {
-  "bee-16": BEE_16,
-  "bee-32": BEE_32,
-  "queen-16": QUEEN_16,
-  "queen-32": QUEEN_32,
-  "comb-32": COMB_32,
-};
-
-export function PixelIcon({
-  name,
-  size,
-  className,
-  title,
-}: {
-  name: PixelIconName;
-  size: number;
-  className?: string;
-  title?: string;
-}) {
-  const sprite = SPRITES[name];
-  assertGridSize(name, sprite.grid, size);
-  return (
-    <PixelSvg
-      sprite={sprite}
-      size={size}
-      className={className ? `hg-px ${className}` : "hg-px"}
-      title={title}
-    />
-  );
-}
-
 /* -------------------------------------------------------------------------- */
-/* Forager avatars                                                            */
+/* Foragers                                                                   */
 /* -------------------------------------------------------------------------- */
-
-// Six coordinated warm bodies; all keep plenty of contrast against the near-black
-// stripes, so the stripes and the eyes stay readable whichever one is picked.
-export const FORAGER_BODIES = [
-  "#f2b53a",
-  "#f5c46b",
-  "#efa95b",
-  "#ef9450",
-  "#e8c05a",
-  "#e2a86a",
-] as const;
-
-export type Accessory = "none" | "glasses" | "hat" | "bowtie" | "headphones";
-export type Facing = "left" | "right";
-
-export type ForagerLook = {
-  body: string;
-  stripes: 2 | 3;
-  accessory: Accessory;
-  facing: Facing;
-};
 
 /**
  * FNV-1a over the Forager id: stable across sessions and machines, so a Forager
- * always comes back as the same bee. 32 bits is plenty for the ~120 looks below.
+ * always comes back as the same bee.
  */
 export function fnv1a(input: string): number {
   let hash = 0x811c9dc5;
@@ -220,201 +138,201 @@ export function fnv1a(input: string): number {
   return hash >>> 0;
 }
 
-const ACCESSORIES: Accessory[] = ["none", "glasses", "hat", "bowtie", "headphones"];
+/** The body colour a Forager id hashes to; replaces "y" only. */
+export function foragerBodyColor(id: string): string {
+  return FORAGER_BODY_COLORS[fnv1a(id) % FORAGER_BODY_COLORS.length];
+}
 
-export function foragerLook(id: string): ForagerLook {
-  const hash = fnv1a(id);
-  return {
-    body: FORAGER_BODIES[hash % FORAGER_BODIES.length],
-    stripes: ((hash >>> 4) & 1) === 0 ? 2 : 3,
-    accessory: ACCESSORIES[(hash >>> 8) % ACCESSORIES.length],
-    facing: ((hash >>> 13) & 1) === 0 ? "left" : "right",
+type StreamEntry = {
+  kind: string;
+  message?: { from: string; kind: string; state: string };
+  action?: {
+    kind: string;
+    title: string;
+    summary: string;
+    artifact?: { ref: string };
+    details: { label: string; value: string }[];
   };
-}
-
-/** [x, y, token] — every accessory is 2-6 pixels, as the spec requires. */
-type PixelPatch = [number, number, PixelToken];
-
-const ACCESSORY_PATCHES: Record<16 | 32, Record<Exclude<Accessory, "none">, PixelPatch[]>> = {
-  32: {
-    // a bridge across the eyes plus a rim either side
-    glasses: [
-      [3, 19, "ink"],
-      [6, 19, "ink"],
-      [7, 19, "ink"],
-      [8, 19, "ink"],
-      [11, 19, "ink"],
-    ],
-    // a little domed cap sitting straight on the head
-    hat: [
-      [8, 7, "wingEdge"],
-      [9, 7, "wingEdge"],
-      [7, 8, "wingEdge"],
-      [8, 8, "wingEdge"],
-      [9, 8, "wingEdge"],
-      [10, 8, "wingEdge"],
-    ],
-    // a little bow under the chin
-    bowtie: [
-      [2, 25, "blush"],
-      [3, 25, "blush"],
-      [2, 26, "blush"],
-      [3, 26, "blush"],
-    ],
-    // a band arching over the head, hollow underneath
-    headphones: [
-      [7, 7, "wingEdge"],
-      [8, 7, "wingEdge"],
-      [9, 7, "wingEdge"],
-      [10, 7, "wingEdge"],
-      [6, 8, "wingEdge"],
-      [11, 8, "wingEdge"],
-    ],
-  },
-  16: {
-    glasses: [
-      [2, 9, "ink"],
-      [2, 10, "ink"],
-      [4, 9, "ink"],
-      [4, 10, "ink"],
-    ],
-    hat: [
-      [6, 3, "wingEdge"],
-      [5, 4, "wingEdge"],
-      [6, 4, "wingEdge"],
-      [7, 4, "wingEdge"],
-    ],
-    bowtie: [
-      [2, 13, "blush"],
-      [3, 13, "blush"],
-    ],
-    headphones: [
-      [5, 3, "wingEdge"],
-      [6, 3, "wingEdge"],
-      [7, 3, "wingEdge"],
-      [5, 4, "wingEdge"],
-      [8, 4, "wingEdge"],
-    ],
-  },
 };
 
-const GLYPH_FOR_TOKEN: Record<PixelToken, string> = {
-  ink: "#",
-  body: "y",
-  shade: "d",
-  wing: "w",
-  wingHi: "W",
-  wingEdge: "b",
-  blush: "p",
-  gold: "g",
-  goldShade: "G",
-  shine: "i",
-};
-
-function patch(rows: string[], patches: PixelPatch[]): string[] {
-  const next = [...rows];
-  for (const [x, y, token] of patches) {
-    const row = next[y];
-    if (row === undefined || row[x] === undefined) continue;
-    next[y] = row.slice(0, x) + GLYPH_FOR_TOKEN[token] + row.slice(x + 1);
-  }
-  return next;
+/**
+ * A Forager needs you when the hive stream is waiting on a human: a pending
+ * question from that Forager, or a pending approval that names it (by id, or by
+ * the pull request it owns).
+ */
+export function foragerNeedsYou(
+  agent: { id: string; prNumber?: number },
+  entries: readonly StreamEntry[],
+): boolean {
+  const pr = agent.prNumber ? `#${agent.prNumber}` : "";
+  const named = (text: string) => text.includes(agent.id) || (pr.length > 0 && text.includes(pr));
+  return entries.some(entry => {
+    if (entry.kind === "message" && entry.message) {
+      const message = entry.message;
+      return (
+        message.from === `forager:${agent.id}` &&
+        message.kind === "question" &&
+        message.state !== "handled"
+      );
+    }
+    if (entry.kind === "action" && entry.action?.kind === "request_approval") {
+      const action = entry.action;
+      return [
+        action.title,
+        action.summary,
+        action.artifact?.ref ?? "",
+        ...action.details.map(detail => `${detail.label} ${detail.value}`),
+      ].some(named);
+    }
+    return false;
+  });
 }
 
-function mirror(rows: string[]): string[] {
-  return rows.map(row => [...row].reverse().join(""));
-}
+/** The eight drawings the spec ships for a bee: seven states plus needs-you. */
+export const FORAGER_STATES: ForagerSprite[] = [
+  "creating",
+  "active",
+  "parked",
+  "needs_you",
+  "hibernated",
+  "completed",
+  "failed",
+  "cancelled",
+];
 
-/** The base bee for a grid size and stripe count. */
-export function beeSprite(grid: 16 | 32, stripes: 2 | 3): PixelSprite {
-  if (grid === 32) return stripes === 3 ? BEE_32_THREE : BEE_32;
-  return stripes === 3 ? BEE_16_THREE : BEE_16;
+/** "disabled" is a Queen-only state in this console; a greyed bee is closest. */
+function spriteFor(state: AgentState, needsYou: boolean): ForagerSprite {
+  if (needsYou) return "needs_you";
+  if (state === "disabled") return "cancelled";
+  return state;
 }
 
 /**
- * 16-grid below 32px, 32-grid from 32px up: both stay whole-number scales, and
- * the small bee drops the mouth and blush so it still reads at 16px.
+ * Hash colour first, then the state's overrides, so cancelled greys out and
+ * creating stays pale whatever the id hashes to.
  */
-export function resolveAvatar(id: string, size: number): { sprite: PixelSprite; look: ForagerLook } {
-  const look = foragerLook(id);
-  const grid: 16 | 32 = size >= 32 ? 32 : 16;
-  assertGridSize(`ForagerAvatar(${id})`, grid, size);
-  const base = beeSprite(grid, look.stripes);
-  let rows = base.rows;
-  if (look.accessory !== "none") rows = patch(rows, ACCESSORY_PATCHES[grid][look.accessory]);
-  if (look.facing === "right") rows = mirror(rows);
-  return { sprite: { grid, rows }, look };
+export function foragerColors(id: string, state: AgentState): ColorOverrides {
+  return {
+    y: foragerBodyColor(id),
+    ...(STATE_OVERRIDES[state] ?? {}),
+  };
 }
 
 export function ForagerAvatar({
   id,
+  state,
+  needsYou = false,
   size = 32,
   className,
   label,
 }: {
   id: string;
-  size?: number;
+  state: AgentState;
+  needsYou?: boolean;
+  size?: PixelSize;
   className?: string;
   label?: string;
 }) {
-  const { sprite, look } = useMemo(() => resolveAvatar(id, size), [id, size]);
+  const sprite = spriteFor(state, needsYou);
+  assertPixelSize(`ForagerAvatar(${id})`, size);
   return (
     <span
-      className={className ? `hg-px-avatar ${className}` : "hg-px-avatar"}
-      style={{ width: size, height: size, "--hg-px-body": look.body } as CSSProperties}
+      className={`hg-px-avatar${className ? ` ${className}` : ""}`}
+      style={{ width: size, height: size } as CSSProperties}
       role="img"
       aria-label={label ?? `Forager ${id}`}
     >
-      <PixelSvg sprite={sprite} size={size} />
+      <PixelArt rows={FORAGER_GRIDS[sprite]} size={size} colors={foragerColors(id, state)} />
     </span>
   );
 }
 
-/** The Queen is a crown, per the round-2 direction. */
+/** The Queen is the crown; switching it off keeps the shape and drops the gold. */
 export function QueenAvatar({
   size = 32,
+  off = false,
   className,
   label = "Queen（蜂王）",
-  off = false,
 }: {
-  size?: number;
+  size?: PixelSize;
+  off?: boolean;
   className?: string;
   label?: string;
-  off?: boolean;
 }) {
-  const sprite = size >= 32 ? QUEEN_32 : QUEEN_16;
-  assertGridSize("QueenAvatar", sprite.grid, size);
+  assertPixelSize("QueenAvatar", size);
   return (
     <span
       className={`hg-px-avatar hg-px-avatar-queen${off ? " is-off" : ""}${className ? ` ${className}` : ""}`}
-      style={{ width: size, height: size }}
+      style={{ width: size, height: size } as CSSProperties}
       role="img"
       aria-label={label}
     >
-      <PixelSvg sprite={sprite} size={size} />
+      <PixelArt rows={QUEEN_GRID} size={size} colors={off ? QUEEN_OFF : undefined} />
     </span>
   );
 }
 
-/** Two wing positions for the loader; CSS flips between them with steps(). */
-export function LoaderBee({ frame, size }: { frame: "up" | "down"; size: number }) {
-  const sprite = frame === "up" ? BEE_32 : BEE_32_FLAP;
-  assertGridSize(`LoaderBee(${frame})`, sprite.grid, size);
-  return <PixelSvg sprite={sprite} size={size} />;
+/* -------------------------------------------------------------------------- */
+/* Loader                                                                     */
+/* -------------------------------------------------------------------------- */
+
+const WING_ROWS = [3, 4, 5, 6];
+
+/**
+ * Second flap frame: the wing pixels of rows 3-6 move up one row, everything
+ * else stays put. Derived from forager.active so the loader cannot drift away
+ * from the spec.
+ */
+export function flapRows(rows: readonly string[]): string[] {
+  const next = rows.map(row => [...row]);
+  const moved: Cell[] = [];
+  for (const y of WING_ROWS) {
+    for (let x = 0; x < next[y].length; x += 1) {
+      if (next[y][x] === "w") {
+        moved.push([x, y - 1]);
+        next[y][x] = ".";
+      }
+    }
+  }
+  for (const [x, y] of moved) next[y][x] = "w";
+  return next.map(row => row.join(""));
 }
 
-/** Small helper used by the icon reference page to render a labelled cell. */
-export function PixelCell({
-  label,
-  children,
-}: {
-  label: ReactNode;
-  children: ReactNode;
-}) {
+/** The two loader frames: wings lifted, then wings level. */
+export const LOADER_FRAMES = {
+  up: flapRows(FORAGER_GRIDS.active),
+  down: FORAGER_GRIDS.active,
+} as const;
+
+/** Loader drawing: the active Forager in two wing positions. */
+export function LoaderBee({ frame, size = 32 }: { frame: "up" | "down"; size?: PixelSize }) {
+  assertPixelSize(`LoaderBee(${frame})`, size);
+  return <PixelArt rows={LOADER_FRAMES[frame]} size={size} colors={{ y: "var(--hg-px-y)" }} />;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Pieces that combine spec grids                                             */
+/* -------------------------------------------------------------------------- */
+
+/** Empty state: the hive icon with a parked Forager tucked beside it. */
+export function EmptyHiveArt({ size = 64 }: { size?: PixelSize }) {
+  const beeSize: PixelSize = size >= 64 ? 48 : 32;
   return (
-    <div className="hg-icon-cell">
-      <span className="hg-icon-cell-box">{children}</span>
-      <span className="hg-icon-cell-label">{label}</span>
+    <span className="hg-empty-pixels">
+      <PixelArt rows={ICON_GRIDS.hive} size={size} />
+      <span className="hg-empty-pixels-bee">
+        <PixelArt rows={FORAGER_GRIDS.parked} size={beeSize} colors={{ y: "var(--hg-px-y)" }} />
+      </span>
+    </span>
+  );
+}
+
+/** Small helper for the reference page: a labelled pixel cell. */
+export function PixelCell({ label, children }: { label: ReactNode; children: ReactNode }) {
+  return (
+    <div className="hg-px-cell">
+      <span className="hg-px-cell-art">{children}</span>
+      <span className="hg-px-cell-label">{label}</span>
     </div>
   );
 }

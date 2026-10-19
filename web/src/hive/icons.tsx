@@ -1,16 +1,17 @@
-// Pixel icon set for the honey-garden console. Everything is inline SVG, drawn
-// on a 16x16 grid and painted with currentColor, so the icons follow the text
-// colour of whatever they sit in (see pixel.tsx for the drawing rules).
+// Pixel icon set for the honey-garden console, generated from the design spec
+// (docs/claude/design/pixel-icons.json via web/src/hive/pixel-icons.ts).
 //
-// The names and the call sites are unchanged from the line-icon round: only the
-// artwork differs. `swarm` is a few minimal bees, `hive` a pixel honeycomb.
-import { ICON_ART } from "./pixel-art";
-import { assertGridSize, PixelSvg } from "./pixel";
+// Every icon is a 16x16 monochrome grid painted with currentColor, so it follows
+// the text colour of whatever it sits in. Sizes are limited to 16/32/48/64px;
+// anything else warns in development.
+//
+// The names are the ones the console already used, minus "hexagon" (the spec has
+// no equivalent) and plus "bee", which is the logo / bee marker.
+import { ICON_GRIDS } from "./pixel-icons";
+import { assertPixelSize, PixelArt } from "./pixel";
 
 export type IconName =
   | "hive"
-  | "hexagon"
-  | "crown"
   | "swarm"
   | "chat"
   | "timeline"
@@ -36,10 +37,12 @@ export type IconName =
   | "user"
   | "refresh"
   | "pause"
-  | "play";
+  | "play"
+  | "crown"
+  | "bee";
 
 /** The size steps that keep a 16x16 grid on whole pixels. */
-export const ICON_STEPS = [16, 32, 48] as const;
+export const ICON_STEPS = [16, 32, 48, 64] as const;
 
 export function Icon({
   name,
@@ -50,13 +53,11 @@ export function Icon({
   size?: number;
   className?: string;
 }) {
-  const sprite = ICON_ART[name];
-  assertGridSize(`icon:${name}`, sprite.grid, size);
+  assertPixelSize(`icon:${name}`, size);
   return (
-    <PixelSvg
-      sprite={sprite}
+    <PixelArt
+      rows={ICON_GRIDS[name]}
       size={size}
-      monochrome
       className={className ? `hg-icon ${className}` : "hg-icon"}
     />
   );

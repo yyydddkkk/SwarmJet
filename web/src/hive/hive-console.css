@@ -44,19 +44,20 @@
   --hg-font-queen: "Source Han Serif SC", "Noto Serif SC", "Songti SC", Georgia,
     "Times New Roman", serif;
   --hg-font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  /* Pixel accents. Every pixel drawing resolves its colours from these, so the
-     dark surface is a token swap rather than a second set of artwork. */
-  --hg-px-ink: #2e2410;
-  --hg-px-body: #f2b53a;
-  --hg-px-shade: #e5a61f;
-  --hg-px-wing: #cfe3f5;
-  --hg-px-wing-hi: #edf5fc;
-  --hg-px-wing-edge: #a9c6e0;
-  --hg-px-blush: #f2a0a8;
-  --hg-px-gold: #ffd34d;
-  --hg-px-gold-shade: #c98a15;
-  --hg-px-shine: #fffdf8;
-  --hg-px-shadow: #2e2410;
+  /* Pixel accents (docs/claude/design/pixel-icons.json, palette.light).
+     Each legend character maps to one token, so the dark surface is a token
+     swap rather than a second set of artwork. */
+  --hg-px-y: #f2b230;
+  --hg-px-d: #3a2a1a;
+  --hg-px-a: #3a2a1a;
+  --hg-px-w: #bfddf2;
+  --hg-px-z: #7f77dd;
+  --hg-px-r: #e24b4a;
+  --hg-px-g: #e0a11b;
+  --hg-px-o: #f6d24a;
+  --hg-px-h: #b8780f;
+  --hg-px-m: #e24b4a;
+  --hg-px-shadow: #3a2a1a;
   /* Shape: pixel accents want tight corners and honest 2px borders. */
   --hg-radius-card: 4px;
   --hg-radius-control: 3px;
@@ -400,10 +401,9 @@
   display: block;
 }
 
-/* The Queen reads as the crown; a muted crown means the Queen is switched off. */
-.hg-px-avatar-queen.is-off {
-  opacity: 0.45;
-  filter: grayscale(0.6);
+/* The Queen reads as the crown; queenOff recolours it when the Queen is off. */
+.hg-px-avatar svg {
+  display: block;
 }
 
 /* Status stays a badge, never the avatar: a small honeycomb dot plus a label. */
@@ -786,6 +786,18 @@
 .hg-empty-art {
   display: inline-grid;
   place-items: center;
+}
+
+/* The empty state is the hive icon plus a parked Forager sitting beside it. */
+.hg-empty-pixels {
+  display: inline-flex;
+  align-items: flex-end;
+}
+
+.hg-empty-pixels-bee {
+  display: inline-flex;
+  margin-left: -14px;
+  margin-bottom: -2px;
 }
 
 .hg-empty-title {
@@ -1299,7 +1311,7 @@ a.hg-meta:hover {
 .hg-px-cell-art {
   display: grid;
   place-items: end center;
-  min-height: 96px;
+  min-height: 64px;
 }
 
 .hg-px-sizes {
@@ -1372,11 +1384,12 @@ a.hg-meta:hover {
   background: var(--hg-night);
   border-color: var(--hg-night);
   color: var(--hg-night-ink);
-  /* One token swap keeps every pixel drawing readable on a dark surface: the ink
-     (outline, stripes, eyes) turns cream, and the eye shine turns dark. */
-  --hg-px-ink: #fbf8f1;
-  --hg-px-shine: #2e2410;
-  --hg-px-wing-hi: #f4faff;
+  /* palette.dark: only the antennae/outline, wings, sleep marks and needs-you
+     mark change; the body, stripes and crown keep their light values. */
+  --hg-px-a: #ede6d6;
+  --hg-px-w: #9cc3e0;
+  --hg-px-z: #afa9ec;
+  --hg-px-r: #f09595;
 }
 
 .hg-icon-lab-dark .hg-icon-lab-note {

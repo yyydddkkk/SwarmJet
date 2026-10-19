@@ -3,7 +3,7 @@
 import { foragerDetailById, hiveById } from "../fixtures/hive-console";
 import type { Check } from "./types";
 import { CheckList, EmptyState, Panel, StatusBadge, Tabs } from "./components";
-import { ForagerAvatar } from "./pixel";
+import { ForagerAvatar, foragerNeedsYou } from "./pixel";
 import { Icon } from "./icons";
 import { ConversationStream } from "./ConversationStream";
 
@@ -106,7 +106,12 @@ export default function ForagerPage({
       </nav>
 
       <header className="hg-page-head hg-forager-head">
-        <ForagerAvatar id={agent.id} size={64} />
+        <ForagerAvatar
+          id={agent.id}
+          state={agent.state}
+          needsYou={foragerNeedsYou(agent, detail.conversation)}
+          size={64}
+        />
         <div className="hg-forager-head-text">
           <h1>
             {agent.id}

@@ -1,7 +1,7 @@
 // Conversation stream: Queen prose, structured action cards and external event cards.
 import type { Agent, AgentState, ConversationEntry, Message, MessageKind } from "./types";
 import { ActionCard, EmptyState, EventCard } from "./components";
-import { ForagerAvatar, QueenAvatar } from "./pixel";
+import { ForagerAvatar, QueenAvatar, foragerNeedsYou } from "./pixel";
 import { Icon } from "./icons";
 
 const kindLabels: Record<MessageKind, string> = {
@@ -13,7 +13,17 @@ const kindLabels: Record<MessageKind, string> = {
   control: "控制",
 };
 
-function MessageRow({ message, agents, at }: { message: Message; agents: Agent[]; at: string }) {
+function MessageRow({
+  message,
+  agents,
+  entries,
+  at,
+}: {
+  message: Message;
+  agents: Agent[];
+  entries: ConversationEntry[];
+  at: string;
+}) {
   const from = message.from;
   const isLocal = from.startsWith("local:");
   const isQueen = from === "queen";
@@ -40,7 +50,12 @@ function MessageRow({ message, agents, at }: { message: Message; agents: Agent[]
       {isQueen ? (
         <QueenAvatar size={32} off={state === "disabled"} />
       ) : (
-        <ForagerAvatar id={foragerId} size={32} />
+        <ForagerAvatar
+          id={foragerId}
+          state={state}
+          needsYou={agent ? foragerNeedsYou(agent, entries) : false}
+          size={32}
+        />
       )}
       <div className="hg-msg-main">
         <div className="hg-msg-meta">
@@ -83,7 +98,7 @@ export function ConversationStream({
         if (entry.kind === "message")
           return (
             <li key={entry.id}>
-              <MessageRow message={entry.message} agents={agents} at={entry.at} />
+              <MessageRow message={entry.message} agents={agents} entries={entries} at={entry.at} />
             </li>
           );
         if (entry.kind === "action")

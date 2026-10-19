@@ -17,7 +17,7 @@ import {
   stateLabels,
 } from "./components";
 import { Icon } from "./icons";
-import { ForagerAvatar, PixelIcon, QueenAvatar } from "./pixel";
+import { ForagerAvatar, QueenAvatar, foragerNeedsYou } from "./pixel";
 import { ConversationStream } from "./ConversationStream";
 
 const sections = [
@@ -119,7 +119,12 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
         />
       ) : active === "swarm" ? (
         <div className="hg-conversation single">
-          <SwarmPanel hive={hive} foragers={foragers} maxConcurrent={hive.config.maxConcurrentForagers} />
+          <SwarmPanel
+            hive={hive}
+            foragers={foragers}
+            entries={entries}
+            maxConcurrent={hive.config.maxConcurrentForagers}
+          />
         </div>
       ) : (
         <Panel title={placeholders[active]?.title ?? "占位"}>
@@ -224,7 +229,7 @@ function ConversationSection({
         )}
       </div>
       <aside className="hg-conversation-side">
-        <SwarmPanel hive={hive} foragers={foragers} maxConcurrent={maxConcurrent} />
+        <SwarmPanel hive={hive} foragers={foragers} entries={entries} maxConcurrent={maxConcurrent} />
       </aside>
     </div>
   );
@@ -330,7 +335,7 @@ function DispatchForm({ hive }: { hive: Hive }) {
           </select>
         </label>
         <button className="hg-btn hg-btn-primary" type="submit">
-          <PixelIcon name="bee-16" size={16} />
+          <Icon name="bee" size={16} />
           派出 Forager
         </button>
       </div>
@@ -351,10 +356,12 @@ function DispatchForm({ hive }: { hive: Hive }) {
 function SwarmPanel({
   hive,
   foragers,
+  entries,
   maxConcurrent,
 }: {
   hive: Hive;
   foragers: Agent[];
+  entries: ConversationEntry[];
   maxConcurrent: number;
 }) {
   const [notice, setNotice] = useState("");
@@ -395,7 +402,12 @@ function SwarmPanel({
             const detail = foragerDetailById(forager.id);
             const content = (
               <>
-                <ForagerAvatar id={forager.id} size={32} />
+                <ForagerAvatar
+                  id={forager.id}
+                  state={forager.state}
+                  needsYou={foragerNeedsYou(forager, entries)}
+                  size={32}
+                />
                 <div className="hg-swarm-item-main">
                   <span className="hg-swarm-id">{forager.id}</span>
                   <p className="hg-swarm-task">{forager.task}</p>
