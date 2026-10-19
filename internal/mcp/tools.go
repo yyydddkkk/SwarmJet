@@ -316,11 +316,71 @@ func (ts *toolset) getHive(ctx context.Context, _ *mcpsdk.CallToolRequest, in ge
 	return nil, out, nil
 }
 
+// hiveConfigInput is the MCP view of domain.HiveConfig. Every field is optional
+// so a partial config such as {"cli":"opencode"} is valid. The domain type is
+// not used directly because its JSON tags have no omitempty, which makes the
+// generated schema require every field.
+type hiveConfigInput struct {
+	CLI                     *string            `json:"cli,omitempty" jsonschema:"coding CLI for Foragers, for example opencode; default opencode"`
+	MaxConcurrentForagers   *int               `json:"maxConcurrentForagers,omitempty" jsonschema:"maximum Foragers running at once; default 4"`
+	MaxHops                 *int               `json:"maxHops,omitempty" jsonschema:"maximum hops in one causal chain; default 10"`
+	MaxForagersPerChain     *int               `json:"maxForagersPerChain,omitempty" jsonschema:"maximum Foragers per causal chain; default 10"`
+	IdleParkMinutes         *int               `json:"idleParkMinutes,omitempty" jsonschema:"idle minutes before a Forager parks; default 30"`
+	HibernateHours          *int               `json:"hibernateHours,omitempty" jsonschema:"parked hours before a Forager hibernates; default 24"`
+	TurnTimeoutMinutes      *int               `json:"turnTimeoutMinutes,omitempty" jsonschema:"minutes allowed for one turn; default 120"`
+	ForagerMaxLifetimeHours *int               `json:"foragerMaxLifetimeHours,omitempty" jsonschema:"maximum Forager lifetime in hours; default 168"`
+	Triggers                []triggerRuleInput `json:"triggers,omitempty" jsonschema:"GitHub events that start a Forager; when set it replaces the current list"`
+}
+
+// triggerRuleInput is the MCP view of domain.TriggerRule with every field optional.
+type triggerRuleInput struct {
+	Event         string `json:"event,omitempty" jsonschema:"issue_labeled or issue_comment"`
+	Label         string `json:"label,omitempty" jsonschema:"label name for issue_labeled"`
+	CommentPrefix string `json:"commentPrefix,omitempty" jsonschema:"comment prefix for issue_comment, for example /swarmjet run"`
+	Preset        string `json:"preset,omitempty" jsonschema:"Forager preset to start"`
+}
+
+// apply overlays the fields that were set onto base. Unset fields keep base:
+// create starts from the zero config so store defaults apply, and update starts
+// from the current config so unset fields are preserved.
+func (c *hiveConfigInput) apply(base domain.HiveConfig) domain.HiveConfig {
+	if c == nil {
+		return base
+	}
+	setIfSet(&base.CLI, c.CLI)
+	setIfSet(&base.MaxConcurrentForagers, c.MaxConcurrentForagers)
+	setIfSet(&base.MaxHops, c.MaxHops)
+	setIfSet(&base.MaxForagersPerChain, c.MaxForagersPerChain)
+	setIfSet(&base.IdleParkMinutes, c.IdleParkMinutes)
+	setIfSet(&base.HibernateHours, c.HibernateHours)
+	setIfSet(&base.TurnTimeoutMinutes, c.TurnTimeoutMinutes)
+	setIfSet(&base.ForagerMaxLifetimeHours, c.ForagerMaxLifetimeHours)
+	if c.Triggers != nil {
+		triggers := make([]domain.TriggerRule, 0, len(c.Triggers))
+		for _, t := range c.Triggers {
+			triggers = append(triggers, domain.TriggerRule{
+				Event:         t.Event,
+				Label:         t.Label,
+				CommentPrefix: t.CommentPrefix,
+				Preset:        t.Preset,
+			})
+		}
+		base.Triggers = triggers
+	}
+	return base
+}
+
+func setIfSet[T any](dst *T, v *T) {
+	if v != nil {
+		*dst = *v
+	}
+}
+
 type createHiveInput struct {
-	Name         string            `json:"name" jsonschema:"human-readable Hive name"`
-	Repository   string            `json:"repository" jsonschema:"GitHub repository as owner/name"`
-	QueenEnabled bool              `json:"queenEnabled,omitempty" jsonschema:"start with the Queen enabled; default false"`
-	Config       domain.HiveConfig `json:"config,omitempty" jsonschema:"per-Hive limits; zero fields use the platform defaults"`
+	Name         string           `json:"name" jsonschema:"human-readable Hive name"`
+	Repository   string           `json:"repository" jsonschema:"GitHub repository as owner/name"`
+	QueenEnabled bool             `json:"queenEnabled,omitempty" jsonschema:"start with the Queen enabled; default false"`
+	Config       *hiveConfigInput `json:"config,omitempty" jsonschema:"per-Hive limits; unset fields use the platform defaults"`
 }
 
 type hiveOutput struct {
@@ -341,7 +401,7 @@ func (ts *toolset) createHive(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 		Name:         in.Name,
 		Repository:   in.Repository,
 		QueenEnabled: in.QueenEnabled,
-		Config:       in.Config,
+		Config:       in.Config.apply(domain.HiveConfig{}),
 	})
 	if err != nil {
 		return nil, hiveOutput{}, err
@@ -350,12 +410,12 @@ func (ts *toolset) createHive(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 }
 
 type updateHiveInput struct {
-	HiveID       string             `json:"hiveId" jsonschema:"the Hive id"`
-	Version      int                `json:"version" jsonschema:"the version read from get_hive; stale versions are rejected"`
-	Name         string             `json:"name,omitempty"`
-	Repository   string             `json:"repository,omitempty"`
-	QueenEnabled *bool              `json:"queenEnabled,omitempty"`
-	Config       *domain.HiveConfig `json:"config,omitempty"`
+	HiveID       string           `json:"hiveId" jsonschema:"the Hive id"`
+	Version      int              `json:"version" jsonschema:"the version read from get_hive; stale versions are rejected"`
+	Name         string           `json:"name,omitempty"`
+	Repository   string           `json:"repository,omitempty"`
+	QueenEnabled *bool            `json:"queenEnabled,omitempty"`
+	Config       *hiveConfigInput `json:"config,omitempty" jsonschema:"per-Hive limits; unset fields keep their current value"`
 }
 
 func (ts *toolset) updateHive(ctx context.Context, _ *mcpsdk.CallToolRequest, in updateHiveInput) (*mcpsdk.CallToolResult, hiveOutput, error) {
@@ -384,9 +444,7 @@ func (ts *toolset) updateHive(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	if in.QueenEnabled != nil {
 		current.QueenEnabled = *in.QueenEnabled
 	}
-	if in.Config != nil {
-		current.Config = *in.Config
-	}
+	current.Config = in.Config.apply(current.Config)
 	current.Version = in.Version
 	updated, err := ts.backend.UpdateHive(ctx, current)
 	if err != nil {

@@ -227,6 +227,124 @@ func TestAdminScopeForHiveConfiguration(t *testing.T) {
 	}
 }
 
+func TestPartialHiveConfigIsAcceptedOnCreateAndUpdate(t *testing.T) {
+	env := newTestEnv(t, Options{})
+	admin := env.connect(env.adminToken)
+
+	created := callTool(t, admin, "create_hive", map[string]any{
+		"name": "partial", "repository": "acme/partial",
+		"config": map[string]any{"cli": "opencode"},
+	})
+	if created.IsError {
+		t.Fatalf("create_hive with partial config failed: %s", toolErrorText(created))
+	}
+	hive := decode[hiveOutput](t, created).Hive
+	if hive.Config.CLI != "opencode" || hive.Config.MaxConcurrentForagers != 4 {
+		t.Fatalf("config = %+v, want cli opencode and store default concurrency 4", hive.Config)
+	}
+
+	// A second create that sets a non-default value, then an update that only
+	// touches maxHops: the unset fields must keep their current values.
+	seeded := decode[hiveOutput](t, callTool(t, admin, "create_hive", map[string]any{
+		"name": "keep", "repository": "acme/keep",
+		"config": map[string]any{"maxConcurrentForagers": 7},
+	})).Hive
+	updated := callTool(t, admin, "update_hive", map[string]any{
+		"hiveId": seeded.ID, "version": seeded.Version,
+		"config": map[string]any{"maxHops": 5},
+	})
+	if updated.IsError {
+		t.Fatalf("update_hive with partial config failed: %s", toolErrorText(updated))
+	}
+	got := decode[hiveOutput](t, updated).Hive
+	if got.Config.MaxHops != 5 || got.Config.MaxConcurrentForagers != 7 || got.Config.CLI != "opencode" {
+		t.Fatalf("config after partial update = %+v", got.Config)
+	}
+}
+
+func TestHiveConfigSchemaHasNoRequiredFields(t *testing.T) {
+	env := newTestEnv(t, Options{})
+	session := env.connect(env.userToken)
+	res, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	for _, tool := range res.Tools {
+		if tool.Name != "create_hive" && tool.Name != "update_hive" {
+			continue
+		}
+		raw, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var root struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Defs       map[string]json.RawMessage `json:"$defs"`
+		}
+		if err := json.Unmarshal(raw, &root); err != nil {
+			t.Fatalf("%s schema: %v", tool.Name, err)
+		}
+		config := resolveSchemaRef(t, root.Properties["config"], root.Defs)
+		assertNoRequired(t, tool.Name+".config", config, root.Defs)
+		if len(config) == 0 {
+			t.Fatalf("%s has no config property", tool.Name)
+		}
+	}
+}
+
+// resolveSchemaRef follows a single $ref into $defs and returns the raw schema.
+// A nil or empty schema is returned unchanged.
+func resolveSchemaRef(t *testing.T, raw json.RawMessage, defs map[string]json.RawMessage) json.RawMessage {
+	t.Helper()
+	var ref struct {
+		Ref string `json:"$ref"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &ref) != nil || ref.Ref == "" {
+		return raw
+	}
+	name := strings.TrimPrefix(ref.Ref, "#/$defs/")
+	target, ok := defs[name]
+	if !ok {
+		t.Fatalf("unresolved $ref %q", ref.Ref)
+	}
+	return target
+}
+
+// assertNoRequired fails when a schema object, or any object reachable through
+// its properties, items or anyOf branches, lists required properties.
+func assertNoRequired(t *testing.T, path string, raw json.RawMessage, defs map[string]json.RawMessage) {
+	t.Helper()
+	if len(raw) == 0 {
+		return
+	}
+	var node struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+		Items      json.RawMessage            `json:"items"`
+		AnyOf      []json.RawMessage          `json:"anyOf"`
+		Ref        string                     `json:"$ref"`
+	}
+	if err := json.Unmarshal(raw, &node); err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	if node.Ref != "" {
+		assertNoRequired(t, path, resolveSchemaRef(t, raw, defs), defs)
+		return
+	}
+	if len(node.Required) > 0 {
+		t.Errorf("%s has required fields %v", path, node.Required)
+	}
+	for name, prop := range node.Properties {
+		assertNoRequired(t, path+"."+name, prop, defs)
+	}
+	if len(node.Items) > 0 {
+		assertNoRequired(t, path+"[]", node.Items, defs)
+	}
+	for _, branch := range node.AnyOf {
+		assertNoRequired(t, path+"|", branch, defs)
+	}
+}
+
 func TestListAndGetHive(t *testing.T) {
 	env := newTestEnv(t, Options{})
 	h := env.seedHive("alpha", "acme/alpha")
