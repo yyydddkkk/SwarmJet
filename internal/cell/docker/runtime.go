@@ -58,6 +58,11 @@ type Runtime struct {
 	Git    *Git
 	Tokens TokenSource
 	Logger *slog.Logger
+	// ContainerUser is the uid:gid the CLI (and the git commands the Publisher
+	// runs inside the Cell) runs as. It must be non-root so the bind-mounted
+	// workspace does not end up owned by root on the host. Empty means
+	// DefaultContainerUser.
+	ContainerUser string
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -78,11 +83,12 @@ func NewRuntime(dataDir string) *Runtime {
 		image = "swarmjet-agent:local"
 	}
 	return &Runtime{
-		DataDir:      abs,
-		Config:       domain.AgentConfig{Image: image},
-		DockerBinary: "docker",
-		Git:          &Git{},
-		sessions:     map[string]*Session{},
+		DataDir:       abs,
+		Config:        domain.AgentConfig{Image: image},
+		DockerBinary:  "docker",
+		ContainerUser: DefaultContainerUser,
+		Git:           &Git{},
+		sessions:      map[string]*Session{},
 	}
 }
 
@@ -178,6 +184,9 @@ func (r *Runtime) Start(ctx context.Context, spec cell.Spec) (cell.Session, erro
 	if err := validateSpec(spec, r.Config.Image); err != nil {
 		return nil, err
 	}
+	if _, err := r.containerUserArg(); err != nil {
+		return nil, err
+	}
 	secrets := specSecrets(spec.Env, spec.MCPToken)
 
 	lock := r.agentLock(spec.AgentID)
@@ -193,6 +202,9 @@ func (r *Runtime) Start(ctx context.Context, spec cell.Spec) (cell.Session, erro
 	fresh, err := r.workspace().EnsureCloned(ctx, spec, workspace)
 	if err != nil {
 		return nil, fmt.Errorf("cell: prepare workspace: %s", redact(err.Error(), secrets...))
+	}
+	if err := r.ensureWorkspaceOwner(workspace); err != nil {
+		return nil, err
 	}
 
 	name := containerName(spec.AgentID)
@@ -404,8 +416,12 @@ func (r *Runtime) createContainer(ctx context.Context, spec cell.Spec, workspace
 		"--mount", "type=bind,src=" + workspace + ",dst=" + cellWorkdir,
 		"--mount", "type=volume,src=" + volume + ",dst=" + cellDataMount,
 	}
+	user, err := r.containerUserArg()
+	if err != nil {
+		return err
+	}
 	args = append(args, ContainerPolicyArgs(r.Config)...)
-	args = append(args, "--user", ContainerUser())
+	args = append(args, "--user", user)
 	args = append(args, "--entrypoint", "/bin/sh", r.Config.Image, "-c", "exec sleep infinity")
 	res, err := r.docker(ctx, nil, args...)
 	if err != nil {
@@ -435,12 +451,16 @@ func (r *Runtime) ensureVolume(ctx context.Context, spec cell.Spec, volume strin
 			return fmt.Errorf("cell: create volume: %s", redact(strings.TrimSpace(string(res.Stderr)), secrets...))
 		}
 	}
+	user, err := r.containerUserArg()
+	if err != nil {
+		return err
+	}
 	// Chown even when the volume already exists: an earlier create may have
 	// failed between volume creation and ownership setup.
 	res, err = r.docker(ctx, nil,
 		"run", "--rm", "--user", "0:0", "--entrypoint", "/bin/sh",
 		"--mount", "type=volume,src="+volume+",dst="+cellDataMount,
-		r.Config.Image, "-c", "chown -R "+ContainerUser()+" "+cellDataMount,
+		r.Config.Image, "-c", "chown -R "+user+" "+cellDataMount,
 	)
 	if err != nil {
 		return err
@@ -449,6 +469,51 @@ func (r *Runtime) ensureVolume(ctx context.Context, spec cell.Spec, volume strin
 		return fmt.Errorf("cell: initialize volume: %s", redact(strings.TrimSpace(string(res.Stderr)), secrets...))
 	}
 	return nil
+}
+
+// containerUser returns the configured uid:gid or the default.
+func (r *Runtime) containerUser() string {
+	if user := strings.TrimSpace(r.ContainerUser); user != "" {
+		return user
+	}
+	return ContainerUser()
+}
+
+// containerUserArg asks the policy layer for the canonical uid:gid. It is used
+// as a single argv element and, for the volume chown, interpolated into a shell
+// command, so the canonical form matters.
+func (r *Runtime) containerUserArg() (string, error) {
+	return ContainerUserFor(r.ContainerUser)
+}
+
+// ensureWorkspaceOwner hands the host-side workspace (including .git and the
+// files the CLI creates) to the Cell user after the one-time clone. A non-root
+// platform can only chown to itself, so in that case a different configured user
+// is reported and skipped instead of blocking local development.
+func (r *Runtime) ensureWorkspaceOwner(workspace string) error {
+	user, err := r.containerUserArg()
+	if err != nil {
+		return err
+	}
+	uid, gid, err := parseContainerUser(user)
+	if err != nil {
+		return err
+	}
+	if os.Geteuid() != 0 && (uid != os.Geteuid() || gid != os.Getegid()) {
+		r.logger().Warn("cell: cannot chown workspace to the configured container user",
+			"workspace", workspace, "container_user", user,
+			"platform_uid", os.Geteuid(), "platform_gid", os.Getegid())
+		return nil
+	}
+	return filepath.Walk(workspace, func(path string, _ os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if err := os.Lchown(path, uid, gid); err != nil {
+			return fmt.Errorf("cell: chown workspace %s to %s: %w", path, user, err)
+		}
+		return nil
+	})
 }
 
 func (r *Runtime) cellEnv(spec cell.Spec) ([]string, error) {

@@ -178,13 +178,15 @@ func TestForagerScopeTools(t *testing.T) {
 
 	t.Run("send uses the agent address", func(t *testing.T) {
 		out := decode[sendOutput](t, callTool(t, session, "send", map[string]any{
-			"hiveId": env.hive.ID, "body": "hello Queen",
+			"hiveId": env.hive.ID, "body": "hello Hive",
 		}))
 		if out.Message.From != string(domain.ForagerAddress(env.forager.ID)) {
 			t.Fatalf("from = %q, want the forager address", out.Message.From)
 		}
-		if out.Message.To != string(domain.AddressQueen) {
-			t.Fatalf("to = %q, want queen", out.Message.To)
+		// This Hive has no Queen and the Forager has no task message, so the
+		// report goes to the Hive Inbox instead of an unread Queen Inbox.
+		if out.Message.To != string(domain.AddressHive) {
+			t.Fatalf("to = %q, want hive", out.Message.To)
 		}
 		local := decode[sendOutput](t, callTool(t, session, "send", map[string]any{
 			"hiveId": env.hive.ID, "to": "local:" + env.user.ID, "body": "to the human",
