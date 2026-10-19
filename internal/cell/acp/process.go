@@ -69,6 +69,13 @@ func StartLocal(ctx context.Context, name string, args, env []string, dir string
 // passed with `-e`, which is how Cell credentials reach the CLI without being
 // baked into the image.
 func StartDockerExec(ctx context.Context, dockerBinary, container string, env, argv []string) (*Process, error) {
+	return StartDockerExecIn(ctx, dockerBinary, container, "", env, argv)
+}
+
+// StartDockerExecIn is StartDockerExec with an explicit working directory
+// inside the container. A Cell must always start its CLI in /workspace because
+// OpenCode attaches sessions to the cwd.
+func StartDockerExecIn(ctx context.Context, dockerBinary, container, workdir string, env, argv []string) (*Process, error) {
 	if container == "" {
 		return nil, errors.New("acp: docker exec requires a container name")
 	}
@@ -79,6 +86,9 @@ func StartDockerExec(ctx context.Context, dockerBinary, container string, env, a
 		dockerBinary = "docker"
 	}
 	args := []string{"exec", "-i"}
+	if workdir != "" {
+		args = append(args, "-w", workdir)
+	}
 	for _, kv := range env {
 		args = append(args, "-e", kv)
 	}
@@ -153,6 +163,8 @@ func (p *Process) Stderr() string { return p.stderr.String() }
 type DockerCell struct {
 	DockerBinary string
 	Container    string
+	// Workdir is the in-container cwd. Cells always use /workspace.
+	Workdir string
 	// Env is passed with `docker exec -e`. Keep credentials here rather than in
 	// the image, mirroring internal/agent's configuration snapshot.
 	Env []string
@@ -163,7 +175,7 @@ type DockerCell struct {
 // Connect starts Argv inside the container and returns a client positioned to
 // call Initialize.
 func (c DockerCell) Connect(ctx context.Context, opts ...Option) (*Client, error) {
-	proc, err := StartDockerExec(ctx, c.DockerBinary, c.Container, c.Env, c.Argv)
+	proc, err := StartDockerExecIn(ctx, c.DockerBinary, c.Container, c.Workdir, c.Env, c.Argv)
 	if err != nil {
 		return nil, err
 	}

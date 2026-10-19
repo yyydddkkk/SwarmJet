@@ -1,15 +1,15 @@
-// Package acp is an EXPERIMENTAL (实验性) client for the Agent Client Protocol
-// (ACP).
+// Package acp drives a long-running Agent Client Protocol (ACP) process.
 //
-// It exists to validate how SwarmJet should drive a long-running OpenCode
-// process inside a Cell container (docs/claude/adr-hive-queen-forager.md,
-// section 8). Nothing here is wired into the runtime yet and the API may change
-// without notice; see docs/claude/spikes/opencode-driver.md for the findings.
+// A Cell runs one CLI for the lifetime of an Agent and speaks ACP with it over
+// newline-delimited JSON-RPC on stdio, either as a local process or through
+// `docker exec -i` into the Cell container. The protocol was validated in
+// docs/claude/spikes/opencode-driver.md; this package keeps the subset SwarmJet
+// needs: initialize, session/new, session/prompt with streamed session/update
+// notifications, session/cancel and session/load.
 //
-// The client speaks newline-delimited JSON-RPC over a stdio transport, which is
-// either a local process or `docker exec -i` into a Cell container. It covers
-// the calls the spike needs: initialize, session/new, session/prompt with
-// streamed session/update notifications, session/cancel and session/load.
+// Session state lives in the CLI's data directory (for OpenCode a SQLite
+// database). The platform persists the session ID and passes it back through
+// session/load after a container or process restart.
 package acp
 
 import (
@@ -18,11 +18,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 )
 
-// UpdateSink receives one session/update notification. It runs on the
-// connection's read loop, so it must return quickly.
+// UpdateSink receives one session/update notification. Sinks run on a
+// dedicated dispatcher goroutine, never on the connection read loop, so a slow
+// sink cannot stall JSON-RPC responses. Sinks should still return promptly and
+// must tolerate being called from a goroutine other than the caller's.
 type UpdateSink func(SessionNotification) error
 
 // PermissionHandler decides a session/request_permission request. Returning an
@@ -35,9 +36,7 @@ type Client struct {
 	conn       *rpcConn
 	caps       ClientCapabilities
 	permission PermissionHandler
-
-	mu   sync.Mutex
-	sink UpdateSink
+	updates    *updateQueue
 }
 
 // Option configures a Client.
@@ -57,7 +56,7 @@ func WithPermissionHandler(h PermissionHandler) Option {
 
 // NewClient wraps an already-connected transport. rw is closed by Close.
 func NewClient(rw io.ReadWriteCloser, opts ...Option) *Client {
-	c := &Client{conn: newRPCConn(rw)}
+	c := &Client{conn: newRPCConn(rw), updates: newUpdateQueue()}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -66,8 +65,13 @@ func NewClient(rw io.ReadWriteCloser, opts ...Option) *Client {
 	return c
 }
 
-// Close shuts down the transport and fails in-flight calls.
-func (c *Client) Close() error { return c.conn.Close() }
+// Close shuts down the transport, stops the update dispatcher and fails
+// in-flight calls. It is safe to call more than once.
+func (c *Client) Close() error {
+	err := c.conn.Close()
+	c.updates.stop()
+	return err
+}
 
 // Initialize performs the ACP handshake and reports the agent's capabilities.
 func (c *Client) Initialize(ctx context.Context) (InitializeResult, error) {
@@ -87,8 +91,8 @@ func (c *Client) NewSession(ctx context.Context, cwd string, mcp []MCPServer) (N
 }
 
 // LoadSession resumes a previous session. The agent replays the conversation as
-// session/update notifications before the call returns, so sink must be set
-// before it is invoked.
+// session/update notifications before the call returns; replay is delivered to
+// sink before LoadSession returns.
 func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string, mcp []MCPServer, sink UpdateSink) (LoadSessionResult, error) {
 	if sessionID == "" {
 		return LoadSessionResult{}, errors.New("acp: session/load requires a session id")
@@ -96,12 +100,15 @@ func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string, mcp []M
 	params := LoadSessionParams{SessionID: sessionID, Cwd: cwd, McpServers: normalizeMCP(mcp)}
 	c.setSink(sink)
 	defer c.setSink(nil)
-	return callTyped[LoadSessionResult](c, ctx, MethodSessionLoad, params)
+	res, err := callTyped[LoadSessionResult](c, ctx, MethodSessionLoad, params)
+	c.updates.flush()
+	return res, err
 }
 
 // Prompt sends one turn and streams session/update notifications to sink. It
-// returns once the agent reports a stop reason. The context cancels the local
-// wait; use Cancel to stop the agent's turn.
+// returns once the agent reports a stop reason and every update received for
+// the turn has been handed to sink. The context cancels the local wait; use
+// Cancel to stop the agent's turn.
 func (c *Client) Prompt(ctx context.Context, sessionID string, blocks []ContentBlock, sink UpdateSink) (PromptResult, error) {
 	if sessionID == "" {
 		return PromptResult{}, errors.New("acp: session/prompt requires a session id")
@@ -112,7 +119,9 @@ func (c *Client) Prompt(ctx context.Context, sessionID string, blocks []ContentB
 	params := PromptParams{SessionID: sessionID, Prompt: blocks}
 	c.setSink(sink)
 	defer c.setSink(nil)
-	return callTyped[PromptResult](c, ctx, MethodSessionPrompt, params)
+	res, err := callTyped[PromptResult](c, ctx, MethodSessionPrompt, params)
+	c.updates.flush()
+	return res, err
 }
 
 // Cancel asks the agent to stop the current turn. ACP models this as a
@@ -148,9 +157,7 @@ func normalizeMCP(mcp []MCPServer) []MCPServer {
 }
 
 func (c *Client) setSink(sink UpdateSink) {
-	c.mu.Lock()
-	c.sink = sink
-	c.mu.Unlock()
+	c.updates.setSink(sink)
 }
 
 func (c *Client) handleNotification(method string, params json.RawMessage) {
@@ -161,12 +168,10 @@ func (c *Client) handleNotification(method string, params json.RawMessage) {
 	if err := json.Unmarshal(params, &n); err != nil {
 		return
 	}
-	c.mu.Lock()
-	sink := c.sink
-	c.mu.Unlock()
-	if sink != nil {
-		_ = sink(n)
-	}
+	// Queue the update for the dispatcher instead of invoking the sink on the
+	// read loop. Some agents emit very large notifications (for example
+	// available_commands_update), so backpressure here would block responses.
+	c.updates.push(n)
 }
 
 func (c *Client) handleRequest(method string, params json.RawMessage) (any, *rpcError) {
