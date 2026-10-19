@@ -50,15 +50,27 @@ type Decision struct {
 	MessageID  string         `json:"messageId,omitempty"`
 }
 
+// PRRecorder records the PR number a Forager opened. It matches the round-2
+// store contract (SetAgentPR); Router detects it at runtime so the round-1 store
+// keeps compiling and the link starts working once the data layer lands.
+type PRRecorder interface {
+	SetAgentPR(ctx context.Context, id string, pr int64) error
+}
+
 // Router routes normalized GitHub events. It is safe for concurrent use when
 // the Backend is.
 type Router struct {
-	backend Backend
+	backend    Backend
+	prRecorder PRRecorder
 }
 
 // New builds a Router over the given backend.
 func New(backend Backend) *Router {
-	return &Router{backend: backend}
+	r := &Router{backend: backend}
+	if recorder, ok := backend.(PRRecorder); ok {
+		r.prRecorder = recorder
+	}
+	return r
 }
 
 // Route applies the deterministic routing rules from ADR section 9:
@@ -90,9 +102,29 @@ func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
 		return Decision{}, err
 	}
 	if found {
-		return r.deliverToForager(ctx, hive, e, forager, domain.MessageEvent, "")
+		reason := ""
+		if r.shouldRecordPR(e, forager) {
+			if err := r.prRecorder.SetAgentPR(ctx, forager.ID, e.Number); err != nil {
+				return Decision{}, err
+			}
+			forager.PRNumber = e.Number
+			reason = fmt.Sprintf("recorded PR #%d", e.Number)
+		}
+		return r.deliverToForager(ctx, hive, e, forager, domain.MessageEvent, reason)
 	}
 	return r.toInbox(ctx, hive, e, "")
+}
+
+// shouldRecordPR links the Forager to a newly opened or reopened PR. It only
+// fills a missing number, so a later event can never rewrite an existing link.
+func (r *Router) shouldRecordPR(e Event, forager domain.Agent) bool {
+	if r.prRecorder == nil || forager.PRNumber != 0 || e.Number <= 0 {
+		return false
+	}
+	if e.Type != EventPullRequest {
+		return false
+	}
+	return e.Action == "opened" || e.Action == "reopened"
 }
 
 // routeTrigger handles an event that matched a trigger rule. Authorization is

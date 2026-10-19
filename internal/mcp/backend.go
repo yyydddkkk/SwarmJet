@@ -42,7 +42,20 @@ type Backend interface {
 	WaitInbox(ctx context.Context, hiveID string, to domain.Address, afterID string) error
 
 	TokenByPlaintext(ctx context.Context, plaintext string) (domain.Token, error)
+
+	// UpdateHandoff replaces an Agent's handoff summary. It is the only store
+	// method beyond the first-round Backend that the MCP tools need; the new
+	// round-2 methods are used by the Router and the Forager supervisor.
+	UpdateHandoff(ctx context.Context, id string, h domain.Handoff) error
 }
+
+// Limits applied to update_handoff. They keep a handoff summary summary-sized
+// even though the store itself only bounds message bodies.
+const (
+	maxHandoffArtifacts = 50
+	maxArtifactKind     = 100
+	maxArtifactRef      = 1000
+)
 
 // Defaults applied to zero-valued Options fields.
 const (

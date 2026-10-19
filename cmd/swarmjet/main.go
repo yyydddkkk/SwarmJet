@@ -18,10 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/worker"
-	"go.temporal.io/sdk/workflow"
 	"github.com/yyydddkkk/SwarmJet/internal/agent"
 	"github.com/yyydddkkk/SwarmJet/internal/api"
 	"github.com/yyydddkkk/SwarmJet/internal/credentials"
@@ -36,20 +32,34 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 	"github.com/yyydddkkk/SwarmJet/internal/maintenance"
 	"github.com/yyydddkkk/SwarmJet/internal/managedmeta"
+	"github.com/yyydddkkk/SwarmJet/internal/mcp"
 	"github.com/yyydddkkk/SwarmJet/internal/networkconfig"
 	"github.com/yyydddkkk/SwarmJet/internal/nodeenvironment"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"github.com/yyydddkkk/SwarmJet/internal/pipeline"
 	"github.com/yyydddkkk/SwarmJet/internal/repochange"
+	"github.com/yyydddkkk/SwarmJet/internal/router"
 	"github.com/yyydddkkk/SwarmJet/internal/runtimeadmin"
 	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
 	"github.com/yyydddkkk/SwarmJet/internal/service"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 	"github.com/yyydddkkk/SwarmJet/internal/workspace"
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/worker"
+	"go.temporal.io/sdk/workflow"
 )
 
 var buildVersion = "dev"
 var buildCommit = "unknown"
+
+// The control plane serves MCP straight from the Hive store; there is no
+// in-memory backend in production. The Router may also link a Forager to the PR
+// it opened once the same store implements SetAgentPR.
+var (
+	_ mcp.Backend       = (*store.Store)(nil)
+	_ router.PRRecorder = (*store.Store)(nil)
+)
 
 func env(k, d string) string {
 	if v := os.Getenv(k); v != "" {
@@ -222,7 +232,7 @@ func run() error {
 		mode = os.Args[1]
 	}
 	if mode == "help" || mode == "--help" {
-		fmt.Println("swarmjet serve | worker | node | mihomo | migrate | doctor | version | legacy-inventory <state.json>")
+		fmt.Println("swarmjet serve | worker | node | mihomo | migrate | doctor | version | token create --name <name> --scope default|admin | legacy-inventory <state.json>")
 		return nil
 	}
 	if mode == "version" {
@@ -257,6 +267,9 @@ func run() error {
 	defer s.Close()
 	if mode == "migrate" {
 		return s.Migrate(ctx)
+	}
+	if mode == "token" {
+		return runToken(ctx, s, os.Args[2:])
 	}
 	// The master key is deployment-managed and must be stable: a new key on
 	// startup would make previously saved connection tokens undecryptable.
@@ -460,6 +473,9 @@ func run() error {
 		routes := http.NewServeMux()
 		routes.Handle("/api/webhooks/gitlab", svc.Webhook(os.Getenv("GITLAB_WEBHOOK_SECRET")))
 		routes.Handle("/api/webhooks/github", svc.GitHubWebhook(os.Getenv("GITHUB_WEBHOOK_SECRET")))
+		// MCP authenticates with a bearer token only; it never uses the console
+		// session (ADR section 12).
+		routes.Handle("/mcp", mcp.NewHandler(s, mcp.Options{Logger: slog.Default()}))
 		routes.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 			if err := checkReadiness(r.Context()); err != nil {
 				http.Error(w, "not ready", http.StatusServiceUnavailable)

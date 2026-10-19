@@ -96,6 +96,48 @@ docker compose -f compose.yaml -f compose.local-node.yaml up -d --wait
 
 Git HTTPS 认证使用 `/usr/local/bin/swarmjet-askpass`，用户名为 `oauth2`、密码从 `GITLAB_TOKEN` 读取。控制台只保存 credential reference。OpenCode provider key 可以从显式环境变量读取，也可以用 `OPENCODE_CONFIG_CONTENT` 设置包含 `{env:VARIABLE_NAME}` 的配置。
 
+## 给本地 Claude Code / Codex 配置 MCP
+
+第一版 MCP 服务挂在同一个 API 的 `/mcp`，只接受 `Authorization: Bearer <token>`，不经过网页登录，也不直接暴露公网（ADR 第 12 节）。先用 SSH 隧道把服务器的控制台端口映射到本机：
+
+```sh
+ssh -N -L 8180:127.0.0.1:8180 用户名@服务器
+```
+
+在服务器上创建 Token。明文只在创建时打印一次，数据库里只保存哈希：
+
+```sh
+cd deploy
+docker compose exec -T api swarmjet token create --name claude-code --scope default
+# 需要创建/修改 Hive 和凭证时用 --scope admin
+```
+
+`default` 作用域只能派活和查看，`admin` 还能配置 Hive。Agent 作用域（`scope=agent`）由平台为每只 Forager 自动签发，不需要手工创建，也不能通过命令行创建。
+
+Claude Code（`~/.claude.json` 或项目里的 `.mcp.json`）：
+
+```json
+{
+  "mcpServers": {
+    "swarmjet": {
+      "type": "http",
+      "url": "http://127.0.0.1:8180/mcp",
+      "headers": { "Authorization": "Bearer <TOKEN>" }
+    }
+  }
+}
+```
+
+Codex（`~/.codex/config.toml`，具体字段以所用版本为准）：
+
+```toml
+[mcp_servers.swarmjet]
+url = "http://127.0.0.1:8180/mcp"
+bearer_token_env_var = "SWARMJET_MCP_TOKEN"
+```
+
+Token 放在本地环境变量或密码管理器里，不要提交到仓库。本轮还没有撤销 Token 的命令；停用一条 Token 目前需要删除 `mcp_tokens` 中对应的行。`/mcp` 与网页控制台共用进程和数据库，但不需要网页会话，也不需要 `ADMIN_PASSWORD`，只要数据库可连、迁移已执行。
+
 ## 额外环境变量与保留期
 
 ### 执行器配置终端
