@@ -1,5 +1,11 @@
 // Shared "honey garden" building blocks for the Hive console.
-import type { ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type {
   AgentState,
   Check,
@@ -288,5 +294,191 @@ export function Tabs({
         </a>
       ))}
     </nav>
+  );
+}
+
+/** Native modal used by the onboarding dialogs, styled like a pixel panel. */
+export function Dialog({
+  title,
+  children,
+  onClose,
+  wide = false,
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+  wide?: boolean;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (!dialog.open) dialog.showModal();
+    return () => dialog.close();
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className={wide ? "hg-dialog hg-dialog-wide" : "hg-dialog"}
+      aria-labelledby={titleId}
+      onCancel={event => {
+        event.preventDefault();
+        onClose();
+      }}
+    >
+      <header className="hg-dialog-head">
+        <h2 id={titleId}>{title}</h2>
+        <button className="hg-dialog-close" type="button" onClick={onClose} aria-label="关闭对话框">
+          <Icon name="close" size={16} />
+        </button>
+      </header>
+      <div className="hg-dialog-body">{children}</div>
+    </dialog>
+  );
+}
+
+export function ConfirmDialog({
+  title,
+  confirmLabel,
+  danger = false,
+  busy = false,
+  error = "",
+  children,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  confirmLabel: string;
+  danger?: boolean;
+  busy?: boolean;
+  error?: string;
+  children: ReactNode;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Dialog title={title} onClose={onCancel}>
+      <div className="hg-confirm-copy">{children}</div>
+      {error ? (
+        <p className="hg-form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="hg-dialog-actions">
+        <button className="hg-btn" type="button" onClick={onCancel} disabled={busy}>
+          取消
+        </button>
+        <button
+          className={danger ? "hg-btn hg-btn-danger" : "hg-btn hg-btn-primary"}
+          type="button"
+          onClick={onConfirm}
+          disabled={busy}
+        >
+          {busy ? "正在处理…" : confirmLabel}
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+/** Copy-to-clipboard button with an inline (testable) result. */
+export function CopyButton({
+  text,
+  label = "复制",
+  ariaLabel,
+}: {
+  text: string;
+  label?: string;
+  ariaLabel?: string;
+}) {
+  const [result, setResult] = useState("");
+  useEffect(() => {
+    if (!result) return;
+    const timer = window.setTimeout(() => setResult(""), 2500);
+    return () => window.clearTimeout(timer);
+  }, [result]);
+  return (
+    <span className="hg-copy">
+      <button
+        className="hg-btn hg-btn-small"
+        type="button"
+        aria-label={ariaLabel ?? label}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(text);
+            setResult("已复制");
+          } catch {
+            setResult("复制失败，请手动选择");
+          }
+        }}
+      >
+        {label}
+      </button>
+      {result ? (
+        <span className="hg-copy-result" role="status">
+          {result}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** A labelled read-only value with its own copy button. */
+export function CopyField({
+  label,
+  text,
+  mono = true,
+}: {
+  label: string;
+  text: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="hg-copy-field">
+      <div className="hg-copy-field-head">
+        <span>{label}</span>
+        <CopyButton text={text} ariaLabel={`复制 ${label}`} />
+      </div>
+      <pre className={mono ? "hg-copy-value" : undefined}>{text}</pre>
+    </div>
+  );
+}
+
+/** Quiet inline explanation, used for "not enabled" states. */
+export function Callout({
+  tone = "neutral",
+  title,
+  children,
+}: {
+  tone?: "neutral" | "mint" | "amber" | "coral";
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`hg-callout hg-callout-${tone}`}>
+      {title ? <strong>{title}</strong> : null}
+      <div>{children}</div>
+    </div>
+  );
+}
+
+/** Definition rows used by the setup and CLI-login pages. */
+export function StatusGrid({ children }: { children: ReactNode }) {
+  return <dl className="hg-status-grid">{children}</dl>;
+}
+
+export function StatusItem({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{children}</dd>
+    </div>
   );
 }

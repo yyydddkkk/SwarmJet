@@ -176,7 +176,7 @@ test("A 403 explains that a platform administrator is required", async ({ page }
   await page.goto("/#/hives");
   const alert = page.getByRole("alert");
   await expect(alert).toContainText("需要平台管理员权限");
-  await expect(alert).toContainText("需要平台管理员权限才能使用 Hive 控制台");
+  await expect(alert).toContainText("需要管理员会话才能继续");
   await expect(page.getByRole("link", { name: "返回主控制台" })).toHaveAttribute("href", "/");
 });
 
@@ -184,6 +184,7 @@ test("A 403 explains that a platform administrator is required", async ({ page }
 // on and off, six hashed body colours, the 29 icons at 16 and 32px, the loader
 // and the empty state — on a light and on a dark surface.
 test("Pixel reference shows the whole design spec on light and dark surfaces", async ({ page }, testInfo) => {
+  await mockHiveAPI(page);
   await page.goto("/#/icons");
 
   await expect(page.getByRole("heading", { name: "像素规范", level: 1 })).toBeVisible();
@@ -295,10 +296,23 @@ test("A Forager keeps the same bee, and every state draws a different one", asyn
 });
 
 test("The bee loader flaps between two wing frames", async ({ page }) => {
+  await mockHiveAPI(page);
   await page.goto("/#/icons");
   const loader = page.locator(".hg-loader").first();
   await expect(loader).toBeVisible();
   await expect(loader.locator(".hg-loader-frame")).toHaveCount(2);
+  // Wait for the stylesheet to be applied: a missing rule would read as "" and
+  // used to make this assertion pass for the wrong reason.
+  await page.waitForFunction(() => {
+    const frames = [...document.querySelectorAll(".hg-loader-frame")];
+    return (
+      frames.length > 0 &&
+      frames.every(frame => {
+        const name = getComputedStyle(frame).animationName;
+        return name !== "" && name !== "none";
+      })
+    );
+  });
   const names = await loader.locator(".hg-loader-frame").evaluateAll(nodes =>
     nodes.map(node => getComputedStyle(node).animationName),
   );
@@ -310,9 +324,22 @@ test.describe("reduced motion", () => {
   test.use({ reducedMotion: "reduce" });
 
   test("The loader parks on its first frame when motion is reduced", async ({ page }) => {
+    await mockHiveAPI(page);
     await page.goto("/#/icons");
     const loader = page.locator(".hg-loader").first();
     await expect(loader).toBeVisible();
+    // The reduced-motion rule sets animation: none; wait for the stylesheet so a
+    // cold dev-server render cannot be mistaken for a parked animation.
+    await page.waitForFunction(() => {
+      const bee = document.querySelector<HTMLElement>(".hg-loader-bee");
+      const up = document.querySelector<HTMLElement>(".hg-loader-frame-up");
+      return (
+        !!bee &&
+        !!up &&
+        getComputedStyle(bee).animationName === "none" &&
+        getComputedStyle(up).animationName === "none"
+      );
+    });
 
     const state = await loader.evaluate(node => {
       const bob = node.querySelector<HTMLElement>(".hg-loader-bee");

@@ -1,6 +1,6 @@
 // Domain types for the Hive / Queen / Forager console (ADR docs/claude/adr-hive-queen-forager.md).
 // Field names mirror the Go contract in docs/claude/round1-prompts.md as camelCase JSON.
-// This round is front-end only: the pages below read the fake fixtures in web/src/fixtures.
+// The UI talks to /api; the fake fixtures in web/src/fixtures are used by Playwright only.
 
 export type HiveConfig = {
   cli: string;
@@ -158,4 +158,80 @@ export type ForagerDetail = {
   guards: Check[];
   diff: { files: number; additions: number; deletions: number };
   conversation: ConversationEntry[];
+};
+
+// ---- Session and onboarding (round 3, public contract section 5) ----
+
+export type Principal = {
+  id: string;
+  username: string;
+  email?: string;
+  displayName?: string;
+  platformAdmin?: boolean;
+  breakGlass?: boolean;
+};
+
+export type GithubSetup = {
+  configured: boolean;
+  source: "env" | "database" | "";
+  appId: number;
+  appSlug: string;
+  htmlUrl: string;
+  installUrl: string;
+  installations: number;
+};
+
+export type TunnelSetup = {
+  enabled: boolean;
+  url: string;
+  webhookSynced: boolean;
+  lastError: string;
+};
+
+export type CellsSetup = {
+  enabled: boolean;
+  image: string;
+  model: string;
+  dockerAvailable: boolean;
+};
+
+export type CliLoginSetup = {
+  available: boolean;
+  loggedIn: boolean;
+  cli: string;
+};
+
+export type SetupStatus = {
+  github: GithubSetup;
+  tunnel: TunnelSetup;
+  cells: CellsSetup;
+  cliLogin: CliLoginSetup;
+};
+
+export type GithubRepository = {
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+};
+
+export type TokenScope = "default" | "admin";
+
+export type TokenSummary = {
+  id: string;
+  name: string;
+  scope: TokenScope;
+  createdAt: string;
+};
+
+export type TokenConnect = {
+  mcpUrl: string;
+  claudeCode: string;
+  codex: string;
+  json: unknown;
+};
+
+export type CreatedToken = {
+  token: TokenSummary;
+  plaintext: string;
+  connect: TokenConnect;
 };

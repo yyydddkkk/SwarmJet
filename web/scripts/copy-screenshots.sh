@@ -20,6 +20,14 @@ shots=(
   icon-lab-1440.png
   pixel-icons-1440.png
   forager-avatars-1440.png
+  hive-create-1440.png
+  setup-github-unconfigured-1440.png
+  setup-github-configured-1440.png
+  setup-tunnel-1440.png
+  setup-token-created-1440.png
+  cli-login-1440.png
+  cli-login-unavailable-1440.png
+  login-1440.png
 )
 
 mkdir -p "$dest"
