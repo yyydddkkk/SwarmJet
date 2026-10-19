@@ -124,6 +124,38 @@ func TestLatestAttestationAndSupersede(t *testing.T) {
 	}
 }
 
+func TestPRAuthorByBranchPrefersTheBranchOwner(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	h := newTestHive(t, s, "acme/branch-author")
+	owner, err := s.CreateForager(ctx, domain.Agent{
+		HiveID: h.ID, Role: domain.RoleForager, State: domain.AgentCompleted,
+		PRNumber: 9, Branch: "swarm/owner",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A verifier may be linked to the same PR without owning its branch.
+	verifier, err := s.CreateForager(ctx, domain.Agent{
+		HiveID: h.ID, Role: domain.RoleForager, State: domain.AgentActive,
+		PRNumber: 9, Branch: "swarm/verifier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPR, err := s.PRAuthor(ctx, h.ID, 9)
+	if err != nil || byPR.ID != verifier.ID {
+		t.Fatalf("PRAuthor = %+v %v, want the newest linked Agent %s", byPR, err, verifier.ID)
+	}
+	byBranch, err := s.PRAuthorByBranch(ctx, h.ID, "swarm/owner")
+	if err != nil || byBranch.ID != owner.ID {
+		t.Fatalf("PRAuthorByBranch = %+v %v, want the branch owner %s", byBranch, err, owner.ID)
+	}
+	if _, err = s.PRAuthorByBranch(ctx, h.ID, "swarm/missing"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("unknown branch = %v, want ErrNotFound", err)
+	}
+}
+
 func TestPRAuthorIncludesTerminalForager(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

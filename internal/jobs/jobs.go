@@ -13,6 +13,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
+	"github.com/riverqueue/river/rivertype"
 )
 
 const (
@@ -157,10 +158,22 @@ func (c *Client) InsertMessage(ctx context.Context, tx pgx.Tx, job Message) erro
 
 // InsertMergeCheck enqueues one merge gate evaluation. ByArgs uniqueness makes
 // repeated events for the same (hive, PR, SHA) collapse into one pending job.
+// Completed jobs are deliberately outside the unique state set: a later
+// attestation must be able to trigger a fresh check for the same head after an
+// earlier CI-triggered check has already run.
 func (c *Client) InsertMergeCheck(ctx context.Context, job MergeCheck) error {
 	_, err := c.river.Insert(ctx, mergeCheckArgs{HiveID: job.HiveID, PR: job.PR, SHA: job.SHA}, &river.InsertOpts{
-		Queue:      mergeQueue,
-		UniqueOpts: river.UniqueOpts{ByArgs: true},
+		Queue: mergeQueue,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs: true,
+			ByState: []rivertype.JobState{
+				rivertype.JobStateAvailable,
+				rivertype.JobStatePending,
+				rivertype.JobStateRunning,
+				rivertype.JobStateRetryable,
+				rivertype.JobStateScheduled,
+			},
+		},
 	})
 	return err
 }

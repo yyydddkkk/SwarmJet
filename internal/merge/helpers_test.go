@@ -20,12 +20,13 @@ import (
 // --- fake Hive store --------------------------------------------------------
 
 type fakeStore struct {
-	mu       sync.Mutex
-	hive     domain.Hive
-	owner    domain.Agent
-	ownerErr error
-	messages []domain.Message
-	inbox    map[domain.Address][]domain.Message
+	mu          sync.Mutex
+	hive        domain.Hive
+	owner       domain.Agent
+	branchOwner domain.Agent
+	ownerErr    error
+	messages    []domain.Message
+	inbox       map[domain.Address][]domain.Message
 }
 
 func (f *fakeStore) Hive(context.Context, string) (domain.Hive, error) {
@@ -50,6 +51,13 @@ func (f *fakeStore) PRAuthor(context.Context, string, int64) (domain.Agent, erro
 		return domain.Agent{}, domain.ErrNotFound
 	}
 	return f.owner, nil
+}
+
+func (f *fakeStore) PRAuthorByBranch(context.Context, string, string) (domain.Agent, error) {
+	if f.branchOwner.ID == "" {
+		return domain.Agent{}, domain.ErrNotFound
+	}
+	return f.branchOwner, nil
 }
 
 func (f *fakeStore) Inbox(_ context.Context, _ string, to domain.Address, _ string, limit int) ([]domain.Message, error) {

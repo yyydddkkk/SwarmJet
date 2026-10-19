@@ -100,7 +100,10 @@ func (s *Service) Attest(ctx context.Context, req AttestRequest) (AttestOutcome,
 	}
 	superseded := strings.TrimSpace(req.SHA) != pull.HeadSHA
 
-	author, err := s.store.PRAuthor(ctx, req.Hive.ID, req.PR)
+	author, err := s.store.PRAuthorByBranch(ctx, req.Hive.ID, pull.HeadRef)
+	if errors.Is(err, domain.ErrNotFound) {
+		author, err = s.store.PRAuthor(ctx, req.Hive.ID, req.PR)
+	}
 	if errors.Is(err, domain.ErrNotFound) {
 		author = domain.Agent{}
 	} else if err != nil {

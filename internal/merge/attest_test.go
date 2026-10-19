@@ -101,6 +101,37 @@ func TestAttestMarksTheAuthor(t *testing.T) {
 	}
 }
 
+func TestAttestUsesTheBranchOwnerAsAuthor(t *testing.T) {
+	stub := readyStub()
+	store := &fakeStore{
+		hive:        testHive(),
+		owner:       domain.Agent{ID: "verifier-1"}, // newest PR link, not the owner
+		branchOwner: domain.Agent{ID: "forager-real"},
+	}
+	attestations := &fakeAttestations{}
+	svc := newTestService(t, stub, store, attestations, methodologyWith(requireAllPolicy()), nil)
+	out, err := svc.Attest(context.Background(), AttestRequest{
+		Hive: testHive(), PR: 7, SHA: "head", Result: domain.AttestPass, Summary: "ok", Actor: testActor(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Attestation.AuthorID != "forager-real" || out.Attestation.IsAuthor {
+		t.Fatalf("attestation = %+v, want the branch owner as author", out.Attestation)
+	}
+
+	out, err = svc.Attest(context.Background(), AttestRequest{
+		Hive: testHive(), PR: 7, SHA: "head", Result: domain.AttestPass, Summary: "self",
+		Actor: Actor{ID: "forager-real", Label: "Agent forager-real", RoleName: "verifier", IsAgent: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Attestation.IsAuthor {
+		t.Fatalf("branch owner was not marked as author: %+v", out.Attestation)
+	}
+}
+
 func TestAttestRequiresTheAttestPermission(t *testing.T) {
 	stub := readyStub()
 	attestations := &fakeAttestations{}

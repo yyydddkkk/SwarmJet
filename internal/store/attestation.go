@@ -138,11 +138,22 @@ func (s *Store) SupersedeAttestations(ctx context.Context, hiveID string, pr int
 	return domainErr(err)
 }
 
-// PRAuthor returns the Agent that owns a PR branch, including a terminal one.
-// The authoritative author does not disappear when the Forager finishes, so an
-// attestation can still record whether its author was the attester.
+// PRAuthor returns the Agent linked to a PR number, including a terminal one.
+// It is the fallback when the PR head branch is unknown.
 func (s *Store) PRAuthor(ctx context.Context, hiveID string, pr int64) (domain.Agent, error) {
 	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents
 		WHERE hive_id=$1 AND role='forager' AND pr_number=$2
 		ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, pr))
+}
+
+// PRAuthorByBranch returns the Agent that owns a branch, including a terminal
+// one. Branch ownership identifies the PR author even when a verifier was
+// spawned with the same PR number.
+func (s *Store) PRAuthorByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error) {
+	if branch == "" {
+		return domain.Agent{}, domain.ErrNotFound
+	}
+	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents
+		WHERE hive_id=$1 AND role='forager' AND branch=$2
+		ORDER BY created_at ASC,id ASC LIMIT 1`, hiveID, branch))
 }

@@ -23,6 +23,7 @@ type Store interface {
 	Hive(ctx context.Context, id string) (domain.Hive, error)
 	Agent(ctx context.Context, id string) (domain.Agent, error)
 	PRAuthor(ctx context.Context, hiveID string, pr int64) (domain.Agent, error)
+	PRAuthorByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error)
 	Inbox(ctx context.Context, hiveID string, to domain.Address, afterID string, limit int) ([]domain.Message, error)
 	SendMessage(ctx context.Context, m domain.Message) (domain.Message, error)
 }
