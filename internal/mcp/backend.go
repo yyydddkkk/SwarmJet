@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/methodology"
 )
 
 // Backend is the subset of the Hive store that the MCP tools need. Every method
@@ -47,6 +48,15 @@ type Backend interface {
 	// method beyond the first-round Backend that the MCP tools need; the new
 	// round-2 methods are used by the Router and the Forager supervisor.
 	UpdateHandoff(ctx context.Context, id string, h domain.Handoff) error
+
+	// Round 4: a Hive's versioned methodology. The four methodology tools read
+	// and write through these methods.
+	ActiveMethodology(ctx context.Context, hiveID string) (domain.Methodology, []domain.MethodologyFile, error)
+	MethodologyVersion(ctx context.Context, hiveID string, version int) (domain.Methodology, []domain.MethodologyFile, error)
+	MethodologyVersions(ctx context.Context, hiveID string) ([]domain.Methodology, error)
+	MethodologyChanges(ctx context.Context, hiveID string) ([]methodology.Change, error)
+	PublishMethodology(ctx context.Context, m domain.Methodology, files []domain.MethodologyFile) (domain.Methodology, error)
+	ActivateMethodology(ctx context.Context, hiveID string, version int, actor domain.Address, note string) (domain.Methodology, error)
 }
 
 // Limits applied to update_handoff. They keep a handoff summary summary-sized

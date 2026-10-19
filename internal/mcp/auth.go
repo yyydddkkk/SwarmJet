@@ -73,6 +73,11 @@ var agentTools = map[domain.AgentRole]map[string]bool{
 // visible reports whether the tool is listed for this session. Default and admin
 // tokens see the whole catalog; agent tokens only see the tools they may call.
 func (ts *toolset) visible(tool string) bool {
+	if methodologyTools[tool] {
+		// Reads are open to every token; publish and activate enforce the
+		// effective role permission in their handlers.
+		return true
+	}
 	if ts.token.Scope != domain.TokenAgent {
 		return true
 	}
@@ -91,6 +96,12 @@ func (ts *toolset) visible(tool string) bool {
 // is deliberately independent of visibility: a tool that is reachable anyway is
 // still rejected.
 func (ts *toolset) authorize(tool string) error {
+	if methodologyTools[tool] {
+		if ts.token.Scope == domain.TokenAgent && ts.actorErr != nil {
+			return ts.actorErr
+		}
+		return nil
+	}
 	switch ts.token.Scope {
 	case domain.TokenAdmin:
 		return nil
