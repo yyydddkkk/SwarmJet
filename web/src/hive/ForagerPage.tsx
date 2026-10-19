@@ -4,17 +4,37 @@
 import { useId, useState } from "react";
 import { hiveAPI } from "./api";
 import type { ForagerDetailResponse } from "./api";
-import type { ConversationEntry } from "./types";
-import { BeeLoader, EmptyState, ErrorNotice, Panel, StatusBadge, Tabs } from "./components";
+import type {
+  Agent,
+  Attestation,
+  Check,
+  CheckStatus,
+  ConversationEntry,
+  MergeCheck,
+  PRStatusResponse,
+} from "./types";
+import {
+  AttestBadge,
+  BeeLoader,
+  CheckList,
+  EmptyState,
+  ErrorNotice,
+  Panel,
+  StatusBadge,
+  Tabs,
+} from "./components";
 import { ForagerAvatar, foragerNeedsYou } from "./pixel";
 import { Icon } from "./icons";
 import { ConversationStream } from "./ConversationStream";
-import { messageEntries, mergeMessages } from "./format";
+import { AgentUsagePanel } from "./UsagePanel";
+import { formatTimestamp, messageEntries, mergeMessages, shortSha } from "./format";
 import { useResource } from "./use-resource";
 
 const sections = [
   { id: "conversation", label: "对话" },
   { id: "handoff", label: "交接摘要" },
+  { id: "merge", label: "验证与合并" },
+  { id: "usage", label: "用量与花费" },
   { id: "diff", label: "Diff" },
   { id: "timeline", label: "时间线" },
   { id: "terminal", label: "终端" },
@@ -148,6 +168,17 @@ function ForagerDetail({
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const prRes = useResource(
+    signal =>
+      agent.prNumber
+        ? hiveAPI.getPRStatus(hive.id, agent.prNumber, signal)
+        : Promise.resolve(undefined as PRStatusResponse | undefined),
+    [hive.id, agent.prNumber],
+  );
+  const refresh = () => {
+    onChanged();
+    prRes.reload();
+  };
   const active = section || "conversation";
   const terminal = ["completed", "failed", "cancelled"].includes(agent.state);
   const tabs = sections.map(item => ({
@@ -166,7 +197,7 @@ function ForagerDetail({
       .cancelForager(agent.id)
       .then(() => {
         setNotice("已发送取消指令，等监管者处理。");
-        onChanged();
+        refresh();
       })
       .catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
       .finally(() => setCancelling(false));
@@ -214,9 +245,21 @@ function ForagerDetail({
               </a>
             ) : null}
             <span className="hg-meta">
-              <Icon name="clock" size={16} />
-              预设 {agent.preset || "默认"}
+              <Icon name="user" size={16} />
+              角色 <code>{agent.roleName || agent.preset || agent.role}</code>
             </span>
+            {agent.parentId ? (
+              <span className="hg-meta">
+                <Icon name="swarm" size={16} />
+                父 Agent <code>{agent.parentId}</code>
+              </span>
+            ) : null}
+            {agent.revision ? (
+              <span className="hg-meta" title={agent.revision}>
+                <Icon name="check" size={16} />
+                检出提交 <code>{shortSha(agent.revision)}</code>
+              </span>
+            ) : null}
             {agent.chainId ? (
               <span className="hg-meta">
                 <Icon name="timeline" size={16} />
@@ -268,9 +311,19 @@ function ForagerDetail({
             />
           </Panel>
           {!terminal ? (
-            <ForagerComposer hiveId={hive.id} foragerId={agent.id} onSent={onChanged} />
+            <ForagerComposer hiveId={hive.id} foragerId={agent.id} onSent={refresh} />
           ) : null}
         </div>
+      ) : active === "merge" ? (
+        <MergePanel
+          agent={agent}
+          pr={prRes.data}
+          error={prRes.error}
+          errorStatus={prRes.errorStatus}
+          onRetry={prRes.reload}
+        />
+      ) : active === "usage" ? (
+        <AgentUsagePanel hiveId={hive.id} agentId={agent.id} />
       ) : active === "handoff" ? (
         <Panel title="交接摘要" subtitle="每轮结束时更新，也是 CLI 会话丢失后的恢复依据。">
           {agent.handoff ? (
@@ -312,6 +365,204 @@ function ForagerDetail({
           />
         </Panel>
       )}
+    </div>
+  );
+}
+
+function MergePanel({
+  agent,
+  pr,
+  error,
+  errorStatus,
+  onRetry,
+}: {
+  agent: Agent;
+  pr: PRStatusResponse | undefined;
+  error: string;
+  errorStatus: number | undefined;
+  onRetry: () => void;
+}) {
+  return (
+    <Panel
+      title="验证与合并"
+      subtitle={
+        agent.prNumber
+          ? `PR #${agent.prNumber} 的结论历史，以及平台按方法论判断的可合并状态。`
+          : "这只 Forager 还没有关联 PR。"
+      }
+    >
+      {!agent.prNumber ? (
+        <EmptyState
+          title="还没有 PR。"
+          hint="Forager 发布分支并打开 PR 后，这里会出现结论历史和可合并状态。"
+        />
+      ) : null}
+      {error ? (
+        <ErrorNotice
+          message={error}
+          onRetry={onRetry}
+          auth={errorStatus === 401}
+          admin={errorStatus === 403}
+        />
+      ) : null}
+      {pr ? <MergeBody pr={pr} /> : agent.prNumber && !error ? (
+        <BeeLoader label="正在读取 PR 状态…" />
+      ) : null}
+    </Panel>
+  );
+}
+
+function MergeBody({ pr }: { pr: PRStatusResponse }) {
+  const { readiness, pull } = pr;
+  const merged = pull?.merged ?? readiness.pull?.merged;
+  const ready = readiness.ready;
+  const headSha = pull?.headSha || readiness.pull?.headSha;
+  const tone = merged || ready ? "mint" : "coral";
+  const label = merged ? "已合并" : ready ? "可合并" : "尚不可合并";
+
+  return (
+    <div className="hg-merge-body">
+      <div className="hg-merge-status">
+        <span className={`hg-badge hg-tone-${tone}`} data-testid="merge-readiness">
+          {label}
+        </span>
+        <code className="hg-merge-sha" title={headSha}>
+          {shortSha(headSha)}
+        </code>
+        <span className="hg-muted">
+          PR #{pull?.number ?? pr.prNumber} · {pull?.state ?? "unknown"}
+          {pull?.draft ? " · draft" : ""}
+          {pull?.baseRef ? ` → ${pull.baseRef}` : ""}
+        </span>
+        {pull?.url ? (
+          <a className="hg-meta" href={pull.url} target="_blank" rel="noreferrer">
+            <Icon name="external" size={16} />
+            在 GitHub 查看
+          </a>
+        ) : null}
+      </div>
+
+      {readiness.reasons?.length ? (
+        <ul className="hg-merge-reasons">
+          {readiness.reasons.map(reason => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="hg-form-status">所有合并条件都已满足。</p>
+      )}
+
+      <section className="hg-merge-section">
+        <h3>CI 检查</h3>
+        <CheckList
+          checks={mergeChecks(readiness.checks ?? [])}
+          empty="这个 head 上还没有检查结果。"
+        />
+      </section>
+
+      <section className="hg-merge-section">
+        <h3>结论历史</h3>
+        <AttestationTable attestations={pr.attestations ?? []} />
+      </section>
+    </div>
+  );
+}
+
+function mergeChecks(checks: MergeCheck[]): Check[] {
+  return checks.map(check => {
+    const passed = ["success", "neutral", "skipped"].includes(check.conclusion);
+    const pending = check.status !== "completed";
+    const status: CheckStatus = pending ? "pending" : passed ? "passed" : "failed";
+    return {
+      name: check.name,
+      status,
+      detail: pending ? check.status : check.conclusion,
+    };
+  });
+}
+
+function AttestationTable({ attestations }: { attestations: Attestation[] }) {
+  if (attestations.length === 0) {
+    return <EmptyState title="还没有结论。" hint="验证者给出结论后，这里会按 head SHA 记录。" />;
+  }
+  return (
+    <div className="hg-table-wrap">
+      <table className="hg-attest-table" aria-label="结论历史">
+        <thead>
+          <tr>
+            <th scope="col">结论</th>
+            <th scope="col">提交</th>
+            <th scope="col">给出者</th>
+            <th scope="col">是否作者</th>
+            <th scope="col">时间</th>
+            <th scope="col">评论</th>
+            <th scope="col">状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          {attestations.map(attestation => (
+            <tr
+              key={attestation.id}
+              className={attestation.superseded ? "hg-attest-superseded" : undefined}
+            >
+              <td>
+                <AttestBadge result={attestation.result} />
+                <span className="hg-attest-summary">{attestation.summary}</span>
+                {attestation.findings?.length ? (
+                  <details className="hg-attest-findings">
+                    <summary>{attestation.findings.length} 条发现</summary>
+                    <ul>
+                      {attestation.findings.map((finding, index) => (
+                        <li key={`${attestation.id}-${index}`}>
+                          <span className="hg-chip">{finding.severity}</span>
+                          {finding.location ? <code>{finding.location}</code> : null}
+                          {finding.finding}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+              </td>
+              <td>
+                <code title={attestation.headSha}>{shortSha(attestation.headSha)}</code>
+              </td>
+              <td>
+                <code>{attestation.attesterId}</code>
+              </td>
+              <td>
+                <span
+                  className={
+                    attestation.isAuthor ? "hg-badge hg-tone-amber" : "hg-badge hg-tone-mint"
+                  }
+                >
+                  {attestation.isAuthor ? "作者" : "独立"}
+                </span>
+              </td>
+              <td>{formatTimestamp(attestation.createdAt)}</td>
+              <td>
+                {attestation.commentUrl ? (
+                  <a href={attestation.commentUrl} target="_blank" rel="noreferrer">
+                    在 GitHub 查看
+                  </a>
+                ) : (
+                  <span className="hg-muted">—</span>
+                )}
+              </td>
+              <td>
+                <span
+                  className={
+                    attestation.superseded
+                      ? "hg-badge hg-tone-neutral"
+                      : "hg-badge hg-tone-mint"
+                  }
+                >
+                  {attestation.superseded ? "已作废" : "有效"}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

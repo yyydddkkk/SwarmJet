@@ -109,7 +109,7 @@ test("Hive Inbox shows unhandled external events", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Inbox（蜂巢收件箱）", level: 2 })).toBeVisible();
   await expect(page.getByText(/GitHub issues\.opened：#142/)).toBeVisible();
-  await expect(page.getByText("系统事件", { exact: true })).toBeVisible();
+  await expect(page.locator(".hg-msg-external .hg-trust-external")).toHaveText("外部");
 });
 
 test("Cancel writes a control message and the Swarm badge follows the API", async ({ page }) => {

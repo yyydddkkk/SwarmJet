@@ -75,10 +75,19 @@ export type Agent = {
   prNumber?: number;
   nodeId?: string;
   chainId?: string;
+  /** Methodology role that governs this Agent, e.g. "worker" or "verifier". */
+  roleName?: string;
+  /** Commit checked out detached for this Agent, if any. */
+  revision?: string;
+  /** The Agent that spawned this one, if any. */
+  parentId?: string;
   handoff?: Handoff;
   createdAt: string;
   updatedAt: string;
 };
+
+/** Where a message's content came from (round-4 contract section 5). */
+export type MessageTrust = "user" | "agent" | "external" | "system";
 
 export type MessageKind =
   | "event"
@@ -99,6 +108,8 @@ export type Message = {
   chainId: string;
   hop: number;
   body: string;
+  /** Provenance; an empty value from older rows means "agent". */
+  trust?: MessageTrust;
   artifacts?: ArtifactRef[];
   state: MessageState;
   createdAt: string;
@@ -195,17 +206,18 @@ export type CellsSetup = {
   dockerAvailable: boolean;
 };
 
-export type CliLoginSetup = {
+/** Round 4 replaced the CLI login block with the model credential summary. */
+export type ModelsSetup = {
+  /** Whether at least one provider has a usable credential. */
   available: boolean;
-  loggedIn: boolean;
-  cli: string;
+  defaultModel: string;
 };
 
 export type SetupStatus = {
   github: GithubSetup;
   tunnel: TunnelSetup;
   cells: CellsSetup;
-  cliLogin: CliLoginSetup;
+  models: ModelsSetup;
 };
 
 export type GithubRepository = {
@@ -234,4 +246,244 @@ export type CreatedToken = {
   token: TokenSummary;
   plaintext: string;
   connect: TokenConnect;
+};
+
+// ---- Round 4: model credentials, methodology, attestations and usage ----
+//
+// These shapes follow the round-4 public contract. The backend tasks land in
+// parallel; until they merge the console reads them through /api and the
+// Playwright mock supplies the fixtures.
+
+export type ModelOption = {
+  /** provider/model, e.g. "deepseek/deepseek-chat". */
+  id: string;
+  provider: string;
+  name: string;
+  contextWindow?: number;
+  inputPerMillionUsd?: number;
+  outputPerMillionUsd?: number;
+  /** False when the provider has no credential yet. */
+  available?: boolean;
+};
+
+export type ModelCredential = {
+  provider: string;
+  /** Masked by the server; the plaintext key never reaches the console. */
+  maskedKey: string;
+  updatedAt: string;
+};
+
+export type ModelsResponse = {
+  models: ModelOption[];
+  defaultModel: string;
+  credentials: ModelCredential[];
+};
+
+/** The contract only promises the masked value, so accept both shapes. */
+export type ModelCredentialResponse = {
+  credential?: ModelCredential;
+  provider?: string;
+  maskedKey?: string;
+  updatedAt?: string;
+};
+
+export type MethodologySource = {
+  url: string;
+  ref: string;
+  path?: string;
+  sha?: string;
+};
+
+export type MethodologyFile = {
+  path: string;
+  content: string;
+};
+
+export type RolePermissions = {
+  publish: boolean;
+  message: boolean;
+  spawn?: string[];
+  attest: boolean;
+  merge: boolean;
+  methodology: boolean;
+};
+
+export type MethodologyRole = {
+  description?: string;
+  prompt?: string;
+  model?: string;
+  lifecycle?: string;
+  permissions: RolePermissions;
+  denyTools?: string[];
+};
+
+export type EventRule = {
+  event: string;
+  label?: string;
+  commentPrefix?: string;
+  role: string;
+};
+
+export type MergePolicy = {
+  requireAttestation: boolean;
+  acceptResults?: AttestResult[];
+  requireNonAuthor: boolean;
+  requireChecks: boolean;
+  auto: boolean;
+  method?: string;
+};
+
+export type MethodologyLimits = {
+  maxConcurrentAgents?: number;
+  maxHops?: number;
+  maxAgentsPerChain?: number;
+  maxCostPerAgentUsd?: number;
+  maxCostPerDayUsd?: number;
+};
+
+export type MethodologyManifest = {
+  defaultRole: string;
+  roles: Record<string, MethodologyRole>;
+  standingOrders?: string[];
+  events?: EventRule[];
+  merge: MergePolicy;
+  limits?: MethodologyLimits;
+};
+
+export type Methodology = {
+  id: string;
+  hiveId: string;
+  version: number;
+  active: boolean;
+  source?: MethodologySource | null;
+  manifest: MethodologyManifest;
+  digest: string;
+  note?: string;
+  createdBy: string;
+  createdAt: string;
+};
+
+export type MethodologyResponse = {
+  methodology: Methodology;
+  files: MethodologyFile[];
+};
+
+export type MethodologyEvent = {
+  id: string;
+  hiveId: string;
+  version: number;
+  action: "publish" | "activate" | string;
+  actor: string;
+  note?: string;
+  source?: MethodologySource | null;
+  createdAt: string;
+};
+
+export type MethodologyVersionsResponse = {
+  versions: Methodology[];
+  events: MethodologyEvent[];
+};
+
+export type AttestResult = "pass" | "pass_notes" | "fail" | "blocked";
+
+export type Finding = {
+  severity: "critical" | "warning" | "nit" | string;
+  location?: string;
+  finding: string;
+  evidence?: string;
+};
+
+export type Attestation = {
+  id: string;
+  hiveId: string;
+  prNumber: number;
+  headSha: string;
+  /** The Agent that gave the conclusion. */
+  attesterId: string;
+  /** The Agent that owns the PR revision. */
+  authorId: string;
+  /** Convenience copy of AttesterID == AuthorID from the server. */
+  isAuthor: boolean;
+  result: AttestResult;
+  summary: string;
+  findings?: Finding[];
+  commentUrl?: string;
+  superseded: boolean;
+  createdAt: string;
+};
+
+export type MergeCheck = {
+  name: string;
+  status: string;
+  conclusion: string;
+  url?: string;
+  output?: string;
+  outputTruncated?: boolean;
+  untrusted?: boolean;
+};
+
+export type PullRequest = {
+  number: number;
+  state: string;
+  draft: boolean;
+  merged: boolean;
+  url?: string;
+  headSha?: string;
+  baseRef?: string;
+  baseRepository?: string;
+  mergeable?: boolean | null;
+  mergeableState?: string;
+};
+
+export type MergeReadiness = {
+  ready: boolean;
+  reasons: string[];
+  pull: PullRequest;
+  attestation?: Attestation | null;
+  attestationFound?: boolean;
+  checks?: MergeCheck[];
+};
+
+export type PRStatusResponse = {
+  hiveId: string;
+  prNumber: number;
+  pull: PullRequest;
+  readiness: MergeReadiness;
+  attestations: Attestation[];
+};
+
+export type ModelUsage = {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  /** False when the model has no price entry; its cost is recorded as zero. */
+  priceKnown?: boolean;
+};
+
+export type AgentUsage = {
+  agentId: string;
+  hiveId: string;
+  roleName?: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  models?: ModelUsage[];
+};
+
+export type UsageLimits = {
+  maxCostPerAgentUsd?: number;
+  maxCostPerDayUsd?: number;
+};
+
+export type UsageResponse = {
+  hiveId: string;
+  /** Local calendar day, YYYY-MM-DD. */
+  date: string;
+  totalCostUsd: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  /** Per-Agent totals for the day, highest cost first. */
+  agents: AgentUsage[];
+  limits?: UsageLimits;
 };

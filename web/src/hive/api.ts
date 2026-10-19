@@ -9,10 +9,16 @@ import type {
   HiveOverview,
   Message,
   MessageKind,
+  MethodologyResponse,
+  MethodologyVersionsResponse,
+  ModelCredentialResponse,
+  ModelsResponse,
   Principal,
+  PRStatusResponse,
   SetupStatus,
   TokenScope,
   TokenSummary,
+  UsageResponse,
 } from "./types";
 
 export type HiveListResponse = {
@@ -81,7 +87,7 @@ export class HiveAPIError extends Error {
 
 async function request<T>(
   path: string,
-  method: "GET" | "POST" | "DELETE" = "GET",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" = "GET",
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
@@ -166,6 +172,30 @@ export const hiveAPI = {
     return request<void>(`/tokens/${segment(id)}`, "DELETE", undefined, signal);
   },
 
+  /* ---- models and credentials (round 4, contract section 7) ---- */
+
+  listModels(signal?: AbortSignal) {
+    return request<ModelsResponse>("/models", "GET", undefined, signal);
+  },
+
+  /**
+   * Writes a provider key. The key travels only in the request body: never in
+   * the URL, localStorage or a log line. The server answers with the masked
+   * value, which is all the console keeps.
+   */
+  setModelCredential(provider: string, apiKey: string, signal?: AbortSignal) {
+    return request<ModelCredentialResponse>(
+      `/models/credentials/${segment(provider)}`,
+      "PUT",
+      { apiKey },
+      signal,
+    );
+  },
+
+  deleteModelCredential(provider: string, signal?: AbortSignal) {
+    return request<void>(`/models/credentials/${segment(provider)}`, "DELETE", undefined, signal);
+  },
+
   /* ---- hives ---- */
 
   listHives(signal?: AbortSignal) {
@@ -178,6 +208,36 @@ export const hiveAPI = {
 
   createHive(input: CreateHiveInput, signal?: AbortSignal) {
     return request<HiveDetailResponse>("/hives", "POST", input, signal);
+  },
+
+  /* ---- methodology (round 4, contract sections 2, 3 and 7) ---- */
+
+  getMethodology(hiveId: string, version?: number, signal?: AbortSignal) {
+    const query = version ? `?version=${encodeURIComponent(String(version))}` : "";
+    return request<MethodologyResponse>(
+      `/hives/${segment(hiveId)}/methodology${query}`,
+      "GET",
+      undefined,
+      signal,
+    );
+  },
+
+  listMethodologyVersions(hiveId: string, signal?: AbortSignal) {
+    return request<MethodologyVersionsResponse>(
+      `/hives/${segment(hiveId)}/methodology/versions`,
+      "GET",
+      undefined,
+      signal,
+    );
+  },
+
+  activateMethodology(hiveId: string, version: number, signal?: AbortSignal) {
+    return request<MethodologyResponse>(
+      `/hives/${segment(hiveId)}/methodology/activate`,
+      "POST",
+      { version },
+      signal,
+    );
   },
 
   listForagers(hiveId: string, signal?: AbortSignal) {
@@ -216,6 +276,25 @@ export const hiveAPI = {
       undefined,
       signal,
     );
+  },
+
+  /* ---- PR attestations, merge readiness and usage (round 4) ---- */
+
+  getPRStatus(hiveId: string, prNumber: number, signal?: AbortSignal) {
+    return request<PRStatusResponse>(
+      `/hives/${segment(hiveId)}/prs/${encodeURIComponent(String(prNumber))}`,
+      "GET",
+      undefined,
+      signal,
+    );
+  },
+
+  getUsage(query: { hive?: string; agent?: string }, signal?: AbortSignal) {
+    const params = new URLSearchParams();
+    if (query.hive) params.set("hive", query.hive);
+    if (query.agent) params.set("agent", query.agent);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request<UsageResponse>(`/usage${suffix}`, "GET", undefined, signal);
   },
 
   cancelForager(foragerId: string, signal?: AbortSignal) {

@@ -1,6 +1,6 @@
-// Hive page: conversation with the Queen, the Swarm rail and the Inbox, all
-// backed by GET /api/hives/{id} and its messages/foragers endpoints. The
-// conversation and the Swarm rail poll every five seconds (ADR section 18).
+// Hive page: conversation with the Queen, the Swarm rail, the Inbox, the Hive
+// methodology and spend, all backed by GET /api/hives/{id} and its endpoints.
+// The conversation and the Swarm rail poll every five seconds (ADR section 18).
 import { useId, useState } from "react";
 import { hiveAPI } from "./api";
 import type { Agent, ConversationEntry, Hive } from "./types";
@@ -16,12 +16,16 @@ import {
 import { Icon } from "./icons";
 import { ForagerAvatar, QueenAvatar, foragerNeedsYou } from "./pixel";
 import { ConversationStream } from "./ConversationStream";
+import MethodologySection from "./MethodologyPage";
+import { HiveUsagePanel } from "./UsagePanel";
 import { isUnhandled, messageEntries, mergeMessages } from "./format";
 import { useResource } from "./use-resource";
 
 const sections = [
   { id: "conversation", label: "对话" },
   { id: "swarm", label: "Swarm" },
+  { id: "methodology", label: "方法论" },
+  { id: "usage", label: "用量" },
   { id: "timeline", label: "时间线" },
   { id: "inbox", label: "Inbox" },
   { id: "memory", label: "记忆" },
@@ -39,7 +43,7 @@ const placeholders: Record<string, { title: string; hint: string }> = {
   },
   settings: {
     title: "设置",
-    hint: "仓库、CLI 与模型凭证、Queen 开关、触发规则、Guard 与上限。这一轮先放占位。",
+    hint: "仓库、Queen 开关、触发规则与上限。模型凭证在顶部的「模型」页，方法论在同级「方法论」分区。",
   },
 };
 
@@ -229,6 +233,10 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
             <DispatchForm hive={hive} onSpawned={refreshAfterSpawn} onClose={() => setDispatchOpen(false)} />
           ) : null}
         </div>
+      ) : active === "methodology" ? (
+        <MethodologySection hiveId={hive.id} />
+      ) : active === "usage" ? (
+        <HiveUsagePanel hiveId={hive.id} />
       ) : active === "inbox" ? (
         <Panel
           title="Inbox（蜂巢收件箱）"

@@ -35,7 +35,7 @@ test("a failed sign-in shows the server message instead of a fake expiry", async
   await expect(page.getByRole("alert")).not.toContainText("会话已过期");
 });
 
-test("the top navigation has exactly Hive, 接入 and CLI 登录", async ({ page }) => {
+test("the top navigation has exactly Hive, 接入 and 模型", async ({ page }) => {
   await mockHiveAPI(page);
   await page.goto("/#/hives");
 
@@ -43,7 +43,7 @@ test("the top navigation has exactly Hive, 接入 and CLI 登录", async ({ page
   await expect(nav.getByRole("link")).toHaveCount(3);
   await expect(nav.getByRole("link", { name: "Hive" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "接入" })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "CLI 登录" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "模型" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "审批" })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "系统" })).toHaveCount(0);
 });
@@ -55,7 +55,7 @@ test("#/ and retired routes redirect to #/hives", async ({ page }) => {
   await expect(page).toHaveURL(/#\/hives$/);
   await expect(page.getByRole("heading", { name: "Hive（蜂巢）" })).toBeVisible();
 
-  for (const retired of ["/#/tasks/123", "/#/overview", "/#/projects", "/#/nodes"]) {
+  for (const retired of ["/#/tasks/123", "/#/overview", "/#/projects", "/#/nodes", "/#/cli-login"]) {
     await page.goto(retired);
     await expect(page).toHaveURL(/#\/hives$/);
   }
