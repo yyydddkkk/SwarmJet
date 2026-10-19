@@ -105,6 +105,7 @@ export default function ForagerPage({
           message={detailRes.error}
           onRetry={detailRes.reload}
           auth={detailRes.errorStatus === 401}
+          admin={detailRes.errorStatus === 403}
         />
       </div>
     );
@@ -257,6 +258,7 @@ function ForagerDetail({
                 message={conversationError}
                 onRetry={onRetryConversation}
                 auth={conversationErrorStatus === 401}
+                admin={conversationErrorStatus === 403}
               />
             ) : null}
             <ConversationStream

@@ -171,6 +171,15 @@ test("A 401 tells the user to sign in again", async ({ page }) => {
   await expect(page.getByRole("link", { name: "去登录" })).toHaveAttribute("href", "/");
 });
 
+test("A 403 explains that a platform administrator is required", async ({ page }) => {
+  await mockHiveAPI(page, { failures: { hives: 403 }, errorMessage: "platform administrator required" });
+  await page.goto("/#/hives");
+  const alert = page.getByRole("alert");
+  await expect(alert).toContainText("需要平台管理员权限");
+  await expect(alert).toContainText("需要平台管理员权限才能使用 Hive 控制台");
+  await expect(page.getByRole("link", { name: "返回主控制台" })).toHaveAttribute("href", "/");
+});
+
 // Pixel reference page: the whole design spec — eight Forager states, the Queen
 // on and off, six hashed body colours, the 29 icons at 16 and 32px, the loader
 // and the empty state — on a light and on a dark surface.

@@ -94,6 +94,9 @@ async function request<T>(
     if (response.status === 401) {
       message = "会话已过期或未登录，请回到主控制台登录后再打开 Hive 控制台。";
     }
+    if (response.status === 403) {
+      message = "需要平台管理员权限才能使用 Hive 控制台。";
+    }
     throw new HiveAPIError(message, response.status);
   }
   if (response.status === 204) return undefined as T;

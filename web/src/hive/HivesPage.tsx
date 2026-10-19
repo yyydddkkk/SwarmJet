@@ -47,6 +47,7 @@ export default function HivesPage() {
           message={resource.error}
           onRetry={resource.reload}
           auth={resource.errorStatus === 401}
+          admin={resource.errorStatus === 403}
         />
       ) : (
         <>

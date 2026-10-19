@@ -99,6 +99,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
           message={hiveRes.error}
           onRetry={hiveRes.reload}
           auth={hiveRes.errorStatus === 401}
+          admin={hiveRes.errorStatus === 403}
         />
       </div>
     );
@@ -176,6 +177,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
                   message={conversationRes.error}
                   onRetry={conversationRes.reload}
                   auth={conversationRes.errorStatus === 401}
+                  admin={conversationRes.errorStatus === 403}
                 />
               ) : null}
               <ConversationStream
@@ -237,6 +239,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
               message={inboxRes.error}
               onRetry={inboxRes.reload}
               auth={inboxRes.errorStatus === 401}
+              admin={inboxRes.errorStatus === 403}
             />
           ) : null}
           <ConversationStream
