@@ -53,7 +53,7 @@ func TestMigrateFromFiveAddsSessionAndAgentTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	var version int
-	if err = s.Pool.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil || version != 9 {
+	if err = s.Pool.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil || version != 10 {
 		t.Fatalf("version=%d err=%v", version, err)
 	}
 	got, err := s.Agent(ctx, a.ID)

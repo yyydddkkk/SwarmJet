@@ -196,7 +196,7 @@ func TestRouteSuccessfulCheckIsNotCheckFailed(t *testing.T) {
 	meth := methodologyWithEvents(domain.EventRule{Event: MethodologyEventCheckFailed, Role: "triage"})
 	meth.HiveID = hive.ID
 	b.SetActiveMethodology(meth)
-	owner := platformForager(t, b, hive.ID)
+	platformForager(t, b, hive.ID)
 	r := New(b)
 
 	event := loadEvent(t, EventCheckRun, "testdata/check_run_completed.json")
@@ -205,7 +205,9 @@ func TestRouteSuccessfulCheckIsNotCheckFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}
-	if decision.Action != ActionDelivered || decision.ForagerID != owner.ID {
-		t.Fatalf("decision = %+v, want the owner to receive a successful check", decision)
+	// A successful check neither matches check_failed nor wakes the owner;
+	// it only feeds the merge check.
+	if decision.Action != ActionIgnored || decision.ForagerID != "" {
+		t.Fatalf("decision = %+v, want a successful check to be ignored", decision)
 	}
 }

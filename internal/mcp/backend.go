@@ -95,6 +95,9 @@ type Options struct {
 	SessionTimeout time.Duration
 	// Now is injectable for tests. Nil means time.Now.
 	Now func() time.Time
+	// Merge powers attest, pr_status and merge_pr. When nil the tools are still
+	// listed but return a clear "not configured" error.
+	Merge MergeService
 }
 
 // withDefaults returns a copy of o with zero fields filled in.

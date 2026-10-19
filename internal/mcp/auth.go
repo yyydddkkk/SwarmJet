@@ -59,6 +59,9 @@ var agentTools = map[domain.AgentRole]map[string]bool{
 		"get_forager":    true,
 		"inbox":          true,
 		"update_handoff": true,
+		"attest":         true,
+		"pr_status":      true,
+		"merge_pr":       true,
 	},
 	domain.RoleQueen: {
 		"send":                true,
@@ -68,6 +71,9 @@ var agentTools = map[domain.AgentRole]map[string]bool{
 		"read_forager_detail": true,
 		"inbox":               true,
 		"claim":               true,
+		"attest":              true,
+		"pr_status":           true,
+		"merge_pr":            true,
 	},
 }
 
