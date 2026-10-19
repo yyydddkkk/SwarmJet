@@ -13,11 +13,10 @@ import (
 )
 
 const (
-	// DefaultCLI is the CLI used when neither the Agent nor the Hive pins one.
-	DefaultCLI = "opencode"
-	// DefaultModel pins a model explicitly; relying on the CLI default has
-	// resolved to models that need a subscription (see the OpenCode spike).
-	DefaultModel = "opencode/big-pickle"
+	// DefaultCLI is the only CLI a Cell runs in round 4.
+	DefaultCLI = "omp"
+	// DefaultModel is the Hive default model in omp's provider/model form.
+	DefaultModel = "deepseek/deepseek-chat"
 	// DefaultScanInterval is how often the recovery and lifecycle scan runs.
 	DefaultScanInterval = 30 * time.Second
 	// DefaultMaxFailures is the consecutive Start/Prompt failure budget.
@@ -47,13 +46,14 @@ type Options struct {
 
 	// Clock defaults to the system clock.
 	Clock Clock
-	// Model is passed as cell.Spec.Model on every turn.
+	// Model is the Hive default model, used when the role does not pin one.
 	Model string
 	// MCPURL is passed as cell.Spec.MCPURL on every turn.
 	MCPURL string
-	// CLIEnv resolves the CLI secrets for a Hive. It is called once per Start
-	// attempt; values are passed to the Cell but never logged.
-	CLIEnv func(ctx context.Context, hive domain.Hive) (map[string]string, error)
+	// LLMBaseURL is the platform's model proxy as reachable from inside the
+	// Cell. The Cell only ever receives its own Agent token, never a provider
+	// credential.
+	LLMBaseURL string
 	// OnUpdate receives streamed output. It must not block.
 	OnUpdate func(agent domain.Agent, update cell.Update)
 	// Logger defaults to discarding output.
@@ -105,9 +105,6 @@ func (o Options) withDefaults() Options {
 	}
 	if o.TurnAbortWait <= 0 {
 		o.TurnAbortWait = DefaultTurnAbortWait
-	}
-	if o.CLIEnv == nil {
-		o.CLIEnv = func(context.Context, domain.Hive) (map[string]string, error) { return nil, nil }
 	}
 	return o
 }

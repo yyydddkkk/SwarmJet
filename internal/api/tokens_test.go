@@ -146,7 +146,7 @@ func TestSetupStatusReportsCLILogin(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
 		t.Fatal(err)
 	}
-	if status.CLILogin.CLI != "opencode" || status.CLILogin.Available {
+	if status.CLILogin.CLI != "omp" || status.CLILogin.Available {
 		t.Fatalf("unexpected cliLogin %+v", status.CLILogin)
 	}
 	if w = tokenAPIRequest(t, handler, cookie, http.MethodPost, "/api/setup/status", `{}`); w.Code != http.StatusMethodNotAllowed {

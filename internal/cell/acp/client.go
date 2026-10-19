@@ -2,14 +2,15 @@
 //
 // A Cell runs one CLI for the lifetime of an Agent and speaks ACP with it over
 // newline-delimited JSON-RPC on stdio, either as a local process or through
-// `docker exec -i` into the Cell container. The protocol was validated in
-// docs/claude/spikes/opencode-driver.md; this package keeps the subset SwarmJet
+// `docker exec -i` into the Cell container. oh-my-pi (`omp acp`) implements ACP
+// natively, including session/load; this package keeps the subset SwarmJet
 // needs: initialize, session/new, session/prompt with streamed session/update
 // notifications, session/cancel and session/load.
 //
-// Session state lives in the CLI's data directory (for OpenCode a SQLite
-// database). The platform persists the session ID and passes it back through
-// session/load after a container or process restart.
+// Session state lives in the CLI's data directory (for omp its agent database
+// and session files under the Cell Home volume). The platform persists the
+// session ID and passes it back through session/load after a container or
+// process restart.
 package acp
 
 import (

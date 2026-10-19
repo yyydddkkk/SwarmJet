@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/cell"
+	"github.com/yyydddkkk/SwarmJet/internal/cell/omp"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/methodology"
 )
 
 // errTerminal means a Forager reached a terminal state while a turn was in
@@ -287,36 +289,15 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 // start creates or resumes the Cell, retrying transient failures with
 // exponential backoff up to the configured failure budget.
 func (a *actor) start(ctx context.Context, agent domain.Agent, hive domain.Hive) (cell.Session, cell.Spec, error) {
-	cli := agent.CLI
-	if cli == "" {
-		cli = hive.Config.CLI
-	}
-	if cli == "" {
-		cli = DefaultCLI
-	}
 	var spec cell.Spec
 	for attempt := 1; ; attempt++ {
-		// Token minting and secret resolution can fail transiently too, so they
-		// share the retry budget with Runtime.Start.
+		// Token minting and methodology resolution can fail transiently too, so
+		// they share the retry budget with Runtime.Start.
 		token, err := a.token(ctx, agent.ID)
-		var env map[string]string
 		if err == nil {
-			env, err = a.sup.opts.CLIEnv(ctx, hive)
+			spec, err = a.spec(ctx, agent, hive, token)
 		}
 		if err == nil {
-			spec = cell.Spec{
-				AgentID:    agent.ID,
-				HiveID:     agent.HiveID,
-				Repository: hive.Repository,
-				Branch:     agent.Branch,
-				BaseBranch: "",
-				CLI:        cli,
-				Model:      a.sup.opts.Model,
-				SessionRef: agent.SessionRef,
-				Env:        env,
-				MCPURL:     a.sup.opts.MCPURL,
-				MCPToken:   token,
-			}
 			var session cell.Session
 			session, err = a.sup.opts.Runtime.Start(ctx, spec)
 			if err == nil {
@@ -339,6 +320,82 @@ func (a *actor) start(ctx context.Context, agent domain.Agent, hive domain.Hive)
 		case <-a.sup.clock.After(a.sup.opts.RetryBackoff(attempt)):
 		}
 	}
+}
+
+// spec resolves the Agent's methodology role and builds the Cell contract. The
+// model comes from the role (or the Hive default); the Cell only receives its
+// own Agent token for both MCP and the model proxy.
+func (a *actor) spec(ctx context.Context, agent domain.Agent, hive domain.Hive, token string) (cell.Spec, error) {
+	manifest, files := a.activeMethodology(ctx, hive.ID)
+	role, err := methodology.Resolve(manifest, agent.RoleName)
+	if err != nil {
+		return cell.Spec{}, err
+	}
+	model := role.Model
+	if model == "" {
+		model = a.sup.opts.Model
+	}
+	prompt, err := rolePrompt(files, role.Prompt)
+	if err != nil {
+		return cell.Spec{}, err
+	}
+	configFiles, err := omp.ConfigFiles(omp.Options{
+		Model:            model,
+		LLMBaseURL:       a.sup.opts.LLMBaseURL,
+		MethodologyFiles: files,
+		RolePrompt:       prompt,
+		DenyTools:        role.DenyTools,
+	})
+	if err != nil {
+		return cell.Spec{}, err
+	}
+	return cell.Spec{
+		AgentID:     agent.ID,
+		HiveID:      agent.HiveID,
+		Repository:  hive.Repository,
+		Branch:      agent.Branch,
+		BaseBranch:  "",
+		CLI:         DefaultCLI,
+		Model:       model,
+		SessionRef:  agent.SessionRef,
+		MCPURL:      a.sup.opts.MCPURL,
+		MCPToken:    token,
+		Revision:    agent.Revision,
+		ReadOnly:    !role.Permissions.Publish,
+		ConfigFiles: configFiles,
+		LLMBaseURL:  a.sup.opts.LLMBaseURL,
+		LLMToken:    token,
+	}, nil
+}
+
+// activeMethodology reads the Hive's active version, falling back to Builtin
+// when the store has no methodology yet (or does not implement the contract).
+func (a *actor) activeMethodology(ctx context.Context, hiveID string) (domain.MethodologyManifest, []domain.MethodologyFile) {
+	if store, ok := a.sup.opts.Store.(MethodologyStore); ok {
+		m, files, err := store.ActiveMethodology(ctx, hiveID)
+		if err == nil {
+			return m.Manifest, files
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			a.sup.log.Warn("forager: read active methodology failed", "hive", hiveID, "error", err)
+		}
+	}
+	manifest, files := methodology.Builtin()
+	return manifest, files
+}
+
+// rolePrompt returns the role's prompt file content. A declared-but-missing
+// prompt is a methodology error, not a silently ignored file.
+func rolePrompt(files []domain.MethodologyFile, promptPath string) (string, error) {
+	if promptPath == "" {
+		return "", nil
+	}
+	for _, file := range files {
+		if file.Path == promptPath {
+			return file.Content, nil
+		}
+	}
+	return "", fmt.Errorf("forager: role prompt %q is not in the methodology files", promptPath)
 }
 
 // token mints one Agent-scoped MCP token per actor lifetime. The plaintext is

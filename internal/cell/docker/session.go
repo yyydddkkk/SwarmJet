@@ -21,14 +21,14 @@ type ACPClient interface {
 	Close() error
 }
 
-// Dialer starts `opencode acp` inside a container and returns a client. Tests
+// Dialer starts `omp acp` inside a container and returns a client. Tests
 // provide a fake that returns an in-process agent.
 type Dialer interface {
 	Dial(ctx context.Context, container, workdir string, env, argv []string, permission acp.PermissionHandler) (ACPClient, error)
 }
 
 // DockerDialer connects to the CLI with `docker exec -i`, always from the
-// workspace so OpenCode attaches its sessions to a stable cwd.
+// workspace so omp attaches its sessions to a stable cwd.
 type DockerDialer struct {
 	Binary string
 }

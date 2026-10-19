@@ -12,8 +12,9 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
-// setupCells and setupCLILogin mirror the contract's status blocks. The CLI
-// login task fills the second block through api.Config.CLILoginStatus.
+// setupCells mirrors the contract's Cells status block. The former CLI login
+// block is kept for the console contract but now only names the Cell CLI; the
+// login terminal and its /api/runtime routes were removed with the omp switch.
 type setupCells struct {
 	Enabled         bool   `json:"enabled"`
 	Image           string `json:"image"`
@@ -61,10 +62,7 @@ func (a *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 			Model:           a.cfg.CellsModel,
 			DockerAvailable: a.cfg.DockerAvailable != nil && a.cfg.DockerAvailable(),
 		},
-		CLILogin: setupCLILogin{CLI: "opencode"},
-	}
-	if a.cfg.CLILoginStatus != nil {
-		response.CLILogin.Available, response.CLILogin.LoggedIn = a.cfg.CLILoginStatus()
+		CLILogin: setupCLILogin{CLI: "omp"},
 	}
 	if a.cfg.Setup != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)

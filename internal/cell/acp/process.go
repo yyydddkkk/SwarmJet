@@ -74,7 +74,7 @@ func StartDockerExec(ctx context.Context, dockerBinary, container string, env, a
 
 // StartDockerExecIn is StartDockerExec with an explicit working directory
 // inside the container. A Cell must always start its CLI in /workspace because
-// OpenCode attaches sessions to the cwd.
+// omp attaches sessions to the cwd.
 func StartDockerExecIn(ctx context.Context, dockerBinary, container, workdir string, env, argv []string) (*Process, error) {
 	if container == "" {
 		return nil, errors.New("acp: docker exec requires a container name")
@@ -168,7 +168,7 @@ type DockerCell struct {
 	// Env is passed with `docker exec -e`. Keep credentials here rather than in
 	// the image, mirroring internal/agent's configuration snapshot.
 	Env []string
-	// Argv is the in-container command, for example {"opencode", "acp"}.
+	// Argv is the in-container command, for example {"omp", "acp"}.
 	Argv []string
 }
 

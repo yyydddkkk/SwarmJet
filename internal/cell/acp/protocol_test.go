@@ -6,15 +6,15 @@ import (
 	"testing"
 )
 
-// The JSON fixtures below were captured from opencode 1.18.31 while running the
-// spike (see docs/claude/spikes/opencode-driver.md). They contain no secrets.
+// The JSON fixtures below follow the ACP schema and the capability block that
+// oh-my-pi 18.12.2 returns from initialize. They contain no secrets.
 
 const initializeResultJSON = `{"protocolVersion":1,"agentCapabilities":{"loadSession":true,` +
 	`"mcpCapabilities":{"http":true,"sse":true},` +
 	`"promptCapabilities":{"embeddedContext":true,"image":true},` +
 	`"sessionCapabilities":{"close":{},"fork":{},"list":{},"resume":{}}},` +
-	`"authMethods":[{"description":"Run opencode auth login in the terminal","name":"Login with opencode","id":"opencode-login"}],` +
-	`"agentInfo":{"name":"OpenCode","version":"1.18.31"}}`
+	`"authMethods":[{"description":"Authenticate via the provider keys/OAuth state already configured under ~/.omp.","name":"Use existing local credentials","id":"agent"}],` +
+	`"agentInfo":{"name":"omp","title":"omp","version":"18.12.2"}}`
 
 const promptResultJSON = `{"stopReason":"end_turn","usage":{"inputTokens":3381,` +
 	`"outputTokens":3,"totalTokens":9536,"thoughtTokens":8,"cachedReadTokens":6144},"_meta":{}}`
@@ -23,7 +23,7 @@ const cancelledPromptResultJSON = `{"stopReason":"cancelled","_meta":{}}`
 
 // editPermissionParamsJSON is a session/request_permission for a file edit. Its
 // toolCall.content is an ARRAY (a diff), unlike the message chunks where content
-// is a single object. The toolCall was captured from opencode 1.18.31.
+// is a single object. This is the ACP shape omp emits.
 const editPermissionParamsJSON = `{"sessionId":"ses_edit_fixture",` +
 	`"toolCall":{"toolCallId":"719d5cb6-b5bb-4dd8-b408-240a01ad86b6","title":"/workspace/probe.txt",` +
 	`"kind":"edit","status":"pending","locations":[{"path":"/workspace/probe.txt"}],` +
@@ -68,7 +68,7 @@ func TestDecodeInitializeResult(t *testing.T) {
 	if res.AgentInfo == nil || res.AgentInfo.Name == "" || res.AgentInfo.Version == "" {
 		t.Fatalf("agentInfo = %+v, want name and version", res.AgentInfo)
 	}
-	if len(res.AuthMethods) != 1 || res.AuthMethods[0].ID != "opencode-login" {
+	if len(res.AuthMethods) != 1 || res.AuthMethods[0].ID != "agent" {
 		t.Fatalf("authMethods = %+v", res.AuthMethods)
 	}
 }
@@ -234,8 +234,8 @@ func TestNewSessionParamsAlwaysMarshalsMCPArray(t *testing.T) {
 		t.Fatalf("stdio MCP server not encoded: %s", raw)
 	}
 
-	// OpenCode rejects a stdio server that omits args/env, so both must always
-	// be encoded as arrays even when empty.
+	// ACP stdio MCP servers must always encode args/env as arrays even when
+	// empty; a strict agent may otherwise reject them as invalid params.
 	raw, err = json.Marshal(NewSessionParams{Cwd: "/workspace", McpServers: normalizeMCP([]MCPServer{{
 		Name:    "swarmjet",
 		Command: "python3",

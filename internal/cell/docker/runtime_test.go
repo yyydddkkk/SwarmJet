@@ -12,6 +12,7 @@ import (
 
 	"github.com/yyydddkkk/SwarmJet/internal/cell"
 	"github.com/yyydddkkk/SwarmJet/internal/cell/acp"
+	"github.com/yyydddkkk/SwarmJet/internal/cell/omp"
 )
 
 func startWithFake(t *testing.T, rt *Runtime, exec *fakeExecutor, dialer *fakeDialer, client *fakeACP, spec cell.Spec) cell.Session {
@@ -88,18 +89,30 @@ func TestStartCreatesContainerAndNewSession(t *testing.T) {
 	if record.container != "swarmjet-cell-agent-1" || record.workdir != "/workspace" {
 		t.Fatalf("dial target = %+v", record)
 	}
-	if strings.Join(record.argv, " ") != "opencode acp" {
-		t.Fatalf("argv = %v", record.argv)
+	if got := strings.Join(record.argv, " "); got != "omp acp --no-extensions --config "+omp.OverlayPath+" --config "+omp.ProjectConfigPath+" --model "+spec.Model {
+		t.Fatalf("argv = %q", got)
 	}
-	config, ok := envValue(record.env, "OPENCODE_CONFIG_CONTENT")
-	if !ok || !strings.Contains(config, `"model":"opencode/big-pickle"`) {
-		t.Fatalf("OPENCODE_CONFIG_CONTENT = %q", config)
+	if dir, ok := envValue(record.env, "PI_CODING_AGENT_DIR"); !ok || dir != omp.AgentDir {
+		t.Fatalf("PI_CODING_AGENT_DIR = %q", dir)
 	}
-	if auth, ok := envValue(record.env, "OPENCODE_AUTH_CONTENT"); !ok || auth != "auth-secret" {
-		t.Fatalf("OPENCODE_AUTH_CONTENT = %q", auth)
+	if token, ok := envValue(record.env, omp.TokenEnv); !ok || token != "llm-secret" {
+		t.Fatalf("%s = %q", omp.TokenEnv, token)
+	}
+	for _, entry := range record.env {
+		if strings.HasPrefix(entry, "OPENCODE_") {
+			t.Fatalf("OpenCode environment survived: %q", entry)
+		}
 	}
 	if home, _ := envValue(record.env, "HOME"); home != "/cell/home" {
 		t.Fatalf("HOME = %q", home)
+	}
+	writes := rt.ConfigWriter.(*fakeConfigWriter).snapshot()
+	if len(writes) != 1 {
+		t.Fatalf("ConfigWriter calls = %d, want 1", len(writes))
+	}
+	if writes[0]["methodology/config.yml"] != spec.ConfigFiles["methodology/config.yml"] ||
+		writes[0]["methodology/skills/example/SKILL.md"] != spec.ConfigFiles["methodology/skills/example/SKILL.md"] {
+		t.Fatalf("ConfigFiles written = %+v", writes[0])
 	}
 
 	news := client.newSessionCalls()
@@ -141,7 +154,7 @@ func TestStartFallsBackWhenLoadFails(t *testing.T) {
 	client := &fakeACP{
 		initResult: acp.InitializeResult{AgentCapabilities: acp.AgentCapabilities{LoadSession: true}},
 		newResult:  acp.NewSessionResult{SessionID: "ses-new"},
-		loadErr:    errors.New("session/load rejected auth-secret"),
+		loadErr:    errors.New("session/load rejected llm-secret"),
 	}
 	spec := testSpec()
 	spec.SessionRef = "ses-old"
@@ -155,7 +168,7 @@ func TestStartFallsBackWhenLoadFails(t *testing.T) {
 	if !strings.Contains(logs.String(), "session/load failed") {
 		t.Fatalf("fallback was not logged: %s", logs.String())
 	}
-	if strings.Contains(logs.String(), "auth-secret") {
+	if strings.Contains(logs.String(), "llm-secret") {
 		t.Fatalf("credential leaked into logs: %s", logs.String())
 	}
 }
@@ -300,31 +313,31 @@ func TestSecretsNeverAppearInErrorsOrLogs(t *testing.T) {
 
 	exec.setHandler(func(args []string, _ []string) (Result, error) {
 		if len(args) > 0 && args[0] == "create" {
-			return Result{ExitCode: 1, Stderr: []byte("failed for auth-secret and mcp-secret")}, nil
+			return Result{ExitCode: 1, Stderr: []byte("failed for llm-secret and mcp-secret")}, nil
 		}
 		return dockerHandler(false, false)(args, nil)
 	})
 	if _, err := rt.Start(context.Background(), spec); err == nil {
 		t.Fatal("expected create failure")
-	} else if strings.Contains(err.Error(), "auth-secret") || strings.Contains(err.Error(), "mcp-secret") {
+	} else if strings.Contains(err.Error(), "llm-secret") || strings.Contains(err.Error(), "mcp-secret") {
 		t.Fatalf("secret leaked into error: %v", err)
 	}
 
 	exec.setHandler(dockerHandler(false, false))
-	dialer.err = errors.New("docker exec failed with auth-secret")
+	dialer.err = errors.New("docker exec failed with llm-secret")
 	if _, err := rt.Start(context.Background(), spec); err == nil {
 		t.Fatal("expected dial failure")
-	} else if strings.Contains(err.Error(), "auth-secret") {
+	} else if strings.Contains(err.Error(), "llm-secret") {
 		t.Fatalf("secret leaked into dial error: %v", err)
 	}
 
 	dialer.err = nil
-	client.loadErr = errors.New("cannot load auth-secret")
+	client.loadErr = errors.New("cannot load llm-secret")
 	spec.SessionRef = "ses-old"
 	if _, err := rt.Start(context.Background(), spec); err != nil {
 		t.Fatalf("fallback start: %v", err)
 	}
-	for _, secret := range []string{"auth-secret", "mcp-secret"} {
+	for _, secret := range []string{"llm-secret", "mcp-secret"} {
 		if strings.Contains(logs.String(), secret) {
 			t.Fatalf("secret %q leaked into logs: %s", secret, logs.String())
 		}
@@ -398,9 +411,12 @@ func TestStartValidatesSpec(t *testing.T) {
 		"base branch":  func(s *cell.Spec) { s.BaseBranch = "a..b" },
 		"model":        func(s *cell.Spec) { s.Model = "" },
 		"cli":          func(s *cell.Spec) { s.CLI = "codex" },
-		"env name":     func(s *cell.Spec) { s.Env["bad name"] = "x" },
-		"reserved env": func(s *cell.Spec) { s.Env["HOME"] = "/tmp" },
+		"env name":     func(s *cell.Spec) { s.Env = map[string]string{"bad name": "x"} },
+		"reserved env": func(s *cell.Spec) { s.Env = map[string]string{"HOME": "/tmp"} },
 		"mcp url":      func(s *cell.Spec) { s.MCPURL = "ftp://example.com" },
+		"llm url":      func(s *cell.Spec) { s.LLMBaseURL = "ftp://example.com" },
+		"config path":  func(s *cell.Spec) { s.ConfigFiles = map[string]string{"../escape": "x"} },
+		"revision":     func(s *cell.Spec) { s.Revision = "HEAD" },
 	}
 	for name, mutate := range cases {
 		spec := testSpec()

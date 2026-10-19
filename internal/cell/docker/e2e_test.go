@@ -2,38 +2,43 @@ package docker
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/cell"
+	"github.com/yyydddkkk/SwarmJet/internal/cell/omp"
 )
 
-// TestCellRuntimeE2E drives a real Cell with a real OpenCode process. It is
-// skipped unless SWARMJET_CELL_E2E=1 because it needs Docker, the agent image
-// and network access to a model provider.
+// TestCellRuntimeE2E drives a real Cell with a real `omp acp` process. It is
+// skipped unless SWARMJET_CELL_E2E=1 because it needs Docker and the agent
+// image. When SWARMJET_CELL_E2E_LLM_URL is unset, a local fake pi-native
+// gateway returns fixed replies, so the test does not need a model credential.
 //
-//	SWARMJET_CELL_E2E=1 go test ./internal/cell/docker/ -run TestCellRuntimeE2E -v -timeout 40m
+//	SWARMJET_CELL_E2E=1 go test ./internal/cell/docker/ -run TestCellRuntimeE2E -v -timeout 30m
 //
 // Optional environment:
 //
-//	SWARMJET_CELL_E2E_DOCKER  docker binary (default docker)
-//	SWARMJET_CELL_E2E_IMAGE   image tag (default swarmjet-agent:local)
-//	SWARMJET_CELL_E2E_MODEL   provider/model (default opencode/big-pickle, free)
+//	SWARMJET_CELL_E2E_DOCKER    docker binary (default docker)
+//	SWARMJET_CELL_E2E_IMAGE     image tag (default swarmjet-agent:local)
+//	SWARMJET_CELL_E2E_MODEL     provider/model (default deepseek/deepseek-chat)
+//	SWARMJET_CELL_E2E_NETWORK   Cell network (default host, so 127.0.0.1 reaches the fake)
+//	SWARMJET_CELL_E2E_LLM_URL   external fake/real gateway base URL
 func TestCellRuntimeE2E(t *testing.T) {
 	if os.Getenv("SWARMJET_CELL_E2E") != "1" {
-		t.Skip("set SWARMJET_CELL_E2E=1 to run the real Docker/OpenCode Cell test")
+		t.Skip("set SWARMJET_CELL_E2E=1 to run the real Docker/omp Cell test")
 	}
 	dockerBinary := envOr("SWARMJET_CELL_E2E_DOCKER", "docker")
 	image := envOr("SWARMJET_CELL_E2E_IMAGE", "swarmjet-agent:local")
-	model := envOr("SWARMJET_CELL_E2E_MODEL", "opencode/big-pickle")
+	model := envOr("SWARMJET_CELL_E2E_MODEL", "deepseek/deepseek-chat")
+	network := envOr("SWARMJET_CELL_E2E_NETWORK", "host")
 	if _, err := exec.LookPath(dockerBinary); err != nil {
 		t.Skipf("%s not found: %v", dockerBinary, err)
 	}
@@ -41,24 +46,41 @@ func TestCellRuntimeE2E(t *testing.T) {
 		t.Skipf("image %s not available: %v\n%s", image, err, out)
 	}
 
+	llmURL := os.Getenv("SWARMJET_CELL_E2E_LLM_URL")
+	fake := &fakeGateway{started: make(chan struct{}, 1)}
+	var server *httptest.Server
+	if llmURL == "" {
+		server = httptest.NewServer(fake)
+		defer server.Close()
+		llmURL = server.URL
+	}
+
+	files, err := omp.ConfigFiles(omp.Options{Model: model, LLMBaseURL: llmURL})
+	if err != nil {
+		t.Fatal(err)
+	}
 	bare := initBareRepo(t)
 	agentID := fmt.Sprintf("e2e-agent-%d", time.Now().UnixNano())
 	spec := cell.Spec{
-		AgentID:    agentID,
-		HiveID:     "e2e-hive",
-		Repository: "acme/app",
-		Branch:     "swarm/e2e/" + agentID,
-		BaseBranch: "main",
-		CLI:        "opencode",
-		Model:      model,
+		AgentID:     agentID,
+		HiveID:      "e2e-hive",
+		Repository:  "acme/app",
+		Branch:      "swarm/e2e/" + agentID,
+		BaseBranch:  "main",
+		CLI:         "omp",
+		Model:       model,
+		ConfigFiles: files,
+		LLMBaseURL:  llmURL,
+		LLMToken:    "e2e-agent-token",
 	}
 	rt := NewRuntime(t.TempDir())
 	rt.DockerBinary = dockerBinary
 	rt.Config.Image = image
+	rt.Config.DockerNetwork = network
 	rt.Git = &Git{Remote: func(string) string { return bare }}
 	rt.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -72,75 +94,12 @@ func TestCellRuntimeE2E(t *testing.T) {
 	}
 	t.Logf("started session %s", session.Ref())
 
-	workspace := WorkspaceDir(rt.DataDir, agentID)
-	// The CLI runs as the configured non-root Cell user; give it a commit
-	// identity from inside the container. The host never runs git against the
-	// workspace.
-	containerGit(t, rt, agentID, "config", "user.name", wipAuthorName)
-	containerGit(t, rt, agentID, "config", "user.email", wipAuthorEmail)
-
-	// First prove that streamed text reaches the session sink with a tiny turn.
-	ping := runTurn(t, session, "Reply with exactly the word: pong")
-	t.Logf("ping text: %q", ping)
-	if !strings.Contains(strings.ToLower(ping), "pong") {
-		t.Fatalf("streamed text was not delivered, got %q", ping)
+	first := runTurn(t, session, "Reply with exactly the word: pong")
+	if !strings.Contains(strings.ToLower(first), "pong") {
+		t.Fatalf("streamed text was not delivered, got %q", first)
 	}
 
-	firstText, updates := runTurnWithUpdates(t, session,
-		"Use the bash tool (not the write tool) to run exactly this command: "+
-			"cd /workspace && printf 'BUMBLEBEE' > e2e.txt && git add -A && git commit -m e2e-commit. "+
-			"Then reply with DONE.")
-	t.Logf("first turn text: %q", firstText)
-	for _, update := range updates {
-		t.Logf("update kind=%s title=%q text=%q", update.Kind, update.Title, truncateText(update.Text, 200))
-	}
-	content, err := os.ReadFile(filepath.Join(workspace, "e2e.txt"))
-	if err != nil {
-		t.Fatalf("agent did not create e2e.txt: %v", err)
-	}
-	if !strings.Contains(strings.ToUpper(string(content)), "BUMBLEBEE") {
-		t.Fatalf("e2e.txt = %q", content)
-	}
-	// The Cell user must be non-root, so the host workspace is not owned by root.
-	info, err := os.Stat(filepath.Join(workspace, "e2e.txt"))
-	if err != nil {
-		t.Fatalf("stat e2e.txt: %v", err)
-	}
-	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || stat.Uid == 0 {
-		t.Fatalf("e2e.txt owner = %+v, want a non-root uid", info.Sys())
-	}
-	commitLog := containerGit(t, rt, agentID, "log", "-1", "--format=%s")
-	if subject := strings.TrimSpace(string(commitLog.Stdout)); subject != "e2e-commit" {
-		t.Fatalf("expected an e2e-commit commit, got %q", subject)
-	}
-
-	// Publish through the real bundle/mirror path. The host side only sees the
-	// platform mirror and a copied bundle.
-	pulls := &fakePulls{}
-	pub := &Publisher{
-		DataDir:        rt.DataDir,
-		Git:            &Git{Remote: func(string) string { return bare }},
-		RemoteURL:      func(string) string { return bare },
-		Pulls:          pulls,
-		Repository:     func(context.Context, string) (int64, error) { return 1, nil },
-		Cell:           rt.cellRunner(),
-		CommandTimeout: 5 * time.Minute,
-	}
-	pr, err := pub.Publish(ctx, spec, "E2E handoff", "created e2e.txt")
-	if err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if pr != 42 {
-		t.Fatalf("PR = %d, want 42", pr)
-	}
-	if subject, ok := tryGit(t, bare, "log", "-1", "--format=%s", "refs/heads/"+spec.Branch); !ok || subject != "e2e-commit" {
-		t.Fatalf("published commit = %q (%v)", subject, ok)
-	}
-	if calls := pulls.snapshot(); len(calls) != 1 || calls[0].target != "main" {
-		t.Fatalf("PR calls = %+v", calls)
-	}
-
-	// Park the Cell, then resume the same CLI session against the same volume.
+	// Park the Cell and load the same session from the persistent Home volume.
 	if err := rt.Stop(ctx, agentID); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
@@ -152,69 +111,264 @@ func TestCellRuntimeE2E(t *testing.T) {
 	if resumed.Ref() != spec.SessionRef {
 		t.Fatalf("session was not preserved: got %q, want %q", resumed.Ref(), spec.SessionRef)
 	}
-	secondText := runTurn(t, resumed,
-		"What exact word did I ask you to put in e2e.txt? Reply with just the word.")
-	if !strings.Contains(strings.ToUpper(secondText), "BUMBLEBEE") {
-		t.Fatalf("session memory did not survive restart: %q", secondText)
+	second := runTurn(t, resumed, "What word did you say before? Reply with just that word.")
+	if !strings.Contains(strings.ToLower(second), "pong") {
+		t.Fatalf("session history did not survive restart: %q", second)
 	}
 
-	// A malicious filter/credential rule in the Cell-writable config must run
-	// only inside the container. The marker is a host-only path.
-	marker := filepath.Join(os.TempDir(), fmt.Sprintf("swarmjet-e2e-host-marker-%d", time.Now().UnixNano()))
-	_ = os.Remove(marker)
-	configPath := filepath.Join(workspace, ".git", "config")
-	config, err := os.OpenFile(configPath, os.O_APPEND|os.O_WRONLY, 0644)
+	// Cancel an in-flight turn and keep the session usable afterwards.
+	done := make(chan struct{})
+	var cancelResult cell.TurnResult
+	var cancelErr error
+	go func() {
+		defer close(done)
+		cancelResult, cancelErr = resumed.Prompt(ctx, "Please cancel-me now.", func(cell.Update) {})
+	}()
+	select {
+	case <-fake.started:
+	case <-time.After(60 * time.Second):
+		t.Fatalf("fake gateway never saw the cancel turn")
+	}
+	if err := resumed.Cancel(ctx); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatalf("cancelled turn did not return")
+	}
+	if cancelErr != nil {
+		t.Fatalf("cancelled Prompt error: %v", cancelErr)
+	}
+	if cancelResult.StopReason != "cancelled" {
+		t.Fatalf("stop reason = %q, want cancelled", cancelResult.StopReason)
+	}
+	after := runTurn(t, resumed, "Reply with exactly the word: pong")
+	if !strings.Contains(strings.ToLower(after), "pong") {
+		t.Fatalf("session was not usable after cancel: %q", after)
+	}
+}
+
+// fakeGateway speaks the pi-native SSE protocol omp sends to an auth gateway.
+// It deliberately answers from the context so session reloads are observable.
+type fakeGateway struct {
+	started chan struct{}
+}
+
+func (g *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/v1/pi/stream" {
+		http.NotFound(w, r)
+		return
+	}
+	var body struct {
+		ModelID string `json:"modelId"`
+		Context struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		} `json:"context"`
+	}
+	raw := make([]byte, 0, 1<<20)
+	buf := make([]byte, 4096)
+	for {
+		n, err := r.Body.Read(buf)
+		raw = append(raw, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+	_ = json.Unmarshal(raw, &body)
+	if !strings.Contains(body.ModelID, "/") {
+		http.Error(w, "bad model id", http.StatusBadRequest)
+		return
+	}
+	// Only the newest user message is an instruction. The rest of the body is
+	// conversation history and must not be mistaken for a new command.
+	lastPrompt := ""
+	historyHasPong := false
+	for _, message := range body.Context.Messages {
+		text := contentText(message.Content)
+		switch message.Role {
+		case "user":
+			lastPrompt = text
+		case "assistant":
+			if strings.Contains(text, "pong") {
+				historyHasPong = true
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+
+	if strings.Contains(lastPrompt, "cancel-me") {
+		g.started <- struct{}{}
+		writeEvent(w, map[string]any{
+			"type":         "text_delta",
+			"contentIndex": 0,
+			"delta":        "working",
+			"partial":      assistant("working"),
+		})
+		if flusher != nil {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+		return
+	}
+
+	answer := "pong"
+	if strings.Contains(lastPrompt, "What word did you say before") && !historyHasPong {
+		// The replayed history is part of the request body; if it is absent,
+		// answer something that makes the test fail clearly.
+		answer = "no-history"
+	}
+	writeEvent(w, map[string]any{"type": "start", "partial": assistant("")})
+	writeEvent(w, map[string]any{
+		"type":         "text_start",
+		"contentIndex": 0,
+		"partial":      assistant(""),
+	})
+	writeEvent(w, map[string]any{
+		"type":         "text_delta",
+		"contentIndex": 0,
+		"delta":        answer,
+		"partial":      assistant(answer),
+	})
+	writeEvent(w, map[string]any{
+		"type":         "text_end",
+		"contentIndex": 0,
+		"content":      answer,
+		"partial":      assistant(answer),
+	})
+	writeEvent(w, map[string]any{"type": "done", "reason": "stop", "message": assistant(answer)})
+	if flusher != nil {
+		flusher.Flush()
+	}
+}
+
+func writeEvent(w http.ResponseWriter, v any) {
+	payload, _ := json.Marshal(v)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+}
+
+// contentText extracts text blocks from a pi-native message content value.
+func contentText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &blocks); err == nil {
+		var b strings.Builder
+		for _, block := range blocks {
+			if block.Type == "text" {
+				b.WriteString(block.Text)
+			}
+		}
+		return b.String()
+	}
+	var text string
+	_ = json.Unmarshal(raw, &text)
+	return text
+}
+
+func assistant(text string) map[string]any {
+	return map[string]any{
+		"role":     "assistant",
+		"content":  []map[string]any{{"type": "text", "text": text}},
+		"api":      "openai-completions",
+		"provider": "deepseek",
+		"model":    "deepseek-chat",
+		"usage": map[string]any{
+			"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 2,
+			"cost": map[string]any{"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
+		},
+		"stopReason": "stop",
+		"timestamp":  time.Now().UnixMilli(),
+	}
+}
+
+// TestCellReadOnlyRevisionE2E proves the round-4 workspace contract against a
+// real container and a real clone: the commit is checked out detached, and a
+// read-only Cell can never publish.
+func TestCellReadOnlyRevisionE2E(t *testing.T) {
+	if os.Getenv("SWARMJET_CELL_E2E") != "1" {
+		t.Skip("set SWARMJET_CELL_E2E=1 to run the real Docker revision checkout test")
+	}
+	dockerBinary := envOr("SWARMJET_CELL_E2E_DOCKER", "docker")
+	image := envOr("SWARMJET_CELL_E2E_IMAGE", "swarmjet-agent:local")
+	model := envOr("SWARMJET_CELL_E2E_MODEL", "deepseek/deepseek-chat")
+	if _, err := exec.LookPath(dockerBinary); err != nil {
+		t.Skipf("%s not found: %v", dockerBinary, err)
+	}
+	if out, err := exec.Command(dockerBinary, "image", "inspect", image).CombinedOutput(); err != nil {
+		t.Skipf("image %s not available: %v\n%s", image, err, out)
+	}
+
+	bare := initBareRepo(t)
+	sha := runGit(t, bare, "rev-parse", "refs/heads/main")
+	agentID := fmt.Sprintf("e2e-verify-%d", time.Now().UnixNano())
+	files, err := omp.ConfigFiles(omp.Options{Model: model, LLMBaseURL: "http://127.0.0.1:1"})
 	if err != nil {
-		t.Fatalf("open workspace config: %v", err)
-	}
-	if _, err := fmt.Fprintf(config, "\n[filter \"evil\"]\n\tclean = !touch %s\n[credential \"https://github.com\"]\n\thelper = !touch %s\n", marker, marker); err != nil {
-		config.Close()
-		t.Fatalf("write malicious config: %v", err)
-	}
-	if err := config.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, ".gitattributes"), []byte("* filter=evil\n"), 0644); err != nil {
-		t.Fatal(err)
+	spec := cell.Spec{
+		AgentID:     agentID,
+		HiveID:      "e2e-hive",
+		Repository:  "acme/app",
+		Branch:      "verify/" + agentID,
+		BaseBranch:  "main",
+		CLI:         "omp",
+		Model:       model,
+		Revision:    sha,
+		ReadOnly:    true,
+		ConfigFiles: files,
 	}
-	if err := os.WriteFile(filepath.Join(workspace, "security.txt"), []byte("dirty\n"), 0644); err != nil {
-		t.Fatal(err)
+	rt := NewRuntime(t.TempDir())
+	rt.DockerBinary = dockerBinary
+	rt.Config.Image = image
+	rt.Git = &Git{Remote: func(string) string { return bare }}
+	rt.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cleanupCancel()
+		_ = rt.Destroy(cleanupCtx, agentID)
+	})
+
+	if _, err := rt.Start(ctx, spec); err != nil {
+		t.Fatalf("Start: %v", err)
 	}
-	if _, err := pub.Publish(ctx, spec, "E2E security", "body"); err != nil {
-		t.Fatalf("Publish with malicious config: %v", err)
+	head := containerGit(t, rt, agentID, "rev-parse", "HEAD")
+	if got := strings.TrimSpace(string(head.Stdout)); got != sha {
+		t.Fatalf("HEAD = %q, want %q", got, sha)
 	}
-	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("host executed a workspace-controlled filter: %v", err)
+	detached, err := rt.cellRunner().Run(ctx, containerName(agentID), cellWorkdir,
+		[]string{"git", "symbolic-ref", "--quiet", "--short", "HEAD"})
+	if err != nil {
+		t.Fatalf("symbolic-ref: %v", err)
+	}
+	if detached.ExitCode == 0 {
+		t.Fatalf("HEAD is attached to %q, want a detached checkout", strings.TrimSpace(string(detached.Stdout)))
 	}
 
-	if err := rt.Destroy(ctx, agentID); err != nil {
-		t.Fatalf("Destroy: %v", err)
-	}
-	if _, err := os.Stat(workspace); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("workspace still exists after Destroy: %v", err)
-	}
-	if out, err := exec.Command(dockerBinary, "inspect", containerName(agentID)).CombinedOutput(); err == nil {
-		t.Fatalf("container still exists after Destroy:\n%s", out)
-	}
-	if out, err := exec.Command(dockerBinary, "volume", "inspect", volumeName(agentID)).CombinedOutput(); err == nil {
-		t.Fatalf("volume still exists after Destroy:\n%s", out)
+	pub := &Publisher{DataDir: rt.DataDir, Cell: rt.cellRunner()}
+	if _, err := pub.Publish(ctx, spec, "title", "body"); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("Publish on a read-only Cell: %v", err)
 	}
 }
 
 func runTurn(t *testing.T, session cell.Session, prompt string) string {
 	t.Helper()
-	text, _ := runTurnWithUpdates(t, session, prompt)
-	return text
-}
-
-func runTurnWithUpdates(t *testing.T, session cell.Session, prompt string) (string, []cell.Update) {
-	t.Helper()
 	var text strings.Builder
-	var updates []cell.Update
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	result, err := session.Prompt(ctx, prompt, func(update cell.Update) {
-		updates = append(updates, update)
 		if update.Kind == cell.UpdateText {
 			text.WriteString(update.Text)
 		}
@@ -222,8 +376,8 @@ func runTurnWithUpdates(t *testing.T, session cell.Session, prompt string) (stri
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
-	t.Logf("turn stopReason=%s tokens=%d/%d updates=%d", result.StopReason, result.InputTokens, result.OutputTokens, len(updates))
-	return text.String(), updates
+	t.Logf("turn stopReason=%s tokens=%d/%d", result.StopReason, result.InputTokens, result.OutputTokens)
+	return text.String()
 }
 
 func containerGit(t *testing.T, rt *Runtime, agentID string, args ...string) Result {

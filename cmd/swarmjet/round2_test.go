@@ -347,7 +347,7 @@ func TestRound2Loop(t *testing.T) {
 		Store:     s,
 		Runtime:   runtime,
 		Publisher: publisher,
-		Model:     "opencode/big-pickle",
+		Model:     "deepseek/deepseek-chat",
 		Logger:    logger,
 	})
 	if err != nil {
@@ -550,18 +550,5 @@ func TestCellsRequireDockerSocket(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "启用 Cell 需要叠加 deploy/compose.cells.yaml") {
 		t.Fatalf("error does not point at the cells overlay: %v", err)
-	}
-}
-
-func TestCellCLIEnvReadsOptionalAuth(t *testing.T) {
-	t.Setenv("OPENCODE_AUTH_CONTENT", "")
-	env, err := cellCLIEnv(context.Background(), domain.Hive{})
-	if err != nil || env != nil {
-		t.Fatalf("empty auth = %v, %v", env, err)
-	}
-	t.Setenv("OPENCODE_AUTH_CONTENT", `{"token":"placeholder"}`)
-	env, err = cellCLIEnv(context.Background(), domain.Hive{})
-	if err != nil || env["OPENCODE_AUTH_CONTENT"] != `{"token":"placeholder"}` {
-		t.Fatalf("auth env = %v, %v", env, err)
 	}
 }

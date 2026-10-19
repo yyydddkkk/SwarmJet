@@ -12,7 +12,7 @@ import (
 )
 
 // fakeAgent is an in-process ACP agent used to exercise the client without an
-// OpenCode install, a container or a model.
+// omp install, a container or a model.
 type fakeAgent struct {
 	t    *testing.T
 	conn net.Conn
@@ -138,7 +138,7 @@ func (a *fakeAgent) handlePrompt(msg rpcMessage) {
 			},
 		}
 		if strings.Contains(text, "edit") {
-			// The captured OpenCode edit request, whose tool call content is an array.
+			// An ACP edit request whose tool call content is an array.
 			params = json.RawMessage(editPermissionParamsJSON)
 		}
 		a.sendRequest(reqID, MethodRequestPermission, params)

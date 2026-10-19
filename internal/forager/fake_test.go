@@ -34,6 +34,10 @@ type fakeStore struct {
 	tokenErr      error
 	revokeErr     error
 	transitionErr error
+
+	methodology      *domain.Methodology
+	methodologyFiles []domain.MethodologyFile
+	methodologyErr   error
 }
 
 func newFakeStore(now func() time.Time) *fakeStore {
@@ -109,6 +113,18 @@ func (s *fakeStore) Hive(_ context.Context, id string) (domain.Hive, error) {
 		return domain.Hive{}, domain.ErrNotFound
 	}
 	return h, nil
+}
+
+func (s *fakeStore) ActiveMethodology(_ context.Context, _ string) (domain.Methodology, []domain.MethodologyFile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.methodologyErr != nil {
+		return domain.Methodology{}, nil, s.methodologyErr
+	}
+	if s.methodology == nil {
+		return domain.Methodology{}, nil, domain.ErrNotFound
+	}
+	return *s.methodology, append([]domain.MethodologyFile(nil), s.methodologyFiles...), nil
 }
 
 func (s *fakeStore) Hives(context.Context) ([]domain.Hive, error) {

@@ -19,8 +19,7 @@ import (
 // signature is identical to the store method of the same name, including the
 // round-2 additions (SetAgentSession, SetAgentPR, Unhandled, CreateAgentToken
 // and RevokeAgentTokens).
-type Store interface {
-	// Agent reads one Agent, including SessionRef and Handoff.
+type Store interface { // Agent reads one Agent, including SessionRef and Handoff.
 	Agent(ctx context.Context, id string) (domain.Agent, error)
 	// Hive reads one Hive, with the documented config defaults applied.
 	Hive(ctx context.Context, id string) (domain.Hive, error)
@@ -48,4 +47,11 @@ type Store interface {
 	// once. RevokeAgentTokens invalidates every token minted for the Agent.
 	CreateAgentToken(ctx context.Context, agentID string) (plaintext string, t domain.Token, err error)
 	RevokeAgentTokens(ctx context.Context, agentID string) error
+}
+
+// MethodologyStore is implemented by *store.Store when the methodology task
+// lands. The supervisor type-asserts the Store so Cell wiring compiles and runs
+// (with Builtin) before that method exists.
+type MethodologyStore interface {
+	ActiveMethodology(ctx context.Context, hiveID string) (domain.Methodology, []domain.MethodologyFile, error)
 }
