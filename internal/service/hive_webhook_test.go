@@ -2,16 +2,57 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 	"github.com/yyydddkkk/SwarmJet/internal/router"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
+
+// scanTestStore creates an isolated schema and applies the full migration
+// chain, so these tests exercise the real Hive store.
+func scanTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	root, err := store.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(root.Close)
+	b := make([]byte, 8)
+	if _, err = rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	schema := "service_test_" + hex.EncodeToString(b)
+	if _, err = root.Pool.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = root.Pool.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE") })
+	config := root.Pool.Config()
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	s := &store.Store{Pool: pool}
+	if err = s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
 
 // webhookTestStore is a migrated test schema plus a real River client, so
 // Router.SendMessage can insert its delivery job in the same transaction.
@@ -71,21 +112,19 @@ func TestGitHubWebhookRoutesHiveRepositoryToRouter(t *testing.T) {
 	}
 }
 
-func TestGitHubWebhookWithoutHiveKeepsLegacyPath(t *testing.T) {
+func TestGitHubWebhookWithoutHiveIsIgnored(t *testing.T) {
 	s := webhookTestStore(t)
 	ctx := context.Background()
 	svc := &Service{Store: s}
 	job := jobs.Webhook{Provider: "github", DeliveryID: "delivery-legacy-1", EventType: "issues", Payload: githubIssuePayload("acme/unknown", 7)}
 
-	decision, routed, err := svc.routeHiveDelivery(ctx, job)
+	decision, err := svc.routeHiveDelivery(ctx, job)
 	if err != nil {
 		t.Fatalf("routeHiveDelivery: %v", err)
 	}
-	if routed {
-		t.Fatalf("unknown repository was routed to the Hive Router: %+v", decision)
+	if decision.Action != router.ActionIgnored || decision.Reason != "no Hive for repository" {
+		t.Fatalf("decision = %+v, want ignored for missing Hive", decision)
 	}
-	// The legacy scan has no projects configured, so this stays a no-op and,
-	// importantly, does not create any Hive message.
 	if err := svc.HandleWebhookJob(ctx, job); err != nil {
 		t.Fatalf("HandleWebhookJob: %v", err)
 	}
@@ -102,12 +141,12 @@ func TestGitHubWebhookHiveRepositorySkipsLegacyScanForUnmodelledEvent(t *testing
 	}
 	svc := &Service{Store: s}
 	job := jobs.Webhook{Provider: "github", DeliveryID: "delivery-ping-1", EventType: "ping", Payload: []byte(`{"zen":"hi","repository":{"id":4242,"full_name":"acme/hive"}}`)}
-	decision, routed, err := svc.routeHiveDelivery(ctx, job)
+	decision, err := svc.routeHiveDelivery(ctx, job)
 	if err != nil {
 		t.Fatalf("routeHiveDelivery: %v", err)
 	}
-	if !routed || decision.Action != router.ActionIgnored {
-		t.Fatalf("decision = %+v, routed = %v", decision, routed)
+	if decision.Action != router.ActionIgnored {
+		t.Fatalf("decision = %+v, want ignored", decision)
 	}
 	if err := svc.HandleWebhookJob(ctx, job); err != nil {
 		t.Fatalf("HandleWebhookJob: %v", err)

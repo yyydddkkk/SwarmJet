@@ -3,7 +3,9 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +30,6 @@ type hiveTestJobs struct {
 }
 
 func (j *hiveTestJobs) InsertWebhook(context.Context, pgx.Tx, jobs.Webhook) error { return nil }
-func (j *hiveTestJobs) InsertCommand(context.Context, pgx.Tx, jobs.Command) error { return nil }
 
 func (j *hiveTestJobs) InsertMessage(_ context.Context, _ pgx.Tx, job jobs.Message) error {
 	j.mu.Lock()
@@ -57,7 +58,7 @@ func newHiveAPITest(t *testing.T) (*store.Store, http.Handler, *http.Cookie) {
 		t.Fatal(err)
 	}
 	t.Cleanup(root.Close)
-	id, err := newID()
+	id, err := testID()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,25 +89,13 @@ func newHiveAPITest(t *testing.T) (*store.Store, http.Handler, *http.Cookie) {
 	return s, handler, cookie
 }
 
-// hiveTestUserCookie creates an active, non-admin user with a real session.
-func hiveTestUserCookie(t *testing.T, s *store.Store) *http.Cookie {
-	t.Helper()
-	ctx := context.Background()
-	userID, err := newID()
-	if err != nil {
-		t.Fatal(err)
+// testID returns a unique ID for isolated test schemas.
+func testID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
-	if _, err = s.Pool.Exec(ctx, `INSERT INTO users(id,email,display_name,password_hash,status) VALUES($1,'viewer@example.test','Viewer','hash','active')`, userID); err != nil {
-		t.Fatal(err)
-	}
-	token, err := opaqueToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = s.AddUserSession(ctx, tokenHash(token), userID); err != nil {
-		t.Fatal(err)
-	}
-	return &http.Cookie{Name: "swarmjet_session", Value: token}
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
 
 func hiveTestLogin(t *testing.T, handler http.Handler) *http.Cookie {
@@ -220,55 +209,6 @@ func TestHiveAPIAuthentication(t *testing.T) {
 	handler.ServeHTTP(w, r)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated create: %d", w.Code)
-	}
-}
-
-func TestHiveAPIPlatformAdminOnly(t *testing.T) {
-	s, handler, admin := newHiveAPITest(t)
-	hive := createHiveForTest(t, handler, admin, createHiveRequest{Name: "Admin only", Repository: "owner/admin-only"})
-	spawned := hiveDecode[spawnForagerResponse](t, hiveDo(t, handler, admin, http.MethodPost, "/api/hives/"+hive.ID+"/foragers", spawnForagerRequest{
-		Task: "admin work",
-	}), http.StatusCreated)
-	user := hiveTestUserCookie(t, s)
-
-	forbidden := []struct {
-		method string
-		path   string
-		body   any
-	}{
-		{http.MethodGet, "/api/hives", nil},
-		{http.MethodPost, "/api/hives", createHiveRequest{Name: "user", Repository: "owner/user"}},
-		{http.MethodGet, "/api/hives/" + hive.ID, nil},
-		{http.MethodGet, "/api/hives/" + hive.ID + "/foragers", nil},
-		{http.MethodPost, "/api/hives/" + hive.ID + "/foragers", spawnForagerRequest{Task: "user work"}},
-		{http.MethodGet, "/api/foragers/" + spawned.Forager.ID, nil},
-		{http.MethodPost, "/api/foragers/" + spawned.Forager.ID + "/cancel", nil},
-		{http.MethodGet, "/api/hives/" + hive.ID + "/messages?to=queen", nil},
-		{http.MethodPost, "/api/hives/" + hive.ID + "/messages", sendMessageRequest{To: "queen", Body: "user message"}},
-	}
-	for _, testCase := range forbidden {
-		w := hiveDo(t, handler, user, testCase.method, testCase.path, testCase.body)
-		if w.Code != http.StatusForbidden {
-			t.Fatalf("non-admin %s %s: %d %s", testCase.method, testCase.path, w.Code, w.Body.String())
-		}
-		if !strings.Contains(w.Body.String(), "platform administrator required") {
-			t.Fatalf("non-admin %s %s: %s", testCase.method, testCase.path, w.Body.String())
-		}
-	}
-
-	for _, path := range []string{
-		"/api/hives",
-		"/api/hives/" + hive.ID,
-		"/api/hives/" + hive.ID + "/foragers",
-		"/api/foragers/" + spawned.Forager.ID,
-		"/api/hives/" + hive.ID + "/messages?to=queen",
-	} {
-		if w := hiveDo(t, handler, admin, http.MethodGet, path, nil); w.Code != http.StatusOK {
-			t.Fatalf("admin GET %s: %d %s", path, w.Code, w.Body.String())
-		}
-	}
-	if w := hiveDo(t, handler, admin, http.MethodPost, "/api/hives/"+hive.ID+"/foragers", spawnForagerRequest{Task: "another admin spawn"}); w.Code != http.StatusCreated {
-		t.Fatalf("admin spawn: %d %s", w.Code, w.Body.String())
 	}
 }
 

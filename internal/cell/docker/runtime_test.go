@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-
-	"github.com/yyydddkkk/SwarmJet/internal/agent"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -58,7 +56,7 @@ func TestStartCreatesContainerAndNewSession(t *testing.T) {
 		"--pids-limit", "128",
 		"--cap-drop=ALL",
 		"--security-opt=no-new-privileges",
-		"--user", agent.ContainerUser(),
+		"--user", ContainerUser(),
 		"--entrypoint", "/bin/sh",
 	}
 	for _, want := range wantArgs {

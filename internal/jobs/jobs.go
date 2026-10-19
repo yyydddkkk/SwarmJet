@@ -5,7 +5,6 @@ package jobs
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -18,7 +17,6 @@ import (
 
 const (
 	webhookQueue = "webhooks"
-	commandQueue = "commands"
 	messageQueue = "messages"
 )
 
@@ -36,12 +34,6 @@ type Webhook struct {
 	Payload    []byte
 }
 
-// Command is one durable task command.
-type Command struct {
-	ID     string
-	TaskID string
-}
-
 // Message is one Inbox delivery. The delivery worker only reports the message
 // as delivered; pushing it into a CLI session is the next round's Cell runtime.
 type Message struct {
@@ -53,13 +45,11 @@ type Message struct {
 // caller that needs it asserts for the method instead.
 type Inserter interface {
 	InsertWebhook(context.Context, pgx.Tx, Webhook) error
-	InsertCommand(context.Context, pgx.Tx, Command) error
 }
 
 // Handlers run jobs. A nil handler is a permanent failure.
 type Handlers struct {
 	Webhook func(context.Context, Webhook) error
-	Command func(context.Context, Command) error
 	Message func(context.Context, Message) error
 }
 
@@ -76,13 +66,6 @@ type webhookArgs struct {
 }
 
 func (webhookArgs) Kind() string { return "webhook" }
-
-type commandArgs struct {
-	ID     string `json:"id" river:"unique"`
-	TaskID string `json:"taskId" river:"unique"`
-}
-
-func (commandArgs) Kind() string { return "command" }
 
 type messageArgs struct {
 	ID string `json:"id" river:"unique"`
@@ -108,13 +91,11 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 func Open(pool *pgxpool.Pool, handlers Handlers, cfg Config) (*Client, error) {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &webhookWorker{handle: handlers.Webhook})
-	river.AddWorker(workers, &commandWorker{handle: handlers.Command})
 	river.AddWorker(workers, &messageWorker{handle: handlers.Message})
 	config := &river.Config{
 		Logger: slog.New(slog.DiscardHandler),
 		Queues: map[string]river.QueueConfig{
 			webhookQueue: {MaxWorkers: 8},
-			commandQueue: {MaxWorkers: 8},
 			messageQueue: {MaxWorkers: 8},
 		},
 		Workers:    workers,
@@ -144,14 +125,6 @@ func (c *Client) InsertWebhook(ctx context.Context, tx pgx.Tx, job Webhook) erro
 	return err
 }
 
-func (c *Client) InsertCommand(ctx context.Context, tx pgx.Tx, job Command) error {
-	_, err := c.river.InsertTx(ctx, tx, commandArgs{ID: job.ID, TaskID: job.TaskID}, &river.InsertOpts{
-		Queue:      commandQueue,
-		UniqueOpts: river.UniqueOpts{ByArgs: true},
-	})
-	return err
-}
-
 // InsertMessage enqueues one Inbox delivery in the caller's transaction.
 func (c *Client) InsertMessage(ctx context.Context, tx pgx.Tx, job Message) error {
 	_, err := c.river.InsertTx(ctx, tx, messageArgs{ID: job.ID}, &river.InsertOpts{
@@ -159,42 +132,6 @@ func (c *Client) InsertMessage(ctx context.Context, tx pgx.Tx, job Message) erro
 		UniqueOpts: river.UniqueOpts{ByArgs: true},
 	})
 	return err
-}
-
-// RecoverCommands inserts jobs for commands that were committed before a queue
-// client existed. Unique command IDs keep a second call from delivering twice.
-func (c *Client) RecoverCommands(ctx context.Context, pool *pgxpool.Pool) error {
-	rows, err := pool.Query(ctx, `SELECT id, task_id FROM commands WHERE NOT delivered ORDER BY created_at, id`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	type pending struct{ id, taskID string }
-	var commands []pending
-	for rows.Next() {
-		var item pending
-		if err = rows.Scan(&item.id, &item.taskID); err != nil {
-			return err
-		}
-		commands = append(commands, item)
-	}
-	if err = rows.Err(); err != nil {
-		return err
-	}
-	if len(commands) == 0 {
-		return nil
-	}
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	for _, item := range commands {
-		if err = c.InsertCommand(ctx, tx, Command{ID: item.id, TaskID: item.taskID}); err != nil {
-			return fmt.Errorf("queue command %s: %w", item.id, err)
-		}
-	}
-	return tx.Commit(ctx)
 }
 
 type webhookWorker struct {
@@ -207,18 +144,6 @@ func (w *webhookWorker) Work(ctx context.Context, job *river.Job[webhookArgs]) e
 		return river.JobCancel(errors.New("webhook handler is not configured"))
 	}
 	return disposition(w.handle(ctx, Webhook{Provider: job.Args.Provider, DeliveryID: job.Args.DeliveryID, EventType: job.Args.EventType, Payload: job.Args.Payload}))
-}
-
-type commandWorker struct {
-	river.WorkerDefaults[commandArgs]
-	handle func(context.Context, Command) error
-}
-
-func (w *commandWorker) Work(ctx context.Context, job *river.Job[commandArgs]) error {
-	if w.handle == nil {
-		return river.JobCancel(errors.New("command handler is not configured"))
-	}
-	return disposition(w.handle(ctx, Command{ID: job.Args.ID, TaskID: job.Args.TaskID}))
 }
 
 type messageWorker struct {

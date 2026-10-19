@@ -305,7 +305,6 @@ func TestUnhandledReturnsPendingAndDeliveredInOrder(t *testing.T) {
 type jobsWithoutMessages struct{}
 
 func (jobsWithoutMessages) InsertWebhook(context.Context, pgx.Tx, jobs.Webhook) error { return nil }
-func (jobsWithoutMessages) InsertCommand(context.Context, pgx.Tx, jobs.Command) error { return nil }
 
 func TestSendMessageRequiresDeliveryQueue(t *testing.T) {
 	s := testStore(t)

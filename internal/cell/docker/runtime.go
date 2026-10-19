@@ -33,7 +33,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yyydddkkk/SwarmJet/internal/agent"
 	"github.com/yyydddkkk/SwarmJet/internal/cell"
 	"github.com/yyydddkkk/SwarmJet/internal/cell/acp"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
@@ -405,8 +404,8 @@ func (r *Runtime) createContainer(ctx context.Context, spec cell.Spec, workspace
 		"--mount", "type=bind,src=" + workspace + ",dst=" + cellWorkdir,
 		"--mount", "type=volume,src=" + volume + ",dst=" + cellDataMount,
 	}
-	args = append(args, agent.ContainerPolicyArgs(r.Config)...)
-	args = append(args, "--user", agent.ContainerUser())
+	args = append(args, ContainerPolicyArgs(r.Config)...)
+	args = append(args, "--user", ContainerUser())
 	args = append(args, "--entrypoint", "/bin/sh", r.Config.Image, "-c", "exec sleep infinity")
 	res, err := r.docker(ctx, nil, args...)
 	if err != nil {
@@ -441,7 +440,7 @@ func (r *Runtime) ensureVolume(ctx context.Context, spec cell.Spec, volume strin
 	res, err = r.docker(ctx, nil,
 		"run", "--rm", "--user", "0:0", "--entrypoint", "/bin/sh",
 		"--mount", "type=volume,src="+volume+",dst="+cellDataMount,
-		r.Config.Image, "-c", "chown -R "+agent.ContainerUser()+" "+cellDataMount,
+		r.Config.Image, "-c", "chown -R "+ContainerUser()+" "+cellDataMount,
 	)
 	if err != nil {
 		return err

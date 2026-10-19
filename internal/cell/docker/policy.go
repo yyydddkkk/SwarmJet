@@ -1,4 +1,4 @@
-package agent
+package docker
 
 import (
 	"os"
@@ -7,9 +7,9 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
-// ContainerPolicyArgs returns the docker create flags shared by the legacy
-// execution runner and the Cell runtime: network, resource limits and
-// isolation. Both container kinds must enforce the same policy.
+// ContainerPolicyArgs returns the docker create flags shared by Cell
+// containers: network, resource limits and isolation. Cells enforce the same
+// policy as the platform's other container workloads.
 func ContainerPolicyArgs(config domain.AgentConfig) []string {
 	args := []string{}
 	if config.DockerNetwork != "" {
