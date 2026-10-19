@@ -32,6 +32,11 @@
 | E | 结论与合并：attest、`pr_status`、`merge_pr`、自动合并、CI 结果投递 | 新包 `internal/merge`、`internal/store` 新文件、`internal/mcp`、`internal/router`、`internal/github` 新文件 | 10 |
 | F | 网页：方法论页、模型凭证页、用量、结论与合并状态、来源标记 | `web/` | 无 |
 
+**可复用的旧分支**：上一版第四轮的 PR 已经做完但不会合并（#34、#35、#36，依赖的类型已删除）。新任务直接从中取可用的代码，按新契约改名、去掉写死的流程：
+- `feat/round4-verifier-runtime`（#34）：Revision 分离检出、ReadOnly 拒绝发布及其测试 → **A**；结论表与迁移 → **E**（改名为 attestations，编号 10）。
+- `feat/verify-scheduling`（#35）：`internal/github/comments.go`、pull_request 的 head SHA、CI 投递降噪、`submit_verdict` 的权限与 SHA 校验 → **E**（改为 `attest`）；`internal/verify` 的调度逻辑**不要**带过来（属于方法论）。
+- `feat/round4-merge-gate`（#36）：`internal/merge`、`pr_status`、`merge_pr`、自动合并 Job、`internal/github/round4.go` → **E**（条件改为读取方法论的 `merge`）；Forager 详情页的结论与可合并展示 → **F**。
+
 **合并顺序**：A → C → D → E → B → F。迁移编号按上表固定；`Store.Migrate` 里的版本上限和执行顺序冲突由审查方合并时解决。A、C、D 都会改 `internal/forager`，C、D、E、B 都会改 `internal/mcp/tools.go` 和 `cmd/swarmjet`，冲突由审查方解决；每个任务尽量把新代码放在新文件里，已有文件只改必要的几行。
 
 ---
@@ -187,7 +192,7 @@ func Builtin() (domain.MethodologyManifest, []domain.MethodologyFile)
 # 任务：Cell 里用 oh-my-pi（omp）替换 OpenCode
 
 ## 背景
-SwarmJet 决定 Cell 内统一使用 oh-my-pi（github.com/can1357/oh-my-pi，Pi 的分叉，原生支持 ACP）。现在 Cell 跑的是 `opencode acp`，模型凭证以 OPENCODE_AUTH_CONTENT 传进 Cell，另有一个 CLI 登录终端。本任务把运行时换成 omp，并删除 OpenCode 和 CLI 登录终端。模型代理、方法论内容由其他任务实现。先读 docs/claude/round4-prompts.md 的"已定决策"和"公共契约"第 1、2、6 节，ADR 第 2 节「平台边界」，以及 internal/cell（cell.go、acp、docker）、internal/forager/actor.go 的 start()、deploy/Dockerfile.agent、internal/runtimeadmin、cmd/swarmjet/cells.go 和 cli_login.go。omp 的文档在它仓库的 docs/ 目录（cli-reference.md、settings.md、mcp-config.md、environment-variables.md、models.md、approval-mode.md、extension-loading.md、skills.md）。
+SwarmJet 决定 Cell 内统一使用 oh-my-pi（github.com/can1357/oh-my-pi，Pi 的分叉，原生支持 ACP）。现在 Cell 跑的是 `opencode acp`，模型凭证以 OPENCODE_AUTH_CONTENT 传进 Cell，另有一个 CLI 登录终端。本任务把运行时换成 omp，并删除 OpenCode 和 CLI 登录终端。模型代理、方法论内容由其他任务实现。先读 docs/claude/round4-prompts.md 的"已定决策"和"公共契约"第 1、2、6 节，ADR 第 2 节「平台边界」，以及 internal/cell（cell.go、acp、docker）、internal/forager/actor.go 的 start()、deploy/Dockerfile.agent、internal/runtimeadmin、cmd/swarmjet/cells.go 和 cli_login.go。上一版的分支 origin/feat/round4-verifier-runtime（PR #34，不会合并）已经实现了 Revision 分离检出和 ReadOnly 拒绝发布，直接复用那部分代码和测试（不要带它的验证者提示词、结论存储和监管者结束逻辑）。omp 的文档在它仓库的 docs/ 目录（cli-reference.md、settings.md、mcp-config.md、environment-variables.md、models.md、approval-mode.md、extension-loading.md、skills.md）。
 
 ## 要做的事
 1. 镜像：deploy/Dockerfile.agent 改为安装锁定版本的 omp 预编译二进制（构建参数 OMP_VERSION，校验 SHA-256），删掉 OpenCode。Cell 仍以非 root 的 1000:1000 运行。
@@ -317,7 +322,7 @@ SwarmJet 的 swarm 由一个个独立的 Agent 组成，怎么协作由 Hive 的
 # 任务：通用的 attest，加按方法论条件执行的合并入口
 
 ## 背景
-SwarmJet 不再有平台写死的验证流程。平台只提供机制：任何有权限的 Agent 可以对某个 PR 的某个 head 提交给出结论（attest）；合并只能经平台执行，条件来自 Hive 方法论的 merge 部分（例如要求非作者的 PASS、要求 CI 通过）。Cell 里的 Agent 没有 GitHub 权限，看不到 CI 详情，也需要一个工具帮它读取。先读 docs/claude/round4-prompts.md 的"已定决策"和"公共契约"第 1、3、4、7 节，ADR 第 10 节，以及 internal/github（checks.go 的 RequiredChecks、RequestMerge、GetMergeState，pulls.go）、internal/mcp/tools.go、internal/router（check_run、check_suite 的投递）。
+SwarmJet 不再有平台写死的验证流程。平台只提供机制：任何有权限的 Agent 可以对某个 PR 的某个 head 提交给出结论（attest）；合并只能经平台执行，条件来自 Hive 方法论的 merge 部分（例如要求非作者的 PASS、要求 CI 通过）。Cell 里的 Agent 没有 GitHub 权限，看不到 CI 详情，也需要一个工具帮它读取。先读 docs/claude/round4-prompts.md 的"已定决策"和"公共契约"第 1、3、4、7 节，ADR 第 10 节。上一版有三个不会合并的分支已经实现了大部分机制，直接复用并按新契约调整：origin/feat/round4-merge-gate（PR #36：internal/merge、pr_status、merge_pr、自动合并 Job、internal/github/round4.go）、origin/feat/verify-scheduling（PR #35：internal/github/comments.go、pull_request 的 head SHA、CI 投递降噪、submit_verdict 的权限与 SHA 校验）、origin/feat/round4-verifier-runtime（PR #34：结论表的存储与迁移）；它们里面"自动派验证者、FAIL 打回、轮次上限"这类流程不要带过来。再读 internal/github（checks.go 的 RequiredChecks、RequestMerge、GetMergeState，pulls.go）、internal/mcp/tools.go、internal/router（check_run、check_suite 的投递）。
 
 ## 要做的事
 1. 存储：schema_upgrade_10.sql 和 store 新文件：写入结论（同一 (hive, pr, sha, attester) 幂等）、作废旧 head 的结论、历史查询，以及契约里的 LatestAttestation。AuthorID 取 PR 的 owner Agent，IsAuthor 由平台计算。
@@ -351,7 +356,7 @@ SwarmJet 不再有平台写死的验证流程。平台只提供机制：任何�
 # 任务：控制台加上方法论、模型凭证、用量、结论与合并、来源标记
 
 ## 背景
-SwarmJet 第四轮后端新增了 Hive 方法论（有版本、能回滚）、模型凭证与用量、结论与合并入口、消息来源标记，并删除了 CLI 登录终端。本任务在网页控制台上把这些呈现出来。后端接口按契约开发，可能还没合入，先用 web 里现有的模拟数据方式实现，接口形状以契约为准。先读 docs/claude/round4-prompts.md 的"公共契约"第 1、5、7 节，ADR 第 18 节（视觉风格和像素点缀），以及 web/src 的现有页面结构。
+SwarmJet 第四轮后端新增了 Hive 方法论（有版本、能回滚）、模型凭证与用量、结论与合并入口、消息来源标记，并删除了 CLI 登录终端。本任务在网页控制台上把这些呈现出来。后端接口按契约开发，可能还没合入，先用 web 里现有的模拟数据方式实现，接口形状以契约为准。先读 docs/claude/round4-prompts.md 的"公共契约"第 1、5、7 节，ADR 第 18 节（视觉风格和像素点缀），以及 web/src 的现有页面结构。上一版的分支 origin/feat/round4-merge-gate（PR #36，不会合并）已经做了 Forager 详情页的结论与可合并展示，可以复用，按新的字段（给出者、是否作者）调整。
 
 ## 要做的事
 1. 删除 CLI 登录终端相关的页面和入口；接入页的"CLI 登录"一项换成"模型"：显示是否已有可用凭证和默认模型，提供输入 API key 的表单（提交后只显示脱敏值），以及 GET /api/models 的模型列表。
