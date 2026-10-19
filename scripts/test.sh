@@ -15,13 +15,14 @@ if [[ ${RUN_BROWSER_TESTS:-0} == 1 ]]; then
   (cd web && npx playwright install chromium && npm test)
 fi
 if [[ ${VALIDATE_DEPLOY:-0} == 1 ]]; then
-  for mode in image build; do
-    manifests=(-f deploy/compose.yaml)
-    if [[ $mode == build ]]; then manifests+=(-f deploy/compose.build.yaml); fi
-    env DATABASE_URL='postgres://swarmjet:validation-only@postgres:5432/swarmjet?sslmode=disable' \
-      POSTGRES_PASSWORD=validation-only ADMIN_PASSWORD=validation-only-password \
-      SWARMJET_MASTER_KEY=validation-only-master \
-      DATA_DIR=/tmp/swarmjet-compose-validation \
-      docker compose "${manifests[@]}" --profile tools config --quiet
-  done
+  base=(--env-file deploy/.env.example -f deploy/compose.yaml)
+  common=(DATA_DIR=/tmp/swarmjet-compose-validation
+    DATABASE_URL=postgres://swarmjet:validation-only@postgres:5432/swarmjet?sslmode=disable
+    POSTGRES_PASSWORD=validation-only ADMIN_PASSWORD=validation-only-password
+    SWARMJET_MASTER_KEY=validation-only-master)
+  env "${common[@]}" docker compose "${base[@]}" config --quiet
+  env "${common[@]}" docker compose "${base[@]}" -f deploy/compose.cells.yaml config --quiet
+  env "${common[@]}" docker compose "${base[@]}" --profile tunnel config --quiet
+  env "${common[@]}" docker compose "${base[@]}" --profile observability config --quiet
+  env "${common[@]}" docker compose "${base[@]}" -f deploy/compose.build.yaml --profile tools config --quiet
 fi

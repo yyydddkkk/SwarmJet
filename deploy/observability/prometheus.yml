@@ -20,12 +20,6 @@ scrape_configs:
   - job_name: swarmjet-api
     static_configs:
       - targets: ['api:9090']
-  - job_name: swarmjet-worker
-    static_configs:
-      - targets: ['worker:9090']
-  - job_name: temporal
-    static_configs:
-      - targets: ['temporal:8000']
   - job_name: postgres
     static_configs:
       - targets: ['postgres-exporter:9187']
