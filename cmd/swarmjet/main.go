@@ -193,7 +193,7 @@ func runServe(ctx context.Context, s *store.Store) error {
 		s.MessageSink = cells.Supervisor.Notify
 		cells.Start(ctx)
 		defer cells.Stop()
-		slog.Info("forager cells enabled", "model", env("SWARMJET_FORAGER_MODEL", forager.DefaultModel))
+		slog.Info("forager cells enabled", "model", env("SWARMJET_DEFAULT_MODEL", forager.DefaultModel))
 	}
 
 	password := required("ADMIN_PASSWORD")
@@ -202,9 +202,6 @@ func runServe(ctx context.Context, s *store.Store) error {
 	}
 	adminUser := required("ADMIN_USERNAME")
 	staticDir := env("STATIC_DIR", "web/dist")
-	// The CLI login terminal runs in this process and shares the Cell data
-	// directory, so a successful login is immediately available to Cells.
-	cliLogin, cliLoginReason := newCLILoginHandler(data)
 	handler := api.New(s, api.Config{
 		GitHubApp:       ghApp,
 		Box:             box,
@@ -216,11 +213,8 @@ func runServe(ctx context.Context, s *store.Store) error {
 		Setup:           setupManager,
 		CellsEnabled:    os.Getenv("SWARMJET_CELLS") == "1",
 		CellsImage:      env("AGENT_IMAGE", "swarmjet-agent:local"),
-		CellsModel:      env("SWARMJET_FORAGER_MODEL", forager.DefaultModel),
+		CellsModel:      env("SWARMJET_DEFAULT_MODEL", forager.DefaultModel),
 		DockerAvailable: onboarding.DockerAvailable,
-		CLILogin:        cliLogin,
-		CLILoginReason:  cliLoginReason,
-		CLILoginStatus:  cliLoginStatus(cliLogin, data),
 		MCPURL:          publicMCPURL(),
 	})
 	svc := &service.Service{Store: s, Webhooks: s, AppSlugSource: ghProvider.Slug}

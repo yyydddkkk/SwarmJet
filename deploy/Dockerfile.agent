@@ -2,13 +2,17 @@
 # Node 22 also supports business repositories whose engines exclude Node 23+.
 ARG AGENT_BASE_IMAGE=node:22.23.1-bookworm-slim
 FROM ${AGENT_BASE_IMAGE}
-ARG OPENCODE_VERSION=1.18.31
+# oh-my-pi is installed from its locked, prebuilt release and verified against
+# the published SHA-256 values before it is placed on PATH.
+ARG OMP_VERSION=18.12.2
+ARG OMP_SHA256_X64=9513ef9f19d7991aac6ae0cb6077bcf16662092ddde861c002a91cedc6f47f9a
+ARG OMP_SHA256_ARM64=967d64fce514586e94c9ac5f978743b4fce29b999c8763747ce4754811407d1a
 ARG CODEX_VERSION=0.155.1
 ARG CLAUDE_VERSION=2.1.278
 # Exact-session resume and --json require this published prerelease.
 ARG DSH_VERSION=0.1.6-alpha.2
 ARG DST_VERSION=0.10.2
-ARG AGENT_CLIS=opencode
+ARG AGENT_CLIS=
 ARG GLAB_VERSION=1.115.0
 ARG UV_VERSION=0.8.22
 ARG PNPM_VERSION=10.17.1
@@ -23,6 +27,19 @@ RUN apt-get update \
 RUN pip3 install --no-cache-dir --break-system-packages --index-url "${PYPI_INDEX}" "uv==${UV_VERSION}" \
  && npm install --global --registry "${NPM_REGISTRY}" "pnpm@${PNPM_VERSION}" \
  && uv --version && pnpm --version
+RUN set -eu; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$arch" in \
+      amd64) asset="omp-linux-x64"; sum="${OMP_SHA256_X64}" ;; \
+      arm64) asset="omp-linux-arm64"; sum="${OMP_SHA256_ARM64}" ;; \
+      *) echo "Unsupported architecture for oh-my-pi: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    cd /tmp; \
+    curl -fsSL -o "$asset" "https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}/${asset}"; \
+    printf '%s  %s\n' "$sum" "$asset" | sha256sum -c -; \
+    install -m 0755 "$asset" /usr/local/bin/omp; \
+    rm -f "$asset"; \
+    omp --version
 RUN set -eu; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     archive="glab_${GLAB_VERSION}_linux_${arch}.tar.gz"; \

@@ -239,7 +239,7 @@ func TestSetupManifestCallbackAndStatus(t *testing.T) {
 	if !before.Cells.Enabled || before.Cells.Image != "swarmjet-agent:test" || before.Cells.Model != "test/model" || !before.Cells.DockerAvailable {
 		t.Fatalf("cells status = %+v", before.Cells)
 	}
-	if before.CLILogin.Available || before.CLILogin.CLI != "opencode" {
+	if before.CLILogin.Available || before.CLILogin.CLI != "omp" {
 		t.Fatalf("cli login status = %+v", before.CLILogin)
 	}
 

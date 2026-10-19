@@ -6,7 +6,7 @@
 //     mounted at /workspace. The host clones it once; after that, branch
 //     selection and publishing run git inside the container;
 //   - the CLI data volume, a named volume mounted at /cell, holding HOME and
-//     the XDG directories (OpenCode's session database lives here).
+//     the XDG directories (omp's agent database and session files live here).
 //
 // The Publisher keeps a platform-owned bare mirror at
 // <DATA_DIR>/cells/<agent-id>/mirror.git. It is never mounted into the Cell:
@@ -20,7 +20,6 @@ package docker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +34,7 @@ import (
 
 	"github.com/yyydddkkk/SwarmJet/internal/cell"
 	"github.com/yyydddkkk/SwarmJet/internal/cell/acp"
+	"github.com/yyydddkkk/SwarmJet/internal/cell/omp"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
 
@@ -63,6 +63,9 @@ type Runtime struct {
 	// workspace does not end up owned by root on the host. Empty means
 	// DefaultContainerUser.
 	ContainerUser string
+	// ConfigWriter installs Spec.ConfigFiles below omp.ConfigRoot inside the
+	// container. It defaults to a docker-exec tar writer; tests replace it.
+	ConfigWriter ConfigWriter
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -111,6 +114,13 @@ func (r *Runtime) cellRunner() CellRunner {
 		return r.Cell
 	}
 	return &DockerCellRunner{Binary: r.DockerBinary}
+}
+
+func (r *Runtime) configWriter() ConfigWriter {
+	if r.ConfigWriter != nil {
+		return r.ConfigWriter
+	}
+	return &DockerConfigWriter{Binary: r.DockerBinary}
 }
 
 func (r *Runtime) git() *Git {
@@ -187,7 +197,7 @@ func (r *Runtime) Start(ctx context.Context, spec cell.Spec) (cell.Session, erro
 	if _, err := r.containerUserArg(); err != nil {
 		return nil, err
 	}
-	secrets := specSecrets(spec.Env, spec.MCPToken)
+	secrets := specSecrets(spec.Env, spec.MCPToken, spec.LLMToken)
 
 	lock := r.agentLock(spec.AgentID)
 	lock.Lock()
@@ -228,6 +238,17 @@ func (r *Runtime) Start(ctx context.Context, spec cell.Spec) (cell.Session, erro
 	}
 	if err := r.prepareCell(ctx, spec, fresh); err != nil {
 		return nil, fmt.Errorf("cell: prepare branch in container: %s", redact(err.Error(), secrets...))
+	}
+	// ConfigFiles live in the Cell Home volume, never the workspace, and are
+	// rewritten before every start. The CLI only reads them. A second overlay
+	// disables tools and hooks shipped in the repository's own .omp directory.
+	configFiles := make(map[string]string, len(spec.ConfigFiles)+1)
+	for name, content := range spec.ConfigFiles {
+		configFiles[name] = content
+	}
+	configFiles[omp.ConfigPrefix+"project.yml"] = omp.ProjectOverlayYAML(omp.ProjectDisabledExtensions(workspace))
+	if err := r.configWriter().Write(ctx, name, configFiles); err != nil {
+		return nil, fmt.Errorf("cell: write omp configuration: %s", redact(err.Error(), secrets...))
 	}
 
 	env, err := r.cellEnv(spec)
@@ -400,7 +421,7 @@ func (r *Runtime) containerState(ctx context.Context, name string) (running, exi
 }
 
 func (r *Runtime) createContainer(ctx context.Context, spec cell.Spec, workspace string) error {
-	secrets := specSecrets(spec.Env, spec.MCPToken)
+	secrets := specSecrets(spec.Env, spec.MCPToken, spec.LLMToken)
 	volume := volumeName(spec.AgentID)
 	if err := r.ensureVolume(ctx, spec, volume); err != nil {
 		return err
@@ -437,7 +458,7 @@ func (r *Runtime) createContainer(ctx context.Context, spec cell.Spec, workspace
 // Docker creates an empty volume owned by root; the CLI runs as the platform
 // uid so it can write files that the platform can later read.
 func (r *Runtime) ensureVolume(ctx context.Context, spec cell.Spec, volume string) error {
-	secrets := specSecrets(spec.Env, spec.MCPToken)
+	secrets := specSecrets(spec.Env, spec.MCPToken, spec.LLMToken)
 	res, err := r.docker(ctx, nil, "volume", "inspect", volume)
 	if err != nil {
 		return err
@@ -517,25 +538,19 @@ func (r *Runtime) ensureWorkspaceOwner(workspace string) error {
 }
 
 func (r *Runtime) cellEnv(spec cell.Spec) ([]string, error) {
-	config := map[string]any{
-		"model": spec.Model,
-		"permission": map[string]string{
-			"bash":     "ask",
-			"edit":     "ask",
-			"webfetch": "ask",
-		},
-	}
-	raw, err := json.Marshal(config)
-	if err != nil {
-		return nil, fmt.Errorf("cell: encode CLI config: %w", err)
-	}
+	// omp keeps its configuration and session database on the Cell Home volume.
+	// PI_CODING_AGENT_DIR points at the methodology directory so native
+	// discovery finds the delivered skills/ and rules/.
 	env := []string{
 		"HOME=" + cellDataMount + "/home",
 		"XDG_DATA_HOME=" + cellDataMount + "/data",
 		"XDG_CONFIG_HOME=" + cellDataMount + "/config",
 		"XDG_STATE_HOME=" + cellDataMount + "/state",
-		"OPENCODE_DISABLE_AUTOUPDATE=true",
-		"OPENCODE_CONFIG_CONTENT=" + string(raw),
+		"PI_CODING_AGENT_DIR=" + omp.AgentDir,
+		"GIT_TERMINAL_PROMPT=0",
+	}
+	if spec.LLMToken != "" {
+		env = append(env, omp.TokenEnv+"="+spec.LLMToken)
 	}
 	keys := make([]string, 0, len(spec.Env))
 	for key := range spec.Env {
@@ -565,10 +580,8 @@ func mcpServers(spec cell.Spec) []acp.MCPServer {
 }
 
 func cliArgv(spec cell.Spec) []string {
-	if spec.CLI == "" || spec.CLI == "opencode" {
-		return []string{"opencode", "acp"}
-	}
-	return []string{spec.CLI, "acp"}
+	_, hasRolePrompt := spec.ConfigFiles[omp.ConfigPrefix+"ROLE.md"]
+	return omp.LaunchArgs(spec.Model, hasRolePrompt)
 }
 
 func (r *Runtime) docker(ctx context.Context, secrets []string, args ...string) (Result, error) {
@@ -588,12 +601,13 @@ func notFound(stderr []byte) bool {
 }
 
 var reservedEnv = map[string]bool{
-	"HOME":                        true,
-	"XDG_DATA_HOME":               true,
-	"XDG_CONFIG_HOME":             true,
-	"XDG_STATE_HOME":              true,
-	"OPENCODE_DISABLE_AUTOUPDATE": true,
-	"OPENCODE_CONFIG_CONTENT":     true,
+	"HOME":                true,
+	"XDG_DATA_HOME":       true,
+	"XDG_CONFIG_HOME":     true,
+	"XDG_STATE_HOME":      true,
+	"PI_CODING_AGENT_DIR": true,
+	omp.TokenEnv:          true,
+	"GIT_TERMINAL_PROMPT": true,
 }
 
 func validateSpec(spec cell.Spec, image string) error {
@@ -614,7 +628,12 @@ func validateSpec(spec cell.Spec, image string) error {
 			return err
 		}
 	}
-	if spec.CLI != "" && spec.CLI != "opencode" {
+	if spec.Revision != "" {
+		if err := validRevision(spec.Revision); err != nil {
+			return err
+		}
+	}
+	if spec.CLI != "" && spec.CLI != "omp" {
 		return fmt.Errorf("cell: unsupported CLI %q", spec.CLI)
 	}
 	if spec.Model == "" || len(spec.Model) > 200 || strings.ContainsAny(spec.Model, "\x00\r\n") {
@@ -631,6 +650,20 @@ func validateSpec(spec cell.Spec, image string) error {
 	}
 	if strings.ContainsAny(spec.MCPToken, "\x00\r\n") {
 		return errors.New("cell: invalid MCP token")
+	}
+	if spec.LLMBaseURL != "" {
+		u, err := url.Parse(spec.LLMBaseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+			return errors.New("cell: LLM base URL must be an http(s) URL without credentials")
+		}
+	}
+	if strings.ContainsAny(spec.LLMToken, "\x00\r\n") {
+		return errors.New("cell: invalid LLM token")
+	}
+	for path := range spec.ConfigFiles {
+		if err := omp.ValidatePath(path); err != nil {
+			return fmt.Errorf("cell: invalid ConfigFiles path: %w", err)
+		}
 	}
 	for key := range spec.Env {
 		if !envKeyPattern.MatchString(key) {

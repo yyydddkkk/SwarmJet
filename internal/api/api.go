@@ -41,14 +41,6 @@ type Config struct {
 	CellsImage      string
 	CellsModel      string
 	DockerAvailable func() bool
-	// CLILoginStatus is filled by the CLI-login task. When nil the setup page
-	// reports a CLI login terminal that is not available yet.
-	CLILoginStatus func() (available, loggedIn bool)
-	// CLILogin is the in-process runtimeadmin handler mounted at
-	// /api/runtime/*. nil means the terminal is disabled (for example because
-	// the Docker socket is absent); CLILoginReason is shown to the console.
-	CLILogin       http.Handler
-	CLILoginReason string
 	// MCPURL is the endpoint embedded in generated local Agent configurations.
 	MCPURL string
 }
@@ -114,7 +106,7 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/runtime/") {
-		a.runtime(w, r)
+		problem(w, http.StatusNotFound, "runtime route not found")
 		return
 	}
 	if r.URL.Path == "/api/tokens" {

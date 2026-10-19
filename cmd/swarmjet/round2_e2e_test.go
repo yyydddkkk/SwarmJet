@@ -22,7 +22,7 @@ import (
 )
 
 // TestRound2RealCell runs the same loop as TestRound2Loop with a real Docker
-// Cell, a real OpenCode/ACP process, and the real bundle/mirror Publisher. The
+// Cell, a real omp/ACP process, and the real bundle/mirror Publisher. The
 // Publisher's remote is a local bare repository and PullRequests is faked, so no
 // GitHub credential or network is needed.
 //
@@ -32,19 +32,19 @@ import (
 // Optional environment:
 //
 //	SWARMJET_ROUND2_E2E_IMAGE    agent image (default swarmjet-agent:local)
-//	SWARMJET_ROUND2_E2E_MODEL    provider/model (default opencode/big-pickle)
+//	SWARMJET_ROUND2_E2E_MODEL    provider/model (default deepseek/deepseek-chat)
 //	SWARMJET_ROUND2_E2E_DOCKER   docker binary (default docker)
 //	SWARMJET_ROUND2_E2E_NETWORK  Cell network (default host, for the MCP URL)
 func TestRound2RealCell(t *testing.T) {
 	if os.Getenv("SWARMJET_ROUND2_E2E") != "1" {
-		t.Skip("set SWARMJET_ROUND2_E2E=1 to run the real Docker/OpenCode test")
+		t.Skip("set SWARMJET_ROUND2_E2E=1 to run the real Docker/omp test")
 	}
 	if os.Getenv("TEST_DATABASE_URL") == "" {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
 	dockerBinary := round2EnvOr("SWARMJET_ROUND2_E2E_DOCKER", "docker")
 	image := round2EnvOr("SWARMJET_ROUND2_E2E_IMAGE", "swarmjet-agent:local")
-	model := round2EnvOr("SWARMJET_ROUND2_E2E_MODEL", "opencode/big-pickle")
+	model := round2EnvOr("SWARMJET_ROUND2_E2E_MODEL", "deepseek/deepseek-chat")
 	network := round2EnvOr("SWARMJET_ROUND2_E2E_NETWORK", "host")
 	if _, err := exec.LookPath(dockerBinary); err != nil {
 		t.Skipf("%s not found: %v", dockerBinary, err)
@@ -88,7 +88,7 @@ func TestRound2RealCell(t *testing.T) {
 		Name:       "Round 2 real",
 		Repository: "acme/round2-real",
 		Config: domain.HiveConfig{
-			CLI:                "opencode",
+			CLI:                "omp",
 			TurnTimeoutMinutes: 15,
 			IdleParkMinutes:    60,
 			HibernateHours:     24,
@@ -104,7 +104,7 @@ func TestRound2RealCell(t *testing.T) {
 		HiveID:  hive.ID,
 		Role:    domain.RoleForager,
 		State:   domain.AgentCreating,
-		CLI:     "opencode",
+		CLI:     "omp",
 		Task:    firstTask,
 		Branch:  "swarm/e2e/" + agentID,
 		ChainID: "chain-" + agentID,
@@ -179,7 +179,7 @@ func TestRound2RealCell(t *testing.T) {
 	t.Logf("first turn: branch=%s pr=%d source=%s target=%s", task.Branch, first.PRNumber, firstPR.source, firstPR.target)
 
 	// Second message: append a line and commit it; the supervisor resumes the
-	// saved OpenCode session and publishes again.
+	// saved omp session and publishes again.
 	secondTask := "Use the bash tool to run exactly this command: cd /workspace && printf 'SECOND-TURN\\n' >> round2-e2e.txt && git add -A && git -c user.name=SwarmJet -c user.email=forager@swarmjet.invalid commit -m round2-second. Then reply with exactly DONE. Do not push and do not open a pull request."
 	secondMessage, err := s.SendMessage(ctx, domain.Message{
 		HiveID:  hive.ID,

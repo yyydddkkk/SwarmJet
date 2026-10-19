@@ -113,8 +113,8 @@ ssh -N -L 8180:127.0.0.1:8180 用户名@服务器
 | `PUBLIC_ORIGIN` | 否 | 控制台地址，默认 `http://localhost:8180` |
 | `LISTEN_HOST`、`HTTP_PORT`、`SECURE_COOKIES` | 否 | 监听地址、端口、HTTPS Cookie |
 | `IMAGE`、`AGENT_IMAGE` | 否 | 平台镜像和 Cell 使用的 Agent 镜像 |
-| `SWARMJET_CELLS`、`SWARMJET_FORAGER_MODEL`、`SWARMJET_CELL_MCP_URL`、`SWARMJET_CELL_NETWORK` | 否 | Cell 运行时 |
-| `OPENCODE_AUTH_CONTENT` | 否 | 可选 OpenCode 凭证；CLI 登录终端的结果优先 |
+| `SWARMJET_CELLS`、`SWARMJET_DEFAULT_MODEL`、`SWARMJET_CELL_MCP_URL`、`SWARMJET_CELL_LLM_URL`、`SWARMJET_CELL_NETWORK` | 否 | Cell 运行时；LLM URL 为空时按 MCP URL 推导 |
+| `OMP_VERSION`、`AGENT_CLIS` | 否 | Agent 镜像里锁定的 oh-my-pi 版本和可选的额外 CLI |
 | `GITHUB_APP_ID`、`GITHUB_APP_PRIVATE_KEY_FILE`、`GITHUB_WEBHOOK_SECRET` | 否 | 第二轮手动方式；设置后优先于数据库里的 App |
 | `SWARMJET_TUNNEL_URL` | 否 | 隧道指标地址，例如 `http://tunnel:2000` |
 | `WEBHOOK_LISTEN_ADDRESS` | 否 | api 的 webhook 专用监听地址，默认 `:8081`；隧道转发到这里 |

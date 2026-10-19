@@ -252,15 +252,53 @@ func testRuntime(t *testing.T) (*Runtime, *fakeExecutor, *fakeDialer, *bytes.Buf
 	exec := &fakeExecutor{}
 	dialer := &fakeDialer{}
 	rt := &Runtime{
-		DataDir:   t.TempDir(),
-		Config:    domain.AgentConfig{Image: "test-agent:latest", MemoryMB: 1024, CPUs: 1.5, PidsLimit: 128},
-		Exec:      exec,
-		Dialer:    dialer,
-		Cell:      &fakeCellRunner{handler: defaultCellHandler(testSpec().Branch)},
-		Workspace: &fakeWorkspace{cloned: true},
-		Logger:    slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		DataDir:      t.TempDir(),
+		Config:       domain.AgentConfig{Image: "test-agent:latest", MemoryMB: 1024, CPUs: 1.5, PidsLimit: 128},
+		Exec:         exec,
+		Dialer:       dialer,
+		Cell:         &fakeCellRunner{handler: defaultCellHandler(testSpec().Branch)},
+		Workspace:    &fakeWorkspace{cloned: true},
+		ConfigWriter: &fakeConfigWriter{},
+		Logger:       slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}
 	return rt, exec, dialer, buf
+}
+
+// fakeConfigWriter records the ConfigFiles handed to the runtime.
+type fakeConfigWriter struct {
+	mu        sync.Mutex
+	writes    []map[string]string
+	container []string
+	err       error
+}
+
+func (w *fakeConfigWriter) Write(_ context.Context, container string, files map[string]string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.err != nil {
+		return w.err
+	}
+	copied := make(map[string]string, len(files))
+	for key, value := range files {
+		copied[key] = value
+	}
+	w.writes = append(w.writes, copied)
+	w.container = append(w.container, container)
+	return nil
+}
+
+func (w *fakeConfigWriter) snapshot() []map[string]string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]map[string]string, len(w.writes))
+	for i, write := range w.writes {
+		copied := make(map[string]string, len(write))
+		for key, value := range write {
+			copied[key] = value
+		}
+		out[i] = copied
+	}
+	return out
 }
 
 // fakeCellRunner records commands executed inside the Cell.
@@ -321,16 +359,18 @@ func defaultCellHandler(branch string) func(argv []string) (Result, error) {
 
 func testSpec() cell.Spec {
 	return cell.Spec{
-		AgentID:    "agent-1",
-		HiveID:     "hive-1",
-		Repository: "acme/app",
-		Branch:     "swarm/acme/agent-1",
-		BaseBranch: "main",
-		CLI:        "opencode",
-		Model:      "opencode/big-pickle",
-		MCPURL:     "http://127.0.0.1:8090/mcp",
-		MCPToken:   "mcp-secret",
-		Env:        map[string]string{"OPENCODE_AUTH_CONTENT": "auth-secret"},
+		AgentID:     "agent-1",
+		HiveID:      "hive-1",
+		Repository:  "acme/app",
+		Branch:      "swarm/acme/agent-1",
+		BaseBranch:  "main",
+		CLI:         "omp",
+		Model:       "deepseek/deepseek-chat",
+		MCPURL:      "http://127.0.0.1:8090/mcp",
+		MCPToken:    "mcp-secret",
+		LLMBaseURL:  "http://127.0.0.1:8090/llm",
+		LLMToken:    "llm-secret",
+		ConfigFiles: map[string]string{"methodology/config.yml": "tools:\n  approvalMode: yolo\n", "methodology/skills/example/SKILL.md": "# example\n"},
 	}
 }
 

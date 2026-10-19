@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +18,6 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/forge"
 	"github.com/yyydddkkk/SwarmJet/internal/github"
 	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
-	"github.com/yyydddkkk/SwarmJet/internal/runtimeadmin"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
@@ -68,8 +67,9 @@ func newCellStack(s *store.Store, apps githubAppSource, dataDir string, logger *
 
 	image := env("AGENT_IMAGE", "swarmjet-agent:local")
 	network := env("SWARMJET_CELL_NETWORK", "")
-	model := env("SWARMJET_FORAGER_MODEL", forager.DefaultModel)
+	model := env("SWARMJET_DEFAULT_MODEL", forager.DefaultModel)
 	mcpURL := env("SWARMJET_CELL_MCP_URL", defaultCellMCPURL)
+	llmURL := env("SWARMJET_CELL_LLM_URL", deriveLLMURL(mcpURL))
 
 	runtime := docker.NewRuntime(dataDir)
 	runtime.Config.Image = image
@@ -85,12 +85,12 @@ func newCellStack(s *store.Store, apps githubAppSource, dataDir string, logger *
 	}
 
 	supervisor, err := forager.New(forager.Options{
-		Store:     s,
-		Runtime:   runtime,
-		Publisher: publisher,
-		Model:     model,
-		MCPURL:    mcpURL,
-		CLIEnv:    cellCLIEnv,
+		Store:      s,
+		Runtime:    runtime,
+		Publisher:  publisher,
+		Model:      model,
+		MCPURL:     mcpURL,
+		LLMBaseURL: llmURL,
 		// Streamed output is debug-only this round. Never log Update.Text:
 		// it may contain repository content or model output.
 		OnUpdate: func(agent domain.Agent, update cell.Update) {
@@ -138,25 +138,25 @@ func requireCellDocker() error {
 	return nil
 }
 
-// cellCLIEnv passes OpenCode credentials into the Cell. The CLI login terminal
-// writes auth.json into the shared profile; that login wins over the deployment
-// environment, which remains a fallback for older installs. It is read on every
-// Start so logging in does not require restarting serve. The content is only
-// ever passed to the Cell, never logged or written by this process.
-func cellCLIEnv(context.Context, domain.Hive) (map[string]string, error) {
-	if dataDir, err := filepath.Abs(env("DATA_DIR", "./data")); err == nil {
-		auth, err := runtimeadmin.OpenCodeAuth(dataDir)
-		if err == nil {
-			return map[string]string{"OPENCODE_AUTH_CONTENT": string(auth)}, nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			slog.Warn("CLI login state is unreadable; falling back to OPENCODE_AUTH_CONTENT", "error", err)
-		}
+// publicMCPURL is advertised in generated local Agent configurations. The
+// console and the MCP endpoint share PUBLIC_ORIGIN.
+func publicMCPURL() string {
+	origin := strings.TrimRight(env("PUBLIC_ORIGIN", "http://localhost:8180"), "/")
+	return origin + "/mcp"
+}
+
+// deriveLLMURL derives the Cell-facing model proxy from the MCP URL (same
+// host, /llm instead of /mcp) when SWARMJET_CELL_LLM_URL is not set.
+func deriveLLMURL(mcpURL string) string {
+	u, err := url.Parse(mcpURL)
+	if err == nil && u.Scheme != "" && u.Host != "" {
+		u.Path = "/llm"
+		u.RawPath = ""
+		u.RawQuery = ""
+		u.Fragment = ""
+		return u.String()
 	}
-	if value := os.Getenv("OPENCODE_AUTH_CONTENT"); value != "" {
-		return map[string]string{"OPENCODE_AUTH_CONTENT": value}, nil
-	}
-	return nil, nil
+	return "http://swarmjet:8080/llm"
 }
 
 // Start launches the supervisor. It must be called after MessageSink is set and
