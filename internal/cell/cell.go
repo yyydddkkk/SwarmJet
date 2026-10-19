@@ -22,6 +22,12 @@ type Spec struct {
 	Env        map[string]string // CLI secrets such as OPENCODE_AUTH_CONTENT; never logged
 	MCPURL     string            // SwarmJet MCP endpoint as reachable from inside the Cell
 	MCPToken   string            // Agent-scoped token for MCPURL
+
+	// Round 4. Revision, when set, is the commit the workspace checks out
+	// detached; Branch then only names the local branch. ReadOnly marks a
+	// verifier Cell: nothing in it is ever published.
+	Revision string
+	ReadOnly bool
 }
 
 // UpdateKind classifies streamed output of a turn.
