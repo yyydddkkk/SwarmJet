@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
+	"github.com/yyydddkkk/SwarmJet/internal/onboarding"
 	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
@@ -33,6 +34,16 @@ type Config struct {
 	AllowedOrigin string
 	StaticDir     string
 	SecureCookies bool
+	// Setup powers the GitHub App onboarding page. nil disables /api/setup/*.
+	Setup *onboarding.Manager
+	// Cells status is read from the same environment that starts the supervisor.
+	CellsEnabled    bool
+	CellsImage      string
+	CellsModel      string
+	DockerAvailable func() bool
+	// CLILoginStatus is filled by the CLI-login task. When nil the setup page
+	// reports a CLI login terminal that is not available yet.
+	CLILoginStatus func() (available, loggedIn bool)
 }
 
 type server struct {
@@ -71,6 +82,14 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusForbidden, "same-origin swarmjet request required")
 		return
 	}
+	// GitHub redirects the browser here from github.com. The session cookie is
+	// SameSite=Strict, so it is not sent on that cross-site navigation; the
+	// handler validates the one-time state and its callback cookie (or a
+	// present administrator session).
+	if r.URL.Path == onboarding.ManifestCallbackPath {
+		a.setupGitHubCallback(w, r)
+		return
+	}
 	if r.URL.Path == "/api/login" && r.Method == http.MethodPost {
 		a.login(w, r)
 		return
@@ -83,6 +102,10 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 	r = withPrincipal(r, principal)
 	// The console has a single administrator account, so every authenticated
 	// session may use the Hive and Forager endpoints.
+	if r.URL.Path == "/api/setup/status" || strings.HasPrefix(r.URL.Path, "/api/setup/github/") {
+		a.setup(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/runtime/") {
 		a.runtime(w, r)
 		return

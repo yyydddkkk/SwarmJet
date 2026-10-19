@@ -26,7 +26,6 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/cell"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/forager"
-	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
 	"github.com/yyydddkkk/SwarmJet/internal/jobs"
 	"github.com/yyydddkkk/SwarmJet/internal/mcp"
 	"github.com/yyydddkkk/SwarmJet/internal/service"
@@ -530,17 +529,22 @@ func TestRound2Loop(t *testing.T) {
 	}
 }
 
-func TestCellsRequireGitHubApp(t *testing.T) {
-	if _, err := newCellStack(nil, nil, t.TempDir(), nil); err == nil {
-		t.Fatal("SWARMJET_CELLS=1 without a GitHub App must fail at startup")
-	} else if !strings.Contains(err.Error(), "GITHUB_APP_ID") {
-		t.Fatalf("error does not name the missing configuration: %v", err)
+func TestCellsStartWithoutGitHubApp(t *testing.T) {
+	// A TCP DOCKER_HOST bypasses the local socket check; newCellStack does not
+	// connect to Docker at construction time.
+	t.Setenv("DOCKER_HOST", "tcp://127.0.0.1:2375")
+	if _, err := newCellStack(&store.Store{}, nil, t.TempDir(), nil); err != nil {
+		t.Fatalf("SWARMJET_CELLS=1 without a GitHub App must still start: %v", err)
+	}
+	repos := newGitHubRepositories(nil)
+	if _, err := repos.Token(context.Background(), "acme/repo"); err == nil || !strings.Contains(err.Error(), "GitHub App 未配置") {
+		t.Fatalf("token error does not explain the missing App: %v", err)
 	}
 }
 
 func TestCellsRequireDockerSocket(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "unix:///nonexistent/swarmjet-docker.sock")
-	_, err := newCellStack(&store.Store{}, &githubapp.App{}, t.TempDir(), nil)
+	_, err := newCellStack(&store.Store{}, nil, t.TempDir(), nil)
 	if err == nil {
 		t.Fatal("SWARMJET_CELLS=1 without a Docker socket must fail at startup")
 	}

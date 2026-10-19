@@ -186,3 +186,37 @@ func TestNormalizeAppSlug(t *testing.T) {
 		}
 	}
 }
+
+func TestRouteReadsAppSlugSourceDynamically(t *testing.T) {
+	b := NewMemoryBackend()
+	newTestHive(t, b, domain.HiveConfig{})
+	slug := ""
+	r := NewWithOptions(b, Options{AppSlugSource: func(context.Context) string { return slug }})
+
+	// The bot sender is ours, but the branch is not owned by a Forager. Without
+	// a slug the Router cannot attribute the event and does not ignore it.
+	event := loadEvent(t, EventPullRequest, "testdata/pull_request_opened_by_app.json")
+	event.DeliveryID = "dynamic-slug-1"
+	event.Branch = "feature/human-work"
+	decision, err := r.Route(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Route without slug: %v", err)
+	}
+	if decision.Action == ActionIgnored {
+		t.Fatalf("event was ignored before the App slug was known: %q", decision.Reason)
+	}
+
+	// Once the Provider learns the slug, the same Router recognises the sender
+	// without being rebuilt.
+	slug = "swarmjet"
+	event = loadEvent(t, EventPullRequest, "testdata/pull_request_opened_by_app.json")
+	event.DeliveryID = "dynamic-slug-2"
+	event.Branch = "feature/human-work"
+	decision, err = r.Route(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Route with slug: %v", err)
+	}
+	if decision.Action != ActionIgnored {
+		t.Fatalf("action = %q, want ignored after the slug was learned (reason %q)", decision.Action, decision.Reason)
+	}
+}

@@ -64,14 +64,19 @@ type Options struct {
 	// recognised from the sender alone. When empty the Router falls back to
 	// sender.type == "Bot" plus ownership of the event branch.
 	AppSlug string
+	// AppSlugSource, when non-nil, is consulted for every event and takes
+	// precedence over AppSlug. The Provider uses it so an App created at
+	// runtime is recognised without rebuilding the Router.
+	AppSlugSource func(context.Context) string
 }
 
 // Router routes normalized GitHub events. It is safe for concurrent use when
 // the Backend is.
 type Router struct {
-	backend    Backend
-	prRecorder PRRecorder
-	appSlug    string
+	backend       Backend
+	prRecorder    PRRecorder
+	appSlug       string
+	appSlugSource func(context.Context) string
 }
 
 // New builds a Router over the given backend with default options.
@@ -81,11 +86,24 @@ func New(backend Backend) *Router {
 
 // NewWithOptions builds a Router over the given backend and options.
 func NewWithOptions(backend Backend, opts Options) *Router {
-	r := &Router{backend: backend, appSlug: normalizeAppSlug(opts.AppSlug)}
+	r := &Router{
+		backend:       backend,
+		appSlug:       normalizeAppSlug(opts.AppSlug),
+		appSlugSource: opts.AppSlugSource,
+	}
 	if recorder, ok := backend.(PRRecorder); ok {
 		r.prRecorder = recorder
 	}
 	return r
+}
+
+// currentAppSlug resolves the slug for one routing decision. A dynamic source
+// wins so a newly created GitHub App takes effect without restarting serve.
+func (r *Router) currentAppSlug(ctx context.Context) string {
+	if r.appSlugSource != nil {
+		return normalizeAppSlug(r.appSlugSource(ctx))
+	}
+	return r.appSlug
 }
 
 // normalizeAppSlug accepts either "swarmjet" or "swarmjet[bot]" and returns the
@@ -164,17 +182,18 @@ func (r *Router) platformGenerated(ctx context.Context, hiveID string, e Event) 
 		return false, Decision{}, nil
 	}
 	login := strings.TrimSpace(e.SenderLogin)
+	appSlug := r.currentAppSlug(ctx)
 	appBot := strings.EqualFold(e.SenderType, "Bot")
-	if r.appSlug != "" {
-		appBot = strings.EqualFold(login, r.appSlug+"[bot]") ||
-			(appBot && strings.EqualFold(strings.TrimSuffix(login, "[bot]"), r.appSlug))
+	if appSlug != "" {
+		appBot = strings.EqualFold(login, appSlug+"[bot]") ||
+			(appBot && strings.EqualFold(strings.TrimSuffix(login, "[bot]"), appSlug))
 	}
 	if !appBot {
 		return false, Decision{}, nil
 	}
 
 	foragerID := ""
-	if r.appSlug == "" {
+	if appSlug == "" {
 		// Without the App slug, branch ownership is the only structured signal
 		// that distinguishes our publisher from another bot.
 		branch := strings.TrimSpace(e.Branch)
