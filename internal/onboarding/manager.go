@@ -129,16 +129,18 @@ type HookAttributes struct {
 	Active bool   `json:"active"`
 }
 
-// Manifest is the GitHub App Manifest document. It deliberately requests only
-// the permissions the round-3 architecture needs.
+// Manifest is the GitHub App Manifest document. GitHub only reads the
+// default_permissions and default_events keys; the Go field names mirror those
+// keys so a JSON round trip cannot silently drop the App's permissions and
+// event subscriptions.
 type Manifest struct {
-	Name           string            `json:"name"`
-	URL            string            `json:"url"`
-	RedirectURL    string            `json:"redirect_url"`
-	Public         bool              `json:"public"`
-	HookAttributes HookAttributes    `json:"hook_attributes"`
-	Permissions    map[string]string `json:"permissions"`
-	Events         []string          `json:"events"`
+	Name               string            `json:"name"`
+	URL                string            `json:"url"`
+	RedirectURL        string            `json:"redirect_url"`
+	Public             bool              `json:"public"`
+	HookAttributes     HookAttributes    `json:"hook_attributes"`
+	DefaultPermissions map[string]string `json:"default_permissions"`
+	DefaultEvents      []string          `json:"default_events"`
 }
 
 // ManifestResponse is returned by POST /api/setup/github/manifest. The callback
@@ -183,14 +185,14 @@ func (m *Manager) CreateManifest(ctx context.Context, owner string) (ManifestRes
 			URL:    webhookURL,
 			Active: active,
 		},
-		Permissions: map[string]string{
+		DefaultPermissions: map[string]string{
 			"contents":      "write",
 			"pull_requests": "write",
 			"issues":        "write",
 			"checks":        "read",
 			"metadata":      "read",
 		},
-		Events: []string{
+		DefaultEvents: []string{
 			"pull_request",
 			"pull_request_review",
 			"pull_request_review_comment",

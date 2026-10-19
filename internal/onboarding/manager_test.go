@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -138,15 +139,58 @@ func TestCreateManifestContents(t *testing.T) {
 	if !manifest.HookAttributes.Active || manifest.HookAttributes.URL != "https://console.example.com/api/webhooks/github" {
 		t.Fatalf("hook attributes = %+v", manifest.HookAttributes)
 	}
-	wantPermissions := map[string]string{"contents": "write", "pull_requests": "write", "issues": "write", "checks": "read", "metadata": "read"}
-	for permission, value := range wantPermissions {
-		if manifest.Permissions[permission] != value {
-			t.Fatalf("permission %s = %q", permission, manifest.Permissions[permission])
+	// GitHub reads the manifest as JSON, so assert the serialized keys, not only
+	// the Go struct. It only accepts default_permissions and default_events;
+	// permissions/events would silently create an App with no access.
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err = json.Unmarshal(encoded, &raw); err != nil {
+		t.Fatal(err)
+	}
+	wantKeys := []string{"name", "url", "redirect_url", "public", "hook_attributes", "default_permissions", "default_events"}
+	if len(raw) != len(wantKeys) {
+		t.Fatalf("manifest keys = %v, want exactly %v", rawKeys(raw), wantKeys)
+	}
+	for _, key := range wantKeys {
+		if _, ok := raw[key]; !ok {
+			t.Fatalf("manifest is missing %q; keys = %v", key, rawKeys(raw))
 		}
 	}
+	for _, legacy := range []string{"permissions", "events"} {
+		if _, ok := raw[legacy]; ok {
+			t.Fatalf("manifest still contains legacy key %q", legacy)
+		}
+	}
+	var permissions map[string]string
+	if err = json.Unmarshal(raw["default_permissions"], &permissions); err != nil {
+		t.Fatal(err)
+	}
+	wantPermissions := map[string]string{"contents": "write", "pull_requests": "write", "issues": "write", "checks": "read", "metadata": "read"}
+	if len(permissions) != len(wantPermissions) {
+		t.Fatalf("default_permissions = %v, want %v", permissions, wantPermissions)
+	}
+	for permission, value := range wantPermissions {
+		if permissions[permission] != value {
+			t.Fatalf("default_permissions[%s] = %q, want %q", permission, permissions[permission], value)
+		}
+	}
+	var events []string
+	if err = json.Unmarshal(raw["default_events"], &events); err != nil {
+		t.Fatal(err)
+	}
 	wantEvents := []string{"pull_request", "pull_request_review", "pull_request_review_comment", "issue_comment", "issues", "check_run"}
-	if strings.Join(manifest.Events, ",") != strings.Join(wantEvents, ",") {
-		t.Fatalf("events = %v", manifest.Events)
+	if strings.Join(events, ",") != strings.Join(wantEvents, ",") {
+		t.Fatalf("default_events = %v, want %v", events, wantEvents)
+	}
+	var hook map[string]json.RawMessage
+	if err = json.Unmarshal(raw["hook_attributes"], &hook); err != nil {
+		t.Fatal(err)
+	}
+	if len(hook) != 2 || hook["url"] == nil || hook["active"] == nil {
+		t.Fatalf("hook_attributes keys = %v, want url and active", rawKeys(hook))
 	}
 	state := stateFromAction(t, response.Action)
 	if _, ok := stateStore.states[hashToken(state)]; !ok {
@@ -352,4 +396,13 @@ func TestTunnelStatusReflectsManifestRead(t *testing.T) {
 	if !status.Enabled || status.URL != "https://status-test.trycloudflare.com" {
 		t.Fatalf("tunnel status = %+v", status)
 	}
+}
+
+func rawKeys(values map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
