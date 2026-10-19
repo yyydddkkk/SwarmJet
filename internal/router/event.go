@@ -297,6 +297,7 @@ func normalizePullRequest(payload []byte) (Event, bool) {
 		Title:             p.PullRequest.Title,
 		URL:               p.PullRequest.HTMLURL,
 		Merged:            p.PullRequest.Merged,
+		SHA:               p.PullRequest.Head.SHA,
 		Excerpt:           excerptOf(p.PullRequest.Body),
 		SenderLogin:       p.Sender.Login,
 		SenderType:        p.Sender.Type,

@@ -85,6 +85,11 @@ type Options struct {
 	SessionTimeout time.Duration
 	// Now is injectable for tests. Nil means time.Now.
 	Now func() time.Time
+
+	// SubmitVerdict processes a verifier's conclusion. It is supplied by the
+	// verification scheduler; nil means verification storage is unavailable and
+	// submit_verdict reports that instead of recording anything.
+	SubmitVerdict func(ctx context.Context, verifier domain.Agent, result domain.VerdictResult, summary string, findings []domain.Finding) (domain.Verdict, bool, error)
 }
 
 // withDefaults returns a copy of o with zero fields filled in.

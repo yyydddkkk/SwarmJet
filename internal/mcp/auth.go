@@ -58,6 +58,7 @@ var agentTools = map[domain.AgentRole]map[string]bool{
 		"get_forager":    true,
 		"inbox":          true,
 		"update_handoff": true,
+		"submit_verdict": true,
 	},
 	domain.RoleQueen: {
 		"send":                true,
@@ -73,6 +74,12 @@ var agentTools = map[domain.AgentRole]map[string]bool{
 // visible reports whether the tool is listed for this session. Default and admin
 // tokens see the whole catalog; agent tokens only see the tools they may call.
 func (ts *toolset) visible(tool string) bool {
+	// submit_verdict is stricter than the role table: only an agent token
+	// minted for a verifier Forager may see or call it.
+	if tool == "submit_verdict" {
+		return ts.token.Scope == domain.TokenAgent && ts.actorErr == nil &&
+			ts.actor.agent != nil && ts.actor.agent.Kind == domain.KindVerifier
+	}
 	if ts.token.Scope != domain.TokenAgent {
 		return true
 	}
@@ -91,6 +98,17 @@ func (ts *toolset) visible(tool string) bool {
 // is deliberately independent of visibility: a tool that is reachable anyway is
 // still rejected.
 func (ts *toolset) authorize(tool string) error {
+	if tool == "submit_verdict" {
+		if ts.token.Scope != domain.TokenAgent {
+			return fmt.Errorf("permission denied: submit_verdict is only available to a verifier Forager's agent token (this token is %q)", ts.token.Scope)
+		}
+		if ts.actorErr != nil {
+			return ts.actorErr
+		}
+		if ts.actor.agent == nil || ts.actor.agent.Kind != domain.KindVerifier {
+			return fmt.Errorf("permission denied: submit_verdict is only available to a verifier Forager")
+		}
+	}
 	switch ts.token.Scope {
 	case domain.TokenAdmin:
 		return nil

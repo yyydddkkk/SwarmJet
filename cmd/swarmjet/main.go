@@ -25,6 +25,7 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
 	"github.com/yyydddkkk/SwarmJet/internal/service"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/verify"
 )
 
 var buildVersion = "dev"
@@ -124,6 +125,28 @@ func runServe(ctx context.Context, s *store.Store) error {
 		ghApp = nil
 	}
 
+	// Independent verification: the Router calls OnHead for platform-published
+	// PR heads and submit_verdict hands conclusions to the same dispatcher. Both
+	// are wired only when the store implements the round-4 verdict contract
+	// (task A); until then verification stays off instead of half-working.
+	verificationRepos := newGitHubRepositories(ghProvider)
+	var verifier *verify.Dispatcher
+	if verifyStore, ok := any(s).(verify.Store); ok {
+		var verifierGitHub verify.GitHub = verificationRepos
+		if ghApp == nil {
+			// Without an App the platform cannot read the PR head or post the
+			// verdict comment; keep the store-only behavior instead.
+			verifierGitHub = nil
+		}
+		verifier = verify.New(verify.Options{
+			Store:  verifyStore,
+			GitHub: verifierGitHub,
+			Logger: slog.Default(),
+		})
+	} else {
+		slog.Warn("verification scheduling is disabled: the store does not implement the round-4 verdict methods")
+	}
+
 	metrics := observability.New()
 	metrics.SetReadiness(func(parent context.Context) error {
 		checkCtx, cancel := context.WithTimeout(parent, 3*time.Second)
@@ -214,6 +237,11 @@ func runServe(ctx context.Context, s *store.Store) error {
 		MCPURL:          publicMCPURL(),
 	})
 	svc := &service.Service{Store: s, Webhooks: s, AppSlugSource: ghProvider.Slug}
+	routerOptions := router.Options{AppSlugSource: ghProvider.Slug}
+	if verifier != nil {
+		routerOptions.OnHead = verifier.HeadChanged
+	}
+	svc.HiveRouter = router.NewWithOptions(s, routerOptions)
 
 	recordJob := func(queue string, err error) {
 		result := "acked"
@@ -250,7 +278,11 @@ func runServe(ctx context.Context, s *store.Store) error {
 	routes.Handle("/api/webhooks/github", svc.GitHubWebhookDynamic(ghProvider.WebhookSecret))
 	// MCP authenticates with a bearer token only; it never uses the console
 	// session (ADR section 12).
-	routes.Handle("/mcp", mcp.NewHandler(s, mcp.Options{Logger: slog.Default()}))
+	mcpOptions := mcp.Options{Logger: slog.Default()}
+	if verifier != nil {
+		mcpOptions.SubmitVerdict = verifier.SubmitVerdict
+	}
+	routes.Handle("/mcp", mcp.NewHandler(s, mcpOptions))
 	routes.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.Pool.Ping(r.Context()); err != nil {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)

@@ -17,7 +17,7 @@ import (
 var allToolNames = []string{
 	"list_hives", "get_hive", "create_hive", "update_hive", "send", "wait",
 	"spawn_forager", "cancel_forager", "get_forager", "read_forager_detail",
-	"update_handoff", "inbox", "claim", "offline_digest",
+	"update_handoff", "inbox", "claim", "offline_digest", "submit_verdict",
 }
 
 func allTools() map[string]bool {
@@ -25,6 +25,24 @@ func allTools() map[string]bool {
 	for _, name := range allToolNames {
 		out[name] = true
 	}
+	return out
+}
+
+// localTools is the catalog a default or admin token sees. submit_verdict is
+// deliberately hidden from non-agent tokens, so it is the one exception.
+func localTools() map[string]bool {
+	out := allTools()
+	delete(out, "submit_verdict")
+	return out
+}
+
+// workerTools is the catalog an ordinary (non-verifier) Forager sees.
+func workerTools() map[string]bool {
+	out := make(map[string]bool, len(agentTools[domain.RoleForager]))
+	for name, allowed := range agentTools[domain.RoleForager] {
+		out[name] = allowed
+	}
+	delete(out, "submit_verdict")
 	return out
 }
 
@@ -118,9 +136,9 @@ func TestToolVisibilityFollowsScope(t *testing.T) {
 		token string
 		want  map[string]bool
 	}{
-		{"default", env.userToken, allTools()},
-		{"admin", env.adminToken, allTools()},
-		{"forager", env.foragerToken, agentTools[domain.RoleForager]},
+		{"default", env.userToken, localTools()},
+		{"admin", env.adminToken, localTools()},
+		{"forager", env.foragerToken, workerTools()},
 		{"queen", env.queenToken, agentTools[domain.RoleQueen]},
 	}
 	for _, tc := range cases {
@@ -144,6 +162,10 @@ func TestAgentScopePermissionTable(t *testing.T) {
 			for _, tool := range allToolNames {
 				err := ts.authorize(tool)
 				wantAllowed := agentTools[role][tool]
+				if tool == "submit_verdict" {
+					// This fixture's Forager is a worker, not a verifier.
+					wantAllowed = false
+				}
 				if allowed := err == nil; allowed != wantAllowed {
 					t.Errorf("%s %s: allowed=%v, want %v (err=%v)", role, tool, allowed, wantAllowed, err)
 				}
@@ -565,8 +587,8 @@ func TestMCPEndToEndHandshakeListToolsSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(tools.Tools) != len(allToolNames) {
-		t.Fatalf("listed %d tools, want %d", len(tools.Tools), len(allToolNames))
+	if len(tools.Tools) != len(allToolNames)-1 {
+		t.Fatalf("listed %d tools, want %d (submit_verdict is verifier-only)", len(tools.Tools), len(allToolNames)-1)
 	}
 	out := decode[spawnForagerOutput](t, callTool(t, session, "spawn_forager", map[string]any{
 		"hiveId": h.ID, "task": "end to end",

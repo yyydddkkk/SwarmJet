@@ -271,3 +271,44 @@ func (r *githubRepositories) CreateOrUpdatePR(ctx context.Context, id int64, sou
 	client := github.New(func(context.Context) (string, error) { return token, nil })
 	return client.CreateOrUpdatePR(ctx, id, source, target, title, body)
 }
+
+// prClient resolves a repository name to its ID and a repository-scoped GitHub
+// client. Verification uses it to read the current PR head and to post the
+// verdict comment as the App.
+func (r *githubRepositories) prClient(ctx context.Context, repository string) (*github.Client, int64, error) {
+	fullName := strings.TrimSpace(repository)
+	if fullName == "" {
+		return nil, 0, errors.New("verification: Hive has no repository")
+	}
+	id, err := r.Resolve(ctx, fullName)
+	if err != nil {
+		return nil, 0, err
+	}
+	token, err := r.Token(ctx, fullName)
+	if err != nil {
+		return nil, 0, err
+	}
+	return github.New(func(context.Context) (string, error) { return token, nil }), id, nil
+}
+
+// PRHead implements verify.GitHub.
+func (r *githubRepositories) PRHead(ctx context.Context, repository string, pr int64) (string, error) {
+	client, id, err := r.prClient(ctx, repository)
+	if err != nil {
+		return "", err
+	}
+	mr, err := client.GetMR(ctx, id, pr)
+	if err != nil {
+		return "", err
+	}
+	return mr.SHA, nil
+}
+
+// CreatePRComment implements verify.GitHub.
+func (r *githubRepositories) CreatePRComment(ctx context.Context, repository string, pr int64, body string) (string, error) {
+	client, id, err := r.prClient(ctx, repository)
+	if err != nil {
+		return "", err
+	}
+	return client.CreatePRComment(ctx, id, pr, body)
+}

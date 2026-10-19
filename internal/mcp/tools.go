@@ -94,6 +94,11 @@ func (ts *toolset) register(s *mcpsdk.Server) {
 	}, ts.updateHandoff)
 
 	addTool(ts, s, &mcpsdk.Tool{
+		Name:        "submit_verdict",
+		Description: "Submit the independent verification conclusion for the PR head this verifier was started for. Only a verifier Forager's agent token may call this. `result` is pass, pass_notes, fail or blocked; `summary` is required; `findings` holds evidence-backed problems. When the verified commit is no longer the PR head, the verdict is recorded as superseded and the response says so.",
+	}, ts.submitVerdict)
+
+	addTool(ts, s, &mcpsdk.Tool{
 		Name:        "inbox",
 		Description: "List messages in a Hive's Inbox (to=hive), paginated by afterId. These are events that could not be routed deterministically. A Forager token instead reads only its own Inbox. Read-only.",
 		Annotations: ro(),
@@ -898,6 +903,66 @@ func (ts *toolset) updateHandoff(ctx context.Context, _ *mcpsdk.CallToolRequest,
 		a.Handoff = &handoff
 	}
 	return nil, updateHandoffOutput{Forager: ts.viewAgent(a)}, nil
+}
+
+type verdictFindingInput struct {
+	Severity string `json:"severity,omitempty" jsonschema:"critical, warning or nit"`
+	Location string `json:"location,omitempty" jsonschema:"file or component the finding is about"`
+	Finding  string `json:"finding,omitempty" jsonschema:"what is wrong, with evidence-backed reasoning"`
+	Evidence string `json:"evidence,omitempty" jsonschema:"command output, log excerpt or observed behavior"`
+}
+
+type submitVerdictInput struct {
+	Result   string                `json:"result" jsonschema:"pass, pass_notes, fail or blocked"`
+	Summary  string                `json:"summary" jsonschema:"required conclusion summary; long text is truncated in the PR comment and follow-up messages"`
+	Findings []verdictFindingInput `json:"findings,omitempty" jsonschema:"evidence-backed problems; at most 20 are kept"`
+}
+
+type submitVerdictOutput struct {
+	Verdict    domain.Verdict `json:"verdict"`
+	Superseded bool           `json:"superseded,omitempty"`
+	Message    string         `json:"message"`
+}
+
+func (ts *toolset) submitVerdict(ctx context.Context, _ *mcpsdk.CallToolRequest, in submitVerdictInput) (*mcpsdk.CallToolResult, submitVerdictOutput, error) {
+	if ts.actor.agent == nil || ts.actor.agent.Kind != domain.KindVerifier {
+		return nil, submitVerdictOutput{}, fmt.Errorf("permission denied: submit_verdict is only available to a verifier Forager")
+	}
+	if ts.opts.SubmitVerdict == nil {
+		return nil, submitVerdictOutput{}, fmt.Errorf("verification is not configured on this server")
+	}
+	result := domain.VerdictResult(strings.TrimSpace(in.Result))
+	switch result {
+	case domain.VerdictPass, domain.VerdictPassNotes, domain.VerdictFail, domain.VerdictBlocked:
+	default:
+		return nil, submitVerdictOutput{}, fmt.Errorf("result must be pass, pass_notes, fail or blocked, got %q", in.Result)
+	}
+	summary := strings.TrimSpace(in.Summary)
+	if summary == "" {
+		return nil, submitVerdictOutput{}, fmt.Errorf("summary is required")
+	}
+	findings := make([]domain.Finding, 0, len(in.Findings))
+	for _, finding := range in.Findings {
+		findings = append(findings, domain.Finding{
+			Severity: finding.Severity,
+			Location: finding.Location,
+			Finding:  finding.Finding,
+			Evidence: finding.Evidence,
+		})
+	}
+	verdict, superseded, err := ts.opts.SubmitVerdict(ctx, *ts.actor.agent, result, summary, findings)
+	if err != nil {
+		return nil, submitVerdictOutput{}, err
+	}
+	out := submitVerdictOutput{
+		Verdict:    verdict,
+		Superseded: superseded,
+		Message:    "结论已记录，并已通知相关负责人。",
+	}
+	if superseded {
+		out.Message = "该提交已被新的推送取代；结论已记录为作废。"
+	}
+	return nil, out, nil
 }
 
 // clampHandoff applies the handoff limits before anything is stored. Truncation
