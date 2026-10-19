@@ -5,11 +5,13 @@ x-build: &app-build
 services:
   api:
     build: *app-build
-  worker:
-    build: *app-build
   migrate:
     build: *app-build
+  # Built only with `--profile tools`; Cells run this image, the platform does
+  # not start it as a long-running service.
   agent-image:
+    image: ${AGENT_IMAGE:-swarmjet-agent:local}
+    profiles: [tools]
     build:
       context: ..
       dockerfile: deploy/Dockerfile.agent

@@ -18,8 +18,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
-COPY image_assets.go ./
-COPY deploy/install_node.py deploy/compose.node.yaml ./deploy/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.buildVersion=${RELEASE_VERSION} -X main.buildCommit=${RELEASE_COMMIT}" -o /out/swarmjet ./cmd/swarmjet
 
 FROM ${DOCKER_IMAGE} AS docker-cli
