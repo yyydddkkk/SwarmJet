@@ -24,6 +24,7 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/execution"
 	"github.com/yyydddkkk/SwarmJet/internal/forge"
+	"github.com/yyydddkkk/SwarmJet/internal/forager"
 	"github.com/yyydddkkk/SwarmJet/internal/github"
 	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
 	"github.com/yyydddkkk/SwarmJet/internal/gitlab"
@@ -406,6 +407,20 @@ func run() error {
 		return e
 	}
 	if mode == "serve" {
+		// Cells run in this process: the River message delivery job hands each
+		// delivered Inbox message straight to the supervisor. Install the sink
+		// before the queue starts and wait for the supervisor on shutdown.
+		var cells *cellStack
+		if os.Getenv("SWARMJET_CELLS") == "1" {
+			cells, e = newCellStack(s, ghApp, data, slog.Default())
+			if e != nil {
+				return e
+			}
+			s.MessageSink = cells.Supervisor.Notify
+			cells.Start(ctx)
+			defer cells.Stop()
+			slog.Info("forager cells enabled", "model", env("SWARMJET_FORAGER_MODEL", forager.DefaultModel))
+		}
 		adminUser := env("ADMIN_USERNAME", "admin")
 		password := required("ADMIN_PASSWORD")
 		if len(password) < 12 {

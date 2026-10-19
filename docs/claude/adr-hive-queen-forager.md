@@ -169,6 +169,8 @@ creating → active ⇄ parked → hibernated
 
 **调度**：每个 Hive 有并发 Forager 上限（4），每个 Node 有容量上限。本地 Agent 交互发起的 Forager 优先于事件触发的 Forager。
 
+**第二轮实现说明**：本轮的主协议是 **ACP**（stdio 上的 JSON-RPC）：Cell 内运行长期的 `opencode acp` 进程，平台通过 `session/new`、`session/prompt`、`session/cancel` 和 `session/load` 驱动多轮对话；会话 ID 持久化在 `agents.cli_session_ref`，容器重启后按同一 cwd 和数据卷加载。Cell **不持有 Git 凭证**：工作区由平台在宿主机侧首次克隆；之后暂存、WIP 提交和 `git bundle create` 都在 Cell 内执行，但推送由平台侧的裸镜像用短期安装 Token 完成。发布走 **bundle 加平台镜像**：宿主只接受 Cell 产出的、恰好指向该 Forager 分支的 bundle，校验基线祖先关系后再推送一个 refspec，避免 Cell 可写的 `.git/config` 影响宿主。监管者与 River 消息投递 Job 同在 serve 进程，发布器使用 GitHub App 按仓库名解析安装并申请只覆盖该仓库的 Token。**本轮只支持单机**：Cell 跑在平台宿主机的 Docker 上，Cell 加入配置的 Docker 网络以访问 serve 的 `/mcp`；这一轮还没有多 Node 调度，也没有 Queen、Guard 和 Dream。
+
 ## 9. Inbox、Router 与消息
 
 **消息模型**（`messages` 表）：

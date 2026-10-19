@@ -53,7 +53,7 @@ docker build -f deploy/Dockerfile.agent -t swarmjet-agent:local \
   --build-arg AGENT_BASE_IMAGE=node:22.23.1-bookworm-slim .
 ```
 
-`DATA_DIR` 必须是存在的绝对宿主机路径。API、Worker 和 Docker 创建的执行容器使用同一路径；不能把宿主机 `/srv/swarmjet/data` 改挂成容器 `/data`。Worker 通过宿主 Docker socket 创建同级容器，绝对 `.git` 路径也依赖这个约定。API 的数据挂载只读，且没有 Docker socket。
+`DATA_DIR` 必须是存在的绝对宿主机路径。API、Worker 和 Docker 创建的执行容器使用同一路径；不能把宿主机 `/srv/swarmjet/data` 改挂成容器 `/data`。Worker 通过宿主 Docker socket 创建同级容器，绝对 `.git` 路径也依赖这个约定。启用第二轮 Cell 后，API（serve）也会挂载同一个可写 `DATA_DIR` 和 Docker socket，见下文“第二轮 Cell 运行时”。
 
 访问 `http://localhost:8180`，使用 `.env` 的管理员账号登录。项目配置需要真实 GitLab URL、Meta-Repo、仓库与目标分支、模型 `provider/model`、验收 Compose 与必需检查。项目中配置的 agent image 必须与已构建的 `AGENT_IMAGE` 一致。保存凭证的环境变量名，例如 `GITLAB_TOKEN` 与 `GITLAB_MERGE_TOKEN`，不要把 token 粘贴进项目字段。
 
@@ -137,6 +137,45 @@ bearer_token_env_var = "SWARMJET_MCP_TOKEN"
 ```
 
 Token 放在本地环境变量或密码管理器里，不要提交到仓库。本轮还没有撤销 Token 的命令；停用一条 Token 目前需要删除 `mcp_tokens` 中对应的行。`/mcp` 与网页控制台共用进程和数据库，但不需要网页会话，也不需要 `ADMIN_PASSWORD`，只要数据库可连、迁移已执行。
+
+## 第二轮 Cell 运行时（Forager 执行）
+
+第二轮把 Forager 监管者和 Cell 运行时接进了 serve 进程。监管者必须在 serve 里运行，因为消息投递 Job 也在 serve 里执行：Job 把消息交给监管者，监管者启动或唤醒 Cell、驱动 OpenCode（ACP）、发布分支并开 PR。默认关闭；关闭时消息照常写入，只是没有人执行。
+
+```sh
+# deploy/.env
+SWARMJET_CELLS=1
+# 可选：沿用 AGENT_IMAGE（默认 swarmjet-agent:local）
+AGENT_IMAGE=swarmjet-agent:local
+# 默认 opencode/big-pickle；必须是 provider/model
+SWARMJET_FORAGER_MODEL=opencode/big-pickle
+# Cell 内访问 serve 的 MCP；compose 给 api 加了 swarmjet 别名
+SWARMJET_CELL_MCP_URL=http://swarmjet:8080/mcp
+# Cell 加入的 Docker 网络，默认 <COMPOSE_PROJECT_NAME>_default
+SWARMJET_CELL_NETWORK=swarmjet_default
+# 可选：OpenCode auth.json 的内容；只传给 Cell 内的 CLI 进程
+OPENCODE_AUTH_CONTENT=
+```
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `SWARMJET_CELLS` | `0` | 设为 `1` 才启动监管者。为 `1` 时必须配置 GitHub App，否则 serve 启动失败并给出明确错误。 |
+| `AGENT_IMAGE` | `swarmjet-agent:local` | Cell 镜像，需包含 `opencode`。 |
+| `SWARMJET_FORAGER_MODEL` | `opencode/big-pickle` | Forager 每轮固定使用的模型；不要依赖 CLI 默认模型。 |
+| `SWARMJET_CELL_MCP_URL` | `http://swarmjet:8080/mcp` | Cell 内可达的 `/mcp` 地址；compose 中 `api` 在默认网络上还有 `swarmjet` 别名。 |
+| `SWARMJET_CELL_NETWORK` | `<项目名>_default` | Cell 容器加入的 Docker 网络。Cell 必须和 serve 在同一网络才能访问 `/mcp`。 |
+| `OPENCODE_AUTH_CONTENT` | 空 | 可选模型凭证；只作为 `docker exec -e` 传给 CLI，不写文件、不入镜像、不写日志。 |
+
+**权限变化（重要）**：启用后 serve 服务挂载了宿主机的 `/var/run/docker.sock`。这等同于给 serve 进程宿主机的 root 级权限：容器可以创建、停止、删除宿主上的容器，也可以读写宿主路径。这是本轮单机部署的取舍，不是长期安全边界。只应在自己控制、管理员可信的服务器上启用，不要把 Docker socket 暴露给 agent 容器，也不要让不可信用户获得 serve 的 MCP Token。`DATA_DIR` 与宿主机使用相同绝对路径，Cell 工作区以绑定目录形式落在 `DATA_DIR/cells/<agent-id>/workspace`；发布器在平台侧读取该目录并推送一个受控分支，Cell 内不持有 Git 凭证。
+
+启用步骤：
+
+1. 配置 GitHub App（见上一节），确保 App 安装在目标仓库上，并设置 `GITHUB_APP_ID`、`GITHUB_APP_PRIVATE_KEY_FILE` 和 `GITHUB_WEBHOOK_SECRET`。
+2. 在 `deploy/.env` 设置 `SWARMJET_CELLS=1`，按需设置上面的变量，然后 `docker compose up -d --wait`。
+3. 用 `swarmjet token create --scope admin` 创建管理员 Token，通过 MCP 建 Hive 并 `spawn_forager`；或按 `docs/claude/runbook-round2.md` 手动验收。
+4. 查看 `docker compose logs -f api`，确认出现 `forager cells enabled`，并观察 Cell 容器 `swarmjet-cell-<agent-id>`。
+
+关闭时把 `SWARMJET_CELLS` 改回 `0` 并重启 serve：现有 Cell 不会被新消息唤醒，消息仍留在数据库里。需要清理残留时按标签 `swarmjet.cell=true` 查找容器。
 
 ## 额外环境变量与保留期
 
