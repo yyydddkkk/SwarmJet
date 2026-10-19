@@ -32,6 +32,9 @@ var schemaUpgrade5 string
 //go:embed schema_upgrade_6.sql
 var schemaUpgrade6 string
 
+//go:embed schema_upgrade_8.sql
+var schemaUpgrade8 string
+
 var ErrConflict = errors.New("conflict: stale version or active task already exists")
 var ErrNotFound = errors.New("not found")
 
@@ -93,7 +96,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err = tx.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil {
 		return err
 	}
-	if version > 7 {
+	if version > 8 {
 		return fmt.Errorf("database schema version %d is newer than this application supports", version)
 	}
 	if version < 2 {
@@ -138,6 +141,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	if err = applySchemaUpgrade7(ctx, tx, version); err != nil {
 		return err
+	}
+	if version < 8 {
+		if _, err = tx.Exec(ctx, schemaUpgrade8); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO schema_version(version) VALUES(8) ON CONFLICT DO NOTHING`); err != nil {
+			return err
+		}
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return err

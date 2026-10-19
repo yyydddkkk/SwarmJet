@@ -614,6 +614,11 @@ func validateSpec(spec cell.Spec, image string) error {
 			return err
 		}
 	}
+	if spec.Revision != "" {
+		if err := validRevision(spec.Revision); err != nil {
+			return err
+		}
+	}
 	if spec.CLI != "" && spec.CLI != "opencode" {
 		return fmt.Errorf("cell: unsupported CLI %q", spec.CLI)
 	}

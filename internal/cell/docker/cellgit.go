@@ -146,6 +146,13 @@ func (r *Runtime) prepareCell(ctx context.Context, spec cell.Spec, fresh bool) e
 		return errors.New("cell: workspace origin does not match the Agent repository")
 	}
 
+	// A verifier Cell is pinned to the exact head it must check. Each head gets
+	// a fresh Cell, so the commit is already in the first clone; no fetch is
+	// needed inside the Cell.
+	if spec.Revision != "" {
+		return cellCheckoutRevision(ctx, g, spec)
+	}
+
 	if fresh {
 		// A fresh clone uses --no-checkout, so the index is empty even though
 		// HEAD may resolve. Populate the working tree without a dirty check.
@@ -204,6 +211,26 @@ func (r *Runtime) prepareCell(ctx context.Context, spec cell.Spec, fresh bool) e
 		return err
 	}
 	return cellCheckout(ctx, g, spec.Branch, "origin/"+base)
+}
+
+// cellCheckoutRevision creates the local branch name the Cell knows about, then
+// detaches HEAD at the requested commit. The branch is local only and is never
+// pushed: a verifier Cell is read-only.
+func cellCheckoutRevision(ctx context.Context, g *cellGit, spec cell.Spec) error {
+	res, err := g.git(ctx, "cat-file", "-e", spec.Revision+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("cell: inspect revision %s: %w", spec.Revision, err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("cell: revision %q is not present in the workspace", spec.Revision)
+	}
+	if _, err := g.git(ctx, "checkout", "--quiet", "-B", spec.Branch, spec.Revision); err != nil {
+		return fmt.Errorf("cell: checkout %s at %s: %w", spec.Branch, spec.Revision, err)
+	}
+	if _, err := g.git(ctx, "checkout", "--quiet", "--detach", spec.Revision); err != nil {
+		return fmt.Errorf("cell: detach at %s: %w", spec.Revision, err)
+	}
+	return nil
 }
 
 func cellCheckoutBranch(ctx context.Context, g *cellGit, spec cell.Spec) error {

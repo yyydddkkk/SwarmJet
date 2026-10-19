@@ -49,6 +49,9 @@ type Options struct {
 	Clock Clock
 	// Model is passed as cell.Spec.Model on every turn.
 	Model string
+	// BaseBranch is the branch verifier PRs target. It is only used in the
+	// verifier prompt; empty means "the repository default branch".
+	BaseBranch string
 	// MCPURL is passed as cell.Spec.MCPURL on every turn.
 	MCPURL string
 	// CLIEnv resolves the CLI secrets for a Hive. It is called once per Start

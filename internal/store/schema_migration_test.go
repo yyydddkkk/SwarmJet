@@ -26,6 +26,73 @@ func TestMigrateRemovesPlatformUpgradeTaskGate(t *testing.T) {
 	}
 }
 
+func TestMigrateFromSevenAddsVerifierColumnsAndVerdicts(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	h := newTestHive(t, s, "acme/v7-upgrade")
+	worker, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, Task: "existing work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rebuild the version-7 shape while keeping existing rows.
+	for _, statement := range []string{
+		`DROP TABLE IF EXISTS verdicts`,
+		`ALTER TABLE agents DROP COLUMN IF EXISTS kind`,
+		`ALTER TABLE agents DROP COLUMN IF EXISTS verify_sha`,
+		`ALTER TABLE agents DROP COLUMN IF EXISTS owner_id`,
+		`DELETE FROM schema_version WHERE version > 7`,
+	} {
+		if _, err = s.Pool.Exec(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	if err = s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var version int
+	if err = s.Pool.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil || version != 8 {
+		t.Fatalf("version=%d err=%v", version, err)
+	}
+	got, err := s.Agent(ctx, worker.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != domain.KindWorker || got.VerifySHA != "" || got.OwnerID != "" {
+		t.Fatalf("existing agent after upgrade = %+v", got)
+	}
+
+	verifier, err := s.CreateForager(ctx, domain.Agent{
+		HiveID:    h.ID,
+		Kind:      domain.KindVerifier,
+		PRNumber:  12,
+		VerifySHA: "deadbeef",
+		OwnerID:   got.ID,
+		ChainID:   "chain-1",
+		Branch:    "verify/upgrade",
+	})
+	if err != nil {
+		t.Fatalf("create verifier after upgrade: %v", err)
+	}
+	if verifier.Kind != domain.KindVerifier || verifier.VerifySHA != "deadbeef" || verifier.OwnerID != got.ID {
+		t.Fatalf("verifier round trip after upgrade = %+v", verifier)
+	}
+	verdict, err := s.RecordVerdict(ctx, domain.Verdict{
+		HiveID:     h.ID,
+		PRNumber:   12,
+		HeadSHA:    "deadbeef",
+		OwnerID:    got.ID,
+		VerifierID: verifier.ID,
+		Result:     domain.VerdictBlocked,
+		Summary:    "upgrade check",
+	})
+	if err != nil {
+		t.Fatalf("RecordVerdict after upgrade: %v", err)
+	}
+	if err = s.SetVerdictComment(ctx, verdict.ID, "https://example.invalid/comment"); err != nil {
+		t.Fatalf("SetVerdictComment after upgrade: %v", err)
+	}
+}
+
 func TestMigrateFromFiveAddsSessionAndAgentTokens(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
@@ -53,7 +120,7 @@ func TestMigrateFromFiveAddsSessionAndAgentTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	var version int
-	if err = s.Pool.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil || version != 7 {
+	if err = s.Pool.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil || version != 8 {
 		t.Fatalf("version=%d err=%v", version, err)
 	}
 	got, err := s.Agent(ctx, a.ID)

@@ -22,6 +22,7 @@ type fakeStore struct {
 	agents   map[string]domain.Agent
 	messages []domain.Message
 	tokens   map[string]domain.Token // plaintext -> token
+	verdicts []domain.Verdict
 	tokenSeq int
 	calls    []string
 	sent     []domain.Message
@@ -273,6 +274,44 @@ func (s *fakeStore) RevokeAgentTokens(_ context.Context, agentID string) error {
 		}
 	}
 	return nil
+}
+
+// RecordVerdict implements the idempotent unique key of the real store.
+func (s *fakeStore) RecordVerdict(_ context.Context, v domain.Verdict) (domain.Verdict, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, existing := range s.verdicts {
+		if existing.HiveID == v.HiveID && existing.PRNumber == v.PRNumber &&
+			existing.HeadSHA == v.HeadSHA && existing.VerifierID == v.VerifierID {
+			return existing, nil
+		}
+	}
+	if v.ID == "" {
+		v.ID = fmt.Sprintf("verdict-%d", len(s.verdicts)+1)
+	}
+	if v.CreatedAt.IsZero() {
+		v.CreatedAt = s.now()
+	}
+	s.verdicts = append(s.verdicts, v)
+	s.calls = append(s.calls, "RecordVerdict:"+v.VerifierID)
+	return v, nil
+}
+
+func (s *fakeStore) VerdictByVerifier(_ context.Context, verifierID string) (domain.Verdict, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.verdicts) - 1; i >= 0; i-- {
+		if s.verdicts[i].VerifierID == verifierID {
+			return s.verdicts[i], nil
+		}
+	}
+	return domain.Verdict{}, domain.ErrNotFound
+}
+
+func (s *fakeStore) verdictsCopy() []domain.Verdict {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]domain.Verdict(nil), s.verdicts...)
 }
 
 func (s *fakeStore) SendMessage(_ context.Context, m domain.Message) (domain.Message, error) {
@@ -586,6 +625,9 @@ type runtimeScript struct {
 	promptTexts  []string
 	promptCount  int
 	cancels      int
+	// promptHook runs after a prompt is recorded, so a test can simulate the
+	// submit_verdict MCP call while the turn is in flight.
+	promptHook func(ctx context.Context, text string)
 }
 
 func (s *runtimeScript) releasePrompt() {
@@ -642,8 +684,12 @@ func (s *fakeSession) Prompt(ctx context.Context, text string, sink func(cell.Up
 	}
 	release := s.script.release
 	updates := append([]cell.Update(nil), s.script.updates...)
+	hook := s.script.promptHook
 	s.script.mu.Unlock()
 
+	if hook != nil {
+		hook(ctx, text)
+	}
 	for _, update := range updates {
 		sink(update)
 	}

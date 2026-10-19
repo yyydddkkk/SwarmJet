@@ -20,7 +20,7 @@ import (
 
 const hiveColumns = `id,name,repository,queen_enabled,config,version,created_at,updated_at`
 
-const agentColumns = `id,hive_id,role,state,preset,cli,task,branch,issue_number,pr_number,node_id,chain_id,cli_session_ref,handoff,created_at,updated_at`
+const agentColumns = `id,hive_id,role,state,preset,cli,task,branch,issue_number,pr_number,node_id,chain_id,cli_session_ref,handoff,kind,verify_sha,owner_id,created_at,updated_at`
 
 // newOpaqueID returns 128 random bits as hex. It is used for Hive, Agent and
 // Token identifiers. Message IDs use newMessageID instead so that they sort in
@@ -75,6 +75,15 @@ func applyHiveDefaults(c *domain.HiveConfig) {
 	}
 	if c.ForagerMaxLifetimeHours == 0 {
 		c.ForagerMaxLifetimeHours = 168
+	}
+	if c.Verify.Mode == "" {
+		c.Verify.Mode = "on"
+	}
+	if c.Verify.MaxRounds == 0 {
+		c.Verify.MaxRounds = 3
+	}
+	if c.Verify.MergeMethod == "" {
+		c.Verify.MergeMethod = "squash"
 	}
 }
 
@@ -200,14 +209,16 @@ func (s *Store) UpdateHive(ctx context.Context, h domain.Hive) (domain.Hive, err
 
 func scanAgent(row pgx.Row) (domain.Agent, error) {
 	var a domain.Agent
-	var role, state string
+	var role, state, kind string
 	var handoff []byte
 	err := row.Scan(&a.ID, &a.HiveID, &role, &state, &a.Preset, &a.CLI, &a.Task, &a.Branch,
-		&a.IssueNumber, &a.PRNumber, &a.NodeID, &a.ChainID, &a.SessionRef, &handoff, &a.CreatedAt, &a.UpdatedAt)
+		&a.IssueNumber, &a.PRNumber, &a.NodeID, &a.ChainID, &a.SessionRef, &handoff,
+		&kind, &a.VerifySHA, &a.OwnerID, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return domain.Agent{}, domainErr(err)
 	}
 	a.Role, a.State = domain.AgentRole(role), domain.AgentState(state)
+	a.Kind = domain.ForagerKind(kind)
 	if len(handoff) > 0 {
 		var h domain.Handoff
 		if err = json.Unmarshal(handoff, &h); err != nil {
@@ -222,6 +233,9 @@ func scanAgent(row pgx.Row) (domain.Agent, error) {
 // limits. It locks the Hive row so concurrent creators cannot overshoot.
 func (s *Store) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent, error) {
 	now := time.Now().UTC()
+	if a.Kind == "" {
+		a.Kind = domain.KindWorker
+	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return domain.Agent{}, err
@@ -245,9 +259,11 @@ func (s *Store) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent
 	if active >= cfg.MaxConcurrentForagers {
 		return domain.Agent{}, domain.ErrHiveLimit
 	}
-	if a.ChainID != "" {
+	// Verifiers share the owner's ChainID but must not consume the worker
+	// chain budget: every new head gets a fresh verifier.
+	if a.Kind != domain.KindVerifier && a.ChainID != "" {
 		var chained int
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND chain_id=$2`, a.HiveID, a.ChainID).Scan(&chained); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND chain_id=$2 AND kind <> 'verifier'`, a.HiveID, a.ChainID).Scan(&chained); err != nil {
 			return domain.Agent{}, err
 		}
 		if chained >= cfg.MaxForagersPerChain {
@@ -283,9 +299,10 @@ func (s *Store) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent
 			return domain.Agent{}, err
 		}
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO agents(`+agentColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+	if _, err = tx.Exec(ctx, `INSERT INTO agents(`+agentColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
 		a.ID, a.HiveID, string(a.Role), string(a.State), a.Preset, a.CLI, a.Task, a.Branch,
-		a.IssueNumber, a.PRNumber, a.NodeID, a.ChainID, a.SessionRef, handoff, a.CreatedAt, a.UpdatedAt); err != nil {
+		a.IssueNumber, a.PRNumber, a.NodeID, a.ChainID, a.SessionRef, handoff,
+		string(a.Kind), a.VerifySHA, a.OwnerID, a.CreatedAt, a.UpdatedAt); err != nil {
 		return domain.Agent{}, domainErr(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -336,16 +353,38 @@ func (s *Store) Foragers(ctx context.Context, hiveID string, states ...domain.Ag
 // for finished Foragers fall through to the Hive Inbox instead of a dead Agent.
 const liveForager = ` AND state NOT IN ('completed','failed','cancelled')`
 
+// workerOnly keeps event lookups away from verifiers: a PR event must always
+// reach the Forager that wrote the code.
+const workerOnly = ` AND kind <> 'verifier'`
+
 func (s *Store) ForagerByIssue(ctx context.Context, hiveID string, issue int64) (domain.Agent, error) {
-	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND issue_number=$2`+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, issue))
+	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND issue_number=$2`+workerOnly+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, issue))
 }
 
 func (s *Store) ForagerByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error) {
-	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND pr_number=$2`+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, pr))
+	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND pr_number=$2`+workerOnly+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, pr))
 }
 
 func (s *Store) ForagerByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error) {
-	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND branch=$2`+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, branch))
+	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND branch=$2`+workerOnly+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, branch))
+}
+
+// Verifiers lists the live verification Foragers for a PR, newest first.
+func (s *Store) Verifiers(ctx context.Context, hiveID string, pr int64) ([]domain.Agent, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND kind='verifier' AND pr_number=$2`+liveForager+` ORDER BY created_at DESC,id DESC`, hiveID, pr)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var verifiers []domain.Agent
+	for rows.Next() {
+		a, err := scanAgent(rows)
+		if err != nil {
+			return nil, err
+		}
+		verifiers = append(verifiers, a)
+	}
+	return verifiers, rows.Err()
 }
 
 // TransitionAgent is a compare-and-swap on the Agent state.

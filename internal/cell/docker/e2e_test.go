@@ -244,3 +244,72 @@ func envOr(key, fallback string) string {
 	}
 	return fallback
 }
+
+// TestCellReadOnlyRevisionE2E proves the round-4 workspace contract against a
+// real container and a real clone: the commit is checked out detached, and a
+// read-only Cell can never publish.
+//
+//	SWARMJET_CELL_E2E=1 go test ./internal/cell/docker/ -run TestCellReadOnlyRevisionE2E -v
+func TestCellReadOnlyRevisionE2E(t *testing.T) {
+	if os.Getenv("SWARMJET_CELL_E2E") != "1" {
+		t.Skip("set SWARMJET_CELL_E2E=1 to run the real Docker revision checkout test")
+	}
+	dockerBinary := envOr("SWARMJET_CELL_E2E_DOCKER", "docker")
+	image := envOr("SWARMJET_CELL_E2E_IMAGE", "swarmjet-agent:local")
+	model := envOr("SWARMJET_CELL_E2E_MODEL", "opencode/big-pickle")
+	if _, err := exec.LookPath(dockerBinary); err != nil {
+		t.Skipf("%s not found: %v", dockerBinary, err)
+	}
+	if out, err := exec.Command(dockerBinary, "image", "inspect", image).CombinedOutput(); err != nil {
+		t.Skipf("image %s not available: %v\n%s", image, err, out)
+	}
+
+	bare := initBareRepo(t)
+	sha := runGit(t, bare, "rev-parse", "refs/heads/main")
+	agentID := fmt.Sprintf("e2e-verify-%d", time.Now().UnixNano())
+	spec := cell.Spec{
+		AgentID:    agentID,
+		HiveID:     "e2e-hive",
+		Repository: "acme/app",
+		Branch:     "verify/" + agentID,
+		BaseBranch: "main",
+		CLI:        "opencode",
+		Model:      model,
+		Revision:   sha,
+		ReadOnly:   true,
+	}
+	rt := NewRuntime(t.TempDir())
+	rt.DockerBinary = dockerBinary
+	rt.Config.Image = image
+	rt.Git = &Git{Remote: func(string) string { return bare }}
+	rt.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cleanupCancel()
+		_ = rt.Destroy(cleanupCtx, agentID)
+	})
+
+	if _, err := rt.Start(ctx, spec); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	head := containerGit(t, rt, agentID, "rev-parse", "HEAD")
+	if got := strings.TrimSpace(string(head.Stdout)); got != sha {
+		t.Fatalf("HEAD = %q, want %q", got, sha)
+	}
+	detached, err := rt.cellRunner().Run(ctx, containerName(agentID), cellWorkdir,
+		[]string{"git", "symbolic-ref", "--quiet", "--short", "HEAD"})
+	if err != nil {
+		t.Fatalf("symbolic-ref: %v", err)
+	}
+	if detached.ExitCode == 0 {
+		t.Fatalf("HEAD is attached to %q, want a detached checkout", strings.TrimSpace(string(detached.Stdout)))
+	}
+
+	pub := &Publisher{DataDir: rt.DataDir, Cell: rt.cellRunner()}
+	if _, err := pub.Publish(ctx, spec, "title", "body"); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("Publish on a read-only Cell: %v", err)
+	}
+}

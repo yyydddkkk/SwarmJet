@@ -36,17 +36,18 @@ type actor struct {
 	id     string
 	hiveID string
 
-	mu            sync.Mutex
-	queue         []domain.Message
-	running       bool
-	terminal      bool
-	cancelPending bool
-	failures      int
-	mcpToken      string
-	session       cell.Session
-	lastTurnEnd   time.Time
-	stopped       bool
-	interrupt     chan struct{}
+	mu             sync.Mutex
+	queue          []domain.Message
+	running        bool
+	terminal       bool
+	cancelPending  bool
+	failures       int
+	verifierMisses int
+	mcpToken       string
+	session        cell.Session
+	lastTurnEnd    time.Time
+	stopped        bool
+	interrupt      chan struct{}
 }
 
 func newActor(s *Supervisor, id, hiveID string) *actor {
@@ -195,7 +196,20 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		a.sup.log.Warn("forager: read unhandled messages failed", "agent", agent.ID, "error", err)
 		consumed = dedupeMessages(batch)
 	}
-	text := buildPrompt(agent, hive, consumed, firstTurn)
+	var text string
+	if effectiveKind(agent) == domain.KindVerifier {
+		var owner domain.Agent
+		if agent.OwnerID != "" {
+			if got, ownerErr := store.Agent(ctx, agent.OwnerID); ownerErr == nil {
+				owner = got
+			} else if !errors.Is(ownerErr, domain.ErrNotFound) {
+				a.sup.log.Warn("forager: load verifier owner failed", "agent", agent.ID, "owner", agent.OwnerID, "error", ownerErr)
+			}
+		}
+		text = buildVerifierPrompt(agent, owner, hive, spec.BaseBranch, consumed, firstTurn)
+	} else {
+		text = buildPrompt(agent, hive, consumed, firstTurn)
+	}
 	timeout := time.Duration(hive.Config.TurnTimeoutMinutes) * time.Minute
 	if timeout <= 0 {
 		timeout = 120 * time.Minute
@@ -245,13 +259,19 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		return false
 	}
 
-	// The turn is done: persist consumption, publish the branch, record the PR
-	// and report back before parking.
+	// Persist consumption first: a verifier is judged on whether it submitted a
+	// verdict, while a worker then publishes and parks.
 	a.markHandled(ctx, consumed)
 	latest, err := store.Agent(ctx, agent.ID)
 	if err != nil {
 		latest = agent
 	}
+	if effectiveKind(latest) == domain.KindVerifier {
+		return a.finishVerifierTurn(ctx, latest)
+	}
+
+	// The turn is done for a worker: publish the branch, record the PR and
+	// report back before parking.
 	title := publishTitle(latest.Task)
 	body := reportBody(latest, lastText, turn.StopReason)
 	pr, publishErr := a.sup.opts.Publisher.Publish(ctx, spec, title, body)
@@ -284,6 +304,109 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 	return true
 }
 
+// finishVerifierTurn ends a verifier's turn without publishing anything. It
+// checks whether submit_verdict wrote a verdict, gives the verifier exactly one
+// reminder turn, then records a blocked verdict itself so the workflow cannot
+// hang on a verifier that never submits.
+func (a *actor) finishVerifierTurn(ctx context.Context, agent domain.Agent) bool {
+	store := a.sup.opts.Store
+	if _, err := store.VerdictByVerifier(ctx, agent.ID); err == nil {
+		a.sup.log.Info("forager: verifier submitted a verdict", "agent", agent.ID)
+		a.completeVerifier(ctx, "verdict recorded")
+		return false
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		a.sup.log.Warn("forager: read verifier verdict failed", "agent", agent.ID, "error", err)
+	}
+
+	if misses := a.recordVerifierMiss(); misses >= 2 {
+		a.blockVerifier(ctx, agent)
+		return false
+	}
+
+	reminder := domain.Message{
+		HiveID:  agent.HiveID,
+		From:    domain.AddressSystem,
+		To:      domain.ForagerAddress(agent.ID),
+		Kind:    domain.MessageTask,
+		ChainID: agent.ChainID,
+		Body:    verifierReminder,
+	}
+	sent, err := store.SendMessage(ctx, reminder)
+	if err != nil {
+		a.sup.log.Warn("forager: send verifier reminder failed", "agent", agent.ID, "error", err)
+		a.blockVerifier(ctx, agent)
+		return false
+	}
+	if err := a.enqueue(ctx, sent); err != nil {
+		a.sup.log.Warn("forager: queue verifier reminder failed", "agent", agent.ID, "error", err)
+		a.blockVerifier(ctx, agent)
+		return false
+	}
+	a.sup.log.Info("forager: verifier reminded to submit a verdict", "agent", agent.ID)
+	return true
+}
+
+// blockVerifier records the platform's own blocked verdict when the verifier
+// never answers, so the PR has an explicit non-pass outcome.
+func (a *actor) blockVerifier(ctx context.Context, agent domain.Agent) {
+	verdict := domain.Verdict{
+		HiveID:     agent.HiveID,
+		PRNumber:   agent.PRNumber,
+		HeadSHA:    agent.VerifySHA,
+		OwnerID:    agent.OwnerID,
+		VerifierID: agent.ID,
+		Result:     domain.VerdictBlocked,
+		Summary:    "验证者没有给出结论：两次提醒后仍未调用 submit_verdict。",
+	}
+	if _, err := a.sup.opts.Store.RecordVerdict(ctx, verdict); err != nil {
+		a.sup.log.Warn("forager: record platform blocked verdict failed", "agent", agent.ID, "error", err)
+	}
+	a.completeVerifier(ctx, "verifier did not submit a verdict")
+}
+
+func (a *actor) recordVerifierMiss() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.verifierMisses++
+	return a.verifierMisses
+}
+
+// completeVerifier moves the verifier to completed and tears its Cell down. It
+// never calls the Publisher and never parks: a verifier is used for one head
+// commit and is then destroyed.
+func (a *actor) completeVerifier(ctx context.Context, reason string) {
+	a.mu.Lock()
+	if a.terminal {
+		a.mu.Unlock()
+		return
+	}
+	a.terminal = true
+	queued := a.queue
+	a.queue = nil
+	session := a.session
+	a.session = nil
+	a.mcpToken = ""
+	a.mu.Unlock()
+
+	cleanup := context.WithoutCancel(ctx)
+	a.markHandled(cleanup, queued)
+	if session != nil {
+		_ = session.Cancel(context.Background())
+		_ = session.Close()
+	}
+	if _, err := a.transitionTo(cleanup, domain.AgentCompleted); err != nil &&
+		!errors.Is(err, errTerminal) && !errors.Is(err, domain.ErrNotFound) {
+		a.sup.log.Warn("forager: mark verifier completed failed", "agent", a.id, "error", err)
+	}
+	if err := a.sup.opts.Runtime.Destroy(cleanup, a.id); err != nil && !errors.Is(err, cell.ErrNoCell) {
+		a.sup.log.Warn("forager: destroy verifier cell failed", "agent", a.id, "error", err)
+	}
+	if err := a.sup.opts.Store.RevokeAgentTokens(cleanup, a.id); err != nil {
+		a.sup.log.Warn("forager: revoke verifier tokens failed", "agent", a.id, "error", err)
+	}
+	a.sup.log.Info("forager: verifier finished", "agent", a.id, "reason", reason)
+}
+
 // start creates or resumes the Cell, retrying transient failures with
 // exponential backoff up to the configured failure budget.
 func (a *actor) start(ctx context.Context, agent domain.Agent, hive domain.Hive) (cell.Session, cell.Spec, error) {
@@ -304,18 +427,32 @@ func (a *actor) start(ctx context.Context, agent domain.Agent, hive domain.Hive)
 			env, err = a.sup.opts.CLIEnv(ctx, hive)
 		}
 		if err == nil {
+			model := a.sup.opts.Model
+			baseBranch := ""
+			revision := ""
+			readOnly := false
+			if effectiveKind(agent) == domain.KindVerifier {
+				if verified := hive.Config.Verify.Model; verified != "" {
+					model = verified
+				}
+				baseBranch = a.sup.opts.BaseBranch
+				revision = agent.VerifySHA
+				readOnly = true
+			}
 			spec = cell.Spec{
 				AgentID:    agent.ID,
 				HiveID:     agent.HiveID,
 				Repository: hive.Repository,
 				Branch:     agent.Branch,
-				BaseBranch: "",
+				BaseBranch: baseBranch,
 				CLI:        cli,
-				Model:      a.sup.opts.Model,
+				Model:      model,
 				SessionRef: agent.SessionRef,
 				Env:        env,
 				MCPURL:     a.sup.opts.MCPURL,
 				MCPToken:   token,
+				Revision:   revision,
+				ReadOnly:   readOnly,
 			}
 			var session cell.Session
 			session, err = a.sup.opts.Runtime.Start(ctx, spec)

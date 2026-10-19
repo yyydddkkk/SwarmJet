@@ -106,6 +106,9 @@ func (p *Publisher) run(ctx context.Context, dir string, env []string, args ...s
 // exactly the Agent branch, imports the bundle into the platform mirror, checks
 // the base ancestry, and pushes the mirror branch to the remote.
 func (p *Publisher) Publish(ctx context.Context, spec cell.Spec, title, body string) (int64, error) {
+	if spec.ReadOnly {
+		return 0, errors.New("cell: refusing to publish a read-only Cell")
+	}
 	if err := validAgentID(spec.AgentID); err != nil {
 		return 0, err
 	}

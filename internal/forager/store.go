@@ -48,4 +48,11 @@ type Store interface {
 	// once. RevokeAgentTokens invalidates every token minted for the Agent.
 	CreateAgentToken(ctx context.Context, agentID string) (plaintext string, t domain.Token, err error)
 	RevokeAgentTokens(ctx context.Context, agentID string) error
+
+	// VerdictByVerifier returns the verdict a verifier wrote, or
+	// domain.ErrNotFound when it has not submitted one yet.
+	VerdictByVerifier(ctx context.Context, verifierID string) (domain.Verdict, error)
+	// RecordVerdict stores a verdict. It is idempotent per
+	// (hive, PR, head SHA, verifier).
+	RecordVerdict(ctx context.Context, v domain.Verdict) (domain.Verdict, error)
 }
