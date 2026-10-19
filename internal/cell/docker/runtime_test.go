@@ -3,9 +3,11 @@ package docker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/yyydddkkk/SwarmJet/internal/cell"
@@ -56,7 +58,7 @@ func TestStartCreatesContainerAndNewSession(t *testing.T) {
 		"--pids-limit", "128",
 		"--cap-drop=ALL",
 		"--security-opt=no-new-privileges",
-		"--user", ContainerUser(),
+		"--user", rt.containerUser(),
 		"--entrypoint", "/bin/sh",
 	}
 	for _, want := range wantArgs {
@@ -69,6 +71,13 @@ func TestStartCreatesContainerAndNewSession(t *testing.T) {
 	}
 	if countCalls(calls, "start") != 1 {
 		t.Errorf("docker start called %d times, want 1", countCalls(calls, "start"))
+	}
+	run, ok := findCall(calls, "run")
+	if !ok {
+		t.Fatal("volume ownership helper was not run")
+	}
+	if joined := strings.Join(run, " "); !strings.Contains(joined, "chown -R "+DefaultContainerUser+" /cell") {
+		t.Fatalf("volume chown did not use the default non-root user: %v", run)
 	}
 
 	records := dialer.records()
@@ -623,5 +632,96 @@ func TestStartUnbornHEADCreatesBranchFromBase(t *testing.T) {
 	}
 	if !hasArg(checkout, "origin/main") {
 		t.Fatalf("checkout = %v, want origin/main", checkout)
+	}
+}
+
+func TestContainerUserDefaultsToNonRoot(t *testing.T) {
+	rt := NewRuntime(t.TempDir())
+	if got := rt.containerUser(); got != DefaultContainerUser {
+		t.Fatalf("container user = %q, want %q", got, DefaultContainerUser)
+	}
+	uid, gid, err := parseContainerUser(rt.containerUser())
+	if err != nil {
+		t.Fatalf("parse container user: %v", err)
+	}
+	if uid == 0 || gid == 0 {
+		t.Fatalf("default container user must be non-root, got %d:%d", uid, gid)
+	}
+}
+
+func TestStartUsesConfiguredContainerUser(t *testing.T) {
+	rt, exec, dialer, _ := testRuntime(t)
+	rt.ContainerUser = "2000:2001"
+	client := &fakeACP{
+		initResult: acp.InitializeResult{AgentCapabilities: acp.AgentCapabilities{LoadSession: true}},
+		newResult:  acp.NewSessionResult{SessionID: "ses-user"},
+	}
+	startWithFake(t, rt, exec, dialer, client, testSpec())
+
+	calls := exec.snapshot()
+	create, ok := findCall(calls, "create")
+	if !ok {
+		t.Fatal("docker create was not called")
+	}
+	if !hasArg(create, "2000:2001") {
+		t.Fatalf("docker create did not use the configured user: %v", create)
+	}
+	if hasArg(create, DefaultContainerUser) {
+		t.Fatalf("docker create still used the default user: %v", create)
+	}
+
+	run, ok := findCall(calls, "run")
+	if !ok {
+		t.Fatal("volume ownership helper was not run")
+	}
+	if joined := strings.Join(run, " "); !strings.Contains(joined, "chown -R 2000:2001 /cell") {
+		t.Fatalf("volume chown did not use the configured user: %v", run)
+	}
+}
+
+func TestStartChownsWorkspaceToContainerUser(t *testing.T) {
+	rt, exec, dialer, _ := testRuntime(t)
+	uid, gid := os.Getuid(), os.Getgid()
+	if uid == 0 {
+		// A root test process can hand the workspace to the real default user.
+		uid, gid = 1000, 1000
+	}
+	rt.ContainerUser = fmt.Sprintf("%d:%d", uid, gid)
+
+	workspace := WorkspaceDir(rt.DataDir, testSpec().AgentID)
+	nested := filepath.Join(workspace, "pkg", "file.txt")
+	if err := os.MkdirAll(filepath.Dir(nested), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nested, []byte("host clone content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &fakeACP{
+		initResult: acp.InitializeResult{AgentCapabilities: acp.AgentCapabilities{LoadSession: true}},
+		newResult:  acp.NewSessionResult{SessionID: "ses-own"},
+	}
+	startWithFake(t, rt, exec, dialer, client, testSpec())
+
+	for _, path := range []string{workspace, nested} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			t.Fatalf("stat %s has no uid/gid", path)
+		}
+		if int(stat.Uid) != uid || int(stat.Gid) != gid {
+			t.Fatalf("%s owned by %d:%d, want %d:%d", path, stat.Uid, stat.Gid, uid, gid)
+		}
+	}
+}
+
+func TestStartRejectsInvalidContainerUser(t *testing.T) {
+	rt, _, _, _ := testRuntime(t)
+	rt.ContainerUser = "not-a-user"
+	if _, err := rt.Start(context.Background(), testSpec()); err == nil {
+		t.Fatal("expected an invalid container user error")
 	}
 }

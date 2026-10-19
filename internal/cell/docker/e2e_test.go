@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -72,8 +73,9 @@ func TestCellRuntimeE2E(t *testing.T) {
 	t.Logf("started session %s", session.Ref())
 
 	workspace := WorkspaceDir(rt.DataDir, agentID)
-	// The CLI runs as the platform uid; give it a commit identity from inside
-	// the container. The host never runs git against the workspace.
+	// The CLI runs as the configured non-root Cell user; give it a commit
+	// identity from inside the container. The host never runs git against the
+	// workspace.
 	containerGit(t, rt, agentID, "config", "user.name", wipAuthorName)
 	containerGit(t, rt, agentID, "config", "user.email", wipAuthorEmail)
 
@@ -98,6 +100,14 @@ func TestCellRuntimeE2E(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToUpper(string(content)), "BUMBLEBEE") {
 		t.Fatalf("e2e.txt = %q", content)
+	}
+	// The Cell user must be non-root, so the host workspace is not owned by root.
+	info, err := os.Stat(filepath.Join(workspace, "e2e.txt"))
+	if err != nil {
+		t.Fatalf("stat e2e.txt: %v", err)
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || stat.Uid == 0 {
+		t.Fatalf("e2e.txt owner = %+v, want a non-root uid", info.Sys())
 	}
 	commitLog := containerGit(t, rt, agentID, "log", "-1", "--format=%s")
 	if subject := strings.TrimSpace(string(commitLog.Stdout)); subject != "e2e-commit" {
