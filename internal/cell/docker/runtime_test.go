@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 
 	"github.com/yyydddkkk/SwarmJet/internal/agent"
 	"path/filepath"
@@ -422,53 +421,209 @@ func TestTruncateTextKeepsUTF8(t *testing.T) {
 	}
 }
 
-func TestWorkspaceCloneCreatesAgentBranch(t *testing.T) {
+func TestEnsureClonedRunsGitOnlyOnce(t *testing.T) {
 	bare := initBareRepo(t)
-	rt, exec, dialer, _ := testRuntime(t)
-	rt.Workspace = &GitWorkspace{Git: &Git{Remote: func(string) string { return bare }}}
-	client := &fakeACP{
-		initResult: acp.InitializeResult{AgentCapabilities: acp.AgentCapabilities{LoadSession: true}},
-		newResult:  acp.NewSessionResult{SessionID: "ses-new"},
-	}
-	dialer.newClient = func() ACPClient { return client }
-	exec.setHandler(dockerHandler(false, false))
-	spec := testSpec()
-	if _, err := rt.Start(context.Background(), spec); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	workspace := WorkspaceDir(rt.DataDir, spec.AgentID)
-	content, err := os.ReadFile(filepath.Join(workspace, "README.md"))
-	if err != nil || string(content) != "hello\n" {
-		t.Fatalf("workspace content = %q, err = %v", content, err)
-	}
-	if branch := runGit(t, workspace, "symbolic-ref", "--short", "HEAD"); branch != spec.Branch {
-		t.Fatalf("branch = %q, want %q", branch, spec.Branch)
-	}
-}
-
-func TestWorkspaceKeepsDirtyWorkAndRefusesBranchSwitch(t *testing.T) {
-	bare := initBareRepo(t)
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skipf("git unavailable: %v", err)
-	}
 	dataDir := t.TempDir()
 	spec := testSpec()
-	gitWorkspace := &GitWorkspace{Git: &Git{Remote: func(string) string { return bare }}}
 	dir := WorkspaceDir(dataDir, spec.AgentID)
-	if err := gitWorkspace.Prepare(context.Background(), spec, dir); err != nil {
-		t.Fatalf("first Prepare: %v", err)
+	recorder := &recordingGit{inner: &Git{}}
+	gitWorkspace := &GitWorkspace{Git: recorder, RemoteURL: func(string) string { return bare }}
+
+	if cloned, err := gitWorkspace.EnsureCloned(context.Background(), spec, dir); err != nil || !cloned {
+		t.Fatalf("first EnsureCloned: cloned=%v err=%v", cloned, err)
+	}
+	if calls := recorder.snapshot(); len(calls) != 1 || !hasArg(calls[0].args, "clone") || !hasArg(calls[0].args, "--no-checkout") {
+		t.Fatalf("first clone calls = %+v", calls)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		t.Fatalf("git directory missing: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("wip"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := gitWorkspace.Prepare(context.Background(), spec, dir); err != nil {
-		t.Fatalf("Prepare on same branch must keep dirty work: %v", err)
+	before := len(recorder.snapshot())
+	if cloned, err := gitWorkspace.EnsureCloned(context.Background(), spec, dir); err != nil || cloned {
+		t.Fatalf("second EnsureCloned: cloned=%v err=%v", cloned, err)
+	}
+	if after := len(recorder.snapshot()); after != before {
+		t.Fatalf("host git ran on an existing workspace: %d -> %d calls", before, after)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "dirty.txt")); err != nil {
-		t.Fatalf("dirty file disappeared: %v", err)
+		t.Fatalf("existing workspace was modified: %v", err)
 	}
-	runGit(t, dir, "checkout", "main")
-	if err := gitWorkspace.Prepare(context.Background(), spec, dir); err == nil {
-		t.Fatal("switching branches with uncommitted changes must fail")
+}
+
+func TestStartPreparesBranchInsideCell(t *testing.T) {
+	rt, exec, dialer, _ := testRuntime(t)
+	spec := testSpec()
+	cell := &fakeCellRunner{}
+	cell.setHandler(func(argv []string) (Result, error) {
+		if len(argv) > 1 && argv[0] == "git" {
+			switch argv[1] {
+			case "remote":
+				return Result{Stdout: []byte("https://github.com/acme/app.git\n")}, nil
+			case "rev-parse":
+				return Result{}, nil // HEAD exists
+			case "symbolic-ref":
+				return Result{Stdout: []byte("main\n")}, nil
+			case "status":
+				return Result{}, nil
+			case "show-ref":
+				ref := argv[len(argv)-1]
+				if ref == "refs/remotes/origin/"+spec.Branch {
+					return Result{}, nil
+				}
+				return Result{ExitCode: 1}, nil
+			case "checkout":
+				return Result{}, nil
+			}
+		}
+		return Result{}, nil
+	})
+	rt.Cell = cell
+	exec.setHandler(dockerHandler(false, false))
+	dialer.newClient = func() ACPClient {
+		return &fakeACP{
+			initResult: acp.InitializeResult{AgentCapabilities: acp.AgentCapabilities{LoadSession: true}},
+			newResult:  acp.NewSessionResult{SessionID: "ses-new"},
+		}
+	}
+	if _, err := rt.Start(context.Background(), spec); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	checkout, ok := findCellGitSubcommand(cell.snapshot(), "checkout")
+	if !ok {
+		t.Fatal("branch preparation did not run inside the Cell")
+	}
+	want := []string{"git", "checkout", "--quiet", "-B", spec.Branch, "origin/" + spec.Branch}
+	if strings.Join(checkout, " ") != strings.Join(want, " ") {
+		t.Fatalf("checkout = %v, want %v", checkout, want)
+	}
+	for _, call := range exec.snapshot() {
+		if len(call) > 0 && call[0] == "exec" {
+			t.Fatalf("host git unexpectedly went through docker exec: %v", call)
+		}
+	}
+}
+
+func TestStartRefusesDirtyWorkspaceOnOtherBranch(t *testing.T) {
+	rt, exec, dialer, _ := testRuntime(t)
+	rt.Workspace = &fakeWorkspace{cloned: false}
+	spec := testSpec()
+	cell := rt.Cell.(*fakeCellRunner)
+	cell.setHandler(func(argv []string) (Result, error) {
+		if len(argv) > 1 && argv[0] == "git" {
+			switch argv[1] {
+			case "remote":
+				return Result{Stdout: []byte("https://github.com/acme/app.git\n")}, nil
+			case "rev-parse":
+				return Result{}, nil
+			case "symbolic-ref":
+				return Result{Stdout: []byte("main\n")}, nil
+			case "ls-files":
+				return Result{Stdout: []byte("100644 blob abc123\tfile.txt\n")}, nil
+			case "status":
+				return Result{Stdout: []byte(" M file.txt\n")}, nil
+			}
+		}
+		return Result{}, nil
+	})
+	exec.setHandler(dockerHandler(false, false))
+	dialer.newClient = func() ACPClient {
+		return &fakeACP{newResult: acp.NewSessionResult{SessionID: "ses-new"}}
+	}
+	_, err := rt.Start(context.Background(), spec)
+	if err == nil || !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Fatalf("Start error = %v, want uncommitted-changes refusal", err)
+	}
+	if _, ok := findCellGitSubcommand(cell.snapshot(), "checkout"); ok {
+		t.Fatal("dirty workspace was switched to another branch")
+	}
+}
+
+func TestStartRepairsUnpopulatedWorkspace(t *testing.T) {
+	rt, exec, dialer, _ := testRuntime(t)
+	rt.Workspace = &fakeWorkspace{cloned: false}
+	spec := testSpec()
+	cell := rt.Cell.(*fakeCellRunner)
+	cell.setHandler(func(argv []string) (Result, error) {
+		if len(argv) > 1 && argv[0] == "git" {
+			switch argv[1] {
+			case "remote":
+				return Result{Stdout: []byte("https://github.com/acme/app.git\n")}, nil
+			case "rev-parse":
+				return Result{}, nil // HEAD exists
+			case "ls-files":
+				return Result{}, nil // index is empty
+			case "symbolic-ref":
+				return Result{Stdout: []byte("main\n")}, nil
+			case "show-ref":
+				ref := argv[len(argv)-1]
+				if ref == "refs/remotes/origin/"+spec.Branch {
+					return Result{}, nil
+				}
+				return Result{ExitCode: 1}, nil
+			case "checkout":
+				return Result{}, nil
+			}
+		}
+		return Result{}, nil
+	})
+	exec.setHandler(dockerHandler(false, false))
+	dialer.newClient = func() ACPClient {
+		return &fakeACP{
+			initResult: acp.InitializeResult{AgentCapabilities: acp.AgentCapabilities{LoadSession: true}},
+			newResult:  acp.NewSessionResult{SessionID: "ses-new"},
+		}
+	}
+	if _, err := rt.Start(context.Background(), spec); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	checkout, ok := findCellGitSubcommand(cell.snapshot(), "checkout")
+	if !ok || !hasArg(checkout, "origin/"+spec.Branch) {
+		t.Fatalf("unpopulated workspace was not checked out: %v", checkout)
+	}
+}
+
+func TestStartUnbornHEADCreatesBranchFromBase(t *testing.T) {
+	rt, exec, dialer, _ := testRuntime(t)
+	spec := testSpec()
+	cell := &fakeCellRunner{}
+	cell.setHandler(func(argv []string) (Result, error) {
+		if len(argv) > 1 && argv[0] == "git" {
+			switch argv[1] {
+			case "remote":
+				return Result{Stdout: []byte("https://github.com/acme/app.git\n")}, nil
+			case "rev-parse":
+				return Result{ExitCode: 1}, nil // unborn HEAD from --no-checkout
+			case "show-ref":
+				ref := argv[len(argv)-1]
+				if ref == "refs/remotes/origin/main" {
+					return Result{}, nil
+				}
+				return Result{ExitCode: 1}, nil
+			case "checkout":
+				return Result{}, nil
+			}
+		}
+		return Result{}, nil
+	})
+	rt.Cell = cell
+	exec.setHandler(dockerHandler(false, false))
+	dialer.newClient = func() ACPClient {
+		return &fakeACP{
+			initResult: acp.InitializeResult{AgentCapabilities: acp.AgentCapabilities{LoadSession: true}},
+			newResult:  acp.NewSessionResult{SessionID: "ses-new"},
+		}
+	}
+	if _, err := rt.Start(context.Background(), spec); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	checkout, ok := findCellGitSubcommand(cell.snapshot(), "checkout")
+	if !ok {
+		t.Fatal("unborn HEAD was not checked out inside the Cell")
+	}
+	if !hasArg(checkout, "origin/main") {
+		t.Fatalf("checkout = %v, want origin/main", checkout)
 	}
 }

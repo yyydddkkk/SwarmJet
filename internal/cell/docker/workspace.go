@@ -14,8 +14,12 @@ import (
 // Workspace prepares the host-side directory that is bind-mounted at
 // /workspace in a Cell. It is an interface so the runtime can be tested without
 // git; GitWorkspace is the production implementation.
+//
+// EnsureCloned must only run git when the directory is empty. Once a workspace
+// exists, every git operation happens inside the Cell, so a Cell-writable
+// .git/config or .gitattributes can never execute a command on the host.
 type Workspace interface {
-	Prepare(ctx context.Context, spec cell.Spec, dir string) error
+	EnsureCloned(ctx context.Context, spec cell.Spec, dir string) (bool, error)
 }
 
 // WorkspaceDir is the single source of truth for a Cell's workspace path.
@@ -23,18 +27,30 @@ func WorkspaceDir(dataDir, agentID string) string {
 	return filepath.Join(dataDir, "cells", agentID, "workspace")
 }
 
-// GitWorkspace clones the repository once and then keeps the Agent's own branch
-// checked out. Uncommitted work is never discarded.
+// GitWorkspace clones the repository once, with --no-checkout and no
+// submodules. Branch selection happens inside the Cell after the container is
+// running.
 type GitWorkspace struct {
-	Git    *Git
-	Tokens TokenSource
+	Git       GitRunner
+	RemoteURL func(repository string) string
+	Tokens    TokenSource
 }
 
-func (w *GitWorkspace) git() *Git {
+func (w *GitWorkspace) git() GitRunner {
 	if w.Git != nil {
 		return w.Git
 	}
 	return &Git{}
+}
+
+func (w *GitWorkspace) remoteURL(repository string) string {
+	if w.RemoteURL != nil {
+		return w.RemoteURL(repository)
+	}
+	if g, ok := w.Git.(*Git); ok {
+		return g.URL(repository)
+	}
+	return (&Git{}).URL(repository)
 }
 
 func (w *GitWorkspace) auth(ctx context.Context, repository string) (*gitAuth, error) {
@@ -48,138 +64,58 @@ func (w *GitWorkspace) auth(ctx context.Context, repository string) (*gitAuth, e
 	return newGitAuth(token)
 }
 
-// Prepare creates the workspace on spec.Branch, or leaves an existing one
-// alone when it is already on that branch.
-func (w *GitWorkspace) Prepare(ctx context.Context, spec cell.Spec, dir string) error {
+// EnsureCloned clones the repository when dir is empty. If dir already holds a
+// repository it returns false without running any git command.
+func (w *GitWorkspace) EnsureCloned(ctx context.Context, spec cell.Spec, dir string) (bool, error) {
 	if err := validAgentID(spec.AgentID); err != nil {
-		return err
+		return false, err
 	}
 	if err := validRepository(spec.Repository); err != nil {
-		return err
+		return false, err
 	}
 	if err := validBranch(spec.Branch); err != nil {
-		return err
+		return false, err
 	}
 	if spec.BaseBranch != "" {
 		if err := validBranch(spec.BaseBranch); err != nil {
-			return err
+			return false, err
 		}
 	}
-	git := w.git()
 
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		return w.update(ctx, git, spec, dir)
+		return false, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("cell: inspect workspace: %w", err)
+		return false, fmt.Errorf("cell: inspect workspace: %w", err)
 	}
 	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
-		return errors.New("cell: workspace exists but is not a git repository")
+		return false, errors.New("cell: workspace exists but is not a git repository")
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("cell: inspect workspace: %w", err)
+		return false, fmt.Errorf("cell: inspect workspace: %w", err)
 	}
 
 	auth, err := w.auth(ctx, spec.Repository)
 	if err != nil {
-		return fmt.Errorf("cell: git credential: %w", err)
+		return false, fmt.Errorf("cell: git credential: %w", err)
 	}
 	defer auth.Close()
 
 	if err := os.MkdirAll(filepath.Dir(dir), 0700); err != nil {
-		return fmt.Errorf("cell: create cell directory: %w", err)
+		return false, fmt.Errorf("cell: create cell directory: %w", err)
 	}
-	url := git.URL(spec.Repository)
-	if _, err := git.Run(ctx, "", auth.env, "clone", "--no-checkout", "--", url, dir); err != nil {
-		return fmt.Errorf("cell: clone %s: %w", spec.Repository, err)
+	git := w.git()
+	url := w.remoteURL(spec.Repository)
+	if _, err := git.Run(ctx, "", auth.env, "clone", "--no-checkout", "--no-recurse-submodules", "--", url, dir); err != nil {
+		return false, fmt.Errorf("cell: clone %s: %w", spec.Repository, err)
 	}
+	return true, nil
+}
 
-	base, err := baseBranch(ctx, git, dir, spec.BaseBranch)
-	if err != nil {
-		return err
-	}
-	switch {
-	case hasRef(ctx, git, dir, "refs/remotes/origin/"+spec.Branch):
-		if err := checkout(ctx, git, dir, spec.Branch, "origin/"+spec.Branch); err != nil {
-			return err
-		}
-	case hasRef(ctx, git, dir, "refs/remotes/origin/"+base):
-		if err := checkout(ctx, git, dir, spec.Branch, "origin/"+base); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("cell: base branch %q is not present in the clone", base)
+// validateWorkspacePath guards deletions so a workspace can only be removed
+// below the platform's cells directory.
+func validateWorkspacePath(root, dir string) error {
+	rel, err := filepath.Rel(root, dir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return errors.New("cell: refusing to remove a workspace outside the data directory")
 	}
 	return nil
-}
-
-func (w *GitWorkspace) update(ctx context.Context, git *Git, spec cell.Spec, dir string) error {
-	origin, err := git.Run(ctx, dir, nil, "remote", "get-url", "origin")
-	if err != nil {
-		return fmt.Errorf("cell: read workspace origin: %w", err)
-	}
-	if strings.TrimSpace(string(origin)) != git.URL(spec.Repository) {
-		return errors.New("cell: workspace origin does not match the Agent repository")
-	}
-	current, err := git.Run(ctx, dir, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if err == nil && strings.TrimSpace(string(current)) == spec.Branch {
-		return nil
-	}
-	status, err := git.Run(ctx, dir, nil, "status", "--porcelain")
-	if err != nil {
-		return fmt.Errorf("cell: inspect workspace status: %w", err)
-	}
-	if strings.TrimSpace(string(status)) != "" {
-		return errors.New("cell: workspace has uncommitted changes on another branch")
-	}
-	switch {
-	case hasRef(ctx, git, dir, "refs/heads/"+spec.Branch):
-		// Keep commits made on the local branch; only switch to it.
-		if _, err := git.Run(ctx, dir, nil, "checkout", "--quiet", spec.Branch); err != nil {
-			return fmt.Errorf("cell: checkout %s: %w", spec.Branch, err)
-		}
-		return nil
-	case hasRef(ctx, git, dir, "refs/remotes/origin/"+spec.Branch):
-		return checkout(ctx, git, dir, spec.Branch, "origin/"+spec.Branch)
-	default:
-		base, err := baseBranch(ctx, git, dir, spec.BaseBranch)
-		if err != nil {
-			return err
-		}
-		return checkout(ctx, git, dir, spec.Branch, "origin/"+base)
-	}
-}
-
-func checkout(ctx context.Context, git *Git, dir, branch, start string) error {
-	if _, err := git.Run(ctx, dir, nil, "checkout", "--quiet", "-B", branch, start); err != nil {
-		return fmt.Errorf("cell: checkout %s from %s: %w", branch, start, err)
-	}
-	return nil
-}
-
-func hasRef(ctx context.Context, git *Git, dir, ref string) bool {
-	_, err := git.Run(ctx, dir, nil, "show-ref", "--verify", "--quiet", ref)
-	return err == nil
-}
-
-// baseBranch resolves the branch named by BaseBranch, or the remote default
-// branch when it is empty.
-func baseBranch(ctx context.Context, git *Git, dir, explicit string) (string, error) {
-	if explicit != "" {
-		if err := validBranch(explicit); err != nil {
-			return "", err
-		}
-		return explicit, nil
-	}
-	out, err := git.Run(ctx, dir, nil, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
-	if err == nil {
-		name := strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
-		if name != "" && validBranch(name) == nil {
-			return name, nil
-		}
-	}
-	for _, candidate := range []string{"main", "master"} {
-		if hasRef(ctx, git, dir, "refs/remotes/origin/"+candidate) {
-			return candidate, nil
-		}
-	}
-	return "", errors.New("cell: cannot determine the repository default branch")
 }

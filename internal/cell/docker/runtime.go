@@ -3,9 +3,14 @@
 // A Cell is one long-lived container per Agent plus two persistent locations:
 //
 //   - the workspace, a host bind directory at <DATA_DIR>/cells/<agent-id>/workspace
-//     mounted at /workspace, so the platform can inspect and push it;
+//     mounted at /workspace. The host clones it once; after that, branch
+//     selection and publishing run git inside the container;
 //   - the CLI data volume, a named volume mounted at /cell, holding HOME and
 //     the XDG directories (OpenCode's session database lives here).
+//
+// The Publisher keeps a platform-owned bare mirror at
+// <DATA_DIR>/cells/<agent-id>/mirror.git. It is never mounted into the Cell:
+// the Cell produces a bundle, and only the host mirror receives and pushes it.
 //
 // Containers are named swarmjet-cell-<agent-id> and carry the swarmjet.cell,
 // swarmjet.agent and swarmjet.hive labels for lookup and cleanup. The CLI data
@@ -48,6 +53,7 @@ type Runtime struct {
 	DockerBinary string
 	Exec         Executor
 	Dialer       Dialer
+	Cell         CellRunner
 	Workspace    Workspace
 	// Git and Tokens are used by the default GitWorkspace.
 	Git    *Git
@@ -93,6 +99,20 @@ func (r *Runtime) dialer() Dialer {
 		return r.Dialer
 	}
 	return &DockerDialer{Binary: r.DockerBinary}
+}
+
+func (r *Runtime) cellRunner() CellRunner {
+	if r.Cell != nil {
+		return r.Cell
+	}
+	return &DockerCellRunner{Binary: r.DockerBinary}
+}
+
+func (r *Runtime) git() *Git {
+	if r.Git != nil {
+		return r.Git
+	}
+	return &Git{}
 }
 
 func (r *Runtime) workspace() Workspace {
@@ -171,7 +191,8 @@ func (r *Runtime) Start(ctx context.Context, spec cell.Spec) (cell.Session, erro
 	}
 
 	workspace := WorkspaceDir(r.DataDir, spec.AgentID)
-	if err := r.workspace().Prepare(ctx, spec, workspace); err != nil {
+	fresh, err := r.workspace().EnsureCloned(ctx, spec, workspace)
+	if err != nil {
 		return nil, fmt.Errorf("cell: prepare workspace: %s", redact(err.Error(), secrets...))
 	}
 
@@ -193,6 +214,9 @@ func (r *Runtime) Start(ctx context.Context, spec cell.Spec) (cell.Session, erro
 		if res.ExitCode != 0 {
 			return nil, fmt.Errorf("cell: start container: %s", redact(strings.TrimSpace(string(res.Stderr)), secrets...))
 		}
+	}
+	if err := r.prepareCell(ctx, spec, fresh); err != nil {
+		return nil, fmt.Errorf("cell: prepare branch in container: %s", redact(err.Error(), secrets...))
 	}
 
 	env, err := r.cellEnv(spec)
@@ -344,9 +368,8 @@ func (r *Runtime) removeContainer(ctx context.Context, agentID string) error {
 func (r *Runtime) removeWorkspace(agentID string) error {
 	root := filepath.Join(r.DataDir, "cells")
 	dir := filepath.Join(root, agentID)
-	rel, err := filepath.Rel(root, dir)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return errors.New("cell: refusing to remove a workspace outside the data directory")
+	if err := validateWorkspacePath(root, dir); err != nil {
+		return err
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("cell: remove workspace: %w", err)

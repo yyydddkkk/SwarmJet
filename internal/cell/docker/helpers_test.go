@@ -223,22 +223,27 @@ func (d *fakeDialer) permission() acp.PermissionHandler {
 }
 
 type fakeWorkspace struct {
-	mu    sync.Mutex
-	specs []cell.Spec
-	dirs  []string
-	err   error
+	mu     sync.Mutex
+	specs  []cell.Spec
+	dirs   []string
+	err    error
+	cloned bool
 }
 
-func (w *fakeWorkspace) Prepare(_ context.Context, spec cell.Spec, dir string) error {
+func (w *fakeWorkspace) EnsureCloned(_ context.Context, spec cell.Spec, dir string) (bool, error) {
 	w.mu.Lock()
 	w.specs = append(w.specs, spec)
 	w.dirs = append(w.dirs, dir)
 	err := w.err
+	cloned := w.cloned
 	w.mu.Unlock()
 	if err != nil {
-		return err
+		return false, err
 	}
-	return os.MkdirAll(dir, 0700)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return false, err
+	}
+	return cloned, nil
 }
 
 func testRuntime(t *testing.T) (*Runtime, *fakeExecutor, *fakeDialer, *bytes.Buffer) {
@@ -251,10 +256,67 @@ func testRuntime(t *testing.T) (*Runtime, *fakeExecutor, *fakeDialer, *bytes.Buf
 		Config:    domain.AgentConfig{Image: "test-agent:latest", MemoryMB: 1024, CPUs: 1.5, PidsLimit: 128},
 		Exec:      exec,
 		Dialer:    dialer,
-		Workspace: &fakeWorkspace{},
+		Cell:      &fakeCellRunner{handler: defaultCellHandler(testSpec().Branch)},
+		Workspace: &fakeWorkspace{cloned: true},
 		Logger:    slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}
 	return rt, exec, dialer, buf
+}
+
+// fakeCellRunner records commands executed inside the Cell.
+type fakeCellRunner struct {
+	mu      sync.Mutex
+	calls   [][]string
+	handler func(argv []string) (Result, error)
+}
+
+func (f *fakeCellRunner) Run(_ context.Context, _ string, _ string, argv []string) (Result, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, append([]string(nil), argv...))
+	handler := f.handler
+	f.mu.Unlock()
+	if handler != nil {
+		return handler(argv)
+	}
+	return Result{}, nil
+}
+
+func (f *fakeCellRunner) snapshot() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([][]string, len(f.calls))
+	for i, call := range f.calls {
+		out[i] = append([]string(nil), call...)
+	}
+	return out
+}
+
+func (f *fakeCellRunner) setHandler(handler func(argv []string) (Result, error)) {
+	f.mu.Lock()
+	f.handler = handler
+	f.mu.Unlock()
+}
+
+func defaultCellHandler(branch string) func(argv []string) (Result, error) {
+	return func(argv []string) (Result, error) {
+		if len(argv) < 2 || argv[0] != "git" {
+			return Result{}, nil
+		}
+		switch argv[1] {
+		case "remote":
+			return Result{Stdout: []byte("https://github.com/acme/app.git\n")}, nil
+		case "rev-parse":
+			if hasArg(argv, "--verify") && hasArg(argv, "HEAD") {
+				return Result{ExitCode: 1}, nil
+			}
+			return Result{}, nil
+		case "show-ref":
+			return Result{}, nil
+		case "checkout":
+			return Result{}, nil
+		}
+		return Result{}, nil
+	}
 }
 
 func testSpec() cell.Spec {
