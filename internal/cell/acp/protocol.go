@@ -255,7 +255,9 @@ const (
 )
 
 // SessionUpdate is the decoded body of a session/update notification. Only the
-// fields the spike needs are typed; the rest stays in Raw.
+// fields the Runtime needs are typed; the complete notification stays in Raw so
+// updates without a typed representation (for example a plan) can still be
+// surfaced.
 type SessionUpdate struct {
 	SessionUpdate string          `json:"sessionUpdate"`
 	Content       *ContentBlock   `json:"content,omitempty"`
@@ -267,6 +269,7 @@ type SessionUpdate struct {
 	RawOutput     json.RawMessage `json:"rawOutput,omitempty"`
 	Locations     []ToolLocation  `json:"locations,omitempty"`
 	Meta          json.RawMessage `json:"_meta,omitempty"`
+	Raw           json.RawMessage `json:"-"`
 }
 
 // ToolLocation is a file path touched by a tool call.
@@ -281,8 +284,11 @@ func (n SessionNotification) Decode() (SessionUpdate, error) {
 	if len(n.Update) == 0 {
 		return u, nil
 	}
-	err := json.Unmarshal(n.Update, &u)
-	return u, err
+	if err := json.Unmarshal(n.Update, &u); err != nil {
+		return u, err
+	}
+	u.Raw = append(json.RawMessage(nil), n.Update...)
+	return u, nil
 }
 
 // Text returns the text of a content chunk, or "" when the update carries none.

@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -339,22 +338,10 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 		rec.StartedAt = originalStart
 	}
 	args := []string{"create", "--name", rec.Execution.ContainerID, "--label", "swarmjet.execution=" + req.ExecutionID, "--mount", bindMount(dir, false), "--workdir", workspace}
-	if req.Config.DockerNetwork != "" {
-		if !identifier.MatchString(req.Config.DockerNetwork) {
-			return rec.Execution, errors.New("invalid task network")
-		}
-		args = append(args, "--network", req.Config.DockerNetwork)
+	if req.Config.DockerNetwork != "" && !identifier.MatchString(req.Config.DockerNetwork) {
+		return rec.Execution, errors.New("invalid task network")
 	}
-	if req.Config.MemoryMB > 0 {
-		args = append(args, "--memory", strconv.Itoa(req.Config.MemoryMB)+"m")
-	}
-	if req.Config.CPUs > 0 {
-		args = append(args, "--cpus", strconv.FormatFloat(req.Config.CPUs, 'f', -1, 64))
-	}
-	if req.Config.PidsLimit > 0 {
-		args = append(args, "--pids-limit", strconv.Itoa(req.Config.PidsLimit))
-	}
-	args = append(args, "--cap-drop=ALL", "--security-opt=no-new-privileges")
+	args = append(args, ContainerPolicyArgs(req.Config)...)
 	if req.Role == "init" {
 		// The analyzed business sources are read-only; only the generated
 		// directory is writable. This is enforced by mounts, not by prompt text.
@@ -363,7 +350,7 @@ func (r *Runtime) Start(ctx context.Context, req domain.AgentRequest) (domain.Ex
 		args = append(args, "--mount", bindMount(taskRoot, req.ReadOnlyWorkspace))
 	}
 	// Match the supervisor so native workers can read/reuse agent-created files.
-	args = append(args, "--user", strconv.Itoa(os.Getuid())+":"+strconv.Itoa(os.Getgid()))
+	args = append(args, "--user", ContainerUser())
 	reports := filepath.Join(r.DataDir, "runs", req.TaskID, "integration")
 	if err = safeDirectory(reports, true); err != nil {
 		return domain.Execution{}, err

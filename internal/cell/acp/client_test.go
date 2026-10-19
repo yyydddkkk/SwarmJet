@@ -527,3 +527,72 @@ func TestProcessStderrIsCaptured(t *testing.T) {
 	}
 	_ = proc.Close()
 }
+
+// A blocking consumer must not stop the read loop from delivering JSON-RPC
+// responses. This is the failure mode the spike warned about for very large
+// notifications such as available_commands_update.
+func TestBlockedSinkDoesNotStallResponses(t *testing.T) {
+	clientEnd, agentEnd := net.Pipe()
+	client := NewClient(clientEnd)
+	defer client.Close()
+
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	client.setSink(func(SessionNotification) error {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil
+	})
+
+	go func() {
+		defer agentEnd.Close()
+		br := bufio.NewReader(agentEnd)
+		update := map[string]any{
+			"jsonrpc": "2.0",
+			"method":  MethodSessionUpdate,
+			"params": SessionNotification{
+				SessionID: "ses_fake",
+				Update:    json.RawMessage(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"blocked"}}`),
+			},
+		}
+		body, _ := json.Marshal(update)
+		if _, err := agentEnd.Write(append(body, '\n')); err != nil {
+			return
+		}
+		for {
+			line, err := br.ReadBytes('\n')
+			if err != nil {
+				return
+			}
+			var msg rpcMessage
+			if json.Unmarshal(line, &msg) != nil {
+				continue
+			}
+			if msg.Method != MethodInitialize {
+				continue
+			}
+			result, _ := json.Marshal(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(msg.ID),
+				"result":  InitializeResult{ProtocolVersion: ProtocolVersion},
+			})
+			_, _ = agentEnd.Write(append(result, '\n'))
+			return
+		}
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sink was never invoked")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := client.Initialize(ctx); err != nil {
+		t.Fatalf("initialize while sink is blocked: %v", err)
+	}
+	close(release)
+}
