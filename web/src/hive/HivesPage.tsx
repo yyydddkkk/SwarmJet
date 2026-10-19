@@ -1,18 +1,23 @@
-// Hive list: the home of the honey-garden console (ADR section 18).
+// Hive list: the home of the honey-garden console (ADR section 18). Cards are
+// built from GET /api/hives; the counts come from the store, not fixtures.
 import { useMemo, useState } from "react";
-import { hiveOverviews } from "../fixtures/hive-console";
-import { EmptyState, StatusBadge } from "./components";
+import { hiveAPI } from "./api";
+import { BeeLoader, EmptyState, ErrorNotice, StatusBadge } from "./components";
 import { Icon } from "./icons";
+import { useResource } from "./use-resource";
 
 export default function HivesPage() {
   const [query, setQuery] = useState("");
+  const resource = useResource(signal => hiveAPI.listHives(signal), []);
+  const overviews = resource.data?.hives ?? [];
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return hiveOverviews;
-    return hiveOverviews.filter(({ hive }) =>
+    if (!needle) return overviews;
+    return overviews.filter(({ hive }) =>
       `${hive.name} ${hive.repository}`.toLowerCase().includes(needle),
     );
-  }, [query]);
+  }, [overviews, query]);
 
   return (
     <div className="hg-page">
@@ -35,82 +40,100 @@ export default function HivesPage() {
         </div>
       </header>
 
-      {filtered.length === 0 ? (
-        query.trim() ? (
-          <EmptyState
-            title="没有匹配的 Hive。"
-            hint="换一个关键词，或者清空搜索看看全部 Hive。"
-          />
-        ) : (
-          <EmptyState
-            title="还没有 Hive。"
-            hint="为你的仓库建一个 Hive，再把本地 Agent 接进来。"
-          />
-        )
+      {resource.loading && !resource.data ? (
+        <BeeLoader label="正在读取 Hive…" />
+      ) : resource.error && !resource.data ? (
+        <ErrorNotice
+          message={resource.error}
+          onRetry={resource.reload}
+          auth={resource.errorStatus === 401}
+        />
       ) : (
-        <ul className="hg-hive-grid">
-          {filtered.map((overview, index) => {
-            const { hive } = overview;
-            return (
-              <li key={hive.id}>
-                <a
-                  className="hg-hive-card"
-                  href={`#/hives/${hive.id}`}
-                  aria-label={`${hive.name}，${hive.repository}`}
-                >
-                  <header className="hg-hive-card-head">
-                    <span className={`hg-hive-mark hg-hive-mark-${index % 3}`} aria-hidden="true">
-                      <Icon name="bee" size={32} />
-                    </span>
-                    <div>
-                      <h2>{hive.name}</h2>
-                      <p className="hg-repo">{hive.repository}</p>
-                    </div>
-                  </header>
-                  <dl className="hg-hive-stats">
-                    <div>
-                      <dt>Queen</dt>
-                      <dd>
-                        <StatusBadge
-                          state={hive.queenEnabled ? "active" : "disabled"}
-                          label={hive.queenEnabled ? "已开启" : "未开启"}
-                        />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>活跃 Forager</dt>
-                      <dd className="hg-stat-value">{overview.activeForagers}</dd>
-                    </div>
-                    <div>
-                      <dt>待审批</dt>
-                      <dd
-                        className={
-                          overview.pendingApprovals > 0
-                            ? "hg-stat-value hg-tone-amber"
-                            : "hg-stat-value"
-                        }
-                      >
-                        {overview.pendingApprovals}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Inbox 积压</dt>
-                      <dd
-                        className={
-                          overview.inboxBacklog > 0
-                            ? "hg-stat-value hg-tone-amber"
-                            : "hg-stat-value"
-                        }
-                      >
-                        {overview.inboxBacklog}
-                      </dd>
-                    </div>
-                  </dl>
-                </a>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          {resource.error ? (
+            <ErrorNotice
+              message={`${resource.error}（显示的是上一次读取结果）`}
+              onRetry={resource.reload}
+            />
+          ) : null}
+          {filtered.length === 0 ? (
+            query.trim() ? (
+              <EmptyState
+                title="没有匹配的 Hive。"
+                hint="换一个关键词，或者清空搜索看看全部 Hive。"
+              />
+            ) : (
+              <EmptyState
+                title="还没有 Hive。"
+                hint="为你的仓库建一个 Hive，再把本地 Agent 接进来。"
+              />
+            )
+          ) : (
+            <ul className="hg-hive-grid">
+              {filtered.map((overview, index) => {
+                const { hive } = overview;
+                return (
+                  <li key={hive.id}>
+                    <a
+                      className="hg-hive-card"
+                      href={`#/hives/${hive.id}`}
+                      aria-label={`${hive.name}，${hive.repository}`}
+                    >
+                      <header className="hg-hive-card-head">
+                        <span className={`hg-hive-mark hg-hive-mark-${index % 3}`} aria-hidden="true">
+                          <Icon name="bee" size={32} />
+                        </span>
+                        <div>
+                          <h2>{hive.name}</h2>
+                          <p className="hg-repo">{hive.repository}</p>
+                        </div>
+                      </header>
+                      <dl className="hg-hive-stats">
+                        <div>
+                          <dt>Queen</dt>
+                          <dd>
+                            <StatusBadge
+                              state={hive.queenEnabled ? "active" : "disabled"}
+                              label={hive.queenEnabled ? "已开启" : "未开启"}
+                            />
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>活跃 Forager</dt>
+                          <dd className="hg-stat-value">{overview.activeForagers}</dd>
+                        </div>
+                        <div>
+                          <dt>待审批</dt>
+                          <dd
+                            className={
+                              overview.pendingApprovals > 0
+                                ? "hg-stat-value hg-tone-amber"
+                                : "hg-stat-value"
+                            }
+                          >
+                            {overview.pendingApprovals}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Inbox 积压</dt>
+                          <dd
+                            className={
+                              overview.inboxBacklog > 0
+                                ? "hg-stat-value hg-tone-amber"
+                                : "hg-stat-value"
+                            }
+                          >
+                            {overview.inboxBacklog}
+                          </dd>
+                        </div>
+                      </dl>
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
       )}
     </div>
   );

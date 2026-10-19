@@ -205,6 +205,39 @@ export function EmptyState({
   );
 }
 
+/** Readable failure surface for a failed read or write. */
+export function ErrorNotice({
+  message,
+  onRetry,
+  auth = false,
+}: {
+  message: string;
+  onRetry?: () => void;
+  auth?: boolean;
+}) {
+  return (
+    <div className="hg-error" role="alert">
+      <div className="hg-error-text">
+        <strong>请求没有成功。</strong>
+        <p>{message}</p>
+      </div>
+      <div className="hg-error-actions">
+        {auth ? (
+          <a className="hg-btn" href="/">
+            去登录
+          </a>
+        ) : null}
+        {onRetry ? (
+          <button className="hg-btn" type="button" onClick={onRetry}>
+            <Icon name="refresh" size={16} />
+            重试
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Pixel loader: the 32-grid bee in two wing positions, flipped by CSS `steps()`
  * with a 2px bob on top. `prefers-reduced-motion` parks it on the first frame.

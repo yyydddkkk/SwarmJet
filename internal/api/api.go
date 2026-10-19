@@ -244,6 +244,11 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		a.runtime(w, r)
 		return
 	}
+	if r.URL.Path == "/api/hives" || strings.HasPrefix(r.URL.Path, "/api/hives/") ||
+		strings.HasPrefix(r.URL.Path, "/api/foragers/") {
+		a.hives(w, r)
+		return
+	}
 	switch r.URL.Path {
 	case "/api/logout":
 		if r.Method != "POST" {

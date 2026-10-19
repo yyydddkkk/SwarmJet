@@ -1,11 +1,16 @@
-// Forager detail page: header checks plus the conversation and handoff sections.
-// The Diff / timeline / terminal sections are placeholders for the next rounds.
-import { foragerDetailById, hiveById } from "../fixtures/hive-console";
-import type { Check } from "./types";
-import { CheckList, EmptyState, Panel, StatusBadge, Tabs } from "./components";
+// Forager detail page: real status, branch, PR, handoff and conversation from
+// the Hive REST endpoints. CI / Guard checks and the diff are not stored yet,
+// so those sections keep honest placeholders instead of fixture numbers.
+import { useId, useState } from "react";
+import { hiveAPI } from "./api";
+import type { ForagerDetailResponse } from "./api";
+import type { ConversationEntry } from "./types";
+import { BeeLoader, EmptyState, ErrorNotice, Panel, StatusBadge, Tabs } from "./components";
 import { ForagerAvatar, foragerNeedsYou } from "./pixel";
 import { Icon } from "./icons";
 import { ConversationStream } from "./ConversationStream";
+import { messageEntries, mergeMessages } from "./format";
+import { useResource } from "./use-resource";
 
 const sections = [
   { id: "conversation", label: "对话" },
@@ -38,25 +43,6 @@ const handoffFields: { key: "goal" | "done" | "remaining" | "risks" | "next"; la
   { key: "next", label: "建议的下一步" },
 ];
 
-function CheckChips({ label, checks }: { label: string; checks: Check[] }) {
-  const passed = checks.filter(check => check.status === "passed").length;
-  return (
-    <div className="hg-chip-group">
-      <span className="hg-chip-label">
-        {label} {passed}/{checks.length}
-      </span>
-      <ul className="hg-chip-row">
-        {checks.map(check => (
-          <li key={check.name} className={`hg-chip hg-tone-${check.status === "passed" ? "mint" : check.status === "failed" ? "coral" : "amber"}`}>
-            <Icon name={check.status === "passed" ? "check" : check.status === "failed" ? "alert" : "clock"} size={16} />
-            {check.name}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 export default function ForagerPage({
   hiveId,
   foragerId,
@@ -66,10 +52,38 @@ export default function ForagerPage({
   foragerId: string;
   section: string;
 }) {
-  const detail = foragerDetailById(foragerId);
-  const hive = hiveById(hiveId);
+  const detailRes = useResource(
+    signal => hiveAPI.getForager(foragerId, signal),
+    [foragerId],
+    5000,
+  );
+  const localAddress = detailRes.data?.localAddress ?? "";
+  const messageHiveID = detailRes.data?.forager.hiveId || hiveId;
+  const conversationRes = useResource(
+    async signal => {
+      if (!localAddress) return [];
+      const [incoming, toQueen, toHive] = await Promise.all([
+        hiveAPI.listMessages(messageHiveID, { to: `forager:${foragerId}` }, signal),
+        hiveAPI.listMessages(messageHiveID, { to: "queen" }, signal),
+        hiveAPI.listMessages(messageHiveID, { to: "hive" }, signal),
+      ]);
+      const outgoing = [...toQueen.messages, ...toHive.messages].filter(
+        message => message.from === `forager:${foragerId}`,
+      );
+      return messageEntries(mergeMessages(incoming.messages, outgoing));
+    },
+    [messageHiveID, foragerId, localAddress],
+    5000,
+  );
 
-  if (!detail || !hive) {
+  if (detailRes.loading && !detailRes.data) {
+    return (
+      <div className="hg-page">
+        <BeeLoader label="正在读取 Forager…" />
+      </div>
+    );
+  }
+  if (detailRes.errorStatus === 404) {
     return (
       <div className="hg-page">
         <EmptyState
@@ -84,9 +98,57 @@ export default function ForagerPage({
       </div>
     );
   }
+  if (!detailRes.data) {
+    return (
+      <div className="hg-page">
+        <ErrorNotice
+          message={detailRes.error}
+          onRetry={detailRes.reload}
+          auth={detailRes.errorStatus === 401}
+        />
+      </div>
+    );
+  }
 
-  const { agent } = detail;
+  return (
+    <ForagerDetail
+      detail={detailRes.data}
+      conversation={conversationRes.data ?? []}
+      conversationError={conversationRes.error}
+      conversationErrorStatus={conversationRes.errorStatus}
+      onRetryConversation={conversationRes.reload}
+      section={section}
+      onChanged={() => {
+        detailRes.reload();
+        conversationRes.reload();
+      }}
+    />
+  );
+}
+
+function ForagerDetail({
+  detail,
+  conversation,
+  conversationError,
+  conversationErrorStatus,
+  onRetryConversation,
+  section,
+  onChanged,
+}: {
+  detail: ForagerDetailResponse;
+  conversation: ConversationEntry[];
+  conversationError: string;
+  conversationErrorStatus: number | undefined;
+  onRetryConversation: () => void;
+  section: string;
+  onChanged: () => void;
+}) {
+  const { forager: agent, hive } = detail;
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [cancelling, setCancelling] = useState(false);
   const active = section || "conversation";
+  const terminal = ["completed", "failed", "cancelled"].includes(agent.state);
   const tabs = sections.map(item => ({
     ...item,
     href:
@@ -94,6 +156,20 @@ export default function ForagerPage({
         ? `#/hives/${hive.id}/foragers/${agent.id}`
         : `#/hives/${hive.id}/foragers/${agent.id}/${item.id}`,
   }));
+
+  const cancel = () => {
+    setCancelling(true);
+    setError("");
+    setNotice("");
+    hiveAPI
+      .cancelForager(agent.id)
+      .then(() => {
+        setNotice("已发送取消指令，等监管者处理。");
+        onChanged();
+      })
+      .catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
+      .finally(() => setCancelling(false));
+  };
 
   return (
     <div className="hg-page">
@@ -109,7 +185,7 @@ export default function ForagerPage({
         <ForagerAvatar
           id={agent.id}
           state={agent.state}
-          needsYou={foragerNeedsYou(agent, detail.conversation)}
+          needsYou={foragerNeedsYou(agent, conversation)}
           size={64}
         />
         <div className="hg-forager-head-text">
@@ -138,32 +214,63 @@ export default function ForagerPage({
             ) : null}
             <span className="hg-meta">
               <Icon name="clock" size={16} />
-              预设 {agent.preset ?? "默认"}
+              预设 {agent.preset || "默认"}
             </span>
+            {agent.chainId ? (
+              <span className="hg-meta">
+                <Icon name="timeline" size={16} />
+                <code>{agent.chainId}</code>
+              </span>
+            ) : null}
           </div>
         </div>
+        {!terminal ? (
+          <button
+            className="hg-btn hg-btn-danger"
+            type="button"
+            onClick={cancel}
+            disabled={cancelling}
+          >
+            {cancelling ? "取消中…" : "取消 Forager"}
+          </button>
+        ) : null}
       </header>
 
-      <div className="hg-check-strip">
-        <CheckChips label="CI" checks={detail.ci} />
-        <CheckChips label="Guard（守卫蜂）" checks={detail.guards} />
-      </div>
+      {error ? (
+        <p className="hg-form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="hg-form-status" role="status">
+          {notice}
+        </p>
+      ) : null}
 
       <Tabs items={tabs} active={active} label={`${agent.id} 分区`} />
 
       {active === "conversation" ? (
-        <Panel title="对话" subtitle="Forager 与 Queen（蜂王）之间的往来。">
-          <ConversationStream
-            entries={detail.conversation}
-            agents={[agent]}
-            emptyTitle="这只 Forager 还没有对话。"
-          />
-        </Panel>
+        <div className="hg-conversation-main">
+          <Panel title="对话" subtitle="这只 Forager 与 Queen（蜂王）、你之间的往来。">
+            {conversationError ? (
+              <ErrorNotice
+                message={conversationError}
+                onRetry={onRetryConversation}
+                auth={conversationErrorStatus === 401}
+              />
+            ) : null}
+            <ConversationStream
+              entries={conversation}
+              agents={[agent]}
+              emptyTitle="这只 Forager 还没有对话。"
+            />
+          </Panel>
+          {!terminal ? (
+            <ForagerComposer hiveId={hive.id} foragerId={agent.id} onSent={onChanged} />
+          ) : null}
+        </div>
       ) : active === "handoff" ? (
-        <Panel
-          title="交接摘要"
-          subtitle="每轮结束时更新，也是 CLI 会话丢失后的恢复依据。"
-        >
+        <Panel title="交接摘要" subtitle="每轮结束时更新，也是 CLI 会话丢失后的恢复依据。">
           {agent.handoff ? (
             <div className="hg-handoff">
               <dl className="hg-handoff-grid">
@@ -195,13 +302,6 @@ export default function ForagerPage({
             />
           )}
         </Panel>
-      ) : active === "diff" ? (
-        <Panel
-          title="Diff"
-          subtitle={`${detail.diff.files} 个文件 · +${detail.diff.additions} / -${detail.diff.deletions}`}
-        >
-          <EmptyState title="Diff 还没实现。" hint={placeholders.diff.hint} />
-        </Panel>
       ) : (
         <Panel title={placeholders[active]?.title ?? "占位"}>
           <EmptyState
@@ -211,5 +311,76 @@ export default function ForagerPage({
         </Panel>
       )}
     </div>
+  );
+}
+
+function ForagerComposer({
+  hiveId,
+  foragerId,
+  onSent,
+}: {
+  hiveId: string;
+  foragerId: string;
+  onSent: () => void;
+}) {
+  const id = useId();
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
+
+  return (
+    <form
+      className="hg-composer"
+      onSubmit={event => {
+        event.preventDefault();
+        const body = text.trim();
+        if (!body) {
+          setError("先写下要对这只 Forager 说的话。");
+          setStatus("");
+          return;
+        }
+        setSending(true);
+        setError("");
+        setStatus("");
+        hiveAPI
+          .sendMessage(hiveId, { to: `forager:${foragerId}`, body })
+          .then(() => {
+            setText("");
+            setStatus("已写入这只 Forager 的 Inbox。");
+            onSent();
+          })
+          .catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
+          .finally(() => setSending(false));
+      }}
+    >
+      <label className="hg-field-label" htmlFor={id}>
+        对这只 Forager 说话
+      </label>
+      <textarea
+        id={id}
+        rows={3}
+        value={text}
+        onChange={event => setText(event.target.value)}
+        placeholder="补充要求、纠正方向，或者让它先汇报进展。"
+      />
+      <div className="hg-composer-foot">
+        <span className="hg-composer-hint">消息会进入它的 Inbox，在本轮结束后送达。</span>
+        <button className="hg-btn hg-btn-primary" type="submit" disabled={sending}>
+          <Icon name="send" size={16} />
+          {sending ? "发送中…" : "发送"}
+        </button>
+      </div>
+      {error ? (
+        <p className="hg-form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {status ? (
+        <p className="hg-form-status" role="status">
+          {status}
+        </p>
+      ) : null}
+    </form>
   );
 }

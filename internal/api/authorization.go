@@ -212,6 +212,11 @@ func (a *server) authorizeRoute(w http.ResponseWriter, r *http.Request) bool {
 	if path == "tasks" {
 		return true // Query and create paths resolve their project in the handler.
 	}
+	// The Hive console is a signed-in surface; the handlers validate their own
+	// resources and limits. Legacy project roles do not apply to Hives yet.
+	if path == "hives" || strings.HasPrefix(path, "hives/") || strings.HasPrefix(path, "foragers/") {
+		return true
+	}
 	if path == "gitlab-identities" {
 		return true // Identity handlers use the authenticated principal.
 	}

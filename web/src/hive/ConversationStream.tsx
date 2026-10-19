@@ -27,9 +27,28 @@ function MessageRow({
   const from = message.from;
   const isLocal = from.startsWith("local:");
   const isQueen = from === "queen";
+  const isSystem = from === "system" || from === "hive";
   const foragerId = from.startsWith("forager:") ? from.slice("forager:".length) : "";
   const agent = foragerId ? agents.find(candidate => candidate.id === foragerId) : undefined;
   const state: AgentState = agent?.state ?? "active";
+
+  if (isSystem) {
+    return (
+      <div className="hg-msg hg-msg-system">
+        <span className="hg-msg-system-mark" aria-hidden="true">
+          <Icon name="inbox" size={16} />
+        </span>
+        <div className="hg-msg-main">
+          <div className="hg-msg-meta">
+            <span className="hg-msg-author">系统事件</span>
+            <span className="hg-msg-kind">{kindLabels[message.kind]}</span>
+            <time className="hg-time">{at}</time>
+          </div>
+          <p className="hg-msg-body">{message.body}</p>
+        </div>
+      </div>
+    );
+  }
 
   if (isLocal) {
     return (
