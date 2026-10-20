@@ -254,6 +254,19 @@ func (s *Service) mergeHead(ctx context.Context, hive domain.Hive, pr int64, exp
 		HeadSHA:      readiness.HeadSHA,
 		Method:       method,
 	}
+	defer func() {
+		// RequestMerge may already confirm success even if the state read fails.
+		if !outcome.Merged {
+			return
+		}
+		if publisher, ok := s.store.(interface {
+			PublishPREvent(context.Context, string, int64) error
+		}); ok {
+			if err := publisher.PublishPREvent(ctx, hive.ID, pr); err != nil {
+				slog.Warn("merged PR event notification failed", "hive", hive.ID, "pr", pr, "error", err)
+			}
+		}
+	}()
 	state, err := client.GetMergeState(ctx, repositoryID, pr, readiness.HeadSHA)
 	if err != nil {
 		return outcome, fmt.Errorf("merge was submitted but its state could not be read: %w", err)
@@ -264,13 +277,6 @@ func (s *Service) mergeHead(ctx context.Context, hive domain.Hive, pr int64, exp
 		outcome.QueueEntryID = state.QueueEntryID
 	}
 	if outcome.Merged {
-		if publisher, ok := s.store.(interface {
-			PublishPREvent(context.Context, string, int64) error
-		}); ok {
-			if err := publisher.PublishPREvent(ctx, hive.ID, pr); err != nil {
-				slog.Warn("merged PR event notification failed", "hive", hive.ID, "pr", pr, "error", err)
-			}
-		}
 		outcome.Queued = false
 		return outcome, nil
 	}
