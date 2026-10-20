@@ -522,3 +522,18 @@ test("已有项目按实际列表点亮第三步，GitHub无安装不假装完�
     onboarding.getByRole("button", { name: "接入 GitHub，待完成" }),
   ).toBeVisible();
 });
+
+test("手动打开的图例不会被已关闭的首次图例计时器收起", async ({ page }) => {
+  await mockStarsHTTP(page);
+  await page.goto("/");
+  await page.getByRole("dialog", { name: "简报", exact: true })
+    .getByRole("button", { name: "进入星图", exact: true }).click();
+  const legend = page.getByRole("dialog", { name: "图例", exact: true });
+  await expect(legend).toBeVisible();
+  await legend.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.waitForTimeout(4500);
+  await page.getByRole("button", { name: "图例", exact: true }).click();
+  await expect(legend).toBeVisible();
+  await page.waitForTimeout(3000);
+  await expect(legend).toBeVisible();
+});

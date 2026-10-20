@@ -22,6 +22,8 @@
 
 登录、简报、列表均通过 axe-core 4.14.0 检查，严重/critical 为零。证据在 [round7-d-evidence](round7-d-evidence/)：每个页面有截图和 `*-axe.json`（检查时间、引擎版本、通过规则数量、实际 violation 数组）。
 
+主代理独立复跑 `npm ci && npm run build && PLAYWRIGHT_PORT=5277 npx playwright test`，102 项通过。独立审查随后复现首次图例的旧计时器会关闭后来手动打开的图例，修复前新增回归用例失败；关闭/切换和卸载现在及时清理首次计时器。修复后执行 `PLAYWRIGHT_PORT=5277 npx playwright test tests/periphery.spec.ts && npm run build`，16 项外围测试全部通过（19.5 秒），构建通过；未受影响的旧页面测试复用上述结果，最终集成再跑全量。
+
 `web/tests/stars-http-mock.ts` 补齐默认 StarsApp 的 PR 列表、PR 详情/合并、queue、signals、方法论事件 HTTP 接口。正常连接的 FakeEventSource 保持打开，可手动 push/ready/disconnect；正常截图不会通过隐藏错误来伪装成功。原有 legacy mock/用例逻辑未修改。
 
 新增依赖仅开发依赖 `@axe-core/playwright`，用于自动无障碍检查；没有新增运行时依赖。

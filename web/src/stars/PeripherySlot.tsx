@@ -20,6 +20,7 @@ export default function PeripherySlot(props: StarsSlotProps) {
   const input = useRef<HTMLInputElement>(null);
   const panel = useRef<HTMLElement>(null);
   const legendSeen = useRef(preference.read("sj-legend-seen") === "1");
+  const legendTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [text, setText] = useState("");
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
@@ -43,6 +44,18 @@ export default function PeripherySlot(props: StarsSlotProps) {
   const current = projects.find((p) => p.hive.id === state.hiveId)?.hive;
   const route = command(text, projects, stores, ui);
   const loaded = entries.length === projects.length;
+  useEffect(() => {
+    const unsubscribe = ui.subscribe(() => {
+      if (ui.getSnapshot().overlay !== "legend") {
+        clearTimeout(legendTimer.current);
+        legendTimer.current = undefined;
+      }
+    });
+    return () => {
+      unsubscribe();
+      clearTimeout(legendTimer.current);
+    };
+  }, [ui]);
   useEffect(() => {
     const open = () => {
       while (
@@ -110,7 +123,8 @@ export default function PeripherySlot(props: StarsSlotProps) {
     legendSeen.current = true;
     preference.write("sj-legend-seen", "1");
     ui.openOverlay("legend");
-    setTimeout(() => {
+    legendTimer.current = setTimeout(() => {
+      legendTimer.current = undefined;
       if (ui.getSnapshot().overlay === "legend") ui.close();
     }, 7000);
   }, [state.overlay, state.platformPanel, state.selection, create, ui]);
