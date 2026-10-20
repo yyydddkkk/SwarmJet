@@ -14,12 +14,17 @@ func (s *Store) EventData(ctx context.Context, ref EventRef) (any, error) {
 		if ref.ID != ref.HiveID {
 			return nil, domain.ErrNotFound
 		}
-		return s.Hive(ctx, ref.HiveID)
+		hive, err := s.Hive(ctx, ref.HiveID)
+		hive.CreatedAt = hive.CreatedAt.UTC()
+		hive.UpdatedAt = hive.UpdatedAt.UTC()
+		return hive, err
 	case "agent":
 		agent, err := s.Agent(ctx, ref.ID)
 		if err == nil && agent.HiveID != ref.HiveID {
 			return nil, domain.ErrNotFound
 		}
+		agent.CreatedAt = agent.CreatedAt.UTC()
+		agent.UpdatedAt = agent.UpdatedAt.UTC()
 		return agent, err
 	case "message":
 		m, err := scanMessage(s.Pool.QueryRow(ctx, `SELECT `+messageColumns+` FROM messages WHERE hive_id=$1 AND id=$2`, ref.HiveID, ref.ID))

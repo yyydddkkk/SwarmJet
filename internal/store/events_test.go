@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"testing"
 	"time"
@@ -115,6 +118,52 @@ func TestEventDataChecksHiveOwnership(t *testing.T) {
 	for _, ref := range []EventRef{{Type: "agent", HiveID: "other", ID: queen.ID}, {Type: "hive", HiveID: hive.ID, ID: "other"}} {
 		if _, err := s.EventData(ctx, ref); !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("wrong hive accepted: %+v err=%v", ref, err)
+		}
+	}
+}
+
+func TestEventDataNormalizesNonUTCTimestamps(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	hive := newTestHive(t, s, "acme/event-timezone")
+	queen, err := s.Queen(ctx, hive.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := s.Pool.Config()
+	// Simulate a process decoding PostgreSQL timestamptz in its non-UTC zone
+	// without changing time.Local, which would race with unrelated tests.
+	config.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
+		conn.TypeMap().RegisterType(&pgtype.Type{Name: "timestamptz", OID: pgtype.TimestamptzOID, Codec: &pgtype.TimestamptzCodec{ScanLocation: time.FixedZone("test-zone", 8*60*60)}})
+		return nil
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zoned := &Store{Pool: pool}
+	defer zoned.Close()
+	raw, err := zoned.Agent(ctx, queen.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, offset := raw.CreatedAt.Zone(); offset != 8*60*60 {
+		t.Fatal("fixture did not decode non-UTC time")
+	}
+	for _, ref := range []EventRef{{Type: "hive", HiveID: hive.ID, ID: hive.ID}, {Type: "agent", HiveID: hive.ID, ID: queen.ID}} {
+		value, err := zoned.EventData(ctx, ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var created, updated time.Time
+		switch entity := value.(type) {
+		case domain.Hive:
+			created, updated = entity.CreatedAt, entity.UpdatedAt
+		case domain.Agent:
+			created, updated = entity.CreatedAt, entity.UpdatedAt
+		}
+		if created.Location() != time.UTC || updated.Location() != time.UTC || created.IsZero() || updated.IsZero() {
+			t.Fatalf("non-UTC event: %+v", value)
 		}
 	}
 }
