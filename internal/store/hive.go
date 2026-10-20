@@ -264,8 +264,8 @@ func (s *Store) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent
 }
 
 // CreateForagerWithLimits is CreateForager with the limits declared by the
-// active methodology. A zero field keeps the HiveConfig limit; a non-zero field
-// replaces it. The platform still requires a positive cap, so "unlimited" is
+// active methodology. A zero field keeps the HiveConfig limit; a positive field
+// may only tighten it. The platform still requires a positive cap, so "unlimited" is
 // never possible.
 func (s *Store) CreateForagerWithLimits(ctx context.Context, a domain.Agent, limits domain.Limits) (domain.Agent, error) {
 	return s.createForager(ctx, a, limits)
@@ -303,10 +303,10 @@ func (s *Store) createForagerTx(ctx context.Context, tx pgx.Tx, a domain.Agent, 
 	}
 	applyHiveDefaults(&cfg)
 	maxConcurrent, maxPerChain := cfg.MaxConcurrentForagers, cfg.MaxForagersPerChain
-	if limits.MaxConcurrentAgents > 0 {
+	if limits.MaxConcurrentAgents > 0 && limits.MaxConcurrentAgents < maxConcurrent {
 		maxConcurrent = limits.MaxConcurrentAgents
 	}
-	if limits.MaxAgentsPerChain > 0 {
+	if limits.MaxAgentsPerChain > 0 && limits.MaxAgentsPerChain < maxPerChain {
 		maxPerChain = limits.MaxAgentsPerChain
 	}
 	var active int

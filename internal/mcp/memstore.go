@@ -223,8 +223,7 @@ func (m *MemoryBackend) CreateForager(ctx context.Context, a domain.Agent) (doma
 	return m.CreateForagerWithLimits(ctx, a, domain.Limits{})
 }
 
-// CreateForagerWithLimits overrides the HiveConfig limits with the active
-// methodology's limits when they are set.
+// CreateForagerWithLimits lets the active methodology tighten HiveConfig limits.
 func (m *MemoryBackend) CreateForagerWithLimits(ctx context.Context, a domain.Agent, limits domain.Limits) (domain.Agent, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.Agent{}, err
@@ -237,10 +236,10 @@ func (m *MemoryBackend) CreateForagerWithLimits(ctx context.Context, a domain.Ag
 	}
 	cfg := withConfigDefaults(h.Config)
 	maxConcurrent, maxPerChain := cfg.MaxConcurrentForagers, cfg.MaxForagersPerChain
-	if limits.MaxConcurrentAgents > 0 {
+	if limits.MaxConcurrentAgents > 0 && limits.MaxConcurrentAgents < maxConcurrent {
 		maxConcurrent = limits.MaxConcurrentAgents
 	}
-	if limits.MaxAgentsPerChain > 0 {
+	if limits.MaxAgentsPerChain > 0 && limits.MaxAgentsPerChain < maxPerChain {
 		maxPerChain = limits.MaxAgentsPerChain
 	}
 
