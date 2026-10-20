@@ -92,6 +92,7 @@ export function StarsWorkspace({
   const ui = useMemo(() => createStarsUI(), []);
   const [projects, setProjects] = useState<HiveOverview[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [, render] = useState(0);
@@ -102,6 +103,7 @@ export function StarsWorkspace({
       .listHives(controller.signal)
       .then((r) => {
         setProjects(r.hives);
+        setProjectsLoaded(true);
         setError("");
       })
       .catch((e) => {
@@ -154,7 +156,7 @@ export function StarsWorkspace({
   const status = [...stores.values()]
     .find((s) => s.getSnapshot().error)
     ?.getSnapshot();
-  if (!projects.length && (projectsLoading || error)) {
+  if (!projectsLoaded && (projectsLoading || error)) {
     return (
       <main className="stars-app">
         <div className="stars-status">
