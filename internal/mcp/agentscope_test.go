@@ -16,7 +16,7 @@ import (
 // checked against it so a newly added tool cannot silently bypass either.
 var allToolNames = []string{
 	"list_hives", "get_hive", "create_hive", "update_hive", "send", "wait",
-	"spawn", "spawn_forager", "cancel_forager", "get_forager", "read_forager_detail",
+	"finish_task", "spawn", "spawn_forager", "cancel_forager", "get_forager", "read_forager_detail",
 	"update_handoff", "inbox", "claim", "offline_digest",
 	"get_methodology", "list_methodology_versions", "publish_methodology", "activate_methodology",
 	"attest", "pr_status", "merge_pr", "set_model_credential",

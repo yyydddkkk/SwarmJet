@@ -27,5 +27,5 @@ Green CI is an input to your verdict, not the verdict.
    `summary`, and `findings` (severity critical / warning / nit, location,
    finding, evidence).
 6. **Hand back.** On `fail` or `pass_notes`, `send` the findings to
-   `forager:<parentId>` (see `get_forager` for your own id). Then end your
-   turn; your work is done.
+   `forager:<parentId>` (see `get_forager` for your own id).
+7. **Finish.** Call `finish_task` with a one-line summary, then end your turn.

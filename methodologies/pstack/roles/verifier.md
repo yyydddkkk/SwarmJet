@@ -22,6 +22,8 @@ Follow the `verify-revision` skill. In short:
 4. On `fail` or `pass_notes`, send the findings to the PR owner with `send`
    (to `forager:<parentId>`), one finding per item with location and
    evidence.
+5. Call `finish_task` with a one-line summary. Your task ends with the
+   verdict; the platform then frees your Cell. A new head gets a new verifier.
 
 Report only what you can show. An empty review is a valid outcome. Do not
 inflate style preferences into findings, and do not question the task's goal;

@@ -119,6 +119,11 @@ func (a *actor) loop(ctx context.Context) {
 			a.stopRunning()
 			return
 		}
+		if hasCompleteMessage(batch) {
+			a.terminate(ctx, domain.AgentCompleted, "finished its task", batch, "")
+			a.stopRunning()
+			return
+		}
 		if !a.runTurn(ctx, batch) {
 			a.stopRunning()
 			return
@@ -165,6 +170,10 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 	}
 	if hasCancelMessage(consumed) {
 		a.terminate(ctx, domain.AgentCancelled, "cancelled by control message", consumed, "")
+		return false
+	}
+	if hasCompleteMessage(consumed) {
+		a.terminate(ctx, domain.AgentCompleted, "finished its task", consumed, "")
 		return false
 	}
 	if len(consumed) == 0 {

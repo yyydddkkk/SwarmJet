@@ -688,3 +688,25 @@ func TestUnknownMethodologyRoleFailsTheTurn(t *testing.T) {
 		t.Fatalf("Start ran with an unknown role: %+v", starts)
 	}
 }
+
+// finish_task sends the Agent a "complete" control message during its turn;
+// the turn finishes normally, then the Agent is completed and cleaned up.
+func TestCompleteControlEndsAgentAfterTurn(t *testing.T) {
+	f := newFixture(t, nil)
+	f.notify(f.taskMessage("m1", "verify the PR"))
+	f.wantState(testAgentID, domain.AgentParked)
+
+	done := f.messageTo(testAgentID, "c1", domain.ForagerAddress(testAgentID), domain.MessageControl, "complete\nattested PASS")
+	f.notify(done)
+	f.wantState(testAgentID, domain.AgentCompleted)
+
+	if got := f.runtime.destroyCount(testAgentID); got != 1 {
+		t.Errorf("Destroy calls = %d, want 1", got)
+	}
+	if f.store.tokenCount() != 0 {
+		t.Errorf("tokens left = %d, want 0", f.store.tokenCount())
+	}
+	if !f.store.isHandled("c1") {
+		t.Error("complete control message should be handled")
+	}
+}
