@@ -136,7 +136,7 @@ func TestTokenAPIValidatesInput(t *testing.T) {
 	}
 }
 
-func TestSetupStatusReportsCLILogin(t *testing.T) {
+func TestSetupStatusReportsModelDefaults(t *testing.T) {
 	_, handler, cookie := newHiveAPITest(t)
 	w := tokenAPIRequest(t, handler, cookie, http.MethodGet, "/api/setup/status", "")
 	if w.Code != http.StatusOK {
@@ -146,8 +146,8 @@ func TestSetupStatusReportsCLILogin(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
 		t.Fatal(err)
 	}
-	if status.CLILogin.CLI != "omp" || status.CLILogin.Available {
-		t.Fatalf("unexpected cliLogin %+v", status.CLILogin)
+	if status.Models.DefaultModel == "" || status.Models.Available {
+		t.Fatalf("unexpected models %+v", status.Models)
 	}
 	if w = tokenAPIRequest(t, handler, cookie, http.MethodPost, "/api/setup/status", `{}`); w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST status = %d", w.Code)

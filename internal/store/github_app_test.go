@@ -115,7 +115,7 @@ func TestMigrateCreatesGitHubAppTables(t *testing.T) {
 		}
 	}
 	var version int
-	if err := s.Pool.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil || version != 10 {
+	if err := s.Pool.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil || version < 11 {
 		t.Fatalf("version=%d err=%v", version, err)
 	}
 }

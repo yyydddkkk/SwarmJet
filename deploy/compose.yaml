@@ -26,6 +26,11 @@ x-app-environment: &app-environment
   # Defaults to the same host as SWARMJET_CELL_MCP_URL with /llm.
   SWARMJET_CELL_LLM_URL: ${SWARMJET_CELL_LLM_URL:-}
   SWARMJET_CELL_NETWORK: ${SWARMJET_CELL_NETWORK:-}
+  # Model boundary. compose.cells.yaml starts the auth broker/gateway and fills
+  # these in; the base stack leaves them empty (no /llm endpoint).
+  SWARMJET_LLM_GATEWAY_URL: ${SWARMJET_LLM_GATEWAY_URL:-}
+  SWARMJET_AUTH_BROKER_URL: ${SWARMJET_AUTH_BROKER_URL:-}
+  SWARMJET_OMP_CONFIG_DIR: ${SWARMJET_OMP_CONFIG_DIR:-}
 
 x-app: &app
   image: ${IMAGE:-swarmjet:local}

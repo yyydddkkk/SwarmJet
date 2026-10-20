@@ -1,0 +1,30 @@
+{
+  "_comment": "Reference USD prices per 1M tokens, checked 2026-10-19. Update this file when providers change prices. Models not listed here are recorded with unknown_price=true and cost 0.",
+  "_comment_cache": "cacheRead is the prompt-cache-hit rate; cacheWrite is the cache-creation rate where the provider bills it separately.",
+  "models": {
+    "deepseek/deepseek-chat": {
+      "input": 0.28,
+      "output": 0.42,
+      "cacheRead": 0.028,
+      "cacheWrite": 0.28
+    },
+    "deepseek/deepseek-reasoner": {
+      "input": 0.28,
+      "output": 0.42,
+      "cacheRead": 0.028,
+      "cacheWrite": 0.28
+    },
+    "openai/gpt-4o-mini": {
+      "input": 0.15,
+      "output": 0.6,
+      "cacheRead": 0.075,
+      "cacheWrite": 0.15
+    },
+    "anthropic/claude-haiku-4-5": {
+      "input": 1.0,
+      "output": 5.0,
+      "cacheRead": 0.1,
+      "cacheWrite": 1.25
+    }
+  }
+}

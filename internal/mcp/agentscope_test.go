@@ -19,7 +19,7 @@ var allToolNames = []string{
 	"spawn", "spawn_forager", "cancel_forager", "get_forager", "read_forager_detail",
 	"update_handoff", "inbox", "claim", "offline_digest",
 	"get_methodology", "list_methodology_versions", "publish_methodology", "activate_methodology",
-	"attest", "pr_status", "merge_pr",
+	"attest", "pr_status", "merge_pr", "set_model_credential",
 }
 
 func allTools() map[string]bool {

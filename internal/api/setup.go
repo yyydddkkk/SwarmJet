@@ -6,15 +6,15 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"time"
 
+	"github.com/yyydddkkk/SwarmJet/internal/llmproxy"
 	"github.com/yyydddkkk/SwarmJet/internal/onboarding"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
-// setupCells mirrors the contract's Cells status block. The former CLI login
-// block is kept for the console contract but now only names the Cell CLI; the
-// login terminal and its /api/runtime routes were removed with the omp switch.
+// setupCells and setupModels mirror the contract's status blocks.
 type setupCells struct {
 	Enabled         bool   `json:"enabled"`
 	Image           string `json:"image"`
@@ -22,17 +22,18 @@ type setupCells struct {
 	DockerAvailable bool   `json:"dockerAvailable"`
 }
 
-type setupCLILogin struct {
-	Available bool   `json:"available"`
-	LoggedIn  bool   `json:"loggedIn"`
-	CLI       string `json:"cli"`
+type setupModels struct {
+	Available    bool     `json:"available"`
+	Configured   bool     `json:"configured"`
+	DefaultModel string   `json:"defaultModel"`
+	Providers    []string `json:"providers,omitempty"`
 }
 
 type setupStatusResponse struct {
-	GitHub   onboarding.GitHubStatus `json:"github"`
-	Tunnel   onboarding.TunnelStatus `json:"tunnel"`
-	Cells    setupCells              `json:"cells"`
-	CLILogin setupCLILogin           `json:"cliLogin"`
+	GitHub onboarding.GitHubStatus `json:"github"`
+	Tunnel onboarding.TunnelStatus `json:"tunnel"`
+	Cells  setupCells              `json:"cells"`
+	Models setupModels             `json:"models"`
 }
 
 // setup routes the admin-only setup endpoints. The GitHub callback is handled
@@ -62,7 +63,31 @@ func (a *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 			Model:           a.cfg.CellsModel,
 			DockerAvailable: a.cfg.DockerAvailable != nil && a.cfg.DockerAvailable(),
 		},
-		CLILogin: setupCLILogin{CLI: "omp"},
+		Models: setupModels{DefaultModel: a.cfg.DefaultModel},
+	}
+	if response.Models.DefaultModel == "" {
+		response.Models.DefaultModel = llmproxy.DefaultModel
+	}
+	if a.cfg.Models != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		credentials, err := a.cfg.Models.Snapshot(ctx)
+		cancel()
+		if err == nil {
+			seen := map[string]bool{}
+			for _, credential := range credentials {
+				if !credential.Configured || seen[credential.Provider] {
+					continue
+				}
+				seen[credential.Provider] = true
+				response.Models.Providers = append(response.Models.Providers, credential.Provider)
+				response.Models.Configured = true
+			}
+			sort.Strings(response.Models.Providers)
+			// "available" means a usable credential exists, not merely that the
+			// broker answered: a reachable broker with zero credentials cannot
+			// serve a model request.
+			response.Models.Available = len(response.Models.Providers) > 0
+		}
 	}
 	if a.cfg.Setup != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)

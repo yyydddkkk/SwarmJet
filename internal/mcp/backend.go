@@ -98,6 +98,9 @@ type Options struct {
 	// Merge powers attest, pr_status and merge_pr. When nil the tools are still
 	// listed but return a clear "not configured" error.
 	Merge MergeService
+	// Credentials writes model-provider credentials into the omp auth broker.
+	// nil makes set_model_credential report that it is not configured.
+	Credentials CredentialWriter
 }
 
 // withDefaults returns a copy of o with zero fields filled in.
