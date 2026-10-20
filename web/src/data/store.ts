@@ -195,12 +195,41 @@ export class ProjectStore {
     this.abort?.abort();
     this.abort = new AbortController();
     this.pending = [];
+    const observedNumbers = [...this.observedPRs.keys()];
     this.publish({ connection: ready ? "syncing" : this.state.connection });
     try {
       const snapshot = await this.source.snapshot(
         this.hiveId,
         this.abort.signal,
       );
+      // List readiness is cached server-side for 30 seconds. Before discarding
+      // stream observations, calibrate those PRs against the uncached status
+      // endpoint, so a queue/methodology resync cannot revert a newly ready PR.
+      const statuses = await Promise.all(
+        observedNumbers.map((number) =>
+          this.source.api.getPRStatus(this.hiveId, number, this.abort?.signal),
+        ),
+      );
+      for (const status of statuses) {
+        const existing = snapshot.prs.find(
+          (pr) => pr.number === status.prNumber,
+        );
+        snapshot.prs = upsert(
+          snapshot.prs,
+          {
+            ...existing,
+            number: status.prNumber,
+            headSha: status.headSha ?? existing?.headSha ?? "",
+            state: status.state ?? existing?.state ?? "",
+            ready: status.ready,
+            merged: status.merged,
+            reasons: status.reasons,
+            attestations: status.attestations,
+            url: status.url ?? existing?.url,
+          },
+          (pr) => pr.number,
+        );
+      }
       if (generation !== this.generation || this.stopped) return;
       const queued = this.pending ?? [];
       this.observedPRs.clear();

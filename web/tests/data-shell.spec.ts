@@ -477,3 +477,67 @@ test("browser data source multiplexes projects and resyncs unattributable events
   expect(result.ready).toHaveLength(16);
   expect(result.closed).toBe(1);
 });
+
+test("resnapshot calibrates observed PRs without the stale list cache, including changes while offline", async () => {
+  const initial = fixture();
+  let head = "head-2",
+    ready = true;
+  const mock = createMockDataSource(
+    { swarmjet: initial },
+    {
+      getPRStatus: async () => ({
+        hiveId: "swarmjet",
+        prNumber: 1,
+        draft: false,
+        checks: [],
+        attestations: [],
+        reasons: [],
+        headSha: head,
+        state: "open",
+        ready,
+        merged: false,
+      }),
+    },
+  );
+  const store = createProjectStore("swarmjet", mock.source);
+  store.start();
+  await flush();
+  mock.push("swarmjet", {
+    type: "pr",
+    data: {
+      hiveId: "swarmjet",
+      number: 1,
+      headSha: head,
+      state: "open",
+      ready,
+      merged: false,
+    },
+  });
+  await flush();
+  mock.ready("swarmjet");
+  await flush();
+  expect(store.getSnapshot().snapshot?.prs[0]).toMatchObject({
+    headSha: "head-2",
+    ready: true,
+  });
+  mock.push("swarmjet", {
+    type: "pr",
+    data: {
+      hiveId: "swarmjet",
+      number: 1,
+      headSha: head,
+      state: "open",
+      ready,
+      merged: false,
+    },
+  });
+  head = "head-3";
+  ready = false;
+  mock.ready("swarmjet");
+  await flush();
+  expect(store.getSnapshot().snapshot?.prs[0]).toMatchObject({
+    headSha: "head-3",
+    ready: false,
+  });
+  store.stop();
+});

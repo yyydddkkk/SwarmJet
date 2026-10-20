@@ -23,6 +23,21 @@ export function createMockDataSource(
         const fn = overrides[method as keyof DataAPI] as
           ((...args: unknown[]) => unknown) | undefined;
         if (fn) return fn(...args);
+        if (method === "getPRStatus") {
+          const pr = snapshots[String(args[0])].prs.find(
+            (pr) => pr.number === args[1],
+          );
+          if (!pr) return Promise.reject(new Error("Missing mock PR status"));
+          return Promise.resolve({
+            hiveId: args[0],
+            prNumber: pr.number,
+            draft: false,
+            checks: [],
+            attestations: [],
+            reasons: [],
+            ...structuredClone(pr),
+          });
+        }
         if (method === "listPRs")
           return Promise.resolve({
             prs: structuredClone(snapshots[String(args[0])].prs),
