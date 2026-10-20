@@ -542,3 +542,29 @@ test("resnapshot calibrates observed PRs without the stale list cache, including
   });
   store.stop();
 });
+
+test("offline font files load and the default shell remains reviewable", async ({
+  page,
+}) => {
+  await mockHiveAPI(page);
+  const external: string[] = [];
+  page.on("request", (request) => {
+    if (/fonts\.(googleapis|gstatic)\.com/.test(request.url()))
+      external.push(request.url());
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "显示", exact: true }).click();
+  await page.getByLabel("主题", { exact: true }).selectOption("paper");
+  const loaded = await page.evaluate(async () => {
+    await document.fonts.load('16px "IM Fell English"');
+    await document.fonts.load('16px "Noto Serif SC"', "项目");
+    await document.fonts.load('16px "IBM Plex Sans"');
+    return ["IM Fell English", "Noto Serif SC", "IBM Plex Sans"].every((name) =>
+      document.fonts.check(`16px "${name}"`),
+    );
+  });
+  expect(loaded).toBe(true);
+  expect(external).toEqual([]);
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.screenshot({ path: "/tmp/swarmjet-r7-a-shell.png" });
+});
