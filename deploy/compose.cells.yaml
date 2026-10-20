@@ -12,7 +12,7 @@ services:
       SWARMJET_CELL_NETWORK: ${SWARMJET_CELL_NETWORK:-${COMPOSE_PROJECT_NAME:-swarmjet}_default}
       # The API is the only caller of the broker and gateway. install.py
       # writes both bearer token files under DATA_DIR/omp with mode 0600.
-      SWARMJET_DEFAULT_MODEL: ${SWARMJET_DEFAULT_MODEL:-deepseek/deepseek-chat}
+      SWARMJET_DEFAULT_MODEL: ${SWARMJET_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}
       SWARMJET_LLM_GATEWAY_URL: ${SWARMJET_LLM_GATEWAY_URL:-http://auth-gateway:8766}
       SWARMJET_AUTH_BROKER_URL: ${SWARMJET_AUTH_BROKER_URL:-http://auth-broker:8765}
       SWARMJET_OMP_CONFIG_DIR: ${DATA_DIR:?Set absolute DATA_DIR}/omp

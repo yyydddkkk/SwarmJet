@@ -68,6 +68,15 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(installer.build_values({"AGENT_CLIS": "opencode"}, **common)["AGENT_CLIS"], "")
         self.assertEqual(installer.build_values({"AGENT_CLIS": "opencode, codex"}, **common)["AGENT_CLIS"], "codex")
 
+    def test_upgrade_replaces_retired_deepseek_default(self):
+        common = dict(data_dir="/tmp/data", port=8180, listen_host="127.0.0.1",
+                      public_origin="http://localhost:8180", cells=True, tunnel=False,
+                      image="swarmjet:local", agent_image="swarmjet-agent:local", admin_username="admin")
+        values = installer.build_values({"SWARMJET_DEFAULT_MODEL": "deepseek/deepseek-chat"}, **common)
+        self.assertEqual(values["SWARMJET_DEFAULT_MODEL"], "deepseek/deepseek-v4-flash")
+        kept = installer.build_values({"SWARMJET_DEFAULT_MODEL": "deepseek/deepseek-v4-pro"}, **common)
+        self.assertEqual(kept["SWARMJET_DEFAULT_MODEL"], "deepseek/deepseek-v4-pro")
+
     def test_generated_secrets_and_permissions(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / ".env"
@@ -84,7 +93,7 @@ class EnvironmentTests(unittest.TestCase):
             self.assertEqual(parsed["SWARMJET_CELLS"], "1")
             self.assertEqual(parsed["SWARMJET_TUNNEL_URL"], "")
             self.assertEqual(parsed["OMP_VERSION"], "18.12.2")
-            self.assertEqual(parsed["SWARMJET_DEFAULT_MODEL"], "deepseek/deepseek-chat")
+            self.assertEqual(parsed["SWARMJET_DEFAULT_MODEL"], "deepseek/deepseek-v4-flash")
             self.assertEqual(parsed["SWARMJET_LLM_GATEWAY_URL"], "")
 
     def test_existing_values_and_comments_are_kept(self):

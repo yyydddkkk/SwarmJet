@@ -20,7 +20,7 @@ import (
 )
 
 // DefaultModel is the model used when SWARMJET_DEFAULT_MODEL is unset.
-const DefaultModel = "deepseek/deepseek-chat"
+const DefaultModel = "deepseek/deepseek-v4-flash"
 
 var (
 	// ErrNotConfigured means the auth broker or gateway endpoint/token is absent.

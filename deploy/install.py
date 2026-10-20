@@ -346,6 +346,10 @@ def build_values(
     # Round 4 replaced OpenCode with omp, which the Agent image always
     # installs. Older .env files listed opencode here, which the image build
     # now rejects, so drop it on upgrade.
+    # deepseek-chat left omp's model catalog with DeepSeek V4; the gateway
+    # answers "Unknown model" for it.
+    if values.get("SWARMJET_DEFAULT_MODEL") in ("deepseek/deepseek-chat", "deepseek/deepseek-reasoner"):
+        values["SWARMJET_DEFAULT_MODEL"] = "deepseek/deepseek-v4-flash"
     if "AGENT_CLIS" in values:
         kept = [c.strip() for c in values["AGENT_CLIS"].split(",") if c.strip() and c.strip() != "opencode"]
         values["AGENT_CLIS"] = ",".join(kept)
@@ -373,7 +377,7 @@ def build_values(
         "HTTP_PORT": str(port),
         "SECURE_COOKIES": "false",
         "SWARMJET_CELLS": "1" if cells else "0",
-        "SWARMJET_DEFAULT_MODEL": "deepseek/deepseek-chat",
+        "SWARMJET_DEFAULT_MODEL": "deepseek/deepseek-v4-flash",
         "SWARMJET_CELL_MCP_URL": "http://swarmjet:8080/mcp",
         "SWARMJET_CELL_LLM_URL": "",
         "SWARMJET_CELL_NETWORK": "",
