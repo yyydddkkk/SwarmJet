@@ -1,28 +1,16 @@
 /// <reference types="vite/client" />
-import React, { lazy, Suspense } from "react";
+import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
-import { ToastProvider } from "./ToastProvider";
-import "./styles.css";
-import "./project-setup.css";
-import "./workbench.css";
-import "./console-shell.css";
-// Development-only, disposable design study. Never replaces the production console.
-const Prototype =
-  import.meta.env.DEV &&
-  new URLSearchParams(location.search).get("prototype") === "workbench"
-    ? lazy(() => import("./WorkbenchPrototype"))
-    : null;
+import "./hive/hive-console.css";
+
+// The Hive console is the whole app after round 3: one administrator signs in,
+// then lands on #/hives. Old workbench routes redirect there.
+const HiveConsole = lazy(() => import("./hive/HiveConsoleApp"));
+
 createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <ToastProvider>
-    {Prototype ? (
-      <Suspense fallback={null}>
-        <Prototype />
-      </Suspense>
-    ) : (
-      <App />
-    )}
-    </ToastProvider>
-  </React.StrictMode>,
+  <StrictMode>
+    <Suspense fallback={<div className="hg-boot-screen">正在打开蜂巢控制台…</div>}>
+      <HiveConsole />
+    </Suspense>
+  </StrictMode>,
 );

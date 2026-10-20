@@ -20,26 +20,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// Metrics keeps only the signals that still have a data source after the
+// pipeline, node and admission code was removed: HTTP requests and the two
+// remaining River queues (webhook and message delivery).
 type Metrics struct {
-	registry           *prometheus.Registry
-	readinessMu        sync.RWMutex
-	readiness          func(context.Context) error
-	httpRequests       *prometheus.CounterVec
-	httpDuration       *prometheus.HistogramVec
-	messages           *prometheus.CounterVec
-	admissionRuns      *prometheus.CounterVec
-	admittedTasks      *prometheus.CounterVec
-	activitySteps      *prometheus.CounterVec
-	activityDuration   *prometheus.HistogramVec
-	scanRuns           *prometheus.CounterVec
-	scanDuration       *prometheus.HistogramVec
-	admissionWaiting   prometheus.Gauge
-	admissionOldest    prometheus.Gauge
-	commandPending     prometheus.Gauge
-	commandOldest      prometheus.Gauge
-	runnerSlots        prometheus.Gauge
-	legacyInboxPending prometheus.Gauge
-	snapshotSuccess    prometheus.Gauge
+	registry     *prometheus.Registry
+	readinessMu  sync.RWMutex
+	readiness    func(context.Context) error
+	httpRequests *prometheus.CounterVec
+	httpDuration *prometheus.HistogramVec
+	messages     *prometheus.CounterVec
 }
 
 func New() *Metrics {
@@ -48,20 +38,7 @@ func New() *Metrics {
 	m.httpRequests = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "swarmjet_http_requests_total", Help: "HTTP requests by bounded route and status class."}, []string{"route", "method", "status_class"})
 	m.httpDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "swarmjet_http_request_duration_seconds", Help: "HTTP request duration by bounded route.", Buckets: prometheus.DefBuckets}, []string{"route", "method"})
 	m.messages = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "swarmjet_messages_processed_total", Help: "Durable message processing attempts."}, []string{"queue", "result"})
-	m.admissionRuns = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "swarmjet_admission_runs_total", Help: "Admission cycle results."}, []string{"backend", "result"})
-	m.admittedTasks = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "swarmjet_admitted_tasks_total", Help: "Tasks admitted by execution backend."}, []string{"backend"})
-	m.activitySteps = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "swarmjet_activity_steps_total", Help: "Task activity step results."}, []string{"phase", "result"})
-	m.activityDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "swarmjet_activity_step_duration_seconds", Help: "Task activity step duration.", Buckets: []float64{0.1, 0.5, 1, 5, 15, 60, 300, 900, 3600, 7200}}, []string{"phase"})
-	m.scanRuns = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "swarmjet_scan_runs_total", Help: "Repository reconciliation scan results."}, []string{"scope", "result"})
-	m.scanDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "swarmjet_scan_duration_seconds", Help: "Repository reconciliation scan duration.", Buckets: []float64{0.1, 0.5, 1, 5, 15, 60, 300, 900}}, []string{"scope"})
-	m.admissionWaiting = prometheus.NewGauge(prometheus.GaugeOpts{Name: "swarmjet_admission_waiting", Help: "Tasks awaiting admission."})
-	m.admissionOldest = prometheus.NewGauge(prometheus.GaugeOpts{Name: "swarmjet_admission_oldest_wait_seconds", Help: "Age of the oldest task awaiting admission."})
-	m.commandPending = prometheus.NewGauge(prometheus.GaugeOpts{Name: "swarmjet_command_pending", Help: "Commands not yet delivered to Temporal."})
-	m.commandOldest = prometheus.NewGauge(prometheus.GaugeOpts{Name: "swarmjet_command_oldest_wait_seconds", Help: "Age of the oldest undelivered command."})
-	m.runnerSlots = prometheus.NewGauge(prometheus.GaugeOpts{Name: "swarmjet_runner_slots_reserved", Help: "Currently reserved Runner slots."})
-	m.legacyInboxPending = prometheus.NewGauge(prometheus.GaugeOpts{Name: "swarmjet_legacy_inbox_pending", Help: "Unprocessed records in the legacy PostgreSQL webhook inbox."})
-	m.snapshotSuccess = prometheus.NewGauge(prometheus.GaugeOpts{Name: "swarmjet_state_snapshot_success", Help: "Whether the most recent PostgreSQL state snapshot succeeded."})
-	r.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}), m.httpRequests, m.httpDuration, m.messages, m.admissionRuns, m.admittedTasks, m.activitySteps, m.activityDuration, m.scanRuns, m.scanDuration, m.admissionWaiting, m.admissionOldest, m.commandPending, m.commandOldest, m.runnerSlots, m.legacyInboxPending, m.snapshotSuccess)
+	r.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}), m.httpRequests, m.httpDuration, m.messages)
 	return m
 }
 
@@ -134,9 +111,7 @@ func (m *Metrics) HTTP(next http.Handler) http.Handler {
 
 func routeLabel(path string) string {
 	switch path {
-	case "/healthz":
-		return "/healthz"
-	case "/api/webhooks/gitlab", "/api/webhooks/github", "/api/operations", "/api/login", "/api/session":
+	case "/healthz", "/readyz", "/mcp", "/api/webhooks/github", "/api/login", "/api/session":
 		return path
 	default:
 		if strings.HasPrefix(path, "/api/") {
@@ -205,90 +180,11 @@ func (w *statusWriter) ReadFrom(src io.Reader) (int64, error) {
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (m *Metrics) Message(queue, result string) {
-	if queue != "webhook" && queue != "command" {
+	if queue != "webhook" && queue != "message" {
 		return
 	}
 	if result != "acked" && result != "retry" && result != "dead_letter" {
 		return
 	}
 	m.messages.WithLabelValues(queue, result).Inc()
-}
-
-func (m *Metrics) Admission(backend string, count int, err error) {
-	if backend != "local_or_node" && backend != "kubernetes" {
-		return
-	}
-	result := "ok"
-	if err != nil {
-		result = "error"
-	}
-	m.admissionRuns.WithLabelValues(backend, result).Inc()
-	if count > 0 {
-		m.admittedTasks.WithLabelValues(backend).Add(float64(count))
-	}
-}
-
-// Admitted counts an immediate admission performed while scheduling a task.
-func (m *Metrics) Admitted(backend string) {
-	if backend == "local" || backend == "node" {
-		backend = "local_or_node"
-	}
-	if backend != "local_or_node" && backend != "kubernetes" {
-		return
-	}
-	m.admittedTasks.WithLabelValues(backend).Inc()
-}
-
-func (m *Metrics) Activity(phase string, elapsed time.Duration, err error) {
-	phase = phaseLabel(phase)
-	result := "ok"
-	if err != nil {
-		result = "error"
-	}
-	m.activitySteps.WithLabelValues(phase, result).Inc()
-	m.activityDuration.WithLabelValues(phase).Observe(elapsed.Seconds())
-}
-
-func (m *Metrics) Scan(scope string, elapsed time.Duration, err error) {
-	if scope != "all" && scope != "repository" {
-		return
-	}
-	result := "ok"
-	if err != nil {
-		result = "error"
-	}
-	m.scanRuns.WithLabelValues(scope, result).Inc()
-	m.scanDuration.WithLabelValues(scope).Observe(elapsed.Seconds())
-}
-
-func phaseLabel(phase string) string {
-	switch phase {
-	case "waiting_dependencies", "preparing", "developing", "verifying", "reviewing", "publishing", "acquiring_merge", "waiting_manual_merge", "merging", "partial_merge", "finalizing", "stop", "pause_queue", "recover", "cancel", "run_kubernetes_task", "stop_kubernetes_task":
-		return phase
-	default:
-		return "other"
-	}
-}
-
-type StateSnapshot struct {
-	AdmissionWaiting       int
-	AdmissionOldestWaitSec float64
-	CommandPending         int
-	CommandOldestWaitSec   float64
-	RunnerSlotsReserved    int
-	LegacyInboxPending     int
-}
-
-func (m *Metrics) State(snapshot StateSnapshot, err error) {
-	if err != nil {
-		m.snapshotSuccess.Set(0)
-		return
-	}
-	m.admissionWaiting.Set(float64(snapshot.AdmissionWaiting))
-	m.admissionOldest.Set(snapshot.AdmissionOldestWaitSec)
-	m.commandPending.Set(float64(snapshot.CommandPending))
-	m.commandOldest.Set(snapshot.CommandOldestWaitSec)
-	m.runnerSlots.Set(float64(snapshot.RunnerSlotsReserved))
-	m.legacyInboxPending.Set(float64(snapshot.LegacyInboxPending))
-	m.snapshotSuccess.Set(1)
 }

@@ -1,24 +1,37 @@
 name: ${COMPOSE_PROJECT_NAME:-swarmjet}
+
+# Shared environment for the platform image. Everything here is read by
+# `swarmjet serve`; migrate only needs DATABASE_URL.
 x-app-environment: &app-environment
   DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
-  TEMPORAL_ADDRESS: temporal:7233
-  TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-swarmjet}
-  RABBITMQ_URL: ${RABBITMQ_URL:-amqp://swarmjet:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}@rabbitmq:5672/}
   # Internal-only scrape listener; no host port is published.
   METRICS_LISTEN_ADDRESS: ':9090'
-  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
-  RUNTIME_ADMIN_SECRET: ${RUNTIME_ADMIN_SECRET:-}
-  NODE_SECRET: ${NODE_SECRET:-}
-  EXECUTION_MODE: ${EXECUTION_MODE:-local}
-  PLATFORM_IMAGE: ${IMAGE:-swarmjet:local}
   DATA_DIR: ${DATA_DIR:?Set DATA_DIR to an absolute host path}
-  GITLAB_TOKEN: ${GITLAB_TOKEN:-}
-  GITLAB_MERGE_TOKEN: ${GITLAB_MERGE_TOKEN:-}
+  # Encrypts GitHub App credentials stored in the database. Back it up
+  # separately from PostgreSQL; losing it means creating the App again.
+  SWARMJET_MASTER_KEY: ${SWARMJET_MASTER_KEY:?Set SWARMJET_MASTER_KEY in .env}
+  # Round-3 GitHub App. Either configure it from the console "setup" page or
+  # keep the environment fallback from round 2. Environment wins when set.
   GITHUB_APP_ID: ${GITHUB_APP_ID:-}
   GITHUB_APP_PRIVATE_KEY_FILE: ${GITHUB_APP_PRIVATE_KEY_FILE:-}
-  # Must be identical for api (seals tokens) and worker (decrypts them).
-  SWARMJET_MASTER_KEY: ${SWARMJET_MASTER_KEY:-}
+  GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+  # Set to http://tunnel:2000 when the optional tunnel profile is enabled.
+  SWARMJET_TUNNEL_URL: ${SWARMJET_TUNNEL_URL:-}
+  WEBHOOK_LISTEN_ADDRESS: ${WEBHOOK_LISTEN_ADDRESS:-:8081}
+  # Forager Cells. This base file never mounts the Docker socket; enabling
+  # Cells requires the compose.cells.yaml overlay, which also sets this to 1.
+  SWARMJET_CELLS: ${SWARMJET_CELLS:-0}
+  SWARMJET_DEFAULT_MODEL: ${SWARMJET_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}
+  SWARMJET_CELL_MCP_URL: ${SWARMJET_CELL_MCP_URL:-http://swarmjet:8080/mcp}
+  # Defaults to the same host as SWARMJET_CELL_MCP_URL with /llm.
+  SWARMJET_CELL_LLM_URL: ${SWARMJET_CELL_LLM_URL:-}
+  SWARMJET_CELL_NETWORK: ${SWARMJET_CELL_NETWORK:-}
+  # Model boundary. compose.cells.yaml starts the auth broker/gateway and fills
+  # these in; the base stack leaves them empty (no /llm endpoint).
+  SWARMJET_LLM_GATEWAY_URL: ${SWARMJET_LLM_GATEWAY_URL:-}
+  SWARMJET_AUTH_BROKER_URL: ${SWARMJET_AUTH_BROKER_URL:-}
+  SWARMJET_OMP_CONFIG_DIR: ${SWARMJET_OMP_CONFIG_DIR:-}
+
 x-app: &app
   image: ${IMAGE:-swarmjet:local}
   restart: unless-stopped
@@ -26,22 +39,8 @@ x-app: &app
   logging:
     driver: json-file
     options: {max-size: 20m, max-file: '5'}
+
 services:
-  rabbitmq:
-    image: rabbitmq:4.3.6-management
-    hostname: rabbitmq
-    restart: unless-stopped
-    environment:
-      RABBITMQ_DEFAULT_USER: swarmjet
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
-    volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
-      - ./observability/rabbitmq-enabled-plugins:/etc/rabbitmq/enabled_plugins:ro
-    healthcheck:
-      test: [CMD, rabbitmq-diagnostics, -q, ping]
-      interval: 10s
-      timeout: 5s
-      retries: 30
   postgres:
     image: postgres:18.1-alpine3.23
     restart: unless-stopped
@@ -51,68 +50,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres-data:/var/lib/postgresql
-      - ./temporal/postgres-init.sql:/docker-entrypoint-initdb.d/10-temporal.sql:ro
     healthcheck:
       test: [CMD-SHELL, 'pg_isready -U swarmjet -d swarmjet']
       interval: 5s
       timeout: 3s
       retries: 30
-  temporal-schema:
-    image: temporalio/admin-tools:1.32.0
-    restart: 'no'
-    depends_on:
-      postgres: {condition: service_healthy}
-    environment:
-      POSTGRES_SEEDS: postgres
-      POSTGRES_USER: swarmjet
-      SQL_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-    volumes:
-      - ./temporal/schema.sh:/scripts/schema.sh:ro
-    entrypoint: [/bin/sh, /scripts/schema.sh]
-  temporal:
-    image: temporalio/server:1.32.0
-    restart: unless-stopped
-    depends_on:
-      temporal-schema: {condition: service_completed_successfully}
-    environment:
-      POSTGRES_USER: swarmjet
-      POSTGRES_PWD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-      BIND_ON_IP: 0.0.0.0
-      TEMPORAL_SERVER_CONFIG_FILE_PATH: /etc/temporal/config/swarmjet.yaml
-      TEMPORAL_ALLOW_NO_AUTH: 'true'
-    volumes:
-      - ./temporal/config_template.yaml:/etc/temporal/config/swarmjet.yaml:ro
-      - ./temporal/dynamicconfig.yaml:/etc/temporal/config/dynamicconfig/swarmjet.yaml:ro
-    healthcheck:
-      test: [CMD, nc, -z, localhost, '7233']
-      interval: 5s
-      timeout: 3s
-      retries: 60
-      start_period: 20s
-  temporal-namespace:
-    image: temporalio/admin-tools:1.32.0
-    restart: 'no'
-    depends_on:
-      temporal: {condition: service_healthy}
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-swarmjet}
-    volumes:
-      - ./temporal/namespace.sh:/scripts/namespace.sh:ro
-    entrypoint: [/bin/sh, /scripts/namespace.sh]
-  temporal-ui:
-    image: temporalio/ui:2.54.1
-    restart: unless-stopped
-    depends_on:
-      temporal-namespace: {condition: service_completed_successfully}
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_DEFAULT_NAMESPACE: ${TEMPORAL_NAMESPACE:-swarmjet}
-      TEMPORAL_CORS_ORIGINS: ${TEMPORAL_UI_ORIGIN:-http://localhost:8333}
-      # SwarmJet owns task commands and audit; the Temporal UI is diagnostic.
-      TEMPORAL_DISABLE_WRITE_ACTIONS: 'true'
-    ports:
-      - '127.0.0.1:${TEMPORAL_UI_PORT:-8333}:8080'
+
   migrate:
     <<: *app
     restart: 'no'
@@ -121,30 +64,20 @@ services:
       postgres: {condition: service_healthy}
     environment:
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+
   api:
     <<: *app
     command: [serve]
     depends_on:
       migrate: {condition: service_completed_successfully}
-      temporal-namespace: {condition: service_completed_successfully}
-      rabbitmq: {condition: service_healthy}
     environment:
       <<: *app-environment
       AGENT_IMAGE: ${AGENT_IMAGE:-swarmjet-agent:local}
-      RUNTIME_ADMIN_URL: http://worker:8091
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD with at least 12 characters}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8180}
-      SMTP_ADDR: ${SMTP_ADDR:-}
-      SMTP_USERNAME: ${SMTP_USERNAME:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM: ${SMTP_FROM:-}
       SWARMJET_HOST_LISTEN_ADDRESS: ${LISTEN_HOST:-127.0.0.1}:${HTTP_PORT:-8180}
       SECURE_COOKIES: ${SECURE_COOKIES:-false}
-      GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
-      GITLAB_WEBHOOK_SIGNING_TOKEN: ${GITLAB_WEBHOOK_SIGNING_TOKEN:-}
-      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-      EXECUTION_MODE: ${EXECUTION_MODE:-local}
     ports:
       - '${LISTEN_HOST:-127.0.0.1}:${HTTP_PORT:-8180}:8080'
     volumes:
@@ -157,44 +90,22 @@ services:
       interval: 10s
       timeout: 3s
       retries: 12
-  worker:
-    <<: *app
-    command: [worker]
-    depends_on:
-      migrate: {condition: service_completed_successfully}
-      temporal-namespace: {condition: service_completed_successfully}
-      rabbitmq: {condition: service_healthy}
-    environment:
-      <<: *app-environment
-      AGENT_IMAGE: ${AGENT_IMAGE:-swarmjet-agent:local}
-      TASK_CONCURRENCY: ${TASK_CONCURRENCY:-2}
-      FAILED_KEEP_DAYS: ${FAILED_KEEP_DAYS:-7}
-      REPORT_KEEP_DAYS: ${REPORT_KEEP_DAYS:-30}
-      INIT_VERIFY_IMAGE: ${INIT_VERIFY_IMAGE:-}
-      INTEGRATION_ENV_ALLOWLIST: ${INTEGRATION_ENV_ALLOWLIST:-}
-      AGENT_ENV_ALLOWLIST: ${AGENT_ENV_ALLOWLIST:-OPENAI_API_KEY,CODEX_API_KEY,ANTHROPIC_API_KEY,CLAUDE_CODE_OAUTH_TOKEN,DEEPSEEK_API_KEY,GEMINI_API_KEY,AGY_ADC_AUTH,GOOGLE_GEMINI_BASE_URL,OPENCODE_CONFIG_CONTENT}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      CODEX_API_KEY: ${CODEX_API_KEY:-}
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      AGY_ADC_AUTH: ${AGY_ADC_AUTH:-}
-      GOOGLE_GEMINI_BASE_URL: ${GOOGLE_GEMINI_BASE_URL:-}
-      OPENCODE_CONFIG_CONTENT: ${OPENCODE_CONFIG_CONTENT:-}
-      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-swarmjet}
-      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-swarmjet@example.invalid}
-      GIT_COMMITTER_NAME: ${GIT_AUTHOR_NAME:-swarmjet}
-      GIT_COMMITTER_EMAIL: ${GIT_AUTHOR_EMAIL:-swarmjet@example.invalid}
-    volumes:
-      - type: bind
-        source: ${DATA_DIR:?Set absolute DATA_DIR}
-        target: ${DATA_DIR:?Set absolute DATA_DIR}
-      - /var/run/docker.sock:/var/run/docker.sock
-  agent-image:
-    image: ${AGENT_IMAGE:-swarmjet-agent:local}
-    profiles: [tools]
-    command: [--version]
+
+  # Optional Cloudflare quick tunnel for hosts without a public domain.
+  # Enable with `--profile tunnel` and set SWARMJET_TUNNEL_URL=http://tunnel:2000
+  # (deploy/install.py does both). The platform reads /quicktunnel and syncs the
+  # GitHub App webhook URL. The edge URL is temporary and changes on restart.
+  # It forwards only the webhook listener (api:8081): the console and /mcp on
+  # api:8080 are never reachable through the tunnel.
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.1
+    profiles: [tunnel]
+    restart: unless-stopped
+    command: [tunnel, --no-autoupdate, --metrics, '0.0.0.0:2000', --url, http://api:8081]
+    ports:
+      - '127.0.0.1:${TUNNEL_METRICS_PORT:-2000}:2000'
+
+  # Optional baseline monitoring stack. Enable with `--profile observability`.
   prometheus:
     image: prom/prometheus:v3.15.0
     profiles: [observability]
@@ -209,6 +120,7 @@ services:
       - prometheus-data:/prometheus
     ports:
       - '127.0.0.1:${PROMETHEUS_PORT:-9090}:9090'
+
   postgres-exporter:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
     profiles: [observability]
@@ -219,6 +131,7 @@ services:
       DATA_SOURCE_URI: postgres:5432/swarmjet?sslmode=disable
       DATA_SOURCE_USER: swarmjet
       DATA_SOURCE_PASS: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+
   alertmanager:
     image: prom/alertmanager:v0.30.1
     profiles: [observability]
@@ -231,14 +144,8 @@ services:
       - alertmanager-data:/alertmanager
     ports:
       - '127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093'
-  jaeger:
-    image: jaegertracing/jaeger:2.21.0
-    profiles: [observability]
-    restart: unless-stopped
-    ports:
-      - '127.0.0.1:${JAEGER_UI_PORT:-16686}:16686'
+
 volumes:
   postgres-data:
-  rabbitmq-data:
   prometheus-data:
   alertmanager-data:

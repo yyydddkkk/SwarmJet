@@ -69,18 +69,6 @@ func TestHTTPMetricsKeepWebSocketUpgrade(t *testing.T) {
 	}
 }
 
-func TestStateSnapshotFailureIsVisible(t *testing.T) {
-	metrics := New()
-	metrics.State(StateSnapshot{AdmissionWaiting: 3, CommandPending: 2}, nil)
-	metrics.State(StateSnapshot{}, errors.New("database unavailable"))
-	body := scrape(t, metrics)
-	for _, wanted := range []string{"swarmjet_admission_waiting 3", "swarmjet_command_pending 2", "swarmjet_state_snapshot_success 0"} {
-		if !strings.Contains(body, wanted) {
-			t.Fatalf("missing %q in metrics", wanted)
-		}
-	}
-}
-
 func TestListenerHealthAndReadiness(t *testing.T) {
 	metrics := New()
 	metrics.SetReadiness(func(context.Context) error { return errors.New("secret dependency detail") })
@@ -99,16 +87,5 @@ func TestListenerHealthAndReadiness(t *testing.T) {
 	metrics.SetReadiness(func(context.Context) error { return nil })
 	if got := check("/readyz"); got.Code != http.StatusOK {
 		t.Fatalf("ready status=%d", got.Code)
-	}
-}
-
-func TestImmediateAdmissionCountsOnlyKnownBackend(t *testing.T) {
-	metrics := New()
-	metrics.Admitted("local")
-	metrics.Admitted("node")
-	metrics.Admitted("unexpected")
-	body := scrape(t, metrics)
-	if !strings.Contains(body, `swarmjet_admitted_tasks_total{backend="local_or_node"} 2`) || strings.Contains(body, `backend="unexpected"`) {
-		t.Fatalf("unexpected admission series: %s", body)
 	}
 }

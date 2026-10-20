@@ -1,0 +1,64 @@
+{
+  "action": "submitted",
+  "review": {
+    "url": "https://api.github.com/repos/acme/hive/pulls/34/reviews/9001",
+    "html_url": "https://github.com/acme/hive/pull/34#pullrequestreview-9001",
+    "id": 9001,
+    "node_id": "PRR_kwDOAAABc34",
+    "user": {
+      "login": "reviewer-one",
+      "id": 5150,
+      "type": "User",
+      "site_admin": false
+    },
+    "body": "Please add a regression test for the retry helper before this merges.",
+    "state": "changes_requested",
+    "author_association": "COLLABORATOR",
+    "submitted_at": "2026-10-15T11:00:00Z",
+    "commit_id": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567"
+  },
+  "pull_request": {
+    "url": "https://api.github.com/repos/acme/hive/pulls/34",
+    "html_url": "https://github.com/acme/hive/pull/34",
+    "id": 30034,
+    "number": 34,
+    "state": "open",
+    "title": "Make the retry helper deterministic",
+    "user": {
+      "login": "octo-dev",
+      "id": 4242,
+      "type": "User",
+      "site_admin": false
+    },
+    "author_association": "MEMBER",
+    "merged": false,
+    "labels": [],
+    "head": {
+      "label": "acme:swarm/acme-hive/forager-1",
+      "ref": "swarm/acme-hive/forager-1",
+      "sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567"
+    },
+    "base": {
+      "label": "acme:dev",
+      "ref": "dev",
+      "sha": "aa218f56b14c9653891f9e74264a383fa43fefbd"
+    }
+  },
+  "repository": {
+    "id": 1296269,
+    "name": "hive",
+    "full_name": "acme/hive",
+    "html_url": "https://github.com/acme/hive",
+    "owner": {
+      "login": "acme",
+      "id": 991,
+      "type": "Organization"
+    }
+  },
+  "sender": {
+    "login": "reviewer-one",
+    "id": 5150,
+    "type": "User",
+    "site_admin": false
+  }
+}

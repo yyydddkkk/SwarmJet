@@ -1,0 +1,54 @@
+{
+  "action": "edited",
+  "number": 34,
+  "pull_request": {
+    "url": "https://api.github.com/repos/acme/hive/pulls/34",
+    "html_url": "https://github.com/acme/hive/pull/34",
+    "id": 30034,
+    "node_id": "PR_kwDOAAABc34",
+    "number": 34,
+    "state": "open",
+    "locked": false,
+    "title": "Make the retry helper deterministic",
+    "user": {
+      "login": "swarmjet[bot]",
+      "id": 321321,
+      "type": "Bot",
+      "site_admin": false
+    },
+    "body": "Closes #12. Injects the clock so the retry helper no longer depends on wall time.",
+    "created_at": "2026-10-15T08:00:00Z",
+    "updated_at": "2026-10-15T08:00:00Z",
+    "merged": false,
+    "mergeable": true,
+    "author_association": "MEMBER",
+    "labels": [],
+    "head": {
+      "label": "acme:swarm/acme-hive/forager-1",
+      "ref": "swarm/acme-hive/forager-1",
+      "sha": "6dcb09b5b57875f334f61aebed695e2e4193db5e"
+    },
+    "base": {
+      "label": "acme:dev",
+      "ref": "dev",
+      "sha": "aa218f56b14c9653891f9e74264a383fa43fefbd"
+    }
+  },
+  "repository": {
+    "id": 1296269,
+    "name": "hive",
+    "full_name": "acme/hive",
+    "html_url": "https://github.com/acme/hive",
+    "owner": {
+      "login": "acme",
+      "id": 991,
+      "type": "Organization"
+    }
+  },
+  "sender": {
+    "login": "swarmjet[bot]",
+    "id": 321321,
+    "type": "Bot",
+    "site_admin": false
+  }
+}

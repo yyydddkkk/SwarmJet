@@ -4,113 +4,36 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
-      - series: 'rabbitmq_detailed_queue_messages_ready{job="rabbitmq-queues",queue="swarmjet.webhooks"}'
-        values: '2+0x15'
-    alert_rule_test:
-      - eval_time: 11m
-        alertname: SwarmJetMessageBacklog
-        exp_alerts:
-          - exp_labels:
-              job: rabbitmq-queues
-              queue: swarmjet.webhooks
-              severity: warning
-              evidence: broker_queue_depth
-              threshold_status: provisional_dev
-            exp_annotations:
-              summary: 'Messages remain ready in swarmjet.webhooks'
-  - interval: 1m
-    input_series:
-      - series: 'swarmjet_command_pending'
-        values: '2+0x10'
-      - series: 'swarmjet_command_oldest_wait_seconds'
-        values: '120+0x10'
-      - series: 'swarmjet_admission_waiting'
-        values: '1+0x10'
-      - series: 'swarmjet_admission_oldest_wait_seconds'
-        values: '600+0x10'
-    alert_rule_test:
-      - eval_time: 6m
-        alertname: SwarmJetCommandBacklog
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              evidence: postgres_command_age
-              threshold_status: provisional_dev
-            exp_annotations:
-              summary: PostgreSQL command outbox has old undelivered commands
-      - eval_time: 6m
-        alertname: SwarmJetAdmissionWaiting
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              evidence: postgres_admission_age
-              threshold_status: provisional_dev
-            exp_annotations:
-              summary: A task has waited more than five minutes for admission
-  - interval: 1m
-    input_series:
-      - series: 'swarmjet_activity_steps_total{phase="waiting_dependencies",result="error"}'
-        values: '0+1x15'
-    alert_rule_test:
-      - eval_time: 11m
-        alertname: SwarmJetActivityFailures
-        exp_alerts:
-          - exp_labels:
-              phase: waiting_dependencies
-              result: error
-              severity: warning
-              evidence: application_activity_failure
-              threshold_status: provisional_dev
-            exp_annotations:
-              summary: 'Task Activity waiting_dependencies failed in the last ten minutes'
-  - interval: 1m
-    input_series:
-      - series: 'up{job="temporal"}'
+      - series: 'up{job="swarmjet-api"}'
         values: '0+0x5'
       - series: 'pg_up{job="postgres"}'
-        values: '0+0x5'
-      - series: 'swarmjet_state_snapshot_success{job="swarmjet-api"}'
-        values: '0+0x5'
-      - series: 'rabbitmq_detailed_queue_messages_ready{job="rabbitmq-queues",queue="swarmjet.commands.dead"}'
         values: '1+0x5'
     alert_rule_test:
       - eval_time: 3m
         alertname: SwarmJetScrapeTargetDown
         exp_alerts:
           - exp_labels:
-              job: temporal
               severity: warning
               evidence: direct_scrape_failure
+              job: swarmjet-api
             exp_annotations:
-              summary: Metrics scrape failed for temporal
+              summary: Metrics scrape failed for swarmjet-api
               description: Check the target and its network path; a failed scrape alone does not identify the underlying cause.
+      - eval_time: 3m
+        alertname: SwarmJetPostgresUnavailable
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'up{job="postgres"}'
+        values: '1+0x5'
+      - series: 'pg_up{job="postgres"}'
+        values: '0+0x5'
+    alert_rule_test:
       - eval_time: 3m
         alertname: SwarmJetPostgresUnavailable
         exp_alerts:
           - exp_labels:
-              job: postgres
               severity: warning
               evidence: exporter_connection_failure
             exp_annotations:
               summary: PostgreSQL exporter cannot connect to the database
-      - eval_time: 3m
-        alertname: SwarmJetStateSnapshotFailed
-        exp_alerts:
-          - exp_labels:
-              job: swarmjet-api
-              severity: warning
-              evidence: application_query_failure
-            exp_annotations:
-              summary: SwarmJet backlog snapshot failed
-              description: Backlog gauges retain their last values while this is firing.
-      - eval_time: 3m
-        alertname: SwarmJetDeadLetterBacklog
-        exp_alerts:
-          - exp_labels:
-              job: rabbitmq-queues
-              queue: swarmjet.commands.dead
-              severity: warning
-              evidence: broker_queue_depth
-            exp_annotations:
-              summary: Dead-letter messages are waiting in swarmjet.commands.dead
-              description: Inspect message IDs and PostgreSQL receipts before replaying.

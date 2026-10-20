@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Build-time installation only. Does not launch agents or invoke a model.
+# oh-my-pi is installed by deploy/Dockerfile.agent; this script only handles the
+# optional extra CLIs selected through AGENT_CLIS.
 set -euo pipefail
-IFS=',' read -r -a selected <<< "${AGENT_CLIS:-opencode}"
+IFS=',' read -r -a selected <<< "${AGENT_CLIS:-}"
 for agent in "${selected[@]}"; do
   case "$agent" in
-    opencode) package="opencode-ai@${OPENCODE_VERSION}" ;;
     codex) package="@openai/codex@${CODEX_VERSION}" ;;
     claude) package="@anthropic-ai/claude-code@${CLAUDE_VERSION}" ;;
     dst)

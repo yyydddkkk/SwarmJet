@@ -1,10 +1,10 @@
-# These are direct failure/backlog signals. The 2-minute hold avoids transient
-# startup/scrape noise; no task SLO or capacity threshold is claimed here.
+# Direct failure signals for the three-service stack. The two-minute hold avoids
+# transient startup/scrape noise; no capacity or SLO threshold is claimed here.
 groups:
   - name: swarmjet-baseline
     rules:
       - alert: SwarmJetScrapeTargetDown
-        expr: up{job=~"swarmjet-api|swarmjet-worker|rabbitmq|rabbitmq-queues|temporal|postgres"} == 0
+        expr: up{job=~"swarmjet-api|postgres"} == 0
         for: 2m
         labels:
           severity: warning
@@ -20,57 +20,3 @@ groups:
           evidence: exporter_connection_failure
         annotations:
           summary: PostgreSQL exporter cannot connect to the database
-      - alert: SwarmJetStateSnapshotFailed
-        expr: swarmjet_state_snapshot_success == 0
-        for: 2m
-        labels:
-          severity: warning
-          evidence: application_query_failure
-        annotations:
-          summary: SwarmJet backlog snapshot failed
-          description: 'Backlog gauges retain their last values while this is firing.'
-      - alert: SwarmJetDeadLetterBacklog
-        expr: rabbitmq_detailed_queue_messages_ready{job="rabbitmq-queues",queue=~"swarmjet[.](webhooks|commands)[.]dead"} > 0
-        for: 2m
-        labels:
-          severity: warning
-          evidence: broker_queue_depth
-        annotations:
-          summary: 'Dead-letter messages are waiting in {{ $labels.queue }}'
-          description: 'Inspect message IDs and PostgreSQL receipts before replaying.'
-      # The holds below are dev investigation thresholds, not production SLOs.
-      - alert: SwarmJetMessageBacklog
-        expr: rabbitmq_detailed_queue_messages_ready{job="rabbitmq-queues",queue=~"swarmjet[.](webhooks|commands)"} > 0
-        for: 10m
-        labels:
-          severity: warning
-          evidence: broker_queue_depth
-          threshold_status: provisional_dev
-        annotations:
-          summary: 'Messages remain ready in {{ $labels.queue }}'
-      - alert: SwarmJetCommandBacklog
-        expr: swarmjet_command_pending > 0 and swarmjet_command_oldest_wait_seconds > 60
-        for: 5m
-        labels:
-          severity: warning
-          evidence: postgres_command_age
-          threshold_status: provisional_dev
-        annotations:
-          summary: PostgreSQL command outbox has old undelivered commands
-      - alert: SwarmJetAdmissionWaiting
-        expr: swarmjet_admission_waiting > 0 and swarmjet_admission_oldest_wait_seconds > 300
-        for: 5m
-        labels:
-          severity: warning
-          evidence: postgres_admission_age
-          threshold_status: provisional_dev
-        annotations:
-          summary: A task has waited more than five minutes for admission
-      - alert: SwarmJetActivityFailures
-        expr: increase(swarmjet_activity_steps_total{result="error"}[10m]) > 0
-        labels:
-          severity: warning
-          evidence: application_activity_failure
-          threshold_status: provisional_dev
-        annotations:
-          summary: 'Task Activity {{ $labels.phase }} failed in the last ten minutes'

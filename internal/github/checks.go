@@ -31,8 +31,13 @@ func (c *Client) requirements(ctx context.Context, id int64, branch string) ([]r
 		Checks   []requiredCheck `json:"checks"`
 		Contexts []string        `json:"contexts"`
 	}
+	// Classic branch protection needs the App's Administration permission,
+	// which SwarmJet does not request. A 403 therefore means "not visible", not
+	// "failed": rulesets below stay readable, the caller still requires no
+	// failed check on the head, and GitHub enforces any classic protection
+	// itself when the merge is requested.
 	_, e = c.request(ctx, "GET", p+"/branches/"+url.PathEscape(branch)+"/protection/required_status_checks", nil, &protection)
-	if code, ok := StatusCode(e); e != nil && (!ok || code != 404) {
+	if code, ok := StatusCode(e); e != nil && (!ok || (code != 404 && code != 403)) {
 		return nil, false, e
 	}
 	checks := protection.Checks

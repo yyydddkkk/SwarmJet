@@ -1,0 +1,58 @@
+{
+  "action": "completed",
+  "check_run": {
+    "id": 66001,
+    "node_id": "CR_kwDOAAABc66001",
+    "name": "ci / test",
+    "html_url": "https://github.com/acme/hive/runs/66001",
+    "status": "completed",
+    "conclusion": "success",
+    "head_sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567",
+    "started_at": "2026-10-15T10:00:00Z",
+    "completed_at": "2026-10-15T10:04:00Z",
+    "pull_requests": [
+      {
+        "url": "https://api.github.com/repos/acme/hive/pulls/34",
+        "id": 30034,
+        "number": 34,
+        "head": {
+          "ref": "swarm/acme-hive/forager-1",
+          "sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567"
+        },
+        "base": {
+          "ref": "dev",
+          "sha": "aa218f56b14c9653891f9e74264a383fa43fefbd"
+        }
+      }
+    ],
+    "check_suite": {
+      "id": 55001,
+      "head_branch": "swarm/acme-hive/forager-1",
+      "head_sha": "3f9a1c2d4e5f60718293a4b5c6d7e8f901234567",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    "app": {
+      "id": 15368,
+      "slug": "github-actions",
+      "name": "GitHub Actions"
+    }
+  },
+  "repository": {
+    "id": 1296269,
+    "name": "hive",
+    "full_name": "acme/hive",
+    "html_url": "https://github.com/acme/hive",
+    "owner": {
+      "login": "acme",
+      "id": 991,
+      "type": "Organization"
+    }
+  },
+  "sender": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot",
+    "site_admin": false
+  }
+}

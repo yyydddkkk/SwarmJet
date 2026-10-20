@@ -17,6 +17,6 @@ Compose 验证需要 Docker Compose。浏览器测试使用独立端口 5274，�
 
 ## 发布
 
-GitHub Actions 在推送到 `main`、`dev` 和拉取请求时运行 Go 测试、控制台构建与浏览器测试，以及 Compose 配置检查。推送到 `main` 或 `vX.Y.Z` 标签时，把程序镜像发布到 `ghcr.io/yyydddkkk/swarmjet`，把执行器镜像发布到 `ghcr.io/yyydddkkk/swarmjet/agent`。流水线不部署服务器。`.gitlab-ci.yml` 保留等价的 GitLab CI 配置。
+GitHub Actions 在推送到 `main`、`dev` 以及指向这两个分支的拉取请求时，运行 Go 测试、控制台构建与浏览器测试，以及 Compose 配置检查。只有在 `main` 上推送严格的 `vX.Y.Z` 标签，且这些检查通过后，才把程序镜像发布到 `ghcr.io/yyydddkkk/swarmjet:<tag>`，把执行器镜像发布到 `ghcr.io/yyydddkkk/swarmjet/agent:<tag>`。流水线不部署服务器。
 
 代码以 [MIT 许可证](LICENSE) 发布。Go module 路径是 `github.com/yyydddkkk/SwarmJet`。
