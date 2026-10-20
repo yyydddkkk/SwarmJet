@@ -276,3 +276,26 @@ func TestPRHeadAgentDoesNotTakeOverThePR(t *testing.T) {
 		t.Fatalf("decision = %+v, want delivery to the PR author %s", decision, owner.ID)
 	}
 }
+
+func TestPlatformOwnCommentIsIgnored(t *testing.T) {
+	b := NewMemoryBackend()
+	hive := newTestHive(t, b, domain.HiveConfig{})
+	r := NewWithOptions(b, Options{AppSlug: "swarmjet"})
+	comment := loadEvent(t, EventIssueComment, "testdata/issue_comment_created.json")
+	comment.DeliveryID = "delivery-own-comment"
+	comment.SenderLogin, comment.SenderType = "swarmjet[bot]", "Bot"
+	decision, err := r.Route(context.Background(), comment)
+	if err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	if decision.Action != ActionIgnored || len(b.MessagesTo(hive.ID, domain.AddressHive)) != 0 {
+		t.Fatalf("decision = %+v", decision)
+	}
+	// Another bot's comment is still routed.
+	other := comment
+	other.DeliveryID = "delivery-other-bot"
+	other.SenderLogin = "dependabot[bot]"
+	if decision, err = r.Route(context.Background(), other); err != nil || decision.Action == ActionIgnored {
+		t.Fatalf("other bot decision = %+v err = %v", decision, err)
+	}
+}

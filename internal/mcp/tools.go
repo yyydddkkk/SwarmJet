@@ -110,6 +110,11 @@ func (ts *toolset) register(s *mcpsdk.Server) {
 	}, ts.readForagerDetail)
 
 	addTool(ts, s, &mcpsdk.Tool{
+		Name:        "finish_task",
+		Description: "End the calling Agent: its task is done. After the current turn the platform marks it completed, removes its Cell and revokes its token. Only an Agent can finish itself; use it when your methodology says your task ends (for example after a verifier attests).",
+	}, ts.finishTask)
+
+	addTool(ts, s, &mcpsdk.Tool{
 		Name:        "update_handoff",
 		Description: "Replace an Agent's handoff summary (goal, done, remaining, risks, next, artifacts). A Forager can only update its own handoff. Each field is capped at the server's text limit and artifacts are capped. Returns the updated Agent.",
 	}, ts.updateHandoff)
@@ -1253,4 +1258,42 @@ func (ts *toolset) agentHop(ctx context.Context, hiveID string) (int, string, er
 		return 0, "", err
 	}
 	return received + 1, chainID, nil
+}
+
+type finishTaskInput struct {
+	Summary string `json:"summary,omitempty" jsonschema:"optional one-line reason, shown in the Agent's history"`
+}
+
+type finishTaskOutput struct {
+	Message messageView `json:"message"`
+}
+
+// finishTask lets an Agent end itself. Like cancellation it is a control
+// message, not a state write, so the supervisor completes the Agent after the
+// current turn and cleans up its Cell and token.
+func (ts *toolset) finishTask(ctx context.Context, _ *mcpsdk.CallToolRequest, in finishTaskInput) (*mcpsdk.CallToolResult, finishTaskOutput, error) {
+	if !ts.actor.isAgent() {
+		return nil, finishTaskOutput{}, fmt.Errorf("finish_task is only for Agents; use cancel_forager to stop one")
+	}
+	a := ts.actor.agent
+	if utf8.RuneCountInString(in.Summary) > 500 {
+		return nil, finishTaskOutput{}, fmt.Errorf("summary must be at most 500 characters")
+	}
+	body := "complete"
+	if s := strings.TrimSpace(in.Summary); s != "" {
+		body += "\n" + s
+	}
+	msg, err := ts.backend.SendMessage(ctx, domain.Message{
+		HiveID:  a.HiveID,
+		From:    ts.actor.address(),
+		To:      domain.ForagerAddress(a.ID),
+		Kind:    domain.MessageControl,
+		ChainID: a.ChainID,
+		Body:    body,
+		Trust:   domain.TrustSystem,
+	})
+	if err != nil {
+		return nil, finishTaskOutput{}, err
+	}
+	return nil, finishTaskOutput{Message: ts.viewMessage(msg)}, nil
 }

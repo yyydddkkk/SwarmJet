@@ -174,6 +174,13 @@ func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
 	}
 	cfg := resolveConfig(hive.Config)
 
+	// Comments the platform posts itself (attestation summaries) are already
+	// known to the Hive; routing them back would only add noise. Only the
+	// configured App's bot is recognised, never other bots.
+	if r.platformComment(ctx, e) {
+		return Decision{Action: ActionIgnored, Reason: "comment posted by the platform's own GitHub App", Repository: e.Repository, HiveID: hive.ID}, nil
+	}
+
 	// The platform's own PR pushes never wake the PR owner. They may still be
 	// routed by a methodology pr_head rule, which decides the target role.
 	platformPR, platformDecision, err := r.platformGenerated(ctx, hive.ID, e)
@@ -293,6 +300,19 @@ func (r *Router) platformGenerated(ctx context.Context, hiveID string, e Event) 
 		HiveID:     hiveID,
 		ForagerID:  foragerID,
 	}, nil
+}
+
+// platformComment reports whether an issue or review comment was written by
+// the platform's own App bot. Without a known App slug nothing is ignored.
+func (r *Router) platformComment(ctx context.Context, e Event) bool {
+	if e.Type != EventIssueComment && e.Type != EventPullRequestReviewComment {
+		return false
+	}
+	slug := r.currentAppSlug(ctx)
+	if slug == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(e.SenderLogin), slug+"[bot]")
 }
 
 // platformPRAction lists the PR lifecycle actions the platform itself emits

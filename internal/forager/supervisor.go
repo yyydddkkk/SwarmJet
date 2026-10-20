@@ -16,7 +16,7 @@ const (
 	// DefaultCLI is the only CLI a Cell runs in round 4.
 	DefaultCLI = "omp"
 	// DefaultModel is the Hive default model in omp's provider/model form.
-	DefaultModel = "deepseek/deepseek-chat"
+	DefaultModel = "deepseek/deepseek-v4-flash"
 	// DefaultScanInterval is how often the recovery and lifecycle scan runs.
 	DefaultScanInterval = 30 * time.Second
 	// DefaultMaxFailures is the consecutive Start/Prompt failure budget.

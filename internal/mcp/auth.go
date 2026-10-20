@@ -54,6 +54,7 @@ func resolveActor(ctx context.Context, backend Backend, token domain.Token) (act
 // A tool that is absent from the table is denied, even if it is registered.
 var agentTools = map[domain.AgentRole]map[string]bool{
 	domain.RoleForager: {
+		"finish_task":    true,
 		"send":           true,
 		"spawn":          true,
 		"get_forager":    true,

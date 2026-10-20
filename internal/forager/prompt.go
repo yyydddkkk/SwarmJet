@@ -88,6 +88,25 @@ func isCancelMessage(m domain.Message) bool {
 	return m.Kind == domain.MessageControl && strings.EqualFold(strings.TrimSpace(m.Body), "cancel")
 }
 
+// isCompleteMessage is the control message an Agent sends itself through
+// finish_task: its first line is "complete".
+func isCompleteMessage(m domain.Message) bool {
+	if m.Kind != domain.MessageControl {
+		return false
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(m.Body), "\n")
+	return strings.EqualFold(strings.TrimSpace(first), "complete")
+}
+
+func hasCompleteMessage(msgs []domain.Message) bool {
+	for _, m := range msgs {
+		if isCompleteMessage(m) {
+			return true
+		}
+	}
+	return false
+}
+
 func hasCancelMessage(msgs []domain.Message) bool {
 	for _, m := range msgs {
 		if isCancelMessage(m) {

@@ -117,7 +117,7 @@ go test ./internal/cell/docker/ -run 'TestCell.*E2E' -v -timeout 30m
 
 Optional E2E variables: `SWARMJET_CELL_E2E_DOCKER`,
 `SWARMJET_CELL_E2E_IMAGE`, `SWARMJET_CELL_E2E_MODEL` (default
-`deepseek/deepseek-chat`), `SWARMJET_CELL_E2E_NETWORK` (default `host`) and
+`deepseek/deepseek-v4-flash`), `SWARMJET_CELL_E2E_NETWORK` (default `host`) and
 `SWARMJET_CELL_E2E_LLM_URL`.
 
 ## Known limitations
