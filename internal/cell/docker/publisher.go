@@ -104,7 +104,7 @@ func (p *Publisher) run(ctx context.Context, dir string, env []string, args ...s
 
 // Publish stages the Cell's changes, commits a WIP commit when needed, bundles
 // exactly the Agent branch, imports the bundle into the platform mirror, checks
-// the base ancestry, and pushes the mirror branch to the remote.
+// a common history with the base, and pushes the mirror branch to the remote.
 func (p *Publisher) Publish(ctx context.Context, spec cell.Spec, title, body string) (int64, error) {
 	if spec.ReadOnly {
 		return 0, errors.New("cell: refusing to publish a read-only Cell")
@@ -431,15 +431,12 @@ func (p *Publisher) fetchBundle(ctx context.Context, mirror, bundle, branch stri
 }
 
 func (p *Publisher) verifyAncestry(ctx context.Context, mirror, baseSHA, branch string, secrets []string) error {
-	if _, err := p.run(ctx, mirror, nil, "cat-file", "-e", baseSHA+"^{commit}"); err != nil {
-		return fmt.Errorf("cell: base commit is not in the bundle: %s", redact(err.Error(), secrets...))
-	}
 	mergeBase, err := p.run(ctx, mirror, nil, "merge-base", baseSHA, "refs/heads/"+branch)
 	if err != nil {
-		return fmt.Errorf("cell: base is not an ancestor of %s: %s", branch, redact(err.Error(), secrets...))
+		return fmt.Errorf("cell: %s has no common history with base: %s", branch, redact(err.Error(), secrets...))
 	}
-	if mergeBase != baseSHA {
-		return fmt.Errorf("cell: base is not an ancestor of %s", branch)
+	if mergeBase == "" {
+		return fmt.Errorf("cell: %s has no common history with base", branch)
 	}
 	return nil
 }

@@ -345,14 +345,47 @@ func TestPublisherRejectsUnexpectedBundleRefs(t *testing.T) {
 	}
 }
 
-func TestPublisherRejectsNonAncestorBranch(t *testing.T) {
+func TestPublisherPublishesAfterBaseAdvances(t *testing.T) {
+	spec, dataDir, workspace, bare := publisherFixture(t)
+	bundle, oldBase := makeCellBundle(t, bare, spec.Branch, "agent work")
+	root := t.TempDir()
+	baseRepo := filepath.Join(root, "base")
+	runGit(t, root, "clone", bare, baseRepo)
+	if err := os.WriteFile(filepath.Join(baseRepo, "base.txt"), []byte("new base work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, baseRepo, "add", "-A")
+	runGit(t, baseRepo, "commit", "-m", "advance base")
+	runGit(t, baseRepo, "push", "origin", "main")
+	newBase := runGit(t, bare, "rev-parse", "refs/heads/main")
+	if newBase == oldBase {
+		t.Fatal("base did not advance")
+	}
+
+	pub, pulls := newTestPublisher(dataDir, bare, bundleCellRunner(workspace, spec.Branch, bundle, false))
+	pr, err := pub.Publish(context.Background(), spec, "title", "body")
+	if err != nil {
+		t.Fatalf("Publish after base advance: %v", err)
+	}
+	if pr != 42 || len(pulls.snapshot()) != 1 {
+		t.Fatalf("pr = %d, PR calls = %+v", pr, pulls.snapshot())
+	}
+	if got := runGit(t, bare, "merge-base", "refs/heads/main", "refs/heads/"+spec.Branch); got != oldBase {
+		t.Fatalf("merge base = %s, want original base %s", got, oldBase)
+	}
+	if subject := runGit(t, bare, "log", "-1", "--format=%s", "refs/heads/"+spec.Branch); subject != "agent work" {
+		t.Fatalf("pushed subject = %q", subject)
+	}
+}
+
+func TestPublisherRejectsUnrelatedHistory(t *testing.T) {
 	spec, dataDir, workspace, bare := publisherFixture(t)
 	bundle := makeOrphanBundle(t, spec.Branch)
 	cellRunner := bundleCellRunner(workspace, spec.Branch, bundle, true)
 	pub, _ := newTestPublisher(dataDir, bare, cellRunner)
 
-	if _, err := pub.Publish(context.Background(), spec, "title", "body"); err == nil {
-		t.Fatal("expected an ancestry error")
+	if _, err := pub.Publish(context.Background(), spec, "title", "body"); err == nil || !strings.Contains(err.Error(), "no common history") {
+		t.Fatalf("expected a common history error, got %v", err)
 	}
 	if _, ok := tryGit(t, bare, "rev-parse", "--verify", "refs/heads/"+spec.Branch); ok {
 		t.Fatal("unrelated branch was pushed")

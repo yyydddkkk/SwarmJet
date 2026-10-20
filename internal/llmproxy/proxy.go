@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -186,8 +187,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"limitUsd":   exceeded.limit,
 			"currentUsd": exceeded.current,
 			"agentId":    agent.ID,
-			"message": fmt.Sprintf("%s exceeded: limit %.2f USD, current spend %.2f USD",
-				exceeded.name, exceeded.limit, exceeded.current),
+			"message": fmt.Sprintf("%s exceeded: limit %s USD, current spend %s USD",
+				exceeded.name, formatBudgetUSD(exceeded.limit), formatBudgetUSD(exceeded.current)),
 		})
 		return
 	}
@@ -266,6 +267,16 @@ type budgetExceeded struct {
 	current float64
 }
 
+// formatBudgetUSD keeps cents for ordinary amounts and four significant digits
+// for smaller limits and spends, which would otherwise display as 0.00 USD.
+func formatBudgetUSD(amount float64) string {
+	if amount == 0 || math.Abs(amount) >= 0.01 {
+		return fmt.Sprintf("%.2f", amount)
+	}
+	decimals := 3 - int(math.Floor(math.Log10(math.Abs(amount))))
+	return fmt.Sprintf("%.*f", decimals, amount)
+}
+
 func (p *Proxy) checkBudget(ctx context.Context, agent domain.Agent) *budgetExceeded {
 	limits, err := p.limits.Limits(ctx, agent.HiveID)
 	if err != nil {
@@ -304,8 +315,8 @@ func (p *Proxy) notifyBudget(ctx context.Context, agent domain.Agent, exceeded *
 	if to == "" {
 		return
 	}
-	body := fmt.Sprintf("Model budget limit %s reached for agent %s: limit %.2f USD, current spend %.2f USD. Its model requests are paused until the budget is raised.",
-		exceeded.name, agent.ID, exceeded.limit, exceeded.current)
+	body := fmt.Sprintf("Model budget limit %s reached for agent %s: limit %s USD, current spend %s USD. Its model requests are paused until the budget is raised.",
+		exceeded.name, agent.ID, formatBudgetUSD(exceeded.limit), formatBudgetUSD(exceeded.current))
 	message := domain.Message{
 		HiveID:  agent.HiveID,
 		From:    domain.AddressSystem,

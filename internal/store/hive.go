@@ -262,8 +262,30 @@ func (s *Store) createForager(ctx context.Context, a domain.Agent, limits domain
 	if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND role='forager' AND state IN ('creating','active','parked')`, a.HiveID).Scan(&active); err != nil {
 		return domain.Agent{}, err
 	}
+	if a.ID != "" && ctx.Value(spawnQueueDrainKey{}) == nil {
+		var state string
+		queueErr := tx.QueryRow(ctx, `SELECT state FROM spawn_queue WHERE agent_id=$1`, a.ID).Scan(&state)
+		if queueErr == nil {
+			if state == "waiting" {
+				return domain.Agent{}, domain.ErrHiveLimit
+			}
+			return domain.Agent{}, domain.ErrConflict
+		}
+		if !errors.Is(queueErr, pgx.ErrNoRows) {
+			return domain.Agent{}, queueErr
+		}
+	}
 	if active >= maxConcurrent {
 		return domain.Agent{}, domain.ErrHiveLimit
+	}
+	if ctx.Value(spawnQueueDrainKey{}) == nil {
+		var waiting bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM spawn_queue WHERE hive_id=$1 AND state='waiting')`, a.HiveID).Scan(&waiting); err != nil {
+			return domain.Agent{}, err
+		}
+		if waiting {
+			return domain.Agent{}, domain.ErrHiveLimit
+		}
 	}
 	if a.ChainID != "" {
 		var chained int
