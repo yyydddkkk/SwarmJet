@@ -17,13 +17,16 @@ import (
 // token; publish and activate additionally check the calling Agent's role
 // permission in the handler (a user token is always allowed).
 var methodologyTools = map[string]bool{
-	"get_methodology":           true,
-	"list_methodology_versions": true,
-	"publish_methodology":       true,
-	"activate_methodology":      true,
+	"get_methodology":              true,
+	"list_methodology_versions":    true,
+	"publish_methodology":          true,
+	"activate_methodology":         true,
+	"list_methodology_templates":   true,
+	"install_methodology_template": true,
 }
 
 func (ts *toolset) registerMethodology(s *mcpsdk.Server) {
+	ts.registerMethodologyTemplates(s)
 	ro := func() *mcpsdk.ToolAnnotations { return &mcpsdk.ToolAnnotations{ReadOnlyHint: true} }
 
 	addTool(ts, s, &mcpsdk.Tool{
@@ -266,6 +269,9 @@ func (ts *toolset) requireMethodologyWrite(ctx context.Context, hiveID string) e
 	}
 	if err := ts.requireHive(hiveID); err != nil {
 		return err
+	}
+	if ts.actor.agent.Role == domain.RoleQueen {
+		return nil
 	}
 	manifest := domain.MethodologyManifest{}
 	m, _, err := ts.backend.ActiveMethodology(ctx, hiveID)
