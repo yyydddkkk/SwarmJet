@@ -117,6 +117,13 @@ export class StarMap {
     });
     resize.observe(canvas);
     this.cleanups.push(() => resize.disconnect());
+    // Canvas text does not repaint itself when a downloaded font replaces the
+    // fallback face. Coalesce font completion with other invalidations, then idle.
+    void document.fonts.ready.then(this.schedule);
+    document.fonts.addEventListener("loadingdone", this.schedule);
+    this.cleanups.push(() =>
+      document.fonts.removeEventListener("loadingdone", this.schedule),
+    );
     this.cleanups.push(
       ...[...stores.values()].map((store) =>
         store.subscribe(() => this.sync()),

@@ -665,3 +665,47 @@ test("live merge spirals and completed owner fades, then both stop rendering", a
   );
   await settle(page);
 });
+
+test("delayed font readiness and loading completion each redraw once without data changes", async ({
+  page,
+}) => {
+  // Delay the FontFaceSet readiness notification independently of network/cache
+  // speed. Later loadingdone events model fonts first requested by a new style.
+  await page.addInitScript(() => {
+    const ready = new Promise<FontFaceSet>((resolve) => {
+      (window as any).__completeFontReady = () => resolve(document.fonts);
+    });
+    Object.defineProperty(document.fonts, "ready", {
+      configurable: true,
+      value: ready,
+    });
+  });
+  await mount(page);
+  await settle(page);
+  const canvas = page.locator(".stars-canvas");
+  const revision = await page.evaluate(
+    () => (window as any).__canvas.store.getSnapshot().revision,
+  );
+  let frames = Number(await canvas.getAttribute("data-frames"));
+  await page.waitForTimeout(200);
+  await expect(canvas).toHaveAttribute("data-frames", String(frames));
+  await page.evaluate(() => {
+    (window as any).__completeFontReady();
+  });
+  await expect(canvas).toHaveAttribute("data-frames", String(++frames));
+  await page.waitForTimeout(300);
+  await expect(canvas).toHaveAttribute("data-frames", String(frames));
+  await page.evaluate(() => {
+    // Several completion notifications in one task still need only one frame.
+    for (let i = 0; i < 3; i++)
+      document.fonts.dispatchEvent(new Event("loadingdone"));
+  });
+  await expect(canvas).toHaveAttribute("data-frames", String(++frames));
+  await page.waitForTimeout(500);
+  await expect(canvas).toHaveAttribute("data-frames", String(frames));
+  expect(
+    await page.evaluate(
+      () => (window as any).__canvas.store.getSnapshot().revision,
+    ),
+  ).toBe(revision);
+});
