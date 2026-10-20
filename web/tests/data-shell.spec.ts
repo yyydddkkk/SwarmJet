@@ -141,12 +141,17 @@ test("ready reload buffers increments even if the snapshot includes the same mes
   mock.ready("swarmjet");
   const event = message("during");
   mock.push("swarmjet", { type: "message", data: event });
+  const resolveOlder = resolve;
+  // An unattributable queue/methodology frame may request another snapshot
+  // before this one completes. The buffered real message must survive it.
+  mock.ready("swarmjet");
   const next = fixture();
   next.hive.name = "Fresh";
   next.messages = [event];
   resolve(next);
+  resolveOlder(fixture());
   await flush();
-  expect(count).toBe(2);
+  expect(count).toBe(3);
   expect(store.getSnapshot().snapshot?.hive.name).toBe("Fresh");
   expect(store.getSnapshot().snapshot?.messages).toHaveLength(1);
   expect(store.getSnapshot().pulses).toHaveLength(1);

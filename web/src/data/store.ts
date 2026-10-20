@@ -194,7 +194,7 @@ export class ProjectStore {
     const generation = ++this.generation;
     this.abort?.abort();
     this.abort = new AbortController();
-    this.pending = [];
+    this.pending ??= [];
     const observedNumbers = [...this.observedPRs.keys()];
     this.publish({ connection: ready ? "syncing" : this.state.connection });
     try {
