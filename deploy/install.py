@@ -343,6 +343,13 @@ def build_values(
         elif key in existing and not _missing(existing[key]):
             values[key] = existing[key]
 
+    # Round 4 replaced OpenCode with omp, which the Agent image always
+    # installs. Older .env files listed opencode here, which the image build
+    # now rejects, so drop it on upgrade.
+    if "AGENT_CLIS" in values:
+        kept = [c.strip() for c in values["AGENT_CLIS"].split(",") if c.strip() and c.strip() != "opencode"]
+        values["AGENT_CLIS"] = ",".join(kept)
+
     password = values.get("POSTGRES_PASSWORD") or secrets.token_hex(24)
     values["POSTGRES_PASSWORD"] = password
     if _missing(values.get("DATABASE_URL")) or "replace-with-" in values.get("DATABASE_URL", ""):

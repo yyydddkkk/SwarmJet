@@ -61,6 +61,13 @@ def make_values(**overrides):
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_upgrade_drops_opencode_from_agent_clis(self):
+        common = dict(data_dir="/tmp/data", port=8180, listen_host="127.0.0.1",
+                      public_origin="http://localhost:8180", cells=True, tunnel=False,
+                      image="swarmjet:local", agent_image="swarmjet-agent:local", admin_username="admin")
+        self.assertEqual(installer.build_values({"AGENT_CLIS": "opencode"}, **common)["AGENT_CLIS"], "")
+        self.assertEqual(installer.build_values({"AGENT_CLIS": "opencode, codex"}, **common)["AGENT_CLIS"], "codex")
+
     def test_generated_secrets_and_permissions(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / ".env"
