@@ -7,7 +7,7 @@ import type {
   Hive,
   HiveConfig,
   HiveOverview,
-} from "../hive/types";
+} from "../data/types";
 
 const baseConfig: HiveConfig = {
   cli: "opencode",

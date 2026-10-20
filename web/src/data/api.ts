@@ -1,4 +1,4 @@
-import { hiveAPI, request } from "../hive/api";
+import { hiveAPI, request } from "./http";
 import type {
   PullRequest,
   QueueItem,
@@ -6,7 +6,7 @@ import type {
   MethodologyEvent,
   ProjectSnapshot,
 } from "./types";
-export { HiveAPIError as APIError } from "../hive/api";
+export { HiveAPIError as APIError } from "./http";
 const project = (id: string) => `/hives/${encodeURIComponent(id)}`;
 // Every old page operation remains available here, including credentials, setup,
 // tokens, usage, conversation pagination, PR details and methodology versions.

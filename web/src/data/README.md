@@ -1,6 +1,6 @@
 # 星图共享数据契约（任务 A）
 
-B/C/D 只能从 `src/data/index.ts` 读取数据或发操作。`hive/types.ts` 仅为旧页面重导出本目录类型。API JSON 依据 `internal/api/{events,prs,web_lists,hives,methodology,models,setup,queen}.go` 和 `internal/domain`；没有发明历史花费或 webhook 操作。
+B/C/D 只能从 `src/data/index.ts` 读取数据或发操作。API JSON 依据 `internal/api/{events,prs,web_lists,hives,methodology,models,setup,queen}.go` 和 `internal/domain`；没有发明历史花费或 webhook 操作。底层 HTTP 客户端已迁入本目录 `http.ts`，旧页面及旧目录已在集成阶段删除。
 
 ## React、画布与面板
 

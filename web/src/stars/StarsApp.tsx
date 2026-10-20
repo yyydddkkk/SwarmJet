@@ -183,11 +183,6 @@ export function StarsWorkspace({
           </button>
         </div>
       )}
-      {!projects.length && !error && (
-        <p className="stars-empty">
-          还没有项目。<a href="#/legacy/hives">创建第一个项目</a>
-        </p>
-      )}
     </main>
   );
 }

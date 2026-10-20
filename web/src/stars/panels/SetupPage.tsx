@@ -1,4 +1,4 @@
-// 接入 (#/legacy/setup): create the GitHub App, see the webhook tunnel, and mint tokens
+// 接入与连接设置：GitHub App、隧道状态及一次性连接令牌。
 // for local agents. The backend is being built in parallel; every shape here
 // follows docs/claude/round3-prompts.md "公共契约" section 5.
 import { useId, useState } from "react";

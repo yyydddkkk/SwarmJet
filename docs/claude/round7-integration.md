@@ -60,3 +60,13 @@
 ## 待确认的接口缺口
 
 现有 API 没有最近工具调用轨迹，运行时相关路由直接返回 404。C 如实显示“最近的工具调用：平台暂未提供；下方显示真实消息。”，没有复制演示工具日志。此项已另向用户请求确认，尚未把它记为已批准范围；旧 Diff、终端本来是占位，继续如实说明。
+
+## 最终合并顺序与旧页面删除
+
+- A → E → C → D → B 均已使用 `git merge --no-ff`，无代码冲突。三路测试配置统一可选 `PLAYWRIGHT_PORT`，默认 5274，因此配置无冲突。
+- 每次合并后都实际执行前端 build。D 首次 build 因集成 worktree 尚未安装新开发依赖 axe 而失败；执行 `npm ci` 后 build 通过。没有绕过检查或修改测试来隐藏失败。
+- C 的旧功能对照已逐项核对，B/D 补齐入口；删除 `web/src/hive/`：ConversationStream、CreateHiveDialog、ForagerPage、HiveConsoleApp、HivePage、HiveSettings、HivesPage、IconLab、LoginScreen、MethodologyPage、ModelsPage、SetupPage、UsagePanel，以及旧 components、diff、format、CSS、icons、pixel-icons、pixel、types、use-resource。唯一仍需的 HTTP 客户端从 `hive/api.ts` 移至 `data/http.ts`，fixture 和测试类型统一引用数据层。
+- `main.tsx` 仅挂载新界面，移除 legacy 路由分支与骨架中的旧创建链接；新建项目由 D 的入口负责。
+- 旧测试 `message-trust.spec.ts` 迁移为 `provenance.spec.ts`，三项分别验证四种来源、未知来源和外部事件全文提示，全部通过。
+- 随旧页删除专用测试：`app-shell.spec.ts`、`backend-shapes.spec.ts`、`create-hive-round5.spec.ts`、`forager-round4.spec.ts`、`hive-console.spec.ts`、`methodology-round5.spec.ts`、`methodology.spec.ts`、`models.spec.ts`、`pixel-icons.spec.ts`、`queen-round5.spec.ts`、`settings-round5.spec.ts`、`setup.spec.ts`。新数据层、画布、面板、外围测试验证新位置和共享契约；旧蜂巢像素图的实现断言随对应代码删除。
+- 删除后 `npm run build` 及迁移的三项来源测试通过；后续另跑全部新界面测试和联合验收。

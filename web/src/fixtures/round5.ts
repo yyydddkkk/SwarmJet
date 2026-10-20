@@ -1,5 +1,5 @@
 // Round-5 HTTP fixtures; names mirror domain.MethodologyTemplate and Queen status.
-import type { MethodologyTemplate } from "../hive/types";
+import type { MethodologyTemplate } from "../data/types";
 
 export const methodologyTemplates: MethodologyTemplate[] = [
   { name: "pstack", title: "PStack", description: "Worker 开发，独立 Verifier 验证，适合需要审查与验证的团队。", version: "1.0.0" },

@@ -14,7 +14,7 @@ import type {
   ModelsResponse,
   PRStatusResponse,
   UsageResponse,
-} from "../hive/types";
+} from "../data/types";
 
 const workerRole = {
   description: "写代码、开 PR，完成后更新交接摘要。",
