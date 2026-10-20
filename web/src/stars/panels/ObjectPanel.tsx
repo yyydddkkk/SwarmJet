@@ -484,7 +484,20 @@ export function PRPanel({
     [id, number, live?.headSha, live?.ready, live?.merged],
   );
   const pr = details.data;
-  const observed = live?.headSha || pr?.headSha;
+  // The submitted head belongs to these loaded checks and attestations, never
+  // to a newer lightweight event that has not been reviewed in this panel.
+  const observed = pr?.headSha;
+  const changedHead =
+    !!live?.headSha && !!observed && live.headSha !== observed;
+  const canMerge =
+    !!observed &&
+    !!pr?.ready &&
+    !pr.merged &&
+    !live?.merged &&
+    live?.ready !== false &&
+    !changedHead &&
+    !details.loading &&
+    !details.error;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -495,15 +508,29 @@ export function PRPanel({
       {details.error && (
         <ErrorNotice message={details.error} onRetry={details.reload} />
       )}
+      {changedHead && (
+        <div role="alert">
+          <p>PR 有新提交，请重新查看</p>
+          <p>
+            当前提交：<code>{live?.headSha}</code>
+            ；下方检查与验证对应已读取提交。
+          </p>
+          <button onClick={details.reload}>重新查看</button>
+        </div>
+      )}
+      {details.loading && <p role="status">正在读取提交的检查与验证…</p>}
       <p>
         {live?.merged || pr?.merged
           ? "已合并"
-          : (live?.ready ?? pr?.ready)
+          : canMerge
             ? "等你决定"
             : "尚未满足合并条件"}
       </p>
-      <code>{observed}</code>
-      {(live?.reasons ?? pr?.reasons ?? []).map((reason) => (
+      <p>
+        已读取提交：
+        <code data-testid="reviewed-pr-head">{observed ?? "尚未读取"}</code>
+      </p>
+      {(pr?.reasons ?? []).map((reason) => (
         <p key={reason}>{reason}</p>
       ))}
       {(pr?.url || live?.url) && (
@@ -526,7 +553,7 @@ export function PRPanel({
         <p>还没有检查结果。</p>
       )}
       <h4>验证结论历史</h4>
-      {(pr?.attestations ?? live?.attestations ?? []).map((a) => (
+      {(pr?.attestations ?? []).map((a) => (
         <article className="pc-attestation" key={a.id}>
           <p>
             {
@@ -553,25 +580,38 @@ export function PRPanel({
           {a.commentUrl && <a href={a.commentUrl}>查看评论</a>}
         </article>
       ))}
-      {!(pr?.attestations?.length || live?.attestations?.length) && (
-        <p>还没有验证结论。</p>
-      )}
+      {!pr?.attestations?.length && <p>还没有验证结论。</p>}
       <button
-        disabled={
-          busy ||
-          !observed ||
-          !(live?.ready ?? pr?.ready) ||
-          (live?.merged ?? pr?.merged)
-        }
+        disabled={busy || !canMerge}
         onClick={() => {
-          if (lock.current || !observed) return;
+          if (lock.current || !canMerge || !observed) return;
+          // A store event may arrive before React commits the next render.
+          // Recheck synchronously and retain the exact displayed head.
+          const latest = store
+            .getSnapshot()
+            .snapshot?.prs.find((p) => p.number === number);
+          if (
+            (latest?.headSha && latest.headSha !== observed) ||
+            latest?.ready === false ||
+            latest?.merged
+          ) {
+            setError("PR 有新提交或合并条件已变化，请重新查看");
+            details.reload();
+            return;
+          }
           lock.current = true;
           setBusy(true);
           setError("");
           void store
             .mergePR(number, observed)
-            .then(() => {
-              setNotice("合并请求已提交。");
+            .then((result) => {
+              setNotice(
+                result.merged
+                  ? "已合并。"
+                  : result.queued
+                    ? "已进入合并队列，等待平台处理。"
+                    : "合并请求已提交，请重新读取确认状态。",
+              );
               details.reload();
             })
             .catch((cause) => {

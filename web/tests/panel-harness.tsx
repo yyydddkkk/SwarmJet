@@ -92,6 +92,40 @@ createRoot(document.getElementById("root")!).render(
         <button onClick={() => ui.openProject("methodology")}>项目</button>
         <button
           onClick={() =>
+            mock.push("swarmjet", {
+              type: "pr",
+              data: {
+                hiveId: "swarmjet",
+                number: 88,
+                headSha: "panel-observed-head",
+                ready: false,
+                merged: false,
+                state: "open",
+              },
+            })
+          }
+        >
+          PR条件变化
+        </button>
+        <button
+          onClick={() =>
+            mock.push("swarmjet", {
+              type: "pr",
+              data: {
+                hiveId: "swarmjet",
+                number: 88,
+                headSha: "panel-new-head",
+                ready: true,
+                merged: false,
+                state: "open",
+              },
+            })
+          }
+        >
+          PR新提交
+        </button>
+        <button
+          onClick={() =>
             ui.selectObject({
               hiveId: "swarmjet",
               kind: "agent",

@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockHiveAPI } from "./hive-api-mock";
 async function open(page: Page) {
   const state = await mockHiveAPI(page);
+  state.prStatuses["swarmjet:88"].headSha = "panel-observed-head";
   await page.route("**/panel-test", (route) =>
     route.fulfill({
       contentType: "text/html",
@@ -488,4 +489,162 @@ test("usage ranking opens agent details and pending events retain complete exter
     state.calls.find((c) => c.method === "POST" && c.path.endsWith("/messages"))
       ?.body,
   ).toMatchObject({ to: "queen", body: "请处理 Issue #42" });
+});
+for (const result of ["delay", "failure"] as const) {
+  test(`new PR head cannot merge with old validation while detail refresh ${result}`, async ({
+    page,
+  }) => {
+    const state = await open(page);
+    const initial = state.prStatuses["swarmjet:88"];
+    initial.ready = true;
+    initial.checks = [
+      { name: "OLD_HEAD_CHECK", status: "completed", conclusion: "success" },
+    ];
+    let changed = false;
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/hives/swarmjet/prs/88", async (route) => {
+      if (!changed) {
+        await route.fallback();
+        return;
+      }
+      await pending;
+      await route.fulfill(
+        result === "failure"
+          ? { status: 503, json: { error: "test detail unavailable" } }
+          : {
+              json: {
+                ...initial,
+                headSha: "panel-new-head",
+                ready: true,
+                checks: [
+                  {
+                    name: "NEW_HEAD_CHECK",
+                    status: "completed",
+                    conclusion: "success",
+                  },
+                ],
+              },
+            },
+      );
+    });
+    const merges: unknown[] = [];
+    await page.route("**/api/hives/swarmjet/prs/88/merge", (route) => {
+      merges.push(route.request().postDataJSON());
+      return route.fulfill({
+        json: {
+          merged: false,
+          queued: true,
+          headSha: "panel-new-head",
+          ready: true,
+          reasons: [],
+        },
+      });
+    });
+    await page.getByRole("button", { name: "PR详情", exact: true }).click();
+    const panel = page.getByRole("region", { name: "对象详情" });
+    const merge = panel.getByRole("button", { name: "确认合并", exact: true });
+    await expect(merge).toBeEnabled();
+    await expect(panel).toContainText("OLD_HEAD_CHECK");
+    changed = true;
+    await page.getByRole("button", { name: "PR新提交", exact: true }).click();
+    await expect(panel).toContainText("PR 有新提交，请重新查看");
+    await expect(panel.getByTestId("reviewed-pr-head")).toHaveText(
+      "panel-observed-head",
+    );
+    await expect(merge).toBeDisabled();
+    await merge.dispatchEvent("click");
+    expect(merges).toHaveLength(0);
+    release();
+    if (result === "failure") {
+      await expect(panel).toContainText("test detail unavailable");
+      await expect(merge).toBeDisabled();
+      await merge.dispatchEvent("click");
+      expect(merges).toHaveLength(0);
+      await expect(panel.getByTestId("reviewed-pr-head")).toHaveText(
+        "panel-observed-head",
+      );
+    } else {
+      await expect(panel.getByTestId("reviewed-pr-head")).toHaveText(
+        "panel-new-head",
+      );
+      await expect(panel).toContainText("NEW_HEAD_CHECK");
+      await expect(panel).not.toContainText("OLD_HEAD_CHECK");
+      await expect(merge).toBeEnabled();
+      await merge.click();
+      await expect.poll(() => merges.length).toBe(1);
+      expect(merges).toEqual([{ headSha: "panel-new-head" }]);
+      await expect(panel).toContainText("已进入合并队列，等待平台处理。");
+    }
+  });
+}
+test("head changes during merge never retarget the pending request", async ({
+  page,
+}) => {
+  const state = await open(page);
+  state.prStatuses["swarmjet:88"].ready = true;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const merges: unknown[] = [];
+  await page.route("**/api/hives/swarmjet/prs/88/merge", async (route) => {
+    merges.push(route.request().postDataJSON());
+    await pending;
+    await route.fulfill({ status: 409, json: { error: "head changed" } });
+  });
+  await page.getByRole("button", { name: "PR详情", exact: true }).click();
+  const panel = page.getByRole("region", { name: "对象详情" });
+  await panel.getByRole("button", { name: "确认合并", exact: true }).click();
+  await expect.poll(() => merges.length).toBe(1);
+  await page.route("**/api/hives/swarmjet/prs/88", (route) =>
+    route.fulfill({ status: 503, json: { error: "test refresh failed" } }),
+  );
+  await page.getByRole("button", { name: "PR新提交", exact: true }).click();
+  await expect(panel).toContainText("PR 有新提交，请重新查看");
+  await expect(
+    panel.getByRole("button", { name: "正在合并…", exact: true }),
+  ).toBeDisabled();
+  expect(merges).toEqual([{ headSha: "panel-observed-head" }]);
+  release();
+  await expect(
+    panel.getByRole("button", { name: "确认合并", exact: true }),
+  ).toBeDisabled();
+  await expect(panel).toContainText("test refresh failed");
+  expect(merges).toHaveLength(1);
+});
+test("a same-head detail response that is not ready overrides ready SSE", async ({
+  page,
+}) => {
+  const state = await open(page);
+  state.prStatuses["swarmjet:88"].ready = false;
+  state.prStatuses["swarmjet:88"].reasons = ["需要重新验证"];
+  await page.getByRole("button", { name: "PR详情", exact: true }).click();
+  await expect(page.getByTestId("reviewed-pr-head")).toHaveText(
+    "panel-observed-head",
+  );
+  await expect(
+    page.getByRole("button", { name: "确认合并", exact: true }),
+  ).toBeDisabled();
+  await expect(page.getByRole("region", { name: "对象详情" })).toContainText(
+    "需要重新验证",
+  );
+});
+
+test("same-head not-ready SSE disables stale ready checks immediately", async ({
+  page,
+}) => {
+  const state = await open(page);
+  state.prStatuses["swarmjet:88"].ready = true;
+  await page.getByRole("button", { name: "PR详情", exact: true }).click();
+  const merge = page.getByRole("button", { name: "确认合并", exact: true });
+  await expect(merge).toBeEnabled();
+  await page.getByRole("button", { name: "PR条件变化", exact: true }).click();
+  await expect(merge).toBeDisabled();
+  await merge.dispatchEvent("click");
+  expect(
+    state.calls.filter((c) => c.method === "POST" && c.path.endsWith("/merge")),
+  ).toHaveLength(0);
 });
