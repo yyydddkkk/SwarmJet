@@ -4,8 +4,10 @@ import { APIError, useDataAPI, type Principal } from "../data";
 // Task D owns the login surface. Authentication uses the injectable shared API.
 export default function LoginSlot({
   onLogin,
+  notice,
 }: {
   onLogin(principal: Principal): void;
+  notice?: string;
 }) {
   const api = useDataAPI();
   const [error, setError] = useState("");
@@ -37,6 +39,7 @@ export default function LoginSlot({
     <main className="stars-app">
       <form className="stars-login" onSubmit={submit}>
         <h1>登录 SwarmJet</h1>
+        {notice && <p role="status">{notice}</p>}
         <label>
           用户名
           <input name="username" autoComplete="username" required />

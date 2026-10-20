@@ -430,6 +430,7 @@ test("default shell handles session expiry and opens GitHub callbacks in platfor
   await expect(
     page.getByRole("heading", { name: "登录 SwarmJet" }),
   ).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("会话已过期，请重新登录后继续。");
 });
 
 test("initial project loading and failures never present a false empty workspace", async ({ page }) => {

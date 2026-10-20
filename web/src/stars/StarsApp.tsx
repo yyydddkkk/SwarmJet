@@ -25,12 +25,14 @@ function StarsSession() {
   const source = useDataSource();
   const [principal, setPrincipal] = useState<Principal>();
   const [anonymous, setAnonymous] = useState(false);
+  const [sessionNotice, setSessionNotice] = useState("");
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const expired = () => {
       setPrincipal(undefined);
       setAnonymous(true);
+      setSessionNotice("会话已过期，请重新登录后继续。");
     };
     window.addEventListener("swarmjet:session-expired", expired);
     return () =>
@@ -44,6 +46,7 @@ function StarsSession() {
         if (active) {
           setPrincipal(p);
           setAnonymous(false);
+          setSessionNotice("");
           setError("");
         }
       })
@@ -57,7 +60,8 @@ function StarsSession() {
       active = false;
     };
   }, [source, attempt]);
-  if (anonymous) return <LoginSlot onLogin={() => setAttempt((v) => v + 1)} />;
+  if (anonymous)
+    return <LoginSlot notice={sessionNotice} onLogin={() => setAttempt((v) => v + 1)} />;
   if (!principal)
     return (
       <main className="stars-app">
