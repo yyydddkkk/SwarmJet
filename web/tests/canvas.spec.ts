@@ -622,3 +622,46 @@ test("blank click requests creation; double click cancels creation; distant proj
   await settle(page);
   expect(await point(page, "other:queen")).toBeTruthy();
 });
+
+test("live merge spirals and completed owner fades, then both stop rendering", async ({
+  page,
+}) => {
+  await mount(page);
+  await page.evaluate(() => {
+    const x = (window as any).__canvas;
+    x.ui.selectProject(x.hive.id);
+  });
+  await settle(page);
+  const id = await page.evaluate(
+    () => (window as any).__canvas.hive.id + ":pr:8",
+  );
+  const before = await point(page, id);
+  await page.evaluate(() => {
+    const x = (window as any).__canvas;
+    x.mock.push(x.hive.id, {
+      type: "pr",
+      data: { ...x.snapshot.prs[0], hiveId: x.hive.id, merged: true },
+    });
+    x.mock.push(x.hive.id, {
+      type: "agent",
+      data: { ...x.agent, id: "worker-1", state: "completed" },
+    });
+  });
+  await expect(page.locator(".stars-canvas")).toHaveAttribute(
+    "data-merges",
+    "1",
+  );
+  await expect
+    .poll(async () => {
+      const now = await point(page, id);
+      return now && Math.hypot(now.x - before.x, now.y - before.y);
+    })
+    .toBeGreaterThan(10);
+  await expect.poll(() => point(page, id)).toBeUndefined();
+  await expect.poll(() => point(page, "worker-1")).toBeUndefined();
+  await expect(page.locator(".stars-canvas")).toHaveAttribute(
+    "data-trails",
+    "1",
+  );
+  await settle(page);
+});

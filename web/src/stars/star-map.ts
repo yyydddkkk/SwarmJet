@@ -76,7 +76,8 @@ export class StarMap {
   private frozen?: System[];
   private frozenTrails = new Map<string, Body>();
   private pulses: { pulse: LightPulse; start: number }[] = [];
-  private merging = new Map<string, { start: number; body: Body }>();
+  private merging = new Map<string, { start: number }>();
+  private completing = new Map<string, number>();
   private previous = new Map<string, string>();
   private trails = new Map<string, Body>();
   private hover?: Body;
@@ -128,9 +129,10 @@ export class StarMap {
             this.frozen = this.systems;
             this.frozenTrails = new Map(this.trails);
           }
-        } else {
+        } else if (this.frozen) {
           this.frozen = undefined;
           this.merging.clear();
+          this.completing.clear();
         }
         this.updateCamera();
         this.schedule();
@@ -144,6 +146,11 @@ export class StarMap {
     );
     this.cleanups.push(timelineFor(ui).subscribe(() => this.schedule()));
     const motion = () => {
+      if (this.reduced.matches) {
+        this.pulses = [];
+        this.merging.clear();
+        this.completing.clear();
+      }
       this.camera = { ...this.target };
       this.schedule();
     };
@@ -244,11 +251,13 @@ export class StarMap {
         const old = this.previous.get(node.id);
         if (old && old !== "merged" && node.state === "merged") {
           this.metrics.merges++;
-          if (!this.reduced.matches)
-            this.merging.set(node.id, { start: now, body });
+          if (!this.reduced.matches) this.merging.set(node.id, { start: now });
         }
-        if (node.kind === "comet" && node.state === "completed")
+        if (node.kind === "comet" && node.state === "completed") {
           this.trails.set(node.id, body);
+          if (old && old !== "completed" && !this.reduced.matches)
+            this.completing.set(node.id, now);
+        }
         this.previous.set(node.id, node.state ?? "");
       }
       for (const b of system.bodies.filter(
@@ -262,6 +271,15 @@ export class StarMap {
       }
       return system;
     });
+    const ids = new Set(
+      this.systems.flatMap((system) =>
+        system.bodies.map((body) => body.node.id),
+      ),
+    );
+    for (const id of this.merging.keys())
+      if (!ids.has(id)) this.merging.delete(id);
+    for (const id of this.completing.keys())
+      if (!ids.has(id)) this.completing.delete(id);
     // Consume synchronously and acknowledge afterwards. Acknowledge publishes again;
     // clearing the queue first prevents reentrant consumption and duplicate animation.
     for (const store of this.stores.values()) {
@@ -652,6 +670,18 @@ export class StarMap {
       for (const body of system.bodies) {
         const node = body.node,
           merge = this.frozen ? undefined : this.merging.get(node.id);
+        let opacity = 1;
+        if (node.kind === "comet" && node.state === "completed") {
+          const completedAt = this.frozen
+            ? undefined
+            : this.completing.get(node.id);
+          if (completedAt === undefined) continue;
+          opacity = Math.max(0, 1 - (now - completedAt) / 900);
+          if (opacity <= 0) {
+            this.completing.delete(node.id);
+            continue;
+          }
+        }
         let world: Point = body;
         if (node.state === "merged" && !merge) continue;
         if (merge) {
@@ -661,7 +691,10 @@ export class StarMap {
             body.angle + t * TAU * 2,
             body.radius * (1 - t) ** 2,
           );
-          if (t >= 1) this.merging.delete(node.id);
+          if (t >= 1) {
+            this.merging.delete(node.id);
+            continue;
+          }
         }
         if (this.dragging?.body === body)
           world = this.world(this.dragging.point);
@@ -674,7 +707,7 @@ export class StarMap {
           q.y > this.height + 80
         )
           continue;
-        ctx.globalAlpha = dim * (node.state === "completed" ? 0.32 : 1);
+        ctx.globalAlpha = dim * opacity;
         ctx.strokeStyle = C.ink;
         ctx.fillStyle = C.ink;
         ctx.lineWidth = R.lw;
@@ -691,7 +724,7 @@ export class StarMap {
               ctx.globalAlpha = (dim * 0.55) / k;
               circle(q, sr * k);
             }
-            ctx.globalAlpha = dim * 0.5;
+            ctx.globalAlpha = dim * opacity * 0.5;
             for (let k = 0; k < 24; k++) {
               const a = (k * TAU) / 24;
               line(
@@ -748,15 +781,15 @@ export class StarMap {
               const a = (k - 3) * 0.055,
                 vx = ux * Math.cos(a) - uy * Math.sin(a),
                 vy = ux * Math.sin(a) + uy * Math.cos(a);
-              ctx.globalAlpha = dim * (0.55 - Math.abs(k - 3) * 0.11);
+              ctx.globalAlpha = dim * opacity * (0.55 - Math.abs(k - 3) * 0.11);
               line(q, {
                 x: q.x + vx * length * (1 - Math.abs(k - 3) * 0.13),
                 y: q.y + vy * length * (1 - Math.abs(k - 3) * 0.13),
               });
             }
-            ctx.globalAlpha = dim;
+            ctx.globalAlpha = dim * opacity;
             circle(q, r, true);
-            ctx.globalAlpha = dim * 0.35;
+            ctx.globalAlpha = dim * opacity * 0.35;
             circle(q, r + 3.5);
           }
         } else if (node.kind === "planet") {
@@ -811,7 +844,7 @@ export class StarMap {
           }
         } else circle(q, Math.max(1.8, 3 * s));
         if (view.hiveId && node.kind !== "star" && node.state !== "completed") {
-          ctx.globalAlpha = dim;
+          ctx.globalAlpha = dim * opacity;
           const comet = node.kind === "comet",
             satellite = node.kind === "satellite",
             right = body.x > system.x;
@@ -929,7 +962,11 @@ export class StarMap {
     this.canvas.dataset.merges = String(this.metrics.merges);
     this.canvas.dataset.trails = String(this.metrics.trails);
     this.canvas.dataset.mode = this.metrics.mode;
-    if (moving || (!this.frozen && (this.pulses.length || this.merging.size)))
+    if (
+      moving ||
+      (!this.frozen &&
+        (this.pulses.length || this.merging.size || this.completing.size))
+    )
       this.schedule();
   };
 }
