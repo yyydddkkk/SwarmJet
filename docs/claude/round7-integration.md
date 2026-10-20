@@ -49,3 +49,13 @@
 - `cd deploy && docker compose --env-file .env.example -f compose.yaml -f compose.cells.yaml config -q`：退出码 0。
 - `TEST_DATABASE_URL='postgres://postgres:pw@127.0.0.1:55450/postgres?sslmode=disable' go test -race -p 1 ./...`：主代理在集成分支实际执行，全部通过，退出码 0；ACP 偶发用例本次一次通过。B/C/D 仅改前端，最终核对 Go、方法论、部署文件未再变化后复用结果。
 - A、E 两个任务 PR 的 GitHub CI 均四项全绿；最终集成 PR 仍需另等 CI 全绿。
+
+## B / C / D 审查与独立验证
+
+- B：[#74](https://github.com/yyydddkkk/SwarmJet/pull/74)，最终 `17663d3`。主代理对原 `90ecfe4` 实际执行 npm ci、构建、完整 103 项测试，全部通过；补字体就绪重绘修复后独立再跑画布 17 项，全部通过。核对六种主题/风格组合截图、脉冲仅由消息触发、冻结画面不变、派活走主 Agent、合并和完成有限动画、空闲停止。独立重测 300 Agent / 50 PR：全部项目 p95 1.2 ms、项目 p95 2.9 ms；各一秒空闲新增绘制帧为 0。计时为 Chromium 中 Canvas 绘制回调，不包含浏览器合成。
+- C：[#72](https://github.com/yyydddkkk/SwarmJet/pull/72)，最终 `132f34a`。主代理独立 npm ci、构建、原版完整 103 项测试通过；独立复核另以 mock 复现 P1 新 head 沿用旧检查即可合并、P2 切项目残留前项目版本。开发者分别以 `3a02f82`、`298bb7f` 修复，独立复核七项回归全过；最终开发者全量 112 项通过。另独立修复双次退出、关闭左侧误关右侧、排名导航和事件全文；方法论默认首屏改为角色图与可读规则，详细元数据和权限按需展开。完整旧功能对照见 `round7-panels.md`。
+- D：[#73](https://github.com/yyydddkkk/SwarmJet/pull/73)，最终 `edd6e2b`。开发代理提交后遇模型容量错误，由主代理接管推送和建 PR。主代理独立 npm ci、构建、完整 102 项测试通过；随后独立复现旧首次图例计时器关闭后来手动图例，以独立 `fix:` 提交修复。外围 16 项及构建通过；旧测试复用未受影响结果。登录、简报、列表的 axe 证据 violation 数组均为空；已核对仅有开发依赖 `@axe-core/playwright`，没有运行时新增依赖。完整口径见 `round7-d-periphery.md`。
+
+## 待确认的接口缺口
+
+现有 API 没有最近工具调用轨迹，运行时相关路由直接返回 404。C 如实显示“最近的工具调用：平台暂未提供；下方显示真实消息。”，没有复制演示工具日志。此项已另向用户请求确认，尚未把它记为已批准范围；旧 Diff、终端本来是占位，继续如实说明。
