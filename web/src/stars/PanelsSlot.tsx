@@ -78,14 +78,20 @@ function ProjectPanel({
         />
       ) : tab === "usage" ? (
         <>
-          <HiveUsagePanel hiveId={data.hive.id} agents={data.agents} />
+          <HiveUsagePanel
+            hiveId={data.hive.id}
+            agents={data.agents}
+            onAgent={(id) =>
+              ui.selectObject({ hiveId: data.hive.id, kind: "agent", id })
+            }
+          />
           <p>7 天走势、本周花费：暂时无法获取。</p>
           <h3>方法论预算</h3>
           <p>
             单 Agent：
-            {data.methodology.manifest.limits?.maxCostPerAgentUsd ?? "未设置"}
+            {data.methodology.manifest.limits?.maxCostPerAgentUsd || "未设置"}
             ；每天：
-            {data.methodology.manifest.limits?.maxCostPerDayUsd ?? "未设置"}
+            {data.methodology.manifest.limits?.maxCostPerDayUsd || "未设置"}
             （美元）
           </p>
         </>

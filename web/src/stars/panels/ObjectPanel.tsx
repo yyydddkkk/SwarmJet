@@ -67,18 +67,22 @@ export function ObjectPanel({
   const local = snapshot?.localAddress;
   const messageRevision = snapshot?.messages.map((m) => m.id).join(",");
   useEffect(() => {
-    if (!snapshot || !["queen", "agent"].includes(selection.kind)) return;
+    if (!snapshot || !["queen", "agent", "signal"].includes(selection.kind))
+      return;
     let valid = true;
     const controller = new AbortController();
     setLoading(true);
-    const addresses = [
-      ...new Set([
-        "queen",
-        "hive",
-        local,
-        ...snapshot.agents.map((a) => `forager:${a.id}`),
-      ]),
-    ].filter((a): a is string => !!a);
+    const addresses =
+      selection.kind === "signal"
+        ? ["hive"]
+        : [
+            ...new Set([
+              "queen",
+              "hive",
+              local,
+              ...snapshot.agents.map((a) => `forager:${a.id}`),
+            ]),
+          ].filter((a): a is string => !!a);
     void Promise.all(
       addresses.map(async (to) => {
         const result: Message[] = [];
@@ -110,6 +114,7 @@ export function ObjectPanel({
         setMessages(
           all.filter(
             (m) =>
+              (selection.kind === "signal" && m.id === selection.id) ||
               m.from === target ||
               m.to === target ||
               (selection.kind === "queen" && m.to === local),
@@ -204,6 +209,16 @@ export function ObjectPanel({
             .map((signal) => (
               <section key={signal.messageId}>
                 <h3>{signal.title}</h3>
+                {messages
+                  .filter((m) => m.id === signal.messageId)
+                  .map((m) => (
+                    <div key={m.id}>
+                      <small>{trustName[m.trust || "agent"] || m.trust}</small>
+                      <time>{new Date(m.createdAt).toLocaleString()}</time>
+                      <p className="pc-message-body">{m.body}</p>
+                    </div>
+                  ))}
+                {loading && <p role="status">正在读取事件正文…</p>}
                 <a href={signal.url} target="_blank" rel="noreferrer">
                   在 GitHub 查看
                 </a>

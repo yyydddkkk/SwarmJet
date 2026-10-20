@@ -35,7 +35,19 @@ const mock = createMockDataSource(
         },
       ],
       queue: [],
-      signals: [],
+      signals: [
+        {
+          messageId: "signal-full",
+          source: "github",
+          kind: "issue",
+          number: 42,
+          title: "待处理任务",
+          url: "https://github.example/issue/42",
+          claimed: false,
+          claimedBy: "",
+          createdAt: "2026-10-20T00:00:00Z",
+        },
+      ],
       methodology: methodologyResponses[3],
       methodologyEvents: [],
       messages: [],
@@ -111,6 +123,18 @@ createRoot(document.getElementById("root")!).render(
           }
         >
           PR详情
+        </button>
+        <button
+          onClick={() =>
+            ui.selectObject({
+              hiveId: "swarmjet",
+              kind: "signal",
+              id: "signal-full",
+              number: 42,
+            })
+          }
+        >
+          事件详情
         </button>
         <button onClick={() => ui.openPlatform("setup", "github=connected")}>
           平台

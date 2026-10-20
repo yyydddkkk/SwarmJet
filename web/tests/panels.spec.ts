@@ -443,3 +443,49 @@ test("each close button dismisses its own side while Escape semantics stay layer
   expect(result.afterProject.projectPanel).toBeUndefined();
   expect(result.afterProject.hiveId).toBe("h");
 });
+
+test("usage ranking opens agent details and pending events retain complete external content", async ({
+  page,
+}) => {
+  const state = await open(page);
+  state.messages.push({
+    id: "signal-full",
+    hiveId: "swarmjet",
+    from: "router",
+    to: "hive",
+    kind: "event",
+    chainId: "external",
+    hop: 0,
+    trust: "external",
+    state: "pending",
+    body: "这是完整的任务原文。".repeat(30),
+    createdAt: "2026-10-20T00:00:00Z",
+  });
+  await page.getByRole("button", { name: "项目", exact: true }).click();
+  await page.getByRole("button", { name: "花费", exact: true }).click();
+  const rank = page.getByRole("list", { name: "Agent 花费排行" });
+  await rank.getByRole("button").first().click();
+  await expect(page.getByRole("region", { name: "对象详情" })).toBeVisible();
+  await page.getByRole("button", { name: "关闭对象详情" }).click();
+  await page.getByRole("button", { name: "关闭项目面板" }).click();
+  await page.getByRole("button", { name: "事件详情", exact: true }).click();
+  await expect(page.getByRole("region", { name: "对象详情" })).toContainText(
+    "这是完整的任务原文。".repeat(30),
+  );
+  await expect(
+    page.getByText("外部内容，未经核实", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "请主 Agent 处理 Issue #42" }).click();
+  await expect
+    .poll(
+      () =>
+        state.calls.filter(
+          (c) => c.method === "POST" && c.path.endsWith("/messages"),
+        ).length,
+    )
+    .toBe(1);
+  expect(
+    state.calls.find((c) => c.method === "POST" && c.path.endsWith("/messages"))
+      ?.body,
+  ).toMatchObject({ to: "queen", body: "请处理 Issue #42" });
+});

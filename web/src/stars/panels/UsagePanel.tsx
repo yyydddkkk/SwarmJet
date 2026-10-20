@@ -29,9 +29,11 @@ export function agentUsage(
 export function HiveUsagePanel({
   hiveId,
   agents = [],
+  onAgent,
 }: {
   hiveId: string;
   agents?: Agent[];
+  onAgent?: (id: string) => void;
 }) {
   const api = useDataAPI();
   const usage = useResource(
@@ -120,9 +122,14 @@ export function HiveUsagePanel({
                       <span className="pc-usage-rank">{index + 1}</span>
                       <div className="pc-usage-main">
                         <div className="pc-usage-row-head">
-                          <span>
+                          <button
+                            disabled={!agent.agentId || !onAgent}
+                            onClick={() =>
+                              agent.agentId && onAgent?.(agent.agentId)
+                            }
+                          >
                             <code>{agent.agentId}</code>
-                          </span>
+                          </button>
                           {roleName ? (
                             <span className="pc-badge pc-tone-neutral">
                               {roleName}
