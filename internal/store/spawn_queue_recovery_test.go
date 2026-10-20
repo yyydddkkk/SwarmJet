@@ -182,3 +182,55 @@ func TestSpawnQueueConcurrentDrainsDoNotDuplicate(t *testing.T) {
 		t.Fatalf("task messages = %d, %v", count, err)
 	}
 }
+
+func TestSpawnQueueHiveLockAllowsConcurrentMessageForeignKey(t *testing.T) {
+	s := testStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h, err := s.CreateHive(ctx, domain.Hive{Name: "Queue", Repository: "acme/queue-message-lock"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = s.EnqueueSpawn(ctx, domain.Agent{ID: "queued", HiveID: h.ID, Task: "task"}, domain.Message{From: domain.AddressSystem, Kind: domain.MessageTask, Body: "task"}, domain.Limits{}); err != nil {
+		t.Fatal(err)
+	}
+	sender, err := s.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sender.Rollback(context.Background())
+	if _, err = sender.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "inbox:"+h.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.DrainSpawnQueue(ctx, h.ID) }()
+	waiting := false
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		err := s.Pool.QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1 FROM pg_locks queue_lock JOIN pg_locks inbox_lock USING(pid)
+			WHERE queue_lock.locktype='advisory' AND queue_lock.classid=1205
+			AND queue_lock.objid=hashtext($1)::oid AND queue_lock.granted
+			AND inbox_lock.locktype='advisory' AND NOT inbox_lock.granted)`, h.ID).Scan(&waiting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !waiting {
+		t.Fatal("queue never reached task delivery while holding the Hive row lock")
+	}
+	// The sender owns the Inbox lock; task delivery owns the Hive row lock.
+	// Its FK check must still acquire KEY SHARE, or these transactions deadlock.
+	if _, err = s.sendMessageTx(ctx, sender, domain.Message{HiveID: h.ID, From: domain.AddressSystem, To: domain.AddressHive, Kind: domain.MessageEvent, Body: "concurrent event"}); err != nil {
+		t.Fatalf("concurrent message FK was blocked by the Hive lock: %v", err)
+	}
+	if err = sender.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-done; err != nil {
+		t.Fatalf("queue failed after concurrent message: %v", err)
+	}
+}

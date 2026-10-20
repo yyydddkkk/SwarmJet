@@ -49,7 +49,7 @@ func (s *Store) EnqueueSpawn(ctx context.Context, agent domain.Agent, message do
 		return "", 0, err
 	}
 	defer tx.Rollback(ctx)
-	hive, err := scanHive(tx.QueryRow(ctx, `SELECT `+hiveColumns+` FROM hives WHERE id=$1 FOR UPDATE`, agent.HiveID))
+	hive, err := scanHive(tx.QueryRow(ctx, `SELECT `+hiveColumns+` FROM hives WHERE id=$1 FOR NO KEY UPDATE`, agent.HiveID))
 	if err != nil {
 		return "", 0, domainErr(err)
 	}
@@ -115,7 +115,7 @@ func (s *Store) DrainSpawnQueue(ctx context.Context, hiveID string) error {
 	if err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(1205, hashtext($1))`, hiveID).Scan(&locked); err != nil || !locked {
 		return err
 	}
-	hive, err := scanHive(tx.QueryRow(ctx, `SELECT `+hiveColumns+` FROM hives WHERE id=$1 FOR UPDATE`, hiveID))
+	hive, err := scanHive(tx.QueryRow(ctx, `SELECT `+hiveColumns+` FROM hives WHERE id=$1 FOR NO KEY UPDATE`, hiveID))
 	if err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func validateSpawnMessage(hive domain.Hive, message domain.Message) error {
 
 func (s *Store) abandonSpawnTx(ctx context.Context, tx pgx.Tx, seq int64, agent domain.Agent, reason string) error {
 	var queenEnabled bool
-	if err := tx.QueryRow(ctx, `SELECT queen_enabled FROM hives WHERE id=$1 FOR UPDATE`, agent.HiveID).Scan(&queenEnabled); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT queen_enabled FROM hives WHERE id=$1 FOR NO KEY UPDATE`, agent.HiveID).Scan(&queenEnabled); err != nil {
 		return domainErr(err)
 	}
 	to := domain.AddressHive

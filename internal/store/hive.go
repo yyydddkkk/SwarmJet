@@ -190,7 +190,7 @@ func (s *Store) UpdateHive(ctx context.Context, h domain.Hive) (domain.Hive, err
 	defer tx.Rollback(ctx)
 	var enabled bool
 	var version int
-	if err = tx.QueryRow(ctx, `SELECT queen_enabled,version FROM hives WHERE id=$1 FOR UPDATE`, h.ID).Scan(&enabled, &version); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT queen_enabled,version FROM hives WHERE id=$1 FOR NO KEY UPDATE`, h.ID).Scan(&enabled, &version); err != nil {
 		return domain.Hive{}, domainErr(err)
 	}
 	if version != h.Version {
@@ -292,7 +292,7 @@ func (s *Store) createForagerTx(ctx context.Context, tx pgx.Tx, a domain.Agent, 
 	now := time.Now().UTC()
 	var err error
 	var config []byte
-	if err = tx.QueryRow(ctx, `SELECT config FROM hives WHERE id=$1 FOR UPDATE`, a.HiveID).Scan(&config); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT config FROM hives WHERE id=$1 FOR NO KEY UPDATE`, a.HiveID).Scan(&config); err != nil {
 		return domain.Agent{}, domainErr(err)
 	}
 	cfg := domain.HiveConfig{}
