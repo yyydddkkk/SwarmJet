@@ -102,7 +102,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err = tx.QueryRow(ctx, `SELECT max(version) FROM schema_version`).Scan(&version); err != nil {
 		return err
 	}
-	if version > 12 {
+	if version > 13 {
 		return fmt.Errorf("database schema version %d is newer than this application supports", version)
 	}
 	if version < 2 {
@@ -167,6 +167,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if _, err = tx.Exec(ctx, `INSERT INTO schema_version(version) VALUES(12) ON CONFLICT DO NOTHING`); err != nil {
 			return err
 		}
+	}
+	if err = applySchemaUpgrade13(ctx, tx, version); err != nil {
+		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return err

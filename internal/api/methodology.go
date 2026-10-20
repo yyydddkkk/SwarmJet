@@ -42,7 +42,9 @@ func (a *server) methodology(w http.ResponseWriter, r *http.Request, hiveID stri
 		a.listMethodologyVersions(w, r, hiveID)
 	case len(rest) == 1 && rest[0] == "activate" && r.Method == http.MethodPost:
 		a.activateMethodology(w, r, hiveID)
-	case len(rest) == 0 || (len(rest) == 1 && (rest[0] == "versions" || rest[0] == "activate")):
+	case len(rest) == 1 && rest[0] == "install" && r.Method == http.MethodPost:
+		a.installMethodologyTemplate(w, r, hiveID)
+	case len(rest) == 0 || (len(rest) == 1 && (rest[0] == "versions" || rest[0] == "activate" || rest[0] == "install")):
 		problem(w, http.StatusMethodNotAllowed, "method not allowed")
 	default:
 		problem(w, http.StatusNotFound, "API route not found")

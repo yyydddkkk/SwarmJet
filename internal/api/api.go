@@ -121,6 +121,10 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		a.usage(w, r)
 		return
 	}
+	if r.URL.Path == "/api/methodology-templates" {
+		a.methodologyTemplates(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/runtime/") {
 		problem(w, http.StatusNotFound, "runtime route not found")
 		return

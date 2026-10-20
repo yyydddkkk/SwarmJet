@@ -435,6 +435,9 @@ func (s *Store) ForagerByBranch(ctx context.Context, hiveID, branch string) (dom
 
 // TransitionAgent is a compare-and-swap on the Agent state.
 func (s *Store) TransitionAgent(ctx context.Context, id string, from, to domain.AgentState) error {
+	if to == domain.AgentFailed || to == domain.AgentCompleted {
+		return s.transitionMethodologyOutcome(ctx, id, from, to)
+	}
 	tag, err := s.Pool.Exec(ctx, `UPDATE agents SET state=$3,updated_at=now() WHERE id=$1 AND state=$2`, id, string(from), string(to))
 	if err != nil {
 		return domainErr(err)

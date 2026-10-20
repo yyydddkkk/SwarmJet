@@ -20,6 +20,7 @@ var allToolNames = []string{
 	"update_handoff", "inbox", "claim", "offline_digest",
 	"get_methodology", "list_methodology_versions", "publish_methodology", "activate_methodology",
 	"attest", "pr_status", "merge_pr", "set_model_credential",
+	"list_methodology_templates", "install_methodology_template",
 }
 
 func allTools() map[string]bool {

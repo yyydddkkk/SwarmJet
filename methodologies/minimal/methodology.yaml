@@ -1,0 +1,17 @@
+defaultRole: worker
+roles:
+  worker:
+    description: Implements one task, validates the result, and publishes its branch and PR.
+    prompt: roles/worker.md
+    lifecycle: task
+    permissions:
+      publish: true
+      message: true
+      attest: false
+      merge: false
+      methodology: false
+merge:
+  requireAttestation: false
+  requireChecks: true
+  auto: false
+  method: squash

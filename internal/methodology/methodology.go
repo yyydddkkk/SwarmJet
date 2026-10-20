@@ -133,6 +133,15 @@ func Validate(m domain.MethodologyManifest, files []domain.MethodologyFile) erro
 		}
 	}
 
+	if m.Queen.Prompt != "" {
+		if err := ValidatePath(m.Queen.Prompt); err != nil {
+			return fmt.Errorf("methodology: queen prompt: %w", err)
+		}
+		if _, ok := paths[m.Queen.Prompt]; !ok {
+			return fmt.Errorf("methodology: queen prompt %q is not one of the files", m.Queen.Prompt)
+		}
+	}
+
 	for _, name := range sortedRoleNames(m.Roles) {
 		role := m.Roles[name]
 		if strings.TrimSpace(name) == "" {
