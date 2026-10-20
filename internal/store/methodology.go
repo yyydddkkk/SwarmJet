@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -74,7 +75,8 @@ func insertMethodologyEvent(ctx context.Context, tx pgx.Tx, hiveID, action strin
 
 // PublishMethodology validates one version, assigns the next version number and
 // makes it active in the same transaction. The previous active version remains
-// stored and can be activated again for a rollback.
+// stored and can be activated again for a rollback. Reinstalling an unchanged
+// built-in template that is already active preserves its version and tracking.
 func (s *Store) PublishMethodology(ctx context.Context, m domain.Methodology, files []domain.MethodologyFile) (domain.Methodology, error) {
 	if m.HiveID == "" {
 		return domain.Methodology{}, errors.New("store: methodology requires a hive id")
@@ -126,6 +128,17 @@ func (s *Store) PublishMethodology(ctx context.Context, m domain.Methodology, fi
 	var hiveID string
 	if err = tx.QueryRow(ctx, `SELECT id FROM hives WHERE id=$1 FOR UPDATE`, m.HiveID).Scan(&hiveID); err != nil {
 		return domain.Methodology{}, domainErr(err)
+	}
+	if m.Source != nil && strings.HasPrefix(m.Source.URL, "builtin:") && m.Source.Ref != "" {
+		current, _, lookupErr := scanMethodology(tx.QueryRow(ctx, `SELECT `+methodologyColumns+` FROM methodologies
+			WHERE hive_id=$1 AND active AND source->>'url'=$2 AND source->>'ref'=$3 AND digest=$4`,
+			m.HiveID, m.Source.URL, m.Source.Ref, m.Digest))
+		if lookupErr == nil {
+			return current, nil
+		}
+		if !errors.Is(lookupErr, domain.ErrNotFound) {
+			return domain.Methodology{}, lookupErr
+		}
 	}
 	var version int
 	if err = tx.QueryRow(ctx, `SELECT COALESCE(max(version),0)+1 FROM methodologies WHERE hive_id=$1`, m.HiveID).Scan(&version); err != nil {
