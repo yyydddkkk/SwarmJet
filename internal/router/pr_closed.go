@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"strings"
 )
 
 // Lifecycle messages are atomic: either delivery can wake the owner, but the
@@ -15,6 +16,12 @@ func (r *Router) closePROwner(ctx context.Context, hive domain.Hive, e Event) (D
 	owner, found, err := r.owningForager(ctx, hive.ID, e)
 	if err != nil || !found {
 		return Decision{}, false, err
+	}
+	// A retry after the author completes may resolve to a verifier or triage
+	// Agent through the live-only PR lookup. Related Agents do not own this
+	// lifecycle: only the Agent on the PR branch may be completed.
+	if owner.Revision != "" || (strings.TrimSpace(e.Branch) != "" && owner.Branch != strings.TrimSpace(e.Branch)) {
+		return Decision{Action: ActionIgnored, Reason: "PR owner is no longer active", Repository: e.Repository, HiveID: hive.ID}, true, nil
 	}
 	sender, ok := r.backend.(interface {
 		SendMessages(context.Context, ...domain.Message) ([]domain.Message, error)

@@ -34,3 +34,41 @@ func TestClosedPRCompletesOwnerWithOriginalEvent(t *testing.T) {
 		})
 	}
 }
+
+func TestClosedPRRedeliveryDoesNotCompleteRelatedAgent(t *testing.T) {
+	for _, revision := range []string{"head-sha", ""} {
+		t.Run(fmt.Sprintf("related-revision=%q", revision), func(t *testing.T) {
+			b := NewMemoryBackend()
+			hive := newTestHive(t, b, domain.HiveConfig{})
+			owner := b.AddForager(domain.Agent{ID: "owner", HiveID: hive.ID, Role: domain.RoleForager, State: domain.AgentParked, PRNumber: 42, Branch: "swarm/owner"})
+			related := b.AddForager(domain.Agent{ID: "related", HiveID: hive.ID, Role: domain.RoleForager, State: domain.AgentActive, PRNumber: 42, Branch: "swarm/related", Revision: revision, ParentID: owner.ID})
+			event := Event{Type: EventPullRequest, Action: "closed", Repository: hive.Repository, Number: 42, Branch: owner.Branch, DeliveryID: "closed-once"}
+			r := New(b)
+			if first, err := r.Route(context.Background(), event); err != nil || first.ForagerID != owner.ID {
+				t.Fatalf("first route = %+v, %v", first, err)
+			}
+			b.mu.Lock()
+			completed := b.agents[owner.ID]
+			completed.State = domain.AgentCompleted
+			b.agents[owner.ID] = completed
+			b.mu.Unlock()
+			decision, err := r.Route(context.Background(), event)
+			if err != nil || decision.Action != ActionIgnored {
+				t.Fatalf("redelivery = %+v, %v", decision, err)
+			}
+			if messages := b.MessagesTo(hive.ID, domain.ForagerAddress(related.ID)); len(messages) != 0 {
+				t.Fatalf("closed event leaked into related Agent: %+v", messages)
+			}
+		})
+	}
+}
+
+func TestClosedPRWithoutBranchDoesNotCompletePinnedAgent(t *testing.T) {
+	b := NewMemoryBackend()
+	hive := newTestHive(t, b, domain.HiveConfig{})
+	b.AddForager(domain.Agent{HiveID: hive.ID, Role: domain.RoleForager, State: domain.AgentActive, PRNumber: 42, Revision: "head-sha"})
+	decision, err := New(b).Route(context.Background(), Event{Type: EventPullRequest, Action: "closed", Repository: hive.Repository, Number: 42, DeliveryID: "closed-once"})
+	if err != nil || decision.Action != ActionIgnored || len(b.Messages()) != 0 {
+		t.Fatalf("closed PR resolved to a pinned Agent: decision=%+v err=%v messages=%+v", decision, err, b.Messages())
+	}
+}
