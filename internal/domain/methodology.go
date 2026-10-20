@@ -55,6 +55,27 @@ type MethodologyManifest struct {
 	Events         []EventRule     `json:"events,omitempty"`
 	Merge          MergePolicy     `json:"merge"`
 	Limits         Limits          `json:"limits,omitempty"` // zero values keep HiveConfig defaults
+	// Round 5. Queen tunes the Hive's Queen. The Queen's existence and core
+	// duties are fixed by the platform; a methodology only adds style.
+	Queen QueenStyle `json:"queen,omitempty"`
+}
+
+// QueenStyle is the part of a methodology that adjusts the Queen. It cannot
+// remove the Queen or its core duties (managing the methodology, routing
+// work, answering Agents).
+type QueenStyle struct {
+	Prompt string `json:"prompt,omitempty"` // methodology file appended after the platform's core Queen prompt
+	Merge  bool   `json:"merge,omitempty"`  // the Queen may call merge_pr, subject to the merge policy
+}
+
+// MethodologyTemplate is one entry of the platform's built-in catalog. A
+// template is only an option: no Hive gets it unless the user (usually
+// through the Queen) installs it.
+type MethodologyTemplate struct {
+	Name        string `json:"name"` // e.g. "pstack"
+	Title       string `json:"title"`
+	Description string `json:"description"` // what kind of team it sets up, in one paragraph
+	Version     string `json:"version"`     // template revision shipped with this platform build
 }
 
 // Role is one kind of Agent in the swarm.
