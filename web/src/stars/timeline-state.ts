@@ -17,6 +17,7 @@ function createTimeline() {
         ...state,
         fraction: Math.max(0, Math.min(1, fraction)),
         playing,
+        anchor: fraction >= 1 && !playing ? Date.now() : state.anchor,
       };
       listeners.forEach((fn) => fn());
     },
