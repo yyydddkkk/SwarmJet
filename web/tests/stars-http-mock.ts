@@ -96,11 +96,14 @@ export async function mockStarsHTTP(
   await page.addInitScript(() => {
     class Stream extends EventTarget {
       static all: Stream[] = [];
+      static autoReady = true;
       onerror: ((event: Event) => void) | null = null;
       constructor(public url: string) {
         super();
         Stream.all.push(this);
-        queueMicrotask(() => this.dispatchEvent(new Event("ready")));
+        queueMicrotask(() => {
+          if (Stream.autoReady) this.dispatchEvent(new Event("ready"));
+        });
       }
       close() {
         Stream.all = Stream.all.filter((s) => s !== this);
@@ -109,6 +112,8 @@ export async function mockStarsHTTP(
     Object.assign(window, {
       EventSource: Stream,
       __starsStream: {
+        pauseReady() { Stream.autoReady = false; },
+        count() { return Stream.all.length; },
         disconnect() {
           Stream.all.forEach((s) => s.onerror?.(new Event("error")));
         },

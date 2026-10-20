@@ -154,8 +154,10 @@ export function StarsWorkspace({
     reloadProjects: () => setAttempt((v) => v + 1),
   };
   const status = [...stores.values()]
-    .find((s) => s.getSnapshot().error)
-    ?.getSnapshot();
+    .map((s) => s.getSnapshot())
+    .find((s) => s.error || s.retryDelay !== undefined);
+  const statusMessage = error || status?.error ||
+    (status?.retryDelay !== undefined ? "连接已断开，正在重连" : "");
   if (!projectsLoaded && (projectsLoading || error)) {
     return (
       <main className="stars-app">
@@ -172,9 +174,9 @@ export function StarsWorkspace({
       <PeripherySlot {...props} />
       <PanelsSlot {...props} />
       <TimelineSlot {...props} />
-      {(error || status?.error) && (
+      {statusMessage && (
         <div className="stars-status" role="alert">
-          {error || status?.error}
+          {statusMessage}
           <button
             onClick={() => {
               setAttempt((v) => v + 1);
