@@ -57,7 +57,7 @@ for family, names in families.items():
             raise ValueError(f'Upstream source checksum mismatch: {name}')
         manifest['sources'].append({'url': url, 'sha256': digest})
         if name == 'OFL.txt':
-            (out/(family+'-OFL.txt')).write_bytes(target.read_bytes())
+            (out/(family+'-OFL.txt')).write_text('\n'.join(line.rstrip() for line in target.read_text().splitlines())+'\n')
             continue
         font = TTFont(target, lazy=False)
         font.ensureDecompiled()
