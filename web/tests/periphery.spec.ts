@@ -576,3 +576,39 @@ for (const next of ["draft", "command"] as const) {
     }
   });
 }
+
+test("回答仍在同步时不会进入另一项合并确认", async ({ page }) => {
+  const mock = await mockStarsHTTP(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  const brief = page.getByRole("dialog", { name: "简报", exact: true });
+  await expect(brief.getByLabel("答复 是否继续处理兼容问题？")).toBeVisible();
+  let replied = false;
+  let blocked = false;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/hives/swarmjet/messages", async (route) => {
+    if (route.request().method() === "POST") replied = true;
+    await route.fallback();
+  });
+  await page.route("**/api/hives/swarmjet/prs?state=all", async (route) => {
+    if (replied) { blocked = true; await gate; }
+    await route.fallback();
+  });
+  try {
+    await brief.getByLabel("答复 是否继续处理兼容问题？").fill("继续");
+    await brief.getByRole("button", { name: "答复", exact: true }).click();
+    await expect.poll(() => blocked).toBe(true);
+    const start = brief.getByRole("button", { name: "合并", exact: true });
+    await expect(start).toBeDisabled();
+    release();
+    await expect(start).toBeEnabled();
+    mock.setMergeStatus(409);
+    await start.click();
+    await brief.getByRole("button", { name: "确认合并 PR #88", exact: true }).click();
+    await expect(brief.getByRole("alert")).toContainText("PR 有新提交");
+    expect(mock.state.calls.filter((c) => c.path.endsWith("/merge"))).toHaveLength(1);
+  } finally {
+    release();
+  }
+});

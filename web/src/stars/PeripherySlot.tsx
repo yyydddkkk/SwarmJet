@@ -255,6 +255,7 @@ export default function PeripherySlot(props: StarsSlotProps) {
         )}
         {confirm === `${e.id}:${d.id}` ? (
           <button
+            key="confirm-merge"
             disabled={!!busy}
             onClick={() =>
               void act(d.id, async () => {
@@ -273,6 +274,8 @@ export default function PeripherySlot(props: StarsSlotProps) {
           </button>
         ) : (
           <button
+            key="begin-merge"
+            disabled={!!busy}
             onClick={() => {
               setMergeHead(d.pr.headSha);
               setConfirm(`${e.id}:${d.id}`);
