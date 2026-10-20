@@ -19,6 +19,7 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/github"
 	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
+	"github.com/yyydddkkk/SwarmJet/internal/router"
 )
 
 const (
@@ -88,7 +89,13 @@ func newCellStack(s *store.Store, apps githubAppSource, dataDir string, logger *
 		Pulls:      repos,
 	}
 
+	recoveryRouter := router.New(s)
 	supervisor, err := forager.New(forager.Options{
+		ReconcileParkedPR: func(ctx context.Context, hive domain.Hive, agent domain.Agent) error {
+			check, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			return recoveryRouter.ReconcileParkedPR(check, hive, agent, repos.PullState)
+		},
 		Store:      s,
 		Runtime:    runtime,
 		Publisher:  publisher,
@@ -282,4 +289,18 @@ func (r *githubRepositories) CreateOrUpdatePR(ctx context.Context, id int64, sou
 	}
 	client := github.New(func(context.Context) (string, error) { return token, nil })
 	return client.CreateOrUpdatePR(ctx, id, source, target, title, body)
+}
+
+// PullState reads GitHub directly; local attestations cannot prove closure.
+func (r *githubRepositories) PullState(ctx context.Context, fullName string, pr int64) (github.PullState, error) {
+	id, err := r.Resolve(ctx, fullName)
+	if err != nil {
+		return github.PullState{}, err
+	}
+	token, err := r.Token(ctx, fullName)
+	if err != nil {
+		return github.PullState{}, err
+	}
+	client := github.New(func(context.Context) (string, error) { return token, nil })
+	return client.GetPullState(ctx, id, pr)
 }
