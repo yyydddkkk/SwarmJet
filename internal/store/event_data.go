@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
@@ -12,9 +11,16 @@ import (
 func (s *Store) EventData(ctx context.Context, ref EventRef) (any, error) {
 	switch ref.Type {
 	case "hive":
+		if ref.ID != ref.HiveID {
+			return nil, domain.ErrNotFound
+		}
 		return s.Hive(ctx, ref.HiveID)
 	case "agent":
-		return s.Agent(ctx, ref.ID)
+		agent, err := s.Agent(ctx, ref.ID)
+		if err == nil && agent.HiveID != ref.HiveID {
+			return nil, domain.ErrNotFound
+		}
+		return agent, err
 	case "message":
 		m, err := scanMessage(s.Pool.QueryRow(ctx, `SELECT `+messageColumns+` FROM messages WHERE hive_id=$1 AND id=$2`, ref.HiveID, ref.ID))
 		if err != nil {
@@ -32,9 +38,19 @@ func (s *Store) EventData(ctx context.Context, ref EventRef) (any, error) {
 		err := s.Pool.QueryRow(ctx, `SELECT version,action,actor,note,created_at FROM methodology_events WHERE hive_id=$1 AND id=$2::bigint`, ref.HiveID, ref.ID).Scan(&version, &action, &actor, &note, &createdAt)
 		return map[string]any{"version": version, "action": action, "actor": actor, "note": note, "createdAt": createdAt.UTC()}, domainErr(err)
 	case "queue":
-		var row []byte
-		err := s.Pool.QueryRow(ctx, `SELECT json_build_object('agentId',q.agent_id,'role',coalesce(nullif(q.agent->>'roleName',''),q.agent->>'role',''),'task',left(q.task_message->>'body',200),'position',CASE WHEN q.state='waiting' THEN (SELECT count(*) FROM spawn_queue w WHERE w.hive_id=q.hive_id AND w.state='waiting' AND w.seq<=q.seq) ELSE 0 END,'createdAt',q.created_at,'expiresAt',q.created_at+interval '24 hours','state',q.state) FROM spawn_queue q WHERE hive_id=$1 AND agent_id=$2`, ref.HiveID, ref.ID).Scan(&row)
-		return json.RawMessage(row), domainErr(err)
+		var entry struct {
+			AgentID   string    `json:"agentId"`
+			Role      string    `json:"role"`
+			Task      string    `json:"task"`
+			Position  int       `json:"position"`
+			CreatedAt time.Time `json:"createdAt"`
+			ExpiresAt time.Time `json:"expiresAt"`
+			State     string    `json:"state"`
+		}
+		err := s.Pool.QueryRow(ctx, `SELECT q.agent_id,coalesce(nullif(q.agent->>'roleName',''),q.agent->>'role',''),left(q.task_message->>'body',200),CASE WHEN q.state='waiting' THEN (SELECT count(*) FROM spawn_queue w WHERE w.hive_id=q.hive_id AND w.state='waiting' AND w.seq<=q.seq) ELSE 0 END,q.created_at,q.created_at+interval '24 hours',q.state FROM spawn_queue q WHERE hive_id=$1 AND agent_id=$2`, ref.HiveID, ref.ID).Scan(&entry.AgentID, &entry.Role, &entry.Task, &entry.Position, &entry.CreatedAt, &entry.ExpiresAt, &entry.State)
+		entry.CreatedAt = entry.CreatedAt.UTC()
+		entry.ExpiresAt = entry.ExpiresAt.UTC()
+		return entry, domainErr(err)
 	}
 	return nil, domain.ErrNotFound
 }

@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"errors"
+
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"testing"
 	"time"
 )
@@ -97,6 +100,21 @@ func TestEventSubscriptionsShareListenerAndClose(t *testing.T) {
 			}
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
+		}
+	}
+}
+
+func TestEventDataChecksHiveOwnership(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	hive := newTestHive(t, s, "acme/event-ownership")
+	queen, err := s.Queen(ctx, hive.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []EventRef{{Type: "agent", HiveID: "other", ID: queen.ID}, {Type: "hive", HiveID: hive.ID, ID: "other"}} {
+		if _, err := s.EventData(ctx, ref); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("wrong hive accepted: %+v err=%v", ref, err)
 		}
 	}
 }

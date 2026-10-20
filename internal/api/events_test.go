@@ -201,3 +201,50 @@ func TestEventsHTTPReadyAndAuthentication(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestEventsOverrideServerWriteTimeout(t *testing.T) {
+	s, _, cookie := newHiveAPITest(t)
+	t.Cleanup(s.Close)
+	hive, err := s.CreateHive(context.Background(), domain.Hive{Name: "timeout", Repository: "acme/timeout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := New(s, Config{})
+	server := httptest.NewUnstartedServer(handler)
+	server.Config.WriteTimeout = 20 * time.Millisecond
+	server.Start()
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/events?hive="+hive.ID, nil)
+	req.AddCookie(cookie)
+	response, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	for i := 0; i < 3; i++ {
+		if _, err := reader.ReadString('\n'); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A real network connection must remain writable beyond the server's deadline.
+	time.Sleep(80 * time.Millisecond)
+	message, err := s.SendMessage(ctx, domain.Message{HiveID: hive.ID, From: "local:admin", To: domain.AddressHive, Kind: domain.MessageTask, Body: "after deadline"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := reader.ReadString('\n')
+	if err != nil || line != "event: message\n" {
+		t.Fatalf("event after timeout: %q %v", line, err)
+	}
+	line, err = reader.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data: "))), &got); err != nil || got["id"] != message.ID {
+		t.Fatalf("data=%+v err=%v", got, err)
+	}
+}

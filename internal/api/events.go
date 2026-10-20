@@ -142,7 +142,7 @@ func (a *server) eventData(ctx context.Context, ref store.EventRef) (any, error)
 	}
 	if agent, ok := data.(domain.Agent); ok {
 		var cost float64
-		err = a.s.Pool.QueryRow(ctx, `SELECT coalesce(sum(cost_usd),0) FROM llm_usage WHERE agent_id=$1`, agent.ID).Scan(&cost)
+		err = a.s.Pool.QueryRow(ctx, `SELECT coalesce(sum(cost_usd),0) FROM llm_usage WHERE agent_id=$1 AND hive_id=$2`, agent.ID, agent.HiveID).Scan(&cost)
 		return struct {
 			domain.Agent
 			CostUSD float64 `json:"costUsd"`
