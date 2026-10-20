@@ -131,7 +131,36 @@ func TestSendForagerDefaultsToQueenWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestSendExplicitTargetStillWins(t *testing.T) {
+func TestSendQuestionWithoutTargetFollowsQueenState(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		queenEnabled bool
+		want         domain.Address
+	}{
+		{name: "queen enabled", queenEnabled: true, want: domain.AddressQueen},
+		{name: "queen disabled", want: domain.LocalAddress("dispatcher")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newTestEnv(t, Options{})
+			hive, err := env.backend.CreateHive(context.Background(), domain.Hive{
+				Name: "question-hive", Repository: "acme/question", QueenEnabled: tc.queenEnabled,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			forager, token := newForagerWithToken(t, env, hive.ID)
+			deliverTask(t, env, hive.ID, domain.LocalAddress("dispatcher"), domain.ForagerAddress(forager.ID), "investigate")
+			out := decode[sendOutput](t, callTool(t, env.connect(token), "send", map[string]any{
+				"hiveId": hive.ID, "kind": "question", "body": "Which approach should I take?",
+			}))
+			if out.Message.Kind != string(domain.MessageQuestion) || out.Message.To != string(tc.want) {
+				t.Fatalf("question = %+v, want kind=question to=%s", out.Message, tc.want)
+			}
+		})
+	}
+}
+
+func TestSendExplicitHiveTargetRedirectsToEnabledQueen(t *testing.T) {
 	env := newTestEnv(t, Options{})
 	hive, err := env.backend.CreateHive(context.Background(), domain.Hive{
 		Name: "queen-hive", Repository: "acme/queen", QueenEnabled: true,
@@ -147,7 +176,7 @@ func TestSendExplicitTargetStillWins(t *testing.T) {
 		"to":     "hive",
 		"body":   "explicit inbox",
 	}))
-	if out.Message.To != string(domain.AddressHive) {
-		t.Fatalf("to = %q, want explicit hive target", out.Message.To)
+	if out.Message.To != string(domain.AddressQueen) {
+		t.Fatalf("to = %q, want queen", out.Message.To)
 	}
 }

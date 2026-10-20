@@ -97,6 +97,9 @@ func (s *Store) SendMessage(ctx context.Context, m domain.Message) (domain.Messa
 	if err != nil {
 		return domain.Message{}, err
 	}
+	if hive.QueenEnabled && m.To == domain.AddressHive && m.From != domain.AddressQueen {
+		m.To = domain.AddressQueen
+	}
 	if m.Hop > hive.Config.MaxHops {
 		return domain.Message{}, domain.ErrHopLimit
 	}

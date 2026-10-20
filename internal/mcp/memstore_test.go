@@ -58,7 +58,7 @@ func TestMemoryBackendMessageValidation(t *testing.T) {
 	t.Run("hop limit", func(t *testing.T) {
 		_, err := backend.SendMessage(ctx, domain.Message{
 			HiveID: h.ID, From: domain.AddressQueen, To: domain.ForagerAddress(foragerA.ID),
-			Kind: domain.MessageTask, Body: "deep", Hop: 11,
+			Kind: domain.MessageTask, Body: "deep", Hop: 51,
 		})
 		if !errors.Is(err, domain.ErrHopLimit) {
 			t.Fatalf("err = %v, want ErrHopLimit", err)
@@ -124,6 +124,57 @@ func TestMemoryBackendIdempotency(t *testing.T) {
 	conflicting.Body = "changed"
 	if _, err := backend.SendMessage(ctx, conflicting); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+}
+
+func TestMemoryBackendHiveMessagesFollowQueenState(t *testing.T) {
+	backend := NewMemoryBackend()
+	ctx := context.Background()
+	h, err := backend.CreateHive(ctx, domain.Hive{
+		Name: "queen-hive", Repository: "acme/queen", QueenEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		from domain.Address
+		want domain.Address
+	}{
+		{name: "system message", from: domain.AddressSystem, want: domain.AddressQueen},
+		{name: "queen message", from: domain.AddressQueen, want: domain.AddressHive},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := domain.Message{
+				HiveID: h.ID, From: tc.from, To: domain.AddressHive,
+				Kind: domain.MessageQuestion, Body: "question",
+			}
+			sent, err := backend.SendMessage(ctx, msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sent.To != tc.want {
+				t.Fatalf("to = %q, want %q", sent.To, tc.want)
+			}
+			inbox, err := backend.Inbox(ctx, h.ID, tc.want, "", 10)
+			if err != nil || len(inbox) != 1 || inbox[0].ID != sent.ID {
+				t.Fatalf("inbox = %+v, err = %v", inbox, err)
+			}
+		})
+	}
+
+	h.QueenEnabled = false
+	h, err = backend.UpdateHive(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, err := backend.SendMessage(ctx, domain.Message{
+		HiveID: h.ID, From: domain.AddressSystem, To: domain.AddressHive,
+		Kind: domain.MessageQuestion, Body: "follow-up",
+	})
+	if err != nil || sent.To != domain.AddressHive {
+		t.Fatalf("disabled queen: message = %+v, err = %v", sent, err)
 	}
 }
 
@@ -305,8 +356,8 @@ func TestHiveConfigDefaults(t *testing.T) {
 	want := domain.HiveConfig{
 		CLI:                     "opencode",
 		MaxConcurrentForagers:   4,
-		MaxHops:                 10,
-		MaxForagersPerChain:     10,
+		MaxHops:                 50,
+		MaxForagersPerChain:     50,
 		IdleParkMinutes:         30,
 		HibernateHours:          24,
 		TurnTimeoutMinutes:      120,

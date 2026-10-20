@@ -59,10 +59,10 @@ func applyHiveDefaults(c *domain.HiveConfig) {
 		c.MaxConcurrentForagers = 4
 	}
 	if c.MaxHops == 0 {
-		c.MaxHops = 10
+		c.MaxHops = 50
 	}
 	if c.MaxForagersPerChain == 0 {
-		c.MaxForagersPerChain = 10
+		c.MaxForagersPerChain = 50
 	}
 	if c.IdleParkMinutes == 0 {
 		c.IdleParkMinutes = 30
@@ -267,7 +267,7 @@ func (s *Store) createForager(ctx context.Context, a domain.Agent, limits domain
 	}
 	if a.ChainID != "" {
 		var chained int
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND chain_id=$2`, a.HiveID, a.ChainID).Scan(&chained); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND role='forager' AND chain_id=$2`, a.HiveID, a.ChainID).Scan(&chained); err != nil {
 			return domain.Agent{}, err
 		}
 		if chained >= maxPerChain {

@@ -225,6 +225,12 @@ func TestSpawnWithoutMethodologyUsesBuiltin(t *testing.T) {
 func TestPeerPingPongStopsAtHopLimit(t *testing.T) {
 	env, hive := round4Env(t)
 	ctx := context.Background()
+	hive.Config.MaxHops = 10
+	var err error
+	hive, err = env.backend.UpdateHive(ctx, hive)
+	if err != nil {
+		t.Fatal(err)
+	}
 	env.backend.SetActiveMethodology(domain.Methodology{
 		HiveID: hive.ID,
 		Manifest: roleManifest(map[string]domain.Role{

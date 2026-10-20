@@ -30,7 +30,7 @@ func TestCreateHiveCreatesDisabledQueenAndDefaults(t *testing.T) {
 		t.Fatalf("unexpected hive: %+v", h)
 	}
 	cfg := h.Config
-	if cfg.CLI != "opencode" || cfg.MaxConcurrentForagers != 4 || cfg.MaxHops != 10 || cfg.MaxForagersPerChain != 10 ||
+	if cfg.CLI != "opencode" || cfg.MaxConcurrentForagers != 4 || cfg.MaxHops != 50 || cfg.MaxForagersPerChain != 50 ||
 		cfg.IdleParkMinutes != 30 || cfg.HibernateHours != 24 || cfg.TurnTimeoutMinutes != 120 || cfg.ForagerMaxLifetimeHours != 168 {
 		t.Fatalf("defaults not applied on create: %+v", cfg)
 	}
@@ -38,7 +38,7 @@ func TestCreateHiveCreatesDisabledQueenAndDefaults(t *testing.T) {
 	if err != nil || got.Repository != "acme/widgets" {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if got.Config.MaxConcurrentForagers != 4 || got.Config.MaxHops != 10 {
+	if got.Config.MaxConcurrentForagers != 4 || got.Config.MaxHops != 50 || got.Config.MaxForagersPerChain != 50 {
 		t.Fatalf("defaults not applied on read: %+v", got.Config)
 	}
 	byRepo, err := s.HiveByRepository(ctx, "acme/widgets")
@@ -130,6 +130,12 @@ func TestCreateForagerChainLimitAndBranch(t *testing.T) {
 	ctx := context.Background()
 	h := newTestHive(t, s, "acme/a")
 	chain := "chain-shared"
+	h.Config.MaxForagersPerChain = 10
+	var err error
+	h, err = s.UpdateHive(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 10; i++ {
 		a, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, ChainID: chain})
 		if err != nil {
@@ -148,6 +154,35 @@ func TestCreateForagerChainLimitAndBranch(t *testing.T) {
 	}
 	if _, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, ChainID: "other"}); err != nil {
 		t.Fatalf("different chain rejected: %v", err)
+	}
+}
+
+func TestCreateForagerLimitsExcludeQueen(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	h := newTestHive(t, s, "acme/queen-limits")
+	h.Config.MaxConcurrentForagers = 1
+	h.Config.MaxForagersPerChain = 1
+	var err error
+	h, err = s.UpdateHive(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE agents SET state='active',chain_id='shared' WHERE hive_id=$1 AND role='queen'`, h.ID); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, ChainID: "shared"})
+	if err != nil {
+		t.Fatalf("queen counted against forager limits: %v", err)
+	}
+	if _, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, ChainID: "other"}); !errors.Is(err, domain.ErrHiveLimit) {
+		t.Fatalf("forager concurrency limit = %v, want ErrHiveLimit", err)
+	}
+	if err := s.TransitionAgent(ctx, first.ID, domain.AgentCreating, domain.AgentCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateForager(ctx, domain.Agent{HiveID: h.ID, ChainID: "shared"}); !errors.Is(err, domain.ErrChainLimit) {
+		t.Fatalf("forager chain limit = %v, want ErrChainLimit", err)
 	}
 }
 
