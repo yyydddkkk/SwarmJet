@@ -247,8 +247,8 @@ func publishTitle(task string) string {
 	return truncateRunes(line, 200)
 }
 
-// reportBody prefers the handoff summary and falls back to the last streamed
-// text. It is also used as the PR body.
+// reportBody prefers the handoff summary and falls back to the accumulated
+// visible turn text. It is also used as the PR body.
 func reportBody(agent domain.Agent, output, stopReason string) string {
 	body := handoffSummary(agent.Handoff)
 	if body == "" {

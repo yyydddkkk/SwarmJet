@@ -499,15 +499,26 @@ func (a *actor) collectMessages(ctx context.Context, hiveID string) ([]domain.Me
 }
 
 // prompt runs one turn with a timeout and cancellation channel. It keeps the
-// last text update for the report.
+// visible turn text, joining chunks and retaining the latest report-sized tail.
 func (a *actor) prompt(ctx context.Context, agent domain.Agent, session cell.Session, text string, timeout time.Duration) (string, cell.TurnResult, error, promptOutcome) {
 	done := make(chan promptResult, 1)
 	var mu sync.Mutex
 	var lastText string
+	var reply []rune
 	sink := func(update cell.Update) {
 		if update.Kind == cell.UpdateText && update.Text != "" {
 			mu.Lock()
-			lastText = truncateRunes(update.Text, cell.MaxUpdateText)
+			// Text updates are deltas, including when tool updates interleave.
+			// Bound the whole reply while retaining its final answer.
+			chunk := []rune(update.Text)
+			if len(chunk) > domain.MaxMessageBody {
+				chunk = chunk[len(chunk)-domain.MaxMessageBody:]
+			}
+			if overflow := len(reply) + len(chunk) - domain.MaxMessageBody; overflow > 0 {
+				reply = reply[overflow:]
+			}
+			reply = append(reply, chunk...)
+			lastText = string(reply)
 			mu.Unlock()
 		}
 		if a.sup.opts.OnUpdate != nil {
