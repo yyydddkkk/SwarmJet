@@ -233,6 +233,17 @@ export class ProjectStore {
       if (generation !== this.generation || this.stopped) return;
       const queued = this.pending ?? [];
       this.observedPRs.clear();
+      for (const status of statuses) {
+        const pr = snapshot.prs.find((pr) => pr.number === status.prNumber)!;
+        this.observedPRs.set(pr.number, {
+          hiveId: this.hiveId,
+          number: pr.number,
+          headSha: pr.headSha,
+          state: pr.state,
+          ready: pr.ready,
+          merged: pr.merged,
+        });
+      }
       this.pending = undefined;
       this.publish({
         snapshot,

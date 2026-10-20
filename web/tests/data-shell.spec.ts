@@ -520,16 +520,12 @@ test("resnapshot calibrates observed PRs without the stale list cache, including
     headSha: "head-2",
     ready: true,
   });
-  mock.push("swarmjet", {
-    type: "pr",
-    data: {
-      hiveId: "swarmjet",
-      number: 1,
-      headSha: head,
-      state: "open",
-      ready,
-      merged: false,
-    },
+  // A second resync within the cache TTL still calibrates the known PR.
+  mock.ready("swarmjet");
+  await flush();
+  expect(store.getSnapshot().snapshot?.prs[0]).toMatchObject({
+    headSha: "head-2",
+    ready: true,
   });
   head = "head-3";
   ready = false;
