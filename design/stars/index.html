@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SwarmJet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Noto+Serif+SC:wght@300;400&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#E6E5DF;--ink:#1B2233;--ink2:rgba(27,34,51,.58);--ink3:rgba(27,34,51,.30);--hair:rgba(27,34,51,.12);--accent:#94701F;--veil:rgba(230,229,223,.95);
+  --serif:"IM Fell English","Noto Serif SC",serif;--mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --paper:#0A1020;--ink:#DCE3EF;--ink2:rgba(220,227,239,.56);--ink3:rgba(220,227,239,.27);--hair:rgba(220,227,239,.09);--accent:#D7B35E;--veil:rgba(10,16,32,.95);
+}}
+:root[data-theme=dark]{--paper:#0A1020;--ink:#DCE3EF;--ink2:rgba(220,227,239,.56);--ink3:rgba(220,227,239,.27);--hair:rgba(220,227,239,.09);--accent:#D7B35E;--veil:rgba(10,16,32,.95);}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:var(--paper);color:var(--ink);font-family:var(--serif);-webkit-font-smoothing:antialiased}
+canvas{position:fixed;inset:0;display:block}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input{font:inherit;color:inherit;background:none;border:0;outline:none}
+
+#mark{position:fixed;left:60px;top:54px;display:flex;align-items:baseline;gap:18px}
+#mark b{font-weight:400;font-style:italic;font-size:21px;color:var(--ink)}
+#crumbs{font-style:italic;font-size:15px;color:var(--ink3)}
+#crumbs a{cursor:pointer;color:inherit;text-decoration:none}
+#crumbs a:hover,#crumbs a.on{color:var(--ink2)}
+#crumbs i{margin:0 8px;font-style:normal}
+
+#time{position:fixed;right:60px;top:52px;text-align:right;pointer-events:none}
+#time .s{font-style:italic;font-size:16px;color:var(--ink3);font-variant-numeric:oldstyle-nums}
+#time .b{font-weight:300;font-size:88px;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums;opacity:0;transition:opacity .8s;margin-top:6px}
+#time.on .b{opacity:1}
+
+#cartouche{position:fixed;left:60px;bottom:58px;pointer-events:none}
+#cartouche h1{font-weight:300;font-style:italic;font-size:30px;letter-spacing:.005em;transition:opacity .5s}
+#cartouche p{font-size:16px;font-style:italic;color:var(--ink2);margin-top:8px;transition:opacity .5s}
+
+#observer{position:fixed;left:50%;bottom:88px;transform:translateX(-50%);width:34px;height:34px;cursor:pointer;display:grid;place-items:center}
+#observer svg{width:18px;height:18px;overflow:visible}
+#observer.wait::after{content:"";position:absolute;inset:0;border-radius:50%;border:1px solid var(--accent);animation:ring 2.6s ease-out infinite}
+@keyframes ring{0%{transform:scale(.5);opacity:1}100%{transform:scale(1.9);opacity:0}}
+
+#say{position:fixed;left:50%;bottom:46px;transform:translateX(-50%);width:300px;text-align:center;font-style:italic;font-size:16px;padding:4px 0;border-bottom:1px solid var(--hair);transition:width .5s cubic-bezier(.2,.8,.2,1),border-color .3s}
+#say:focus{width:460px;border-color:var(--ink3)}
+#say::placeholder{color:var(--ink3)}
+
+#grid{position:fixed;right:142px;bottom:50px;width:30px;height:30px;color:var(--ink3);display:grid;place-items:center}
+#grid:hover,#grid.on{color:var(--ink)}
+#grid svg{width:18px;height:18px}
+#theme{position:fixed;right:100px;bottom:50px;width:30px;height:30px;color:var(--ink3);display:grid;place-items:center}
+#theme:hover{color:var(--ink)}
+#theme svg{width:18px;height:18px}
+#exposure{position:fixed;right:58px;bottom:50px;width:30px;height:30px;color:var(--ink3);display:grid;place-items:center}
+#exposure:hover{color:var(--ink)}
+#exposure svg{width:20px;height:20px}
+
+button:focus-visible,input:focus-visible{outline:1px solid var(--ink2);outline-offset:5px}
+@media (max-width:720px){#mark{left:30px;top:30px}#time{right:30px;top:30px}#time .b{font-size:56px}#cartouche{left:30px;bottom:120px}#cartouche h1{font-size:24px}#say{width:220px}#say:focus{width:calc(100vw - 60px)}#exposure{right:28px}#theme{right:66px}#grid{right:104px}#lens{width:100%;padding:90px 30px 40px}#hint{display:none}}
+@media (prefers-reduced-motion:reduce){#observer.wait::after{animation:none;opacity:.8;transform:scale(1.3)}}
+#cartouche{pointer-events:auto;cursor:pointer}
+#cartouche:hover h1{color:var(--ink2)}
+#mark b{cursor:pointer}
+.sheet-x{position:absolute;top:44px;right:42px;font-size:22px;color:var(--ink3)}
+.sheet-x:hover{color:var(--ink)}
+#almanac{position:fixed;top:0;left:0;bottom:0;width:420px;background:var(--veil);border-right:1px solid var(--hair);padding:104px 48px 64px;transform:translateX(-100%);transition:transform .7s cubic-bezier(.2,.8,.2,1);z-index:6;overflow-y:auto;scrollbar-width:none}
+#almanac.open{transform:none}
+#almanac h2{font-weight:400;font-style:italic;font-size:34px}
+#almanac .lead{font-size:17px;color:var(--ink2);margin-top:8px;line-height:1.6}
+#almanac h3{font-weight:400;font-style:italic;font-size:20px;margin-top:44px;padding-bottom:8px;border-bottom:1px solid var(--hair)}
+#almanac .mini{display:block;width:100%;height:96px;margin-top:18px}
+#almanac .mini ellipse{fill:none;stroke:var(--ink3)}#almanac .mini circle{fill:var(--ink)}#almanac .mini text{fill:var(--ink2);font:italic 13px var(--serif)}
+#almanac .rules p{font-size:16px;line-height:1.6;color:var(--ink2);margin-top:10px}
+#almanac .files{font-family:var(--mono);font-size:12px;line-height:2;color:var(--ink3);margin-top:16px}
+#almanac .vers{margin-top:16px;font-size:16px;color:var(--ink2);line-height:1.7}
+#almanac .vers a{cursor:pointer;color:var(--ink3);margin-right:14px;font-style:italic;text-decoration:none}
+#almanac .vers a:hover{color:var(--ink)}
+.line{display:flex;justify-content:space-between;align-items:center;margin-top:16px;font-size:16px;color:var(--ink2)}
+.line button{font-style:italic;font-size:16px;color:var(--ink2);border-bottom:1px solid var(--hair)}
+.line button:hover{color:var(--ink)}
+.slots{display:flex;gap:7px;align-items:center}
+.slot{width:11px;height:11px;border-radius:50%;border:1px solid var(--ink2)}.slot.f{background:var(--ink);border-color:var(--ink)}
+.step{width:22px;height:22px;color:var(--ink3);font-size:18px;line-height:1}.step:hover{color:var(--ink)}
+.spark{display:block;width:100%;height:44px;margin-top:14px}.spark path{fill:none;stroke:var(--ink2);stroke-width:1}.spark circle{fill:var(--ink)}
+.mute{font-size:16px;color:var(--ink3);margin-top:14px;line-height:1.6}
+#appendix{position:fixed;left:26px;right:26px;bottom:26px;height:min(68vh,640px);background:var(--paper);border:1px solid var(--hair);outline:1px solid var(--hair);outline-offset:-7px;transform:translateY(calc(100% + 40px));transition:transform .75s cubic-bezier(.2,.8,.2,1);z-index:9;display:grid;grid-template-columns:230px minmax(0,1fr);padding:64px 72px 48px}
+#appendix.open{transform:none}
+#ap-nav h2{font-weight:400;font-style:italic;font-size:30px;margin-bottom:26px}
+#ap-nav button{display:block;font-style:italic;font-size:19px;color:var(--ink3);padding:7px 0;text-align:left}
+#ap-nav button:hover{color:var(--ink2)}#ap-nav button.on{color:var(--ink)}
+#ap-body{max-width:640px;overflow-y:auto;scrollbar-width:none;padding-right:8px}
+#ap-body h3{font-weight:400;font-style:italic;font-size:30px}
+#ap-body>p{font-size:17px;line-height:1.7;color:var(--ink2);margin-top:12px;max-width:34em}
+#ap-body .row{display:flex;justify-content:space-between;align-items:baseline;gap:24px;padding:16px 0;border-bottom:1px solid var(--hair);font-size:17px}
+#ap-body .row:first-of-type{margin-top:26px;border-top:1px solid var(--hair)}
+#ap-body .row span{color:var(--ink2);font-style:italic;text-align:right}
+#ap-body .acts{display:flex;gap:22px;margin-top:26px;font-style:italic;font-size:17px}
+#ap-body .acts button{color:var(--ink2);border-bottom:1px solid var(--hair)}
+#ap-body .acts .go{color:var(--accent);border-color:var(--accent)}
+.bar{height:1px;background:var(--ink2);margin-top:8px}
+#tl{position:fixed;left:50%;bottom:38px;transform:translateX(-50%);width:min(640px,calc(100vw - 140px));display:flex;align-items:center;gap:20px;opacity:0;pointer-events:none;transition:opacity .4s}
+#tl.open{opacity:1;pointer-events:auto}
+#tl button{font-style:italic;font-size:16px;color:var(--ink2);white-space:nowrap}
+#tl button:hover{color:var(--ink)}
+#tl-track{position:relative;flex:1;height:34px;cursor:ew-resize;touch-action:none}
+#tl-track::before{content:"";position:absolute;left:0;right:0;top:12px;border-top:1px solid var(--ink3)}
+#tl-handle{position:absolute;top:4px;width:1px;height:17px;background:var(--ink)}
+#tl-handle::after{content:"";position:absolute;left:-4.5px;top:-5px;width:9px;height:9px;border-radius:50%;border:1px solid var(--ink);background:var(--paper)}
+#tl-ticks span{position:absolute;top:20px;transform:translateX(-50%);font-style:italic;font-size:13px;color:var(--ink3);white-space:nowrap}
+body.timing #say{opacity:0;pointer-events:none}
+#say-hint{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);font-style:italic;font-size:14px;color:var(--ink3);opacity:0;transition:opacity .3s;pointer-events:none}
+#say-hint.on{opacity:1}
+#catbtn{position:fixed;right:184px;bottom:50px;width:30px;height:30px;color:var(--ink3);display:grid;place-items:center}
+#catbtn:hover{color:var(--ink)}#catbtn svg{width:18px;height:18px}
+#catalogue{position:fixed;inset:0;background:var(--veil);z-index:8;opacity:0;pointer-events:none;transition:opacity .45s;overflow-y:auto;scrollbar-width:none}
+#catalogue.open{opacity:1;pointer-events:auto}
+#catalogue .inner{max-width:860px;margin:120px auto 100px;padding:0 48px}
+#catalogue h2{font-weight:400;font-style:italic;font-size:40px}
+#cat-q{display:block;width:100%;margin-top:26px;font-style:italic;font-size:20px;padding:6px 0;border-bottom:1px solid var(--ink3)}
+#cat-q::placeholder{color:var(--ink3)}
+#cat-t{width:100%;border-collapse:collapse;margin-top:18px}
+#cat-t td{padding:12px 8px;border-bottom:1px solid var(--hair);font-size:17px;vertical-align:middle}
+#cat-t tr.item{cursor:pointer}#cat-t tr.item:hover td{color:var(--ink)}#cat-t tr.item:hover .g{color:var(--ink)}
+#cat-t .g{width:40px;color:var(--ink2)}#cat-t .g svg{width:18px;height:18px;display:block}
+#cat-t .s{color:var(--ink2);font-style:italic}
+#cat-t .c{text-align:right;color:var(--ink3);font-variant-numeric:oldstyle-nums;width:90px}
+#cat-t tr.grp td{border:0;padding:40px 8px 8px;font-size:24px;font-style:italic}
+#cat-t tr.grp small{font-size:15px;color:var(--ink3);margin-left:14px}
+
+#hint{position:fixed;left:50%;top:54px;transform:translateX(-50%);font-style:italic;font-size:15px;color:var(--ink3);transition:opacity 1.6s;pointer-events:none}
+
+.note{position:fixed;background:var(--veil);border:1px solid var(--hair);outline:1px solid var(--hair);outline-offset:3px;padding:16px 20px 14px;min-width:180px;max-width:260px;opacity:0;pointer-events:none;transition:opacity .3s;z-index:5}
+.note.open{opacity:1;pointer-events:auto}
+.note h4{font-weight:400;font-style:italic;font-size:19px}
+.note p{font-size:15px;line-height:1.6;color:var(--ink2);margin-top:6px}
+.note .acts{display:flex;gap:18px;margin-top:12px;font-style:italic;font-size:16px}
+.note .acts button{color:var(--ink2)}
+.note .acts button:hover{color:var(--ink)}
+.note .acts .go{color:var(--accent);border-bottom:1px solid var(--accent)}
+
+#decide{left:50%;bottom:140px;transform:translate(-50%,8px);transition:opacity .4s,transform .4s;text-align:center;padding:22px 30px 18px}
+#decide.open{transform:translate(-50%,0)}
+#decide .acts{justify-content:center}
+
+#lens{position:fixed;top:0;right:0;bottom:0;width:400px;background:var(--veil);border-left:1px solid var(--hair);padding:110px 48px 56px;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .7s cubic-bezier(.2,.8,.2,1);z-index:6}
+#lens.open{transform:none}
+#lens .x{position:absolute;top:48px;right:44px;font-size:22px;font-weight:300;color:var(--ink3)}
+#lens .x:hover{color:var(--ink)}
+#lens .k{font-style:italic;font-size:16px;color:var(--ink3)}
+#lens h2{font-weight:300;font-style:italic;font-size:34px;margin-top:10px}
+#lens .now{font-size:18px;line-height:1.6;margin-top:22px;color:var(--ink2)}
+#log{margin-top:40px;flex:1;min-height:0;overflow:hidden;font-family:var(--mono);font-size:11.5px;line-height:2.25;color:var(--ink2);-webkit-mask-image:linear-gradient(#000 55%,transparent)}
+#log div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:in .5s ease}
+#log b{display:inline-block;width:58px;font-weight:400;color:var(--ink3)}
+#log .me{color:var(--accent)}
+@keyframes in{from{opacity:0;transform:translateY(-5px)}}
+#diff{font-family:var(--mono);font-size:11.5px;line-height:2;margin-top:20px;padding-top:18px;border-top:1px solid var(--hair);color:var(--ink2)}
+#diff .a{color:var(--ink)}#diff .d{color:var(--ink3);text-decoration:line-through}
+#lens input{margin-top:26px;font-style:italic;font-size:16px;border-bottom:1px solid var(--hair);padding:4px 0}
+#lens input::placeholder{color:var(--ink3)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="mark"><b>SwarmJet</b><nav id="crumbs"></nav></div>
+<div id="time"><div class="s" id="clock"></div><div class="b" id="big">22:00</div></div>
+<div id="hint">把深空的信号拖向恒星</div>
+<div id="cartouche"><h1 id="c-title"></h1><p id="c-line"></p></div>
+
+<button id="observer" aria-label="观测者"><svg viewBox="-10 -10 20 20"><circle r="7" fill="none" stroke="currentColor" stroke-width="1"/><circle r="1.6" fill="currentColor"/></svg></button>
+<input id="say" placeholder="向恒星发信" autocomplete="off">
+<button id="grid" title="经纬线（G）" aria-label="切换经纬线"><svg viewBox="-12 -12 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle r="9"/><ellipse rx="9" ry="3.6"/><ellipse rx="3.6" ry="9"/></svg></button>
+<button id="theme" title="切换深浅色（D）" aria-label="切换深浅色"><svg viewBox="-12 -12 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle r="8"/><path d="M0-8A8 8 0 0 1 0 8Z" fill="currentColor"/></svg></button>
+<button id="exposure" title="长曝光" aria-label="长曝光"><svg viewBox="-12 -12 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle r="10"/><path d="M-3.5-9.4 4.8 4.9M8.4-4.6-5.4 2M5.1 8.6-1.2-6M-4.8 8.9 3.6-2.6M-9.9.6 4.3 1.6M-.6-10 -3.3 5.6"/></svg></button>
+
+<div class="note" id="note"></div>
+<div class="note" id="decide"><h4>PR #8</h4><p>另一位 Agent 验证通过，八项测试全部通过。</p><div class="acts"><button id="later">稍后</button><button class="go" id="merge">合并</button></div></div>
+
+<aside id="lens">
+  <button class="x" id="lens-x" aria-label="关闭">×</button>
+  <div class="k" id="l-k"></div>
+  <h2 id="l-title"></h2>
+  <div class="now" id="l-now"></div>
+  <div id="log"></div>
+  <div id="diff"></div>
+  <input id="l-say" placeholder="插一句话">
+</aside>
+
+<aside id="almanac" aria-label="星系志"><button class="sheet-x" id="al-x" aria-label="关闭">×</button>
+  <h2 id="al-title"></h2><p class="lead" id="al-lead"></p>
+  <h3>方法论</h3><div id="al-method"></div>
+  <h3>设置</h3><div id="al-settings"></div>
+  <h3>燃料</h3><div id="al-fuel"></div>
+  <h3>记忆</h3><p class="mute">尚未形成。经验积累之后，会在星系一角慢慢聚成星云。</p>
+</aside>
+<section id="appendix" aria-label="附录"><button class="sheet-x" id="ap-x" aria-label="关闭">×</button><nav id="ap-nav"><h2>附录</h2></nav><div id="ap-body"></div></section>
+<div id="tl"><button id="tl-play" title="把这段时间曝光成星轨">曝光</button><div id="tl-track"><b id="tl-handle"></b><div id="tl-ticks"></div></div><button id="tl-now">回到现在</button></div>
+<div id="say-hint"></div>
+<button id="catbtn" title="星表（C）" aria-label="星表"><svg viewBox="-12 -12 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M-8-9h16v18h-16z M-4-4h8 M-4 0h8 M-4 4h5"/></svg></button>
+<div id="catalogue" aria-label="星表"><button class="sheet-x" id="cat-x" aria-label="关闭">×</button><div class="inner"><h2>星表</h2><input id="cat-q" placeholder="查找星系、彗星或 PR" autocomplete="off"><table id="cat-t"></table></div></div>
+
+<script>
+const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),$=id=>document.getElementById(id);
+const exp=document.createElement('canvas'),ex=exp.getContext('2d');
+let W=0,H=0,DPR=1;
+function resize(){DPR=devicePixelRatio||1;W=innerWidth;H=innerHeight;for(const c of[cv,exp]){c.width=W*DPR;c.height=H*DPR}cv.style.width=W+'px';cv.style.height=H+'px';ctx.setTransform(DPR,0,0,DPR,0,0);ex.setTransform(DPR,0,0,DPR,0,0)}
+resize();
+const P={};
+function palette(){const s=getComputedStyle(document.documentElement);for(const k of['paper','ink','ink2','ink3','hair','accent'])P[k]=s.getPropertyValue('--'+k).trim();P.dark=typeof isDark==='function'?isDark():matchMedia('(prefers-color-scheme: dark)').matches;makeGrain()}
+let grain=null;
+function makeGrain(){const g=document.createElement('canvas');g.width=g.height=180;const c=g.getContext('2d'),d=c.createImageData(180,180);for(let i=0;i<d.data.length;i+=4){const v=Math.random()*255;d.data[i]=d.data[i+1]=d.data[i+2]=v;d.data[i+3]=Math.random()<.5?255:0}c.putImageData(d,0,0);grain=ctx.createPattern(g,'repeat')}
+try{const t=localStorage.getItem('sj-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}
+palette();matchMedia('(prefers-color-scheme: dark)').addEventListener('change',palette);
+function isDark(){const t=document.documentElement.dataset.theme;return t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches}
+function toggleTheme(){const t=isDark()?'light':'dark';document.documentElement.dataset.theme=t;try{localStorage.setItem('sj-theme',t)}catch(e){}palette()}
+const SERIF='"IM Fell English","Noto Serif SC",serif',MONO='"JetBrains Mono",monospace';
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),ease=t=>1-Math.pow(1-t,3),TAU=Math.PI*2;
+let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+
+const TILT=-.24,AS=.55,R_PR=212,R_HELIO=300,R_SIG=352;
+function ell(sx,sy,a,r){const c=Math.cos(a)*r,d=Math.sin(a)*r*AS;return{x:sx+c*Math.cos(TILT)-d*Math.sin(TILT),y:sy+c*Math.sin(TILT)+d*Math.cos(TILT)}}
+
+const SYS=[
+  {id:'docs',name:'docs-site',x:-940,y:170,on:false,method:'minimal'},
+  {id:'tfm',name:'test-for-myself',x:0,y:0,on:true,method:'pstack'},
+  {id:'api',name:'api-server',x:960,y:-180,on:true,method:'pstack'}];
+const S=Object.fromEntries(SYS.map(s=>[s.id,s]));
+let B=[],pulses=[],trails=[],flares=[];
+const add=b=>(b.alpha??=1,b.born??=1,b.dx=0,b.dy=0,B.push(b),b),get=id=>B.find(b=>b.id===id);
+const comet=(s,id,label,r,o={})=>add(Object.assign({id,sys:s,kind:'comet',label,r,a:rnd()*TAU,speed:.0024*(140/r)*(.85+rnd()*.3),state:'busy',script:'worker'},o));
+const pr=(s,id,label,ang,o={})=>add(Object.assign({id,sys:s,kind:'pr',label,ang,state:'open',grow:1},o));
+const moon=(s,id,prId,o={})=>add(Object.assign({id,sys:s,kind:'moon',label:'verifier',pr:prId,a:rnd()*TAU,script:'verifier'},o));
+const signal=(s,id,label,ang,o={})=>add(Object.assign({id,sys:s,kind:'signal',label,ang,claimed:true},o));
+const queue=(s,id)=>add({id,sys:s,kind:'queue',label:'等待入轨'});
+
+const T=S.tfm,A=S.api,D=S.docs;
+signal(T,'t:i12','Issue #12',3.55);signal(T,'t:i13','Issue #13',4.05);signal(T,'t:ci','CI',4.75,{ci:true});
+signal(T,'t:i14','Issue #14',2.55,{claimed:false});
+pr(T,'t:pr9','PR #9',.35);pr(T,'t:pr8','PR #8',1.35,{state:'ready'});
+comet(T,'t:w12','worker #12',122,{target:'t:i12',now:'在跑单元测试，第二次迭代',diff:'wc'});
+comet(T,'t:w13','worker #13',142,{target:'t:i13',now:'在读代码，准备改 --lines 的边界',diff:'cli'});
+comet(T,'t:w8','worker #8',132,{target:'t:pr8',state:'parked',now:'PR #8 已就绪，等你决定',diff:'wc'});
+comet(T,'t:w3','worker #3',156,{state:'parked',stale:true,now:'PR 早已合并，它仍停在轨道上，占着一个名额'});
+moon(T,'t:v9','t:pr9',{now:'在干净检出上复现 PR #9'});
+queue(T,'t:q1');
+
+[3.3,3.7,4.1,4.5].forEach((g,i)=>signal(A,'a:s'+i,'Issue #'+(41+i),g));signal(A,'a:ci','CI',5.0,{ci:true});
+pr(A,'a:p0','PR #120',.2);pr(A,'a:p1','PR #121',1.1);pr(A,'a:p2','PR #122',2.0);
+[118,130,142,154,166].forEach((r,i)=>comet(A,'a:c'+i,'worker',r,{target:'a:s'+(i%4),now:'实现中',diff:'go'}));
+moon(A,'a:m0','a:p0',{now:'跑集成测试'});moon(A,'a:m1','a:p1',{now:'读 diff'});
+queue(A,'a:q0');queue(A,'a:q1');queue(A,'a:q2');
+
+signal(D,'d:s0','Issue #2',3.9,{claimed:false});signal(D,'d:s1','Issue #3',4.4,{claimed:false});
+comet(D,'d:c0','worker #2',128,{state:'failed',now:'模型返回 401，连续三次失败'});
+comet(D,'d:c1','worker #5',150,{state:'parked',now:'等待模型恢复'});
+
+const stars=[];for(let i=0;i<520;i++)stars.push({x:(rnd()-.5)*5200,y:(rnd()-.5)*3400,r:rnd()<.9?.4+rnd()*.8:1.2+rnd()*.8,a:.25+rnd()*.6,cross:rnd()<.06});
+const needs=[{sys:'tfm',pr:'t:pr8'}];
+const you={kind:'you',x:0,y:0,alpha:1,born:1};
+
+const cam={x:0,y:0,s:.3,tx:0,ty:0,ts:.3};
+let showGrid=true;try{showGrid=localStorage.getItem('sj-grid')!=='off'}catch(e){}
+let mode='cosmos',focus=null,sel=null,hover=null,speed=1,frame=0,dz=0,replay=null,expAlpha=0;
+const toS=(x,y)=>({x:(x-cam.x)*cam.s+W/2,y:(y-cam.y)*cam.s+H/2}),toW=(x,y)=>({x:(x-W/2)/cam.s+cam.x,y:(y-H/2)/cam.s+cam.y});
+
+function place(){
+  const qi={};
+  for(const b of B){const s=b.sys;
+    if(b.kind==='comet'){if(b.state==='busy'||b.state==='done')b.a+=b.speed*speed;let p=ell(s.x,s.y,b.a,b.r);
+      if(b.born<1){b.born=Math.min(1,b.born+.01*speed);const e=ease(b.born);p={x:s.x+(p.x-s.x)*e,y:s.y+(p.y-s.y)*e}}b.x=p.x;b.y=p.y}
+    else if(b.kind==='pr'){if(b.state==='merging'){b.mt+=.0075*speed;b.ang+=.045*speed;const p=ell(s.x,s.y,b.ang,R_PR*(1-ease(clamp(b.mt,0,1))));b.x=p.x;b.y=p.y;
+        if(b.mt>=1){b.dead=true;flares.push({sys:s,t:0});onMerged(b)}}
+      else{b.ang+=.00035*speed;const p=ell(s.x,s.y,b.ang,R_PR);b.x=p.x;b.y=p.y;if(b.grow<1)b.grow=Math.min(1,b.grow+.015*speed)}}
+    else if(b.kind==='moon'){const h=get(b.pr);if(!h){b.dead=true;continue}b.a+=.03*speed;b.x=h.x+Math.cos(b.a)*15;b.y=h.y+Math.sin(b.a)*15*.6}
+    else if(b.kind==='signal'){const p=ell(s.x,s.y,b.ang,R_SIG);b.x=p.x+b.dx;b.y=p.y+b.dy;if(drag!==b){b.dx*=.86;b.dy*=.86}}
+    else if(b.kind==='queue'){const i=qi[s.id]=(qi[s.id]??-1)+1;const p=ell(s.x,s.y,-1.75-i*.09,R_HELIO);b.x=p.x;b.y=p.y}}
+  B=B.filter(b=>!b.dead);
+  const r=$('observer').getBoundingClientRect(),w=toW(r.left+r.width/2,r.top+r.height/2);you.x=w.x;you.y=w.y;
+}
+
+function routes(s){const R=[];if(!s.on)return R;const st=s.star;
+  for(const b of B){if(b.sys!==s||b.born<1)continue;
+    if(b.kind==='signal'&&b.claimed)R.push([b,st]);
+    if(b.kind==='comet'&&b.state==='busy'){R.push([st,b],[b,st]);const t=b.target&&get(b.target);if(t)R.push([b,t])}
+    if(b.kind==='moon'){R.push([b,st]);const h=get(b.pr);if(h)R.push([h,b])}}
+  return R}
+SYS.forEach(s=>s.star={kind:'star',sys:s,x:s.x,y:s.y,alpha:1,born:1,label:s.on?'Queen':'Queen（已熄灭）'});
+function emit(a,b,me=false,v=1){pulses.push({a,b,me,p:0,v:(3.2+rnd()*1.6)*v})}
+
+function line(x1,y1,x2,y2,w,c,al){ctx.globalAlpha=al;ctx.strokeStyle=c;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()}
+function label(t,x,y,size=14,c=P.ink2,al=1,align='center',italic=true){ctx.globalAlpha=al;ctx.fillStyle=c;ctx.font=`${italic?'italic ':''}400 ${size}px ${SERIF}`;ctx.textAlign=align;ctx.fillText(t,x,y)}
+
+function drawFrame(){const m=26,i=6;ctx.globalAlpha=1;ctx.strokeStyle=P.hair;ctx.lineWidth=1;ctx.strokeRect(m+.5,m+.5,W-2*m-1,H-2*m-1);ctx.strokeRect(m+i+.5,m+i+.5,W-2*(m+i)-1,H-2*(m+i)-1);
+  const o=m+i,step=22;ctx.beginPath();
+  for(let x=o+step,k=1;x<W-o;x+=step,k++){const L=k%5?3:7;ctx.moveTo(x+.5,o);ctx.lineTo(x+.5,o+L);ctx.moveTo(x+.5,H-o);ctx.lineTo(x+.5,H-o-L)}
+  for(let y=o+step,k=1;y<H-o;y+=step,k++){const L=k%5?3:7;ctx.moveTo(o,y+.5);ctx.lineTo(o+L,y+.5);ctx.moveTo(W-o,y+.5);ctx.lineTo(W-o-L,y+.5)}
+  ctx.stroke();
+  if(false){ctx.fillStyle=P.ink3;ctx.font=`300 9px ${MONO}`;ctx.textAlign='center';const off=((cam.x*cam.s)%(step*5)+step*5)%(step*5);
+  for(let x=o+step*5,k=1;x<W-o-20;x+=step*5,k++){ctx.globalAlpha=.8;ctx.fillText(String((k*15+Math.round(cam.x/40))%360).padStart(3,'0'),x,o-9)}}}
+
+function draw(){
+  frame++;
+  if(!(cam.s>0)||!isFinite(cam.s))cam.s=cam.ts>0?cam.ts:.3;
+  cam.x+=(cam.tx-cam.x)*.06;cam.y+=(cam.ty-cam.y)*.06;cam.s=Math.exp(Math.log(cam.s)+(Math.log(cam.ts)-Math.log(cam.s))*.06);
+  if(sel&&mode==='lens'){cam.tx=sel.x+(200-(almOpen?210:0))/cam.ts;cam.ty=sel.y}
+  dz+=((mode==='cosmos'?0:1)-dz)*.05;
+  place();
+  const s=cam.s;
+  ctx.globalAlpha=1;ctx.fillStyle=P.paper;ctx.fillRect(0,0,W,H);
+
+  for(const st of stars){const x=(st.x-cam.x*.35)*Math.max(.35,s*.55)+W/2,y=(st.y-cam.y*.35)*Math.max(.35,s*.55)+H/2;if(x<0||y<0||x>W||y>H)continue;
+    ctx.globalAlpha=st.a*(P.dark?.75:.5);ctx.fillStyle=P.ink;if(st.cross){ctx.strokeStyle=P.ink;ctx.lineWidth=.6;ctx.beginPath();ctx.moveTo(x-3,y);ctx.lineTo(x+3,y);ctx.moveTo(x,y-3);ctx.lineTo(x,y+3);ctx.stroke()}else{ctx.beginPath();ctx.arc(x,y,st.r,0,TAU);ctx.fill()}}
+
+  const gA=showGrid?(1-dz)*.9:0;if(gA>.02){const c=toS(0,0);ctx.strokeStyle=P.hair;ctx.lineWidth=1;ctx.globalAlpha=gA;for(let r=420;r<2600;r+=420){ctx.beginPath();ctx.ellipse(c.x,c.y,r*s,r*s*.62,TILT*.5,0,TAU);ctx.stroke()}
+    for(let k=0;k<12;k++){const a=k*TAU/12;ctx.beginPath();ctx.moveTo(c.x+Math.cos(a)*420*s,c.y+Math.sin(a)*420*s*.62);ctx.lineTo(c.x+Math.cos(a)*2600*s,c.y+Math.sin(a)*2600*s*.62);ctx.stroke()}}
+
+  if(pastF<1)drawPast();
+  if(expAlpha>0){ctx.globalAlpha=expAlpha;ctx.drawImage(exp,0,0,W,H)}
+
+  for(const sy of SYS){const c=toS(sy.x,sy.y),dim=(mode!=='cosmos'&&sy!==focus)?.12:1;
+    ctx.globalAlpha=.9*dim;ctx.strokeStyle=P.ink3;ctx.lineWidth=.8;ctx.setLineDash([1,5]);ctx.beginPath();ctx.ellipse(c.x,c.y,R_HELIO*s,R_HELIO*AS*s,TILT,0,TAU);ctx.stroke();ctx.setLineDash([]);
+    ctx.globalAlpha=.55*dim;ctx.strokeStyle=P.hair;ctx.lineWidth=1;for(const r of[130,R_PR]){ctx.beginPath();ctx.ellipse(c.x,c.y,r*s,r*AS*s,TILT,0,TAU);ctx.stroke()}
+    sy.dim=dim}
+
+  for(const t of trails){const c=toS(t.sys.x,t.sys.y);ctx.globalAlpha=t.al*(t.sys.dim??1);ctx.strokeStyle=P.ink2;ctx.lineWidth=.9;ctx.setLineDash([1,3]);ctx.beginPath();ctx.ellipse(c.x,c.y,t.r*s,t.r*AS*s,TILT,t.a0,t.a1);ctx.stroke();ctx.setLineDash([]);t.al=Math.max(.16,t.al-.0008)}
+
+  for(const sy of SYS){const R=routes(sy);const rate=(sy.id==='api'?.075:.04)*speed;if(R.length&&rnd()<rate){const r=R[Math.floor(rnd()*R.length)];emit(r[0],r[1])}}
+  pulses=pulses.filter(p=>p.p<1&&!p.a.dead&&!p.b.dead);
+  for(const p of pulses){const len=Math.hypot(p.b.x-p.a.x,p.b.y-p.a.y)||1;p.p+=p.v*speed/len;const hx=p.a.x+(p.b.x-p.a.x)*p.p,hy=p.a.y+(p.b.y-p.a.y)*p.p,h=toS(hx,hy),ux=(p.b.x-p.a.x)/len,uy=(p.b.y-p.a.y)/len,L=p.me?16:11;
+    const dim=(p.a.sys&&p.a.sys.dim)??1;line(h.x,h.y,h.x-ux*L,h.y-uy*L,p.me?1.4:1,p.me?P.accent:P.ink,(p.me?1:.75)*dim)}
+
+  for(const f of flares){const c=toS(f.sys.x,f.sys.y);f.t+=.012*speed;ctx.globalAlpha=(1-f.t)*.8;ctx.strokeStyle=P.ink;ctx.lineWidth=.8;ctx.beginPath();ctx.arc(c.x,c.y,(14+f.t*90)*s,0,TAU);ctx.stroke()}flares=flares.filter(f=>f.t<1);
+
+  const behind=[],front=[];for(const b of B){(b.y<b.sys.y&&b.kind!=='signal'?behind:front).push(b)}
+  behind.forEach(b=>drawBody(b,.7));SYS.forEach(drawStar);front.forEach(b=>drawBody(b,1));
+
+  if(dz<.98)for(const sy of SYS){const c=toS(sy.x,sy.y),y=c.y+R_HELIO*AS*s+30,a=1-dz;label(sy.name,c.x,y,18,P.ink,a);
+    if(needs.some(n=>n.sys===sy.id)){ctx.globalAlpha=a;ctx.fillStyle=P.accent;ctx.beginPath();ctx.arc(c.x+ctx.measureText(sy.name).width/2+10,y-5,2.5,0,TAU);ctx.fill()}}
+
+  if(hover&&hover.kind!=='star'||hover&&mode!=='cosmos'){const h=hover,p=toS(h.x,h.y);if(h!==sel)label(h.label,p.x,p.y-(h.kind==='star'?30:16),14,P.ink,1)}
+
+  if(P.dark===false&&grain){ctx.globalAlpha=.045;ctx.fillStyle=grain;ctx.fillRect(0,0,W,H)}else if(grain){ctx.globalAlpha=.025;ctx.fillStyle=grain;ctx.fillRect(0,0,W,H)}
+  drawFrame();ctx.globalAlpha=1;
+
+  if(replay)recordExposure();
+  if(noteFor)placeNote();
+  requestAnimationFrame(draw);
+}
+
+function drawStar(sy){const c=toS(sy.x,sy.y),s=cam.s,r=Math.max(9*s,3.5),d=sy.dim;ctx.globalAlpha=d;
+  if(sy.on){ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(c.x,c.y,r,0,TAU);ctx.fill();ctx.strokeStyle=P.ink;ctx.lineWidth=.6;
+    for(const k of[1.8,2.6,3.6]){ctx.globalAlpha=d*(.55/k*1.6);ctx.beginPath();ctx.arc(c.x,c.y,r*k,0,TAU);ctx.stroke()}
+    ctx.globalAlpha=d*.5;const rot=RM?0:frame*.0015;ctx.beginPath();for(let k=0;k<24;k++){const a=rot+k*TAU/24,i=r*4.3,o=r*(k%2?4.9:5.6);ctx.moveTo(c.x+Math.cos(a)*i,c.y+Math.sin(a)*i);ctx.lineTo(c.x+Math.cos(a)*o,c.y+Math.sin(a)*o)}ctx.stroke()}
+  else{ctx.strokeStyle=P.ink3;ctx.lineWidth=1;ctx.beginPath();ctx.arc(c.x,c.y,r,0,TAU);ctx.stroke();ctx.beginPath();ctx.moveTo(c.x-r*.6,c.y-r*.6);ctx.lineTo(c.x+r*.6,c.y+r*.6);ctx.stroke()}
+  if(sel===sy.star){ctx.globalAlpha=d;ctx.strokeStyle=P.ink2;ctx.lineWidth=.8;ctx.beginPath();ctx.arc(c.x,c.y,r*6.6,0,TAU);ctx.stroke()}}
+
+function drawBody(b,depth){if(b.alpha<=0)return;const p=toS(b.x,b.y),s=cam.s,d=(b.sys.dim??1)*b.alpha*depth;ctx.globalAlpha=d;
+  if(b.kind==='comet'){const st=b.sys,dx=b.x-st.x,dy=b.y-st.y,len=Math.hypot(dx,dy)||1,ux=dx/len,uy=dy/len,hr=Math.max(4*Math.min(s,1.6),2.2);
+    if(b.state==='busy'||b.state==='done'){const L=(b.state==='done'?16:38+(RM?0:Math.sin(frame/9+b.r)*4))*Math.min(Math.max(s,.5),1.8)*b.born;ctx.lineWidth=.6;ctx.strokeStyle=P.ink;
+      for(let k=0;k<7;k++){const o=(k-3)*.055,cx=Math.cos(o),sx=Math.sin(o),vx=ux*cx-uy*sx,vy=ux*sx+uy*cx,l=L*(1-Math.abs(k-3)*.13);ctx.globalAlpha=d*(.55-Math.abs(k-3)*.11);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x+vx*l,p.y+vy*l);ctx.stroke()}
+      ctx.globalAlpha=d;ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(p.x,p.y,hr,0,TAU);ctx.fill();ctx.globalAlpha=d*.35;ctx.strokeStyle=P.ink;ctx.lineWidth=.6;ctx.beginPath();ctx.arc(p.x,p.y,hr+3.5,0,TAU);ctx.stroke()}
+    else if(b.state==='parked'){ctx.strokeStyle=P.ink2;ctx.lineWidth=1;ctx.beginPath();ctx.arc(p.x,p.y,hr,0,TAU);ctx.stroke();ctx.setLineDash([1.5,2.5]);ctx.beginPath();ctx.moveTo(p.x+ux*(hr+2),p.y+uy*(hr+2));ctx.lineTo(p.x+ux*(hr+12),p.y+uy*(hr+12));ctx.stroke();ctx.setLineDash([]);
+      if(b.stale){ctx.globalAlpha=d*.7;ctx.setLineDash([1,2.5]);ctx.beginPath();ctx.arc(p.x,p.y,hr+5,0,TAU);ctx.stroke();ctx.setLineDash([])}}
+    else if(b.state==='failed'){ctx.strokeStyle=P.ink2;ctx.lineWidth=1;const k=hr+1;ctx.beginPath();ctx.moveTo(p.x-k,p.y-k);ctx.lineTo(p.x+k,p.y+k);ctx.moveTo(p.x+k,p.y-k);ctx.lineTo(p.x-k,p.y+k);ctx.stroke();
+      ctx.setLineDash([2,5]);ctx.globalAlpha=d*.5;ctx.beginPath();ctx.moveTo(p.x+ux*6,p.y+uy*6);ctx.lineTo(p.x+ux*34*Math.min(s,1.4),p.y+uy*34*Math.min(s,1.4));ctx.stroke();ctx.setLineDash([])}
+    if(b.state==='done'){b.alpha-=.008*speed;if(b.alpha<=0)b.dead=true}
+    const t=b.target&&get(b.target);if(t&&t.kind==='pr'&&b.state!=='done'){const q=toS(t.x,t.y);ctx.globalAlpha=d*.35;ctx.strokeStyle=P.ink2;ctx.lineWidth=.6;ctx.setLineDash([1,4]);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke();ctx.setLineDash([])}}
+  else if(b.kind==='pr'){const r=Math.max(7*Math.min(s,1.5),3)*b.grow,RT=-.38;ctx.lineWidth=1.1;ctx.strokeStyle=P.ink;
+    ctx.beginPath();ctx.ellipse(p.x,p.y,r*2.15,r*.62,RT,Math.PI,TAU);ctx.stroke();
+    ctx.beginPath();ctx.arc(p.x,p.y,r,0,TAU);ctx.fillStyle=b.state==='merging'?P.ink:P.paper;ctx.fill();ctx.stroke();
+    if(b.state!=='merging'){ctx.globalAlpha=d*.5;ctx.lineWidth=.6;ctx.beginPath();ctx.arc(p.x,p.y,r*.55,-.4,1.9);ctx.stroke();ctx.globalAlpha=d;ctx.lineWidth=1.1}
+    ctx.beginPath();ctx.ellipse(p.x,p.y,r*2.15,r*.62,RT,0,Math.PI);ctx.stroke();
+    if(b.state==='ready'){ctx.strokeStyle=P.accent;ctx.lineWidth=1;ctx.setLineDash([2,3]);ctx.lineDashOffset=-frame*.2;ctx.globalAlpha=d;ctx.beginPath();ctx.arc(p.x,p.y,r+7,0,TAU);ctx.stroke();ctx.setLineDash([]);ctx.lineDashOffset=0}}
+  else if(b.kind==='moon'){const h=get(b.pr);if(h){const q=toS(h.x,h.y);ctx.globalAlpha=d*.6;ctx.strokeStyle=P.ink3;ctx.lineWidth=.7;ctx.setLineDash([1,2]);ctx.beginPath();ctx.ellipse(q.x,q.y,15*s,9*s,0,0,TAU);ctx.stroke();ctx.setLineDash([])}
+    ctx.globalAlpha=d;ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(p.x,p.y,Math.max(2.5*Math.min(s,1.5),1.5),0,TAU);ctx.fill()}
+  else if(b.kind==='signal'){const k=Math.max(5*Math.min(s,1.4),2.8);ctx.strokeStyle=b.claimed?P.ink2:P.ink;ctx.lineWidth=b.claimed?.8:1.1;
+    if(b.ci){ctx.beginPath();ctx.moveTo(p.x,p.y-k);ctx.lineTo(p.x+k,p.y);ctx.lineTo(p.x,p.y+k);ctx.lineTo(p.x-k,p.y);ctx.closePath();ctx.stroke()}
+    else{ctx.beginPath();ctx.moveTo(p.x-k,p.y);ctx.lineTo(p.x+k,p.y);ctx.moveTo(p.x,p.y-k);ctx.lineTo(p.x,p.y+k);ctx.stroke();
+      if(!b.claimed){ctx.globalAlpha=d*(.35+.35*Math.sin(frame/30));ctx.beginPath();ctx.arc(p.x,p.y,k+6,0,TAU);ctx.stroke()}}}
+  else if(b.kind==='queue'){ctx.strokeStyle=P.ink2;ctx.lineWidth=.8;ctx.beginPath();ctx.arc(p.x,p.y,Math.max(3*Math.min(s,1.4),1.8),0,TAU);ctx.stroke()}
+  if(dz>.5&&b.sys===focus&&hover!==b&&sel!==b){const la=(dz-.5)*2*b.alpha;
+    if(b.kind==='pr'||b.kind==='signal')label(b.label,p.x,p.y+(b.kind==='pr'?22:19),12,P.ink3,la);
+    else if(b.kind==='comet'){const st=b.sys,dx=b.x-st.x,dy=b.y-st.y,l=Math.hypot(dx,dy)||1;label(b.label.replace('worker ','').replace('worker','新'),p.x-dx/l*17,p.y-dy/l*17+4,12,P.ink2,la)}
+    else if(b.kind==='moon')label('verifier',p.x,p.y-12,11,P.ink3,la)}
+  if(sel===b){ctx.globalAlpha=1;ctx.strokeStyle=P.ink2;ctx.lineWidth=.8;ctx.beginPath();ctx.arc(p.x,p.y,13,0,TAU);ctx.stroke()}
+  ctx.globalAlpha=1}
+
+function recordExposure(){ex.globalAlpha=1;for(const b of B){if(b.alpha<=0||(b.sys.dim??1)<.5)continue;const p=toS(b.x,b.y);
+  if(b.kind==='comet'&&b.state==='busy'){ex.globalAlpha=.32;ex.fillStyle=P.ink;ex.fillRect(p.x-.6,p.y-.6,1.3,1.3)}
+  if(b.kind==='moon'||b.kind==='pr'&&b.state==='merging'){ex.globalAlpha=.22;ex.fillStyle=P.ink;ex.fillRect(p.x-.5,p.y-.5,1,1)}}
+  for(const q of pulses){const hx=q.a.x+(q.b.x-q.a.x)*q.p,hy=q.a.y+(q.b.y-q.a.y)*q.p,p=toS(hx,hy);ex.globalAlpha=.07;ex.fillStyle=q.me?P.accent:P.ink;ex.fillRect(p.x,p.y,1,1)}}
+
+function setCart(){let t,l;
+  if(mode==='cosmos'){const n=B.filter(b=>b.kind==='comet'&&b.state==='busy').length+B.filter(b=>b.kind==='moon').length;t='宇宙';l=`${SYS.length} 个星系，${n} 颗在轨${needs.length?'，一件事等你决定':''}。`}
+  else{const f=focus,n=B.filter(b=>b.sys===f&&(b.kind==='comet'&&b.state==='busy'||b.kind==='moon')).length,q=B.filter(b=>b.sys===f&&b.kind==='queue').length;
+    t=mode==='lens'&&sel?sel.label:f.name;l=f.on?`${n} 颗在轨${q?'，'+q+' 颗等待入轨':''}${needs.some(x=>x.sys===f.id)?'，一件事等你决定':''}。`:'恒星已熄灭：模型凭证失效。'}
+  const h=$('c-title'),p=$('c-line');h.style.opacity=p.style.opacity=0;setTimeout(()=>{h.textContent=t;p.textContent=l;h.style.opacity=p.style.opacity=1},250);
+  const c=$('crumbs');c.innerHTML='';const items=[['宇宙',goCosmos]];if(focus)items.push([focus.name,()=>goSys(focus)]);if(mode==='lens'&&sel)items.push([sel.label,null]);
+  items.forEach(([x,f],i)=>{if(i){const e=document.createElement('i');e.textContent='/';c.appendChild(e)}const a=document.createElement('a');a.textContent=x;if(i===items.length-1)a.className='on';if(f)a.onclick=f;c.appendChild(a)})}
+
+const cosmosScale=()=>Math.max(.12,Math.min((W-200)/2500,(H-300)/900));
+function goCosmos(){closeLens();closeAlmanac();hideNote();mode='cosmos';focus=null;sel=null;cam.ts=cosmosScale();cam.tx=0;cam.ty=-10;setCart()}
+function goSys(sy){closeLens();hideNote();if(almOpen)setTimeout(()=>renderAlmanac(sy),0);mode='sys';focus=sy;sel=null;cam.ts=Math.max(.3,Math.min((H-250)/((R_SIG*AS+30)*2),(W-320)/((R_SIG+50)*2),1.8));cam.tx=sy.x-(almOpen?210/cam.ts:0);cam.ty=sy.y+10/cam.ts;setCart()}
+function lens(b){hideNote();mode='lens';focus=b.sys;sel=b;cam.ts=Math.min(2.4,H/420);openLens(b);setCart()}
+
+const SCRIPT={worker:[['read','wordcount.py'],['grep','"def count" -n'],['edit','wordcount.py +6 −1'],['bash','python3 -m unittest'],['pass','8 tests · 0.09s'],['edit','README.md +4'],['ask','queen · 缺失文件返回什么'],['hear','queen · 退出 2'],['bash','wordcount.py missing.txt'],['pass','exit 2']],
+  verifier:[['git','checkout a3f9c01'],['bash','python3 -m unittest'],['pass','8 tests'],['bash','printf "\\xff" | wc --bytes'],['pass','1'],['read','diff · 3 files'],['attest','PASS · a3f9c01']]};
+const DIFF={wc:['<span class="d">data = f.read()</span>','<span class="a">data = f.buffer.read()</span>','<span class="a">if args.bytes: print(len(data))</span>'],cli:['<span class="a">p.add_argument("--lines")</span>'],go:['<span class="d">return nil</span>','<span class="a">return ctx.Err()</span>']};
+let logT=null,logI=0;
+function openLens(b){$('lens').classList.add('open');$('l-k').textContent=(b.kind==='moon'?'只读验证，':b.state==='busy'?'在轨工作，':b.state==='failed'?'已坠落，':'静止，')+'属于 '+b.sys.name;
+  $('l-title').textContent=b.label;$('l-now').textContent=b.now||'';const dl=DIFF[b.diff];$('diff').innerHTML=dl?dl.map(x=>`<div>${x}</div>`).join(''):'';$('diff').style.display=dl?'':'none';
+  const log=$('log');log.innerHTML='';logI=0;const sc=SCRIPT[b.script]||SCRIPT.worker;for(let i=0;i<4;i++)pushLog(sc[logI++%sc.length]);clearInterval(logT);
+  if(b.state==='busy'||b.kind==='moon')logT=setInterval(()=>pushLog(sc[logI++%sc.length]),1800)}
+function pushLog([k,v],cls){const e=document.createElement('div');if(cls)e.className=cls;e.innerHTML=`<b>${k}</b>${v}`;$('log').prepend(e);while($('log').children.length>16)$('log').lastChild.remove()}
+function closeLens(){$('lens').classList.remove('open');clearInterval(logT)}
+$('lens-x').onclick=()=>focus&&goSys(focus);
+$('l-say').addEventListener('keydown',e=>{const v=e.target.value.trim();if(e.key!=='Enter'||!v||!sel)return;for(let i=0;i<3;i++)setTimeout(()=>emit(you,sel,true,1.8),i*150);pushLog(['你',v],'me');e.target.value=''});
+
+let noteFor=null;
+function note(b){noteFor=b;sel=b;let h=b.label,p='',acts='';
+  if(b.kind==='star'){h=b.sys.on?'Queen':'Queen 已熄灭';p=b.sys.on?`按 ${b.sys.method} 运转。今天派出七次，答复三次。`:'没有恒星认领，信号停在星系边缘。';acts=b.sys.on?'<button onclick="$(\'say\').focus()">发信</button>':'<button class="go">点亮</button>'}
+  else if(b.kind==='pr'){p=b.state==='ready'?'另一位 Agent 验证通过，等你决定。':'等待独立验证。';if(b.state==='ready')acts='<button class="go" onclick="openDecide()">决定</button>'}
+  else if(b.kind==='signal'){p=b.ci?'来自外部的检查结果，只当作数据。':b.claimed?'来自外部，已被恒星认领。':'来自外部，还没人认领。拖向恒星就会派出一颗彗星。';}
+  else if(b.kind==='queue'){h='等待入轨';p='轨道已满，有空位时按顺序补派。'}
+  $('note').innerHTML=`<h4>${h}</h4>${p?`<p>${p}</p>`:''}${acts?`<div class="acts">${acts}</div>`:''}`;$('note').classList.add('open');placeNote()}
+function placeNote(){const p=toS(noteFor.x,noteFor.y),n=$('note');n.style.left=clamp(p.x+26,40,W-300)+'px';n.style.top=clamp(p.y-24,40,H-180)+'px'}
+function hideNote(){noteFor=null;$('note').classList.remove('open')}
+
+function openDecide(){if(!needs.length)return;hideNote();$('decide').classList.add('open')}
+$('observer').onclick=()=>needs.length?$('decide').classList.toggle('open'):null;
+$('later').onclick=()=>$('decide').classList.remove('open');
+$('merge').onclick=()=>{$('decide').classList.remove('open');const p=get('t:pr8');for(let i=0;i<4;i++)setTimeout(()=>emit(you,T.star,true,2.2),i*130);
+  setTimeout(()=>{if(p){p.state='merging';p.mt=0}},1000);needs.length=0;$('observer').classList.remove('wait');setTimeout(setCart,400)};
+function onMerged(p){const w=B.find(b=>b.target===p.id&&b.kind==='comet');if(w&&w.state!=='done'){w.state='done';trails.push({sys:w.sys,r:w.r,a0:w.a-1.5,a1:w.a,al:.55})}}
+
+let drag=null,down=null,moved=false,pan=null;
+function hit(x,y){if(mode==='cosmos'){return SYS.find(sy=>{const c=toS(sy.x,sy.y);return Math.hypot((c.x-x)/R_HELIO,(c.y-y)/(R_HELIO*AS))<cam.s*1.15})?.star}
+  let best=null,bd=16;for(const b of[...B,...SYS.map(s=>s.star)]){if(b.alpha<=0||(b.sys.dim??1)<.5)continue;const p=toS(b.x,b.y),dd=Math.hypot(p.x-x,p.y-y);if(dd<bd){bd=dd;best=b}}return best}
+cv.addEventListener('mousedown',e=>{down={x:e.clientX,y:e.clientY,cx:cam.tx,cy:cam.ty};moved=false;const h=mode!=='cosmos'&&hit(e.clientX,e.clientY);if(h&&h.kind==='signal'&&!h.claimed&&h.sys.on)drag=h;else if(!h)pan=true});
+addEventListener('mousemove',e=>{if(down&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>4)moved=true;
+  if(drag){const w=toW(e.clientX,e.clientY),b=ell(drag.sys.x,drag.sys.y,drag.ang,R_SIG);drag.dx=w.x-b.x;drag.dy=w.y-b.y;cv.style.cursor='grabbing';return}
+  if(pan&&moved&&mode!=='lens'){cam.tx=down.cx-(e.clientX-down.x)/cam.s;cam.ty=down.cy-(e.clientY-down.y)/cam.s;cam.x=cam.tx;cam.y=cam.ty;cv.style.cursor='move';return}
+  hover=hit(e.clientX,e.clientY);cv.style.cursor=hover?(hover.kind==='signal'&&!hover.claimed&&hover.sys.on?'grab':'pointer'):'default'});
+addEventListener('mouseup',e=>{const d=drag;drag=null;pan=null;
+  if(d){if(Math.hypot(d.x-d.sys.x,d.y-d.sys.y)<90)assign(d);down=null;return}
+  if(!down||moved||e.target!==cv){down=null;return}down=null;const h=hit(e.clientX,e.clientY);
+  if(mode==='cosmos'){if(h)goSys(h.sys);return}
+  if(!h){if(mode==='lens')return goSys(focus);hideNote();sel=null;return}
+  if(h.sys!==focus)return goSys(h.sys);
+  if(h.kind==='comet'||h.kind==='moon')lens(h);else note(h)});
+cv.addEventListener('dblclick',()=>{if(mode!=='cosmos')goCosmos()});
+let lock=0;cv.addEventListener('wheel',e=>{e.preventDefault();const n=performance.now();if(n<lock||Math.abs(e.deltaY)<4)return;lock=n+750;
+  if(e.deltaY<0){if(mode==='cosmos'){const w=toW(e.clientX,e.clientY);goSys(SYS.reduce((a,b)=>Math.hypot(b.x-w.x,b.y-w.y)<Math.hypot(a.x-w.x,a.y-w.y)?b:a))}
+    else if(mode==='sys'){const h=hit(e.clientX,e.clientY);if(h&&(h.kind==='comet'||h.kind==='moon'))lens(h)}}
+  else{if(mode==='lens')goSys(focus);else if(mode==='sys')goCosmos()}},{passive:false});
+addEventListener('keydown',e=>{if(e.key==='Escape'){if($('appendix').classList.contains('open'))return closeAppendix();if($('catalogue').classList.contains('open'))return closeCatalogue();if(tlOpen&&document.activeElement.tagName!=='INPUT')return closeTimeline();if($('decide').classList.contains('open'))return $('decide').classList.remove('open');if(document.activeElement.tagName==='INPUT')return document.activeElement.blur();if(mode==='lens')goSys(focus);else if(almOpen)closeAlmanac();else if(mode==='sys')goCosmos()}
+  const free=document.activeElement.tagName!=='INPUT';
+  if(free&&(e.key==='c'||e.key==='C'))openCatalogue();
+  if(free&&(e.key==='a'||e.key==='A')&&mode!=='cosmos')toggleAlmanac();
+  if(free&&e.key===',')openAppendix();
+  if(free&&(e.key==='t'||e.key==='T'))toggleTimeline();
+  if(e.key==='/'&&document.activeElement.tagName!=='INPUT'){e.preventDefault();$('say').focus()}
+  if((e.key==='g'||e.key==='G')&&document.activeElement.tagName!=='INPUT')toggleGrid();
+  if((e.key==='d'||e.key==='D')&&document.activeElement.tagName!=='INPUT')toggleTheme()});
+$('theme').onclick=toggleTheme;
+function toggleGrid(){showGrid=!showGrid;$('grid').classList.toggle('on',showGrid);try{localStorage.setItem('sj-grid',showGrid?'on':'off')}catch(e){}}
+$('grid').onclick=toggleGrid;$('grid').classList.toggle('on',showGrid);
+addEventListener('resize',()=>{resize();if(mode==='cosmos')cam.ts=cosmosScale();else if(mode==='sys')goSys(focus)});
+
+let born=60;
+function spawn(sy,lbl,target){const c=comet(sy,sy.id+':n'+born++,lbl,118+rnd()*52,{born:0,target,now:'刚离开恒星，正在读任务',diff:'wc'});setTimeout(()=>emit(sy.star,c,false,1.5),250);return c}
+function assign(s){s.claimed=true;emit(s,s.sys.star,false,1.6);setTimeout(()=>emit(s,s.sys.star,false,1.6),160);setTimeout(()=>{spawn(s.sys,'worker #'+s.label.replace(/\D/g,''),s.id);setCart()},1100);$('hint').style.opacity=0}
+$('say').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const v=e.target.value.trim();if(!v)return;e.target.value='';e.target.blur();sayHint('');const rt=route(v);if(rt){rt.go();return}const sy=focus&&focus.on?focus:T;
+  for(let i=0;i<4;i++)setTimeout(()=>emit(you,sy.star,true,2.2),i*130);setTimeout(()=>{spawn(sy,'worker',null);setCart()},1900)});
+
+function startReplay(m0=22*60,span=600){if(replay)return;hideNote();closeLens();if(mode==='lens')goSys(focus);ex.clearRect(0,0,W,H);expAlpha=1;speed=7;const t0=performance.now(),dur=16000,mine=[];$('time').classList.add('on');
+  replay=setInterval(()=>{const k=(performance.now()-t0)/dur,m=m0+Math.floor(clamp(k,0,1)*span);$('big').textContent=String(Math.floor(m/60)%24).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+    if(rnd()<.5){const sy=rnd()<.6?T:A,live=B.filter(b=>b.sys===sy&&b.kind==='comet'&&b.state==='busy');
+      const r=rnd();if(r<.4&&live.length<8)mine.push(spawn(sy,'worker',null));
+      else if(r<.65){const c=mine.find(x=>x.state==='busy'&&x.sys===sy);if(c){const q=pr(sy,sy.id+':r'+born++,'PR',rnd()*TAU,{grow:0});c.target=q.id;if(rnd()<.6)moon(sy,sy.id+':m'+born++,q.id)}}
+      else if(r<.85){const q=B.find(b=>b.sys===sy&&b.kind==='pr'&&b.state==='open'&&b.id.includes(':r'));if(q){q.state='merging';q.mt=0}}
+      else{const c=mine.find(x=>x.state==='busy');if(c){c.state='done';trails.push({sys:c.sys,r:c.r,a0:c.a-1.5,a1:c.a,al:.5})}}}
+    if(k>=1){clearInterval(replay);replay=null;speed=1;mine.forEach(c=>{if(c.state==='busy'){c.state='done'}});
+      setTimeout(()=>{$('time').classList.remove('on');const f=setInterval(()=>{expAlpha-=.02;if(expAlpha<=0){expAlpha=0;clearInterval(f)}},50)},3500)}},200)};
+
+
+let almOpen=false,tlOpen=false,pastF=1;
+const METH={pstack:{roles:['worker','verifier'],rules:['带 swarmjet 标签的 Issue，交给 worker。','评论以 /swarmjet run 开头时，交给 worker。','PR 每有一次新提交，派一位 verifier 去验证。','合并需要另一位 Agent 验证通过、检查全部通过，最后由你决定。'],files:['methodology.yaml','queen.md','roles/worker.md','roles/verifier.md','rules/swarmjet-principles.md','skills/bug-fix/','skills/feature/','skills/verify-revision/']},
+  minimal:{roles:['worker'],rules:['Queen 判断之后派出 worker。','合并由你决定。'],files:['methodology.yaml','roles/worker.md']}};
+const INFO={tfm:{ver:4,note:'今天 05:39 由 Queen 从内置的 pstack 安装',older:[3,2,1],limit:4,today:.41,week:2.86,spark:[.2,.35,.1,.5,.42,.28,.41]},
+  api:{ver:7,note:'昨天你修改了 verifier 的提示词',older:[6,5,4,3,2,1],limit:6,today:2.1,week:11.4,spark:[1.2,1.8,2.4,1.1,2.9,2.2,2.1]},
+  docs:{ver:1,note:'三天前从内置的 minimal 安装',older:[],limit:2,today:.02,week:.31,spark:[.1,.05,.04,.06,.03,.01,.02]}};
+const money=v=>'$'+(v<1?v.toFixed(2):v.toFixed(2));
+function renderAlmanac(sy){if(!sy)return;const I=INFO[sy.id],M=METH[sy.method];$('al-title').textContent=sy.name;
+  $('al-lead').textContent=sy.on?`按 ${sy.method} 第 ${I.ver} 版运转。`:'恒星已熄灭，信号停在边缘，无人认领。';
+  const orb=M.roles.map((ro,i)=>{const rx=i?104:56,ry=i?38:20;return `<ellipse rx="${rx}" ry="${ry}"/><text x="0" y="${-ry-6}" text-anchor="middle">${ro}</text>`}).join('');
+  $('al-method').innerHTML=`<svg class="mini" viewBox="-124 -50 248 96">${orb}<circle r="5"/></svg><div class="rules">${M.rules.map(x=>`<p>${x}</p>`).join('')}</div>
+    <div class="files">${M.files.join('<br>')}</div>
+    <div class="vers">第 ${I.ver} 版，${I.note}。${I.older.length?'<br>'+I.older.map(v=>`<a data-v="${v}">回到第 ${v} 版</a>`).join(''):''}</div>`;
+  $('al-method').querySelectorAll('a[data-v]').forEach(a=>a.onclick=()=>{I.older=I.older.filter(x=>x!=a.dataset.v);I.older.unshift(I.ver);I.ver=+a.dataset.v;I.note='刚刚由你回滚';renderAlmanac(sy);setCart()});
+  const occ=B.filter(b=>b.sys===sy&&b.kind==='comet'&&(b.state==='busy'||b.state==='parked')).length+B.filter(b=>b.sys===sy&&b.kind==='moon').length;
+  $('al-settings').innerHTML=`<div class="line"><span>同时在轨</span><span class="slots"><button class="step" id="lim-">−</button>${Array.from({length:I.limit},(_,i)=>`<i class="slot${i<occ?' f':''}"></i>`).join('')}<button class="step" id="lim+">+</button></span></div>
+    <div class="line"><span>Queen ${sy.on?'正在照看这个星系':'已熄灭'}</span><button id="q-tog">${sy.on?'熄灭恒星':'点亮恒星'}</button></div>
+    <div class="line"><span>Queen 使用 deepseek-v4-flash</span><button>更换</button></div>`;
+  $('lim-').onclick=()=>{I.limit=Math.max(1,I.limit-1);renderAlmanac(sy)};$('lim+').onclick=()=>{I.limit=Math.min(12,I.limit+1);renderAlmanac(sy)};
+  $('q-tog').onclick=()=>{sy.on=!sy.on;sy.star.label=sy.on?'Queen':'Queen（已熄灭）';renderAlmanac(sy);setCart()};
+  const mx=Math.max(...I.spark),pts=I.spark.map((v,i)=>[i*(300/6),40-v/mx*34]);
+  $('al-fuel').innerHTML=`<svg class="spark" viewBox="-4 0 308 44" preserveAspectRatio="none"><path d="M${pts.map(p=>p.join(' ')).join(' L')}"/><circle cx="${pts[6][0]}" cy="${pts[6][1]}" r="2.5"/></svg>
+    <p class="mute" style="color:var(--ink2)">今天 ${money(I.today)}，本周 ${money(I.week)}。</p><p class="mute">${sy.method==='pstack'?'pstack 规定：每个 Agent 不超过 $2，每天不超过 $10。':'这套方法论没有设定预算。'}</p>`}
+function openAlmanac(){if(mode==='cosmos'||!focus)return;almOpen=true;renderAlmanac(focus);$('almanac').classList.add('open');if(mode==='sys')cam.tx=focus.x-210/cam.ts}
+function closeAlmanac(){if(!almOpen)return;almOpen=false;$('almanac').classList.remove('open');if(mode==='sys'&&focus)cam.tx=focus.x}
+function toggleAlmanac(){almOpen?closeAlmanac():openAlmanac()}
+$('al-x').onclick=closeAlmanac;
+$('cartouche').onclick=()=>mode==='cosmos'?openCatalogue():toggleAlmanac();
+
+const AP={
+  '接入':()=>`<h3>接入</h3><p>平台通过一个 GitHub App 读写仓库。凭证只留在平台里，从不进入 Agent 的工作环境。</p>
+    <div class="row">GitHub App<span>swarmjet-c5080e，已安装到 3 个仓库</span></div>
+    <div class="row">Webhook 隧道<span>在线，重启后地址会变，平台会自动同步</span></div>
+    <div class="row">最近一次投递<span>2 分钟前，成功</span></div>
+    <div class="acts"><button>在 GitHub 管理安装</button><button>重新同步</button></div>`,
+  '模型':()=>`<h3>模型</h3><p>凭证由独立的凭证服务保管。Agent 通过平台代理调用模型，看不到密钥。</p>
+    <div class="row">DeepSeek<span>已配置</span></div>
+    <div class="row">默认模型<span>deepseek-v4-flash</span></div>
+    <div class="row">本月调用<span>1,284 次</span></div>
+    <div class="acts"><button class="go">更换凭证</button><button>添加提供方</button></div>`,
+  '连接':()=>`<h3>连接</h3><p>让本地的 Agent 通过 MCP 连到这片宇宙。每个连接的令牌只显示一次。</p>
+    <div class="row">这台电脑上的 Claude Code<span>default 权限，2 分钟前使用</span></div>
+    <div class="row">Codex<span>admin 权限，昨天使用</span></div>
+    <div class="acts"><button class="go">新建连接</button><button>吊销</button></div>`,
+  '账簿':()=>{const t=SYS.map(sy=>[sy.name,INFO[sy.id].week]),mx=Math.max(...t.map(x=>x[1]));return `<h3>账簿</h3><p>本周所有星系一共花费 ${money(t.reduce((a,x)=>a+x[1],0))}。</p>`+
+    t.map(([n,v])=>`<div class="row" style="display:block">${n}<span style="float:right">${money(v)}</span><div class="bar" style="width:${v/mx*100}%"></div></div>`).join('')},
+  '账号':()=>`<h3>账号</h3><p>这是一套单管理员部署。</p><div class="row">管理员<span>admin</span></div><div class="row">本次登录<span>今天 00:12，来自本机</span></div><div class="acts"><button>退出登录</button></div>`};
+function apShow(k){$('ap-body').innerHTML=AP[k]();$('ap-nav').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.textContent===k))}
+Object.keys(AP).forEach(k=>{const b=document.createElement('button');b.textContent=k;b.onclick=()=>apShow(k);$('ap-nav').appendChild(b)});
+function openAppendix(k='接入'){hideNote();closeCatalogue();closeTimeline();$('decide').classList.remove('open');apShow(k);$('appendix').classList.add('open')}
+function closeAppendix(){$('appendix').classList.remove('open')}
+$('ap-x').onclick=closeAppendix;$('mark').querySelector('b').onclick=()=>openAppendix();
+
+const STATUS=b=>b.kind==='star'?(b.sys.on?'照看着这个星系':'已熄灭'):b.kind==='comet'?(b.stale?'静止 18 小时，仍占着名额':{busy:'在轨工作',parked:'静止',failed:'坠落',done:'已完成'}[b.state]):b.kind==='moon'?'正在验证':b.kind==='pr'?({ready:'等你决定',merging:'正在合并'}[b.state]||'等待验证'):b.kind==='signal'?(b.ci?'外部检查':b.claimed?'已被认领':'无人认领'):'等待入轨';
+const GLY={star:'<circle r="4.5" fill="currentColor"/>',busy:'<circle r="3" fill="currentColor"/><path d="M3 -1.5l7 -3M3 0l8 -1.5M3 1.5l7 0" stroke="currentColor" stroke-width=".8"/>',parked:'<circle r="3" fill="none" stroke="currentColor"/><path d="M4.5 -1.5l5 -2" stroke="currentColor" stroke-dasharray="1.5 1.5"/>',
+  failed:'<path d="M-3.5 -3.5l7 7M3.5 -3.5l-7 7" stroke="currentColor"/>',moon:'<ellipse rx="7" ry="4" fill="none" stroke="currentColor" stroke-dasharray="1 1.5"/><circle cx="7" r="1.8" fill="currentColor"/>',
+  pr:'<ellipse rx="9" ry="2.6" transform="rotate(-20)" fill="none" stroke="currentColor"/><circle r="4" fill="var(--paper)" stroke="currentColor"/>',signal:'<path d="M-5 0h10M0 -5v10" stroke="currentColor"/>',ci:'<path d="M0 -5l5 5-5 5-5-5z" fill="none" stroke="currentColor"/>',queue:'<circle r="3" fill="none" stroke="currentColor"/>'};
+const glyph=b=>`<svg viewBox="-12 -12 24 24">${GLY[b.kind==='comet'?(b.state==='busy'||b.state==='done'?'busy':b.state):b.kind==='signal'&&b.ci?'ci':b.kind]}</svg>`;
+function renderCatalogue(){const q=$('cat-q').value.trim().toLowerCase();let h='';
+  for(const sy of [...SYS].sort((a,b)=>(needs.some(n=>n.sys===b.id)-needs.some(n=>n.sys===a.id))||(b.on-a.on))){const items=[sy.star,...B.filter(b=>b.sys===sy&&b.alpha>0)];const rows=items.filter(b=>!q||(b.label+sy.name+STATUS(b)).toLowerCase().includes(q));if(!rows.length)continue;
+    h+=`<tr class="grp"><td colspan="4">${sy.name}<small>${sy.method}，今天 ${money(INFO[sy.id].today)}</small></td></tr>`;
+    rows.forEach(b=>{const i=items.indexOf(b);h+=`<tr class="item" data-s="${sy.id}" data-i="${i}"><td class="g">${glyph(b)}</td><td>${b.kind==='queue'?'等待中的请求':b.label}</td><td class="s">${STATUS(b)}</td><td class="c">${b.kind==='comet'||b.kind==='moon'?money(.01+((b.r||60)%7)/100):''}</td></tr>`})}
+  $('cat-t').innerHTML=h||'<tr><td class="s">没有找到。</td></tr>';
+  $('cat-t').querySelectorAll('tr.item').forEach(tr=>tr.onclick=()=>{const sy=S[tr.dataset.s],items=[sy.star,...B.filter(b=>b.sys===sy&&b.alpha>0)],b=items[+tr.dataset.i];closeCatalogue();flyTo(b)})}
+function openCatalogue(){hideNote();closeAppendix();$('cat-q').value='';renderCatalogue();$('catalogue').classList.add('open');setTimeout(()=>$('cat-q').focus(),50)}
+function closeCatalogue(){$('catalogue').classList.remove('open');$('cat-q').blur()}
+$('cat-q').addEventListener('input',renderCatalogue);$('cat-x').onclick=closeCatalogue;$('catbtn').onclick=openCatalogue;
+function flyTo(b){const go=()=>{if(b.kind==='comet'||b.kind==='moon')lens(b);else if(b.kind==='star'){sel=b;note(b)}else note(b)};if(mode==='cosmos'||b.sys!==focus){goSys(b.sys);setTimeout(go,700)}else go()}
+
+const pad=n=>String(n).padStart(2,'0'),hhmm=d=>pad(d.getHours())+':'+pad(d.getMinutes()),timeAt=f=>new Date(Date.now()-(1-f)*864e5);
+let prevSpeed=1;
+function setPast(f){pastF=clamp(f,0,1);$('tl-handle').style.left=(pastF*100)+'%';
+  if(pastF<.999){if(speed>0)prevSpeed=speed;speed=0;$('time').classList.add('on');$('big').textContent=hhmm(timeAt(pastF))}
+  else{pastF=1;speed=prevSpeed||1;$('time').classList.remove('on');ex.clearRect(0,0,W,H);expAlpha=0}}
+function drawPast(){ex.clearRect(0,0,W,H);let sd=9173;const r2=()=>(sd=(sd*16807)%2147483647)/2147483647,n=Math.floor((1-pastF)*130);
+  ex.strokeStyle=P.ink;ex.lineWidth=.8;for(let i=0;i<n;i++){const sy=r2()<.62?T:A,c=toS(sy.x,sy.y),rr=118+r2()*62,a0=r2()*TAU,len=.25+r2()*2;ex.globalAlpha=.26;ex.beginPath();ex.ellipse(c.x,c.y,rr*cam.s,rr*AS*cam.s,TILT,a0,a0+len);ex.stroke()}expAlpha=1}
+function renderTicks(){$('tl-ticks').innerHTML=[0,.25,.5,.75].map(f=>`<span style="left:${f*100}%">${hhmm(timeAt(f))}</span>`).join('')}
+function openTimeline(){if(replay)return;tlOpen=true;renderTicks();setPast(1);document.body.classList.add('timing');$('tl').classList.add('open')}
+function closeTimeline(){if(!tlOpen)return;tlOpen=false;setPast(1);document.body.classList.remove('timing');$('tl').classList.remove('open')}
+function toggleTimeline(){tlOpen?closeTimeline():openTimeline()}
+$('exposure').onclick=toggleTimeline;$('exposure').title='时间（T）';
+let tlDrag=false;const tlAt=e=>{const r=$('tl-track').getBoundingClientRect();setPast((e.clientX-r.left)/r.width)};
+$('tl-track').addEventListener('pointerdown',e=>{tlDrag=true;$('tl-track').setPointerCapture(e.pointerId);tlAt(e)});
+$('tl-track').addEventListener('pointermove',e=>{if(tlDrag)tlAt(e)});$('tl-track').addEventListener('pointerup',()=>tlDrag=false);
+$('tl-now').onclick=()=>setPast(1);
+$('tl-play').onclick=()=>{const f=pastF<.999?pastF:0,d=timeAt(f),m0=d.getHours()*60+d.getMinutes(),span=Math.round((1-f)*1440);closeTimeline();startReplay(m0,span)};
+
+function route(v){const q=v.toLowerCase().replace(/\s/g,'');if(q.length>14)return null;
+  const sy=SYS.find(x=>q.includes(x.name.toLowerCase()));if(sy)return{label:'前往 '+sy.name,go:()=>{closeAppendix();goSys(sy)}};
+  const m=v.match(/pr\s*#?\s*(\d+)/i)||v.match(/#(\d+)/);if(m){const b=B.find(b=>(b.kind==='pr'&&b.label==='PR #'+m[1])||(b.kind==='comet'&&b.label.endsWith('#'+m[1])));if(b)return{label:'前往 '+b.label,go:()=>flyTo(b)}}
+  const ap=[['模型','模型'],['凭证','模型'],['接入','接入'],['github','接入'],['隧道','接入'],['webhook','接入'],['连接','连接'],['mcp','连接'],['令牌','连接'],['账簿','账簿'],['账号','账号'],['退出','账号'],['附录','接入']].find(([k])=>q.includes(k));
+  if(ap)return{label:'打开附录里的'+ap[1],go:()=>openAppendix(ap[1])};
+  if(/方法论|设置|燃料|用量|星系志/.test(q))return{label:'打开星系志',go:()=>{if(mode==='cosmos')goSys(T);setTimeout(openAlmanac,mode==='cosmos'?600:0)}};
+  if(/星表|目录/.test(q))return{label:'打开星表',go:openCatalogue};
+  if(/时间|回放|昨夜/.test(q))return{label:'打开时间轴',go:openTimeline};
+  return null}
+function sayHint(t){$('say-hint').textContent=t;$('say-hint').classList.toggle('on',!!t)}
+$('say').addEventListener('input',e=>{const v=e.target.value.trim();if(!v)return sayHint('');const rt=route(v);sayHint(rt?'回车'+rt.label:'回车发信给 Queen')});
+$('say').addEventListener('blur',()=>sayHint(''));
+
+function clock(){const d=new Date();$('clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
+clock();setInterval(clock,15000);
+setTimeout(()=>$('hint').style.opacity=0,7000);
+cam.s=cam.ts=cosmosScale()*.8;goCosmos();$('observer').classList.add('wait');
+setTimeout(()=>{if(mode==='cosmos')goSys(T)},2800);
+draw();
+</script>
+</body>
+</html>
