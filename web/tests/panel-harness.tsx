@@ -52,7 +52,7 @@ const props = {
     { hive: hives[0], activeForagers: 1, pendingApprovals: 1, inboxBacklog: 0 },
   ],
   principal: { id: "admin", username: "admin" },
-  onLogout: () => {},
+  onLogout: () => api.logout(),
   reloadProjects: () => {},
 };
 createRoot(document.getElementById("root")!).render(

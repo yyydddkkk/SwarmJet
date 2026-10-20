@@ -1,6 +1,7 @@
+import { useState } from "react";
 import type { StarsSlotProps } from "./slots";
 import { useStarsUI, type ProjectTab, type PlatformTab } from "./ui";
-import { useDataAPI, useProjectState } from "../data";
+import { useProjectState } from "../data";
 import Methodology from "./panels/MethodologyPage";
 import Settings from "./panels/HiveSettings";
 import Models from "./panels/ModelsPage";
@@ -92,7 +93,6 @@ function ProjectPanel({
   );
 }
 export default function PanelsSlot(props: StarsSlotProps) {
-  const api = useDataAPI();
   const { ui, stores } = props;
   const state = useStarsUI(ui);
   const ref = useFocus(!!state.platformPanel);
@@ -155,17 +155,42 @@ export default function PanelsSlot(props: StarsSlotProps) {
             ) : state.platformPanel === "ledger" ? (
               <Ledger projects={props.projects} />
             ) : (
-              <>
-                <h3>账号</h3>
-                <p>{props.principal.displayName || props.principal.username}</p>
-                <button onClick={() => void api.logout().then(props.onLogout)}>
-                  退出登录
-                </button>
-              </>
+              <Account principal={props.principal} onLogout={props.onLogout} />
             )}
           </div>
         </div>
       )}
+    </>
+  );
+}
+
+function Account({
+  principal,
+  onLogout,
+}: Pick<StarsSlotProps, "principal" | "onLogout">) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <>
+      <h3>账号</h3>
+      <p>{principal.displayName || principal.username}</p>
+      <button
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError("");
+          try {
+            await onLogout();
+          } catch (cause) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? "正在退出…" : "退出登录"}
+      </button>
+      {error && <p role="alert">退出失败：{error}。请重试。</p>}
     </>
   );
 }

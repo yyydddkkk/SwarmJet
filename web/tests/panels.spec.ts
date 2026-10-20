@@ -385,3 +385,26 @@ test("catalog distinguishes source release from project version and confirms ins
     )?.body,
   ).toMatchObject({ name: "pstack" });
 });
+
+test("logout delegates once to the shell and exposes failures for retry", async ({
+  page,
+}) => {
+  const state = await open(page);
+  await page.getByRole("button", { name: "平台", exact: true }).click();
+  await page.getByRole("button", { name: "账号", exact: true }).click();
+  await page.route("**/api/logout", (route) =>
+    route.fulfill({ status: 500, json: { error: "test logout unavailable" } }),
+  );
+  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("退出失败");
+  await page.unroute("**/api/logout");
+  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await expect
+    .poll(
+      () =>
+        state.calls.filter(
+          (c) => c.method === "POST" && c.path === "/api/logout",
+        ).length,
+    )
+    .toBe(1);
+});
