@@ -46,4 +46,5 @@
 - A → E 已按顺序执行 `git merge --no-ff`，均无冲突；每次合并后 `cd web && npm run build` 通过。GitHub PR 尚未合并。
 - `python3 -m unittest discover -s deploy -p 'test_*.py'`：28 项通过。
 - `cd deploy && docker compose --env-file .env.example -f compose.yaml -f compose.cells.yaml config -q`：退出码 0。
-- 指定测试数据库的全量 Go race 测试运行中；B/C/D 仅改前端，后续按最终文件范围判断是否复用未受影响结果。
+- `TEST_DATABASE_URL='postgres://postgres:pw@127.0.0.1:55450/postgres?sslmode=disable' go test -race -p 1 ./...`：主代理在集成分支实际执行，全部通过，退出码 0；ACP 偶发用例本次一次通过。B/C/D 仅改前端，最终核对 Go、方法论、部署文件未再变化后复用结果。
+- A、E 两个任务 PR 的 GitHub CI 均四项全绿；最终集成 PR 仍需另等 CI 全绿。
