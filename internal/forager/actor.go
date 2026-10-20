@@ -131,7 +131,7 @@ func (a *actor) loop(ctx context.Context) {
 			a.stopRunning()
 			return
 		}
-		if !a.queen && hasCompleteMessage(batch) {
+		if !a.queen && hasImmediateCompleteMessage(batch) {
 			a.terminate(ctx, domain.AgentCompleted, "finished its task", batch, "")
 			a.stopRunning()
 			return
@@ -187,7 +187,7 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		a.terminate(ctx, domain.AgentCancelled, "cancelled by control message", consumed, "")
 		return false
 	}
-	if !a.queen && hasCompleteMessage(consumed) {
+	if !a.queen && hasImmediateCompleteMessage(consumed) {
 		a.terminate(ctx, domain.AgentCompleted, "finished its task", consumed, "")
 		return false
 	}
@@ -226,7 +226,7 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		source, _ := store.(MethodologyStore)
 		text = buildQueenPrompt(queen.Header(ctx, source, hive.ID), consumed)
 	} else {
-		text = buildPrompt(agent, hive, consumed, firstTurn)
+		text = buildTurnPrompt(agent, hive, consumed, firstTurn)
 	}
 	timeout := time.Duration(hive.Config.TurnTimeoutMinutes) * time.Minute
 	if timeout <= 0 {
@@ -294,6 +294,14 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		return false
 	}
 
+	if hasCompleteMessage(consumed) {
+		a.terminate(ctx, domain.AgentCompleted, completionReason(consumed), consumed, lastText)
+		return false
+	}
+	// A completion arriving during a turn gets its own final turn. Do not
+	// publish while the closing event waits in the Inbox.
+	suppressPublish := a.completionPending(ctx, agent.HiveID)
+
 	// The turn is done: persist consumption, publish the branch, record the PR
 	// and report back before parking.
 	a.markHandled(ctx, consumed)
@@ -307,12 +315,13 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 	// would refuse its read-only Spec anyway.
 	var pr int64
 	var publishErr error
-	if !spec.ReadOnly {
+	if !spec.ReadOnly && !suppressPublish {
 		pr, publishErr = a.sup.opts.Publisher.Publish(ctx, spec, title, body)
 	}
 	publishErrText := ""
 	if publishErr != nil {
 		publishErrText = publishErr.Error()
+		a.publishFailure(ctx, agent, publishErr)
 		a.sup.log.Warn("forager: publish failed", "agent", agent.ID, "error", publishErr)
 	}
 	if pr != 0 && pr != latest.PRNumber {
@@ -477,6 +486,14 @@ func (a *actor) collectMessages(ctx context.Context, hiveID string) ([]domain.Me
 	msgs, err := a.sup.opts.Store.Unhandled(ctx, hiveID, a.address(), a.sup.opts.UnhandledLimit)
 	if err != nil {
 		return nil, err
+	}
+	// The Router writes a deferred completion immediately before its event.
+	// Keep that pair together even at the configured batch boundary.
+	if len(msgs) > 0 && isDeferredCompleteMessage(msgs[len(msgs)-1]) {
+		msgs, err = a.sup.opts.Store.Unhandled(ctx, hiveID, domain.ForagerAddress(a.id), a.sup.opts.UnhandledLimit+1)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return dedupeMessages(msgs), nil
 }

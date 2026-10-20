@@ -90,10 +90,18 @@ func notifyPayload(hiveID string, to domain.Address) string {
 // content returns the stored message, while the same ID with different content
 // is a conflict.
 func (s *Store) SendMessage(ctx context.Context, m domain.Message) (domain.Message, error) {
+	messages, err := s.SendMessages(ctx, m)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return messages[0], nil
+}
+
+func (s *Store) sendMessageTx(ctx context.Context, tx pgx.Tx, m domain.Message) (domain.Message, error) {
 	if utf8.RuneCountInString(m.Body) > domain.MaxMessageBody {
 		return domain.Message{}, domain.ErrMessageTooLarge
 	}
-	hive, err := s.Hive(ctx, m.HiveID)
+	hive, err := scanHive(tx.QueryRow(ctx, `SELECT `+hiveColumns+` FROM hives WHERE id=$1`, m.HiveID))
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -125,11 +133,6 @@ func (s *Store) SendMessage(ctx context.Context, m domain.Message) (domain.Messa
 			return domain.Message{}, err
 		}
 	}
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	defer tx.Rollback(ctx)
 	// seq is assigned at INSERT time but Inbox readers walk it by commit order.
 	// Serializing inserts per Hive makes the two orders identical: a reader can
 	// never observe a later seq and then skip a concurrent transaction that
@@ -150,18 +153,12 @@ func (s *Store) SendMessage(ctx context.Context, m domain.Message) (domain.Messa
 		if !sameMessageContent(existing, m) {
 			return domain.Message{}, domain.ErrConflict
 		}
-		if e = tx.Commit(ctx); e != nil {
-			return domain.Message{}, e
-		}
 		return existing, nil
 	}
 	if err = s.insertMessageJob(ctx, tx, m.ID); err != nil {
 		return domain.Message{}, err
 	}
 	if _, err = tx.Exec(ctx, `SELECT pg_notify($1,$2)`, inboxChannel, notifyPayload(m.HiveID, m.To)); err != nil {
-		return domain.Message{}, err
-	}
-	if err = tx.Commit(ctx); err != nil {
 		return domain.Message{}, err
 	}
 	return m, nil

@@ -646,8 +646,12 @@ type spawnForagerInput struct {
 }
 
 type spawnForagerOutput struct {
-	Forager agentView   `json:"forager"`
-	Message messageView `json:"message"`
+	Forager       agentView   `json:"forager"`
+	Message       messageView `json:"message"`
+	Queued        bool        `json:"queued,omitempty"`
+	QueuePosition int         `json:"queuePosition,omitempty"`
+	AgentID       string      `json:"agentId,omitempty"`
+	Status        string      `json:"status,omitempty"`
 }
 
 func (ts *toolset) spawnForager(ctx context.Context, _ *mcpsdk.CallToolRequest, in spawnForagerInput) (*mcpsdk.CallToolResult, spawnForagerOutput, error) {
@@ -689,6 +693,10 @@ func (ts *toolset) spawnForager(ctx context.Context, _ *mcpsdk.CallToolRequest, 
 		Limits:      limits,
 	})
 	if err != nil {
+		var queued spawnQueued
+		if errors.As(err, &queued) {
+			return nil, spawnForagerOutput{Queued: true, QueuePosition: queued.Position, AgentID: queued.AgentID, Status: "已排队"}, nil
+		}
 		return nil, spawnForagerOutput{}, err
 	}
 	return nil, spawnForagerOutput{Forager: ts.viewAgent(created), Message: ts.viewMessage(msg)}, nil

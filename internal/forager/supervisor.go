@@ -221,6 +221,12 @@ func (s *Supervisor) Scan(ctx context.Context) error {
 				errs = append(errs, err)
 			}
 		}
+		if queue, ok := s.opts.Store.(interface{ DrainSpawnQueue(context.Context, string) error }); ok {
+			if err := queue.DrainSpawnQueue(ctx, hive.ID); err != nil {
+				s.log.Warn("forager: spawn queue scan failed", "hive", hive.ID, "error", err)
+				errs = append(errs, err)
+			}
+		}
 		foragers, err := s.opts.Store.Foragers(ctx, hive.ID,
 			domain.AgentCreating, domain.AgentActive, domain.AgentParked, domain.AgentHibernated)
 		if err != nil {
