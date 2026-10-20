@@ -12,8 +12,9 @@ import type {
 const baseConfig: HiveConfig = {
   cli: "opencode",
   maxConcurrentForagers: 4,
-  maxHops: 10,
-  maxForagersPerChain: 10,
+  queenModel: "deepseek/deepseek-chat",
+  maxHops: 50,
+  maxForagersPerChain: 50,
   idleParkMinutes: 30,
   hibernateHours: 24,
   turnTimeoutMinutes: 120,

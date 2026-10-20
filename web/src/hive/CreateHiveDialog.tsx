@@ -1,7 +1,7 @@
 // 新建 Hive dialog. The repository field prefers repositories the GitHub App is
 // already installed on (GET /api/setup/github/repositories), but manual
 // owner/name input stays available — and is the only option before the App exists.
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { hiveAPI } from "./api";
 import { Callout, Dialog } from "./components";
 import { Icon } from "./icons";
@@ -24,10 +24,13 @@ export default function CreateHiveDialog({
     [configured],
   );
   const [name, setName] = useState("");
+  const models = useResource(signal => hiveAPI.listModels(signal), []);
+  const [step, setStep] = useState(0);
+  const [queenModel, setQueenModel] = useState("");
+  const [concurrency, setConcurrency] = useState("4");
   const [mode, setMode] = useState<"select" | "manual">("select");
   const [repository, setRepository] = useState("");
   const [manual, setManual] = useState("");
-  const [queenEnabled, setQueenEnabled] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const nameId = useId();
@@ -35,21 +38,21 @@ export default function CreateHiveDialog({
 
   const repos = repositories.data ?? [];
   const showManualOnly = !configured;
-
-  useEffect(() => {
-    if (mode !== "select") return;
-    if (!repos.length) return;
-    if (repos.some(repo => repo.fullName === repository)) return;
-    setRepository(repos[0].fullName);
-  }, [mode, repos, repository]);
+  const configuredProviders = new Set(
+    (models.data?.providers ?? []).filter(provider => provider.configured).map(provider => provider.provider),
+  );
+  const availableModels = (models.data?.models ?? []).filter(model => configuredProviders.has(model.provider));
+  const selectedQueenModel = availableModels.some(model => model.id === queenModel)
+    ? queenModel
+    : availableModels.find(model => model.id === models.data?.defaultModel)?.id ?? availableModels[0]?.id ?? "";
+  // Derive the initial choice instead of setting it in an effect: a delayed
+  // default must never overwrite a repository the user has just selected.
+  const repositoryChoice = repository || repos[0]?.fullName || "";
+  const selectedRepository = mode === "manual" || showManualOnly ? manual.trim() : repositoryChoice;
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const repo = mode === "manual" || showManualOnly ? manual.trim() : repository;
-    if (!name.trim()) {
-      setError("给 Hive 起个名字。");
-      return;
-    }
+    const repo = selectedRepository;
     if (!repo) {
       setError("选择或填写一个仓库。");
       return;
@@ -58,10 +61,34 @@ export default function CreateHiveDialog({
       setError("仓库格式应为 owner/name，例如 yyydddkkk/SwarmJet。");
       return;
     }
+    if (step === 0) {
+      setError("");
+      setStep(1);
+      return;
+    }
+    if (!availableModels.some(model => model.id === selectedQueenModel)) {
+      setError("请先配置模型凭证，再选择 Queen 的模型。");
+      return;
+    }
+    if (step === 1) {
+      setError("");
+      setStep(2);
+      return;
+    }
+    const maxConcurrentForagers = Number(concurrency);
+    if (!Number.isSafeInteger(maxConcurrentForagers) || maxConcurrentForagers < 1) {
+      setError("并发上限须为大于 0 的整数。");
+      return;
+    }
     setBusy(true);
     setError("");
     hiveAPI
-      .createHive({ name: name.trim(), repository: repo, queenEnabled })
+      .createHive({
+        name: name.trim() || repo.split("/")[1],
+        repository: repo,
+        queenEnabled: true,
+        config: { queenModel: selectedQueenModel, maxConcurrentForagers },
+      })
       .then(result => onCreated(result.hive.id))
       .catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
       .finally(() => setBusy(false));
@@ -70,9 +97,17 @@ export default function CreateHiveDialog({
   return (
     <Dialog title="新建 Hive" onClose={onClose} wide>
       <form className="hg-token-form" onSubmit={submit}>
+        <div className="hg-segmented" role="group" aria-label="创建进度">
+          {["选择仓库", "Queen 模型", "并发上限"].map((label, index) => (
+            <span key={label} className={`hg-badge ${step === index ? "hg-tone-amber" : ""}`} aria-current={step === index ? "step" : undefined}>
+              {index + 1} · {label}
+            </span>
+          ))}
+        </div>
         <p className="hg-muted">
-          一个 Hive 对应一个仓库。创建后可以派 Forager，Queen 是否开启之后也能改。
+          一个 Hive 对应一个仓库。Queen 默认开启，创建后会在对话里引导你选择方法论。
         </p>
+        {step === 0 ? <>
         <label className="hg-field" htmlFor={nameId}>
           <span>名称</span>
           <input
@@ -80,7 +115,6 @@ export default function CreateHiveDialog({
             value={name}
             onChange={event => setName(event.target.value)}
             placeholder="例如：SwarmJet 平台"
-            required
           />
         </label>
 
@@ -124,7 +158,7 @@ export default function CreateHiveDialog({
             ) : repos.length ? (
               <select
                 aria-label="仓库"
-                value={repository}
+                value={repositoryChoice}
                 onChange={event => setRepository(event.target.value)}
               >
                 {repos.map(repo => (
@@ -153,17 +187,37 @@ export default function CreateHiveDialog({
           </label>
         )}
 
-        <label className="hg-checkbox">
-          <input
-            type="checkbox"
-            checked={queenEnabled}
-            onChange={event => setQueenEnabled(event.target.checked)}
-          />
-          <span>
-            <strong>开启 Queen（蜂王）</strong>
-            <small>Queen 负责判断和派活；关闭时事件留在 Inbox，由人或本地 Agent 处理。</small>
-          </span>
-        </label>
+        </> : step === 1 ? <>
+          {models.loading ? <p className="hg-muted" role="status">正在读取模型与凭证…</p> : models.error ? (
+            <Callout tone="amber" title="无法读取模型">
+              <p>{models.error}</p>
+              <button className="hg-btn hg-btn-small" type="button" onClick={models.reload}>重新读取</button>
+            </Callout>
+          ) : !availableModels.length ? (
+            <Callout tone="amber" title="没有可用的模型凭证">
+              <p>请先去 <a href="#/models" onClick={onClose}>模型</a> 页填写模型凭证，再回来为 Queen 选择模型。</p>
+            </Callout>
+          ) : (
+            <label className="hg-field">
+              <span>Queen 模型</span>
+              <select aria-label="Queen 模型" value={selectedQueenModel} onChange={event => setQueenModel(event.target.value)}>
+                {availableModels.map(model => <option key={model.id} value={model.id}>{model.displayName || model.id} · {model.id}</option>)}
+              </select>
+              <small>只显示已配置凭证的模型。Queen 负责管理 Hive 和与你对话。</small>
+            </label>
+          )}
+        </> : <>
+          <label className="hg-field">
+            <span>并发上限</span>
+            <input aria-label="并发上限" type="number" min="1" step="1" value={concurrency} onChange={event => setConcurrency(event.target.value)} required />
+            <small>同时运行的 Forager 数量，默认 4。Queen 不占用并发名额。</small>
+          </label>
+          <Callout tone="mint" title="准备创建">
+            <p>{name.trim() || selectedRepository.split("/")[1]} · {selectedRepository}</p>
+            <p>Queen 已开启 · {selectedQueenModel}</p>
+            <p>创建后进入 Queen 对话，方法论由你在对话中决定。</p>
+          </Callout>
+        </>}
 
         {error ? (
           <p className="hg-form-error" role="alert">
@@ -175,9 +229,10 @@ export default function CreateHiveDialog({
           <button className="hg-btn" type="button" onClick={onClose} disabled={busy}>
             取消
           </button>
-          <button className="hg-btn hg-btn-primary" type="submit" disabled={busy}>
+          {step > 0 ? <button className="hg-btn" type="button" disabled={busy} onClick={() => { setError(""); setStep(step - 1); }}>上一步</button> : null}
+          <button className="hg-btn hg-btn-primary" type="submit" disabled={busy || (step === 0 && (status.loading || repositories.loading)) || (step === 1 && (models.loading || !!models.error || !selectedQueenModel))}>
             <Icon name="hive" size={16} />
-            {busy ? "正在创建…" : "创建 Hive"}
+            {busy ? "正在创建…" : step === 2 ? "创建 Hive" : "下一步"}
           </button>
         </div>
       </form>

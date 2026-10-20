@@ -99,9 +99,9 @@ test("methodology GET: builtin methodologyResponse renders", async ({ page }) =>
   );
   await page.goto("/#/hives/swarmjet/methodology");
 
-  await expect(page.getByTestId("methodology-version")).toContainText("内置方法论");
-  await expect(page.getByTestId("methodology-version")).not.toContainText("v0");
-  await expect(page.getByTestId("methodology-file-content")).toContainText("defaultRole: worker");
+  await expect(page.getByText("尚未选择方法论，可以在对话里请 Queen 推荐", { exact: true })).toBeVisible();
+  await expect(page.getByRole("list", { name: "内置方法论目录" })).toBeVisible();
+  await expect(page.getByTestId("methodology-version")).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
