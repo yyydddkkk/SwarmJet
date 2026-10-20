@@ -1,7 +1,7 @@
 - name: pstack
   title: pstack
   description: A worker implements each task and an independent verifier checks every PR head. Merging requires a non-author attestation and passing CI; the user decides when to merge.
-  version: "1"
+  version: "2"
 - name: minimal
   title: Minimal
   description: A single worker implements tasks and publishes its branch and PR. There is no independent verifier or automatic merge.
