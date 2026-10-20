@@ -38,21 +38,24 @@ func (s *Store) SpawnQueue(ctx context.Context, hiveID string) ([]SpawnQueueEntr
 		if err := json.Unmarshal(data, &agent); err != nil {
 			return nil, err
 		}
-		entry.Role = agent.RoleName
-		if entry.Role == "" {
-			entry.Role = string(agent.Role)
-		}
-		task := []rune(agent.Task)
-		if len(task) > 200 {
-			task = task[:200]
-		}
-		entry.Task = string(task)
-		entry.Position = len(out) + 1
-		entry.CreatedAt = entry.CreatedAt.UTC()
-		entry.ExpiresAt = entry.CreatedAt.Add(24 * time.Hour)
+		entry = spawnQueueEntry(entry.AgentID, agent, entry.CreatedAt, len(out)+1)
 		out = append(out, entry)
 	}
 	return out, rows.Err()
+}
+
+// spawnQueueEntry keeps list snapshots and realtime queue payloads identical.
+func spawnQueueEntry(agentID string, agent domain.Agent, createdAt time.Time, position int) SpawnQueueEntry {
+	role := agent.RoleName
+	if role == "" {
+		role = string(agent.Role)
+	}
+	task := []rune(agent.Task)
+	if len(task) > 200 {
+		task = task[:200]
+	}
+	createdAt = createdAt.UTC()
+	return SpawnQueueEntry{agentID, role, string(task), position, createdAt, createdAt.Add(24 * time.Hour)}
 }
 
 // MethodologyEvent is deliberately also used for the SSE methodology payload.

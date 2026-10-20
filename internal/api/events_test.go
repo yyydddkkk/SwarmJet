@@ -100,7 +100,7 @@ func TestEventsCommittedEntities(t *testing.T) {
 	if len(meth) != 5 || meth["version"] != float64(2) || meth["action"] != "activate" || meth["actor"] != "system" || meth["note"] != "rollback" {
 		t.Fatalf("methodology: %+v", meth)
 	}
-	if _, err = s.Pool.Exec(ctx, `INSERT INTO spawn_queue(hive_id,agent_id,agent,task_message,limits) VALUES($1,'queued','{"roleName":"worker"}','{"body":"task"}','{}')`, hive.ID); err != nil {
+	if _, err = s.Pool.Exec(ctx, `INSERT INTO spawn_queue(hive_id,agent_id,agent,task_message,limits) VALUES($1,'queued','{"roleName":"worker","task":"task"}','{"body":"task"}','{}')`, hive.ID); err != nil {
 		t.Fatal(err)
 	}
 	queue := nextStreamEvent(t, c, "queue")
