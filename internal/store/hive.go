@@ -91,6 +91,7 @@ func scanHive(row pgx.Row) (domain.Hive, error) {
 			return domain.Hive{}, err
 		}
 	}
+	h.CreatedAt, h.UpdatedAt = h.CreatedAt.UTC(), h.UpdatedAt.UTC()
 	applyHiveDefaults(&h.Config)
 	return h, nil
 }
@@ -221,8 +222,16 @@ func (s *Store) bootstrapQueen(ctx context.Context, tx pgx.Tx, hiveID string, ve
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "inbox:"+hiveID); err != nil {
 		return err
 	}
+	var hasMethodology bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM methodologies WHERE hive_id=$1 AND active)`, hiveID).Scan(&hasMethodology); err != nil {
+		return err
+	}
+	body := "新 Hive，请开始首次引导"
+	if hasMethodology {
+		body = "主 Agent 已重新开启，请继续使用当前生效的方法论处理项目消息。"
+	}
 	tag, err := tx.Exec(ctx, `INSERT INTO messages(id,hive_id,from_addr,to_addr,kind,chain_id,hop,body,trust,state,created_at)
-		VALUES($1,$2,'system','queen','task','',0,'新 Hive，请开始首次引导','system','pending',$3) ON CONFLICT(id) DO NOTHING`, id, hiveID, now)
+		VALUES($1,$2,'system','queen','task','',0,$3,'system','pending',$4) ON CONFLICT(id) DO NOTHING`, id, hiveID, body, now)
 	if err != nil {
 		return domainErr(err)
 	}
@@ -246,6 +255,7 @@ func scanAgent(row pgx.Row) (domain.Agent, error) {
 	if err != nil {
 		return domain.Agent{}, domainErr(err)
 	}
+	a.CreatedAt, a.UpdatedAt = a.CreatedAt.UTC(), a.UpdatedAt.UTC()
 	a.Role, a.State = domain.AgentRole(role), domain.AgentState(state)
 	if len(handoff) > 0 {
 		var h domain.Handoff
@@ -264,8 +274,8 @@ func (s *Store) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent
 }
 
 // CreateForagerWithLimits is CreateForager with the limits declared by the
-// active methodology. A zero field keeps the HiveConfig limit; a non-zero field
-// replaces it. The platform still requires a positive cap, so "unlimited" is
+// active methodology. A zero field keeps the HiveConfig limit; a positive field
+// may only tighten it. The platform still requires a positive cap, so "unlimited" is
 // never possible.
 func (s *Store) CreateForagerWithLimits(ctx context.Context, a domain.Agent, limits domain.Limits) (domain.Agent, error) {
 	return s.createForager(ctx, a, limits)
@@ -303,10 +313,10 @@ func (s *Store) createForagerTx(ctx context.Context, tx pgx.Tx, a domain.Agent, 
 	}
 	applyHiveDefaults(&cfg)
 	maxConcurrent, maxPerChain := cfg.MaxConcurrentForagers, cfg.MaxForagersPerChain
-	if limits.MaxConcurrentAgents > 0 {
+	if limits.MaxConcurrentAgents > 0 && limits.MaxConcurrentAgents < maxConcurrent {
 		maxConcurrent = limits.MaxConcurrentAgents
 	}
-	if limits.MaxAgentsPerChain > 0 {
+	if limits.MaxAgentsPerChain > 0 && limits.MaxAgentsPerChain < maxPerChain {
 		maxPerChain = limits.MaxAgentsPerChain
 	}
 	var active int
@@ -376,7 +386,7 @@ func (s *Store) createForagerTx(ctx context.Context, tx pgx.Tx, a domain.Agent, 
 			return domain.Agent{}, err
 		}
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO agents(`+agentColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+	if _, err = tx.Exec(ctx, `INSERT INTO agents(`+agentColumns+`,methodology_version_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,(SELECT id FROM methodologies WHERE hive_id=$2 AND active))`,
 		a.ID, a.HiveID, string(a.Role), string(a.State), a.Preset, a.CLI, a.Task, a.Branch,
 		a.IssueNumber, a.PRNumber, a.NodeID, a.ChainID, a.SessionRef, handoff,
 		a.RoleName, a.Revision, a.ParentID, a.CreatedAt, a.UpdatedAt); err != nil {

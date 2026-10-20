@@ -210,3 +210,18 @@ docker compose --env-file .env -f compose.yaml exec -T postgres pg_dumpall -U sw
 (cd deploy && python3 -m unittest)
 docker compose --env-file deploy/.env.example -f deploy/compose.yaml -f deploy/compose.cells.yaml config --quiet
 ```
+
+### 网页实时事件（SSE）
+
+`GET /api/events?hive=<项目ID>` 使用管理员会话，返回 `text/event-stream`。
+服务连接后发送 `ready`，之后每 25 秒发送 `: ping`。客户端每次连接后应重新拉取快照；
+不补发断线期间事件，缓冲满或数据库监听重连时会断开慢客户端，触发浏览器重连。
+
+当前 HTTP server 未配置全局 WriteTimeout；IdleTimeout 只作用于等待下一个请求，
+不会关闭正在返回 SSE 的请求。事件路由给每次写入单独设置 10 秒 deadline，
+避免网络阻塞占用连接；其他路由的超时策略不变。
+
+若另外接 Nginx，事件路由应设置
+`proxy_buffering off; proxy_cache off; proxy_read_timeout 75s;`，并保持 HTTP/1.1。
+应用同时返回 `X-Accel-Buffering: no` 和 `Cache-Control: no-cache, no-transform`。
+其他反向代理也应关闭响应缓存/缓冲，并把空闲读取超时设为大于 25 秒。

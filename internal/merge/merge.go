@@ -212,17 +212,20 @@ type Check struct {
 
 // Pull is the live PR state used by the gate.
 type Pull struct {
-	Number         int64  `json:"number"`
-	State          string `json:"state"`
-	Draft          bool   `json:"draft"`
-	Merged         bool   `json:"merged"`
-	URL            string `json:"url,omitempty"`
-	HeadSHA        string `json:"headSha,omitempty"`
-	HeadRef        string `json:"headRef,omitempty"`
-	BaseRef        string `json:"baseRef,omitempty"`
-	BaseRepository string `json:"baseRepository,omitempty"`
-	Mergeable      *bool  `json:"mergeable,omitempty"`
-	MergeableState string `json:"mergeableState,omitempty"`
+	Title          string    `json:"title"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+	ClosedAt       time.Time `json:"closedAt"`
+	Number         int64     `json:"number"`
+	State          string    `json:"state"`
+	Draft          bool      `json:"draft"`
+	Merged         bool      `json:"merged"`
+	URL            string    `json:"url,omitempty"`
+	HeadSHA        string    `json:"headSha,omitempty"`
+	HeadRef        string    `json:"headRef,omitempty"`
+	BaseRef        string    `json:"baseRef,omitempty"`
+	BaseRepository string    `json:"baseRepository,omitempty"`
+	Mergeable      *bool     `json:"mergeable,omitempty"`
+	MergeableState string    `json:"mergeableState,omitempty"`
 }
 
 // Readiness is the complete answer of the gate. Ready is true only when Reasons

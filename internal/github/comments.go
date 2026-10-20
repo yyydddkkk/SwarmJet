@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // NewWithBaseURL builds a client for a GitHub-compatible API endpoint. Tests
@@ -48,17 +49,20 @@ func (c *Client) CreatePRComment(ctx context.Context, id, number int64, body str
 // pointer because GitHub computes it asynchronously and reports null until it
 // is known.
 type PullState struct {
-	Number         int64  `json:"number"`
-	State          string `json:"state"`
-	Draft          bool   `json:"draft"`
-	Merged         bool   `json:"merged"`
-	URL            string `json:"url"`
-	HeadSHA        string `json:"headSha"`
-	HeadRef        string `json:"headRef"`
-	BaseRef        string `json:"baseRef"`
-	BaseRepository string `json:"baseRepository"`
-	Mergeable      *bool  `json:"mergeable,omitempty"`
-	MergeableState string `json:"mergeableState,omitempty"`
+	Title          string    `json:"title"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+	ClosedAt       time.Time `json:"closedAt"`
+	Number         int64     `json:"number"`
+	State          string    `json:"state"`
+	Draft          bool      `json:"draft"`
+	Merged         bool      `json:"merged"`
+	URL            string    `json:"url"`
+	HeadSHA        string    `json:"headSha"`
+	HeadRef        string    `json:"headRef"`
+	BaseRef        string    `json:"baseRef"`
+	BaseRepository string    `json:"baseRepository"`
+	Mergeable      *bool     `json:"mergeable,omitempty"`
+	MergeableState string    `json:"mergeableState,omitempty"`
 }
 
 // GetPullState reads the fields the merge gate needs, including the base
@@ -69,13 +73,16 @@ func (c *Client) GetPullState(ctx context.Context, id, number int64) (PullState,
 		return PullState{}, err
 	}
 	var raw struct {
-		Number         int64  `json:"number"`
-		State          string `json:"state"`
-		Draft          bool   `json:"draft"`
-		Merged         bool   `json:"merged"`
-		HTMLURL        string `json:"html_url"`
-		Mergeable      *bool  `json:"mergeable"`
-		MergeableState string `json:"mergeable_state"`
+		Title          string     `json:"title"`
+		UpdatedAt      time.Time  `json:"updated_at"`
+		ClosedAt       *time.Time `json:"closed_at"`
+		Number         int64      `json:"number"`
+		State          string     `json:"state"`
+		Draft          bool       `json:"draft"`
+		Merged         bool       `json:"merged"`
+		HTMLURL        string     `json:"html_url"`
+		Mergeable      *bool      `json:"mergeable"`
+		MergeableState string     `json:"mergeable_state"`
 		Head           struct {
 			SHA string `json:"sha"`
 			Ref string `json:"ref"`
@@ -90,8 +97,15 @@ func (c *Client) GetPullState(ctx context.Context, id, number int64) (PullState,
 	if _, err = c.request(ctx, "GET", fmt.Sprintf("%s/pulls/%d", p, number), nil, &raw); err != nil {
 		return PullState{}, err
 	}
+	closedAt := time.Time{}
+	if raw.ClosedAt != nil {
+		closedAt = raw.ClosedAt.UTC()
+	}
 	return PullState{
+		ClosedAt:       closedAt,
 		Number:         raw.Number,
+		Title:          raw.Title,
+		UpdatedAt:      raw.UpdatedAt.UTC(),
 		State:          raw.State,
 		Draft:          raw.Draft,
 		Merged:         raw.Merged,

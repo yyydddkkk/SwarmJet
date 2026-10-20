@@ -59,6 +59,7 @@ func TestGetPullStateReadsDraftAndMergeability(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"number": 7, "state": "open", "draft": true, "merged": false,
+			"title": "Implement change", "updated_at": "2026-10-20T12:00:00Z", "closed_at": "2026-10-19T12:00:00Z",
 			"html_url": "https://github.com/owner/repo/pull/7", "mergeable": mergeable,
 			"mergeable_state": "dirty",
 			"head":            map[string]any{"sha": "head", "ref": "feat"},
@@ -68,6 +69,9 @@ func TestGetPullStateReadsDraftAndMergeability(t *testing.T) {
 	pull, err := c.GetPullState(context.Background(), 1, 7)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if pull.Title != "Implement change" || pull.UpdatedAt.Format("2006-01-02") != "2026-10-20" || pull.ClosedAt.Format("2006-01-02") != "2026-10-19" {
+		t.Fatalf("metadata = %+v", pull)
 	}
 	if !pull.Draft || pull.HeadSHA != "head" || pull.BaseRef != "dev" ||
 		pull.BaseRepository != "owner/repo" || pull.Mergeable == nil || *pull.Mergeable {

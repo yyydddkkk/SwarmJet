@@ -44,6 +44,10 @@ type Options struct {
 	Runtime   cell.Runtime
 	Publisher cell.Publisher
 
+	// ReconcileParkedPR verifies associated PRs against the forge and replays
+	// the ordinary closure lifecycle when a webhook was missed.
+	ReconcileParkedPR func(context.Context, domain.Hive, domain.Agent) error
+
 	// Clock defaults to the system clock.
 	Clock Clock
 	// Model is the Hive default model, used when the role does not pin one.
@@ -236,6 +240,12 @@ func (s *Supervisor) Scan(ctx context.Context) error {
 		for _, agent := range foragers {
 			if agent.Role != "" && agent.Role != domain.RoleForager {
 				continue
+			}
+			if agent.State == domain.AgentParked && agent.PRNumber > 0 && agent.Revision == "" && s.opts.ReconcileParkedPR != nil {
+				if err := s.opts.ReconcileParkedPR(ctx, hive, agent); err != nil {
+					s.log.Warn("forager: reconcile parked PR failed", "agent", agent.ID, "error", err)
+					errs = append(errs, err)
+				}
 			}
 			if err := s.actor(agent.ID, agent.HiveID).scan(ctx, agent, hive); err != nil &&
 				!errors.Is(err, domain.ErrNotFound) {
