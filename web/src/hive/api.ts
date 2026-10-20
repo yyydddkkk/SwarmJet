@@ -18,6 +18,7 @@ import type {
   SetupStatus,
   TokenScope,
   TokenSummary,
+  UsagePeriod,
   UsageResponse,
 } from "./types";
 
@@ -289,10 +290,14 @@ export const hiveAPI = {
     );
   },
 
-  getUsage(query: { hive?: string; agent?: string }, signal?: AbortSignal) {
+  getUsage(
+    query: { hive?: string; agent?: string; period?: UsagePeriod },
+    signal?: AbortSignal,
+  ) {
     const params = new URLSearchParams();
     if (query.hive) params.set("hive", query.hive);
     if (query.agent) params.set("agent", query.agent);
+    if (query.period) params.set("period", query.period);
     const suffix = params.toString() ? `?${params.toString()}` : "";
     return request<UsageResponse>(`/usage${suffix}`, "GET", undefined, signal);
   },

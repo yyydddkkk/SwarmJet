@@ -15,7 +15,7 @@ import {
   StatusGrid,
   StatusItem,
 } from "./components";
-import { formatDateTime, formatTokens, formatUsd } from "./format";
+import { formatTokens } from "./format";
 import { Icon } from "./icons";
 import { useResource } from "./use-resource";
 
@@ -37,8 +37,11 @@ export default function ModelsPage() {
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeError, setRemoveError] = useState("");
 
-  const credentials = models.data?.credentials ?? [];
-  const available = credentials.length > 0;
+  const credentials = models.data?.providers ?? [];
+  const configured = credentials.filter(credential => credential.configured);
+  const configuredProviders = new Set(configured.map(credential => credential.provider));
+  const available = configured.length > 0;
+  const gatewayAvailable = models.data?.gatewayAvailable ?? false;
   const defaultModel = models.data?.defaultModel ?? "—";
   const providers = uniqueProviders(models.data?.models ?? [], credentials);
 
@@ -107,12 +110,17 @@ export default function ModelsPage() {
                 <code>{defaultModel || "未配置"}</code>
               </StatusItem>
               <StatusItem label="可用提供方">
-                {available ? credentials.map(item => providerLabel(item.provider)).join("、") : "无"}
+                {available ? configured.map(item => providerLabel(item.provider)).join("、") : "无"}
               </StatusItem>
-              <StatusItem label="模型数量">
-                {models.data.models.length} 个（{models.data.models.filter(model => model.available !== false).length}{" "}
-                个可用）
+              <StatusItem label="模型网关">
+                <span
+                  className={gatewayAvailable ? "hg-tone-mint" : "hg-tone-amber"}
+                  data-testid="gateway-available"
+                >
+                  {gatewayAvailable ? "可连接" : "暂不可用"}
+                </span>
               </StatusItem>
+              <StatusItem label="模型数量">{models.data.models.length} 个</StatusItem>
             </StatusGrid>
 
             {!available ? (
@@ -124,6 +132,12 @@ export default function ModelsPage() {
               </Callout>
             ) : null}
 
+            {!gatewayAvailable ? (
+              <Callout tone="amber" title="模型网关暂时没有响应">
+                <p>平台读不到模型目录，下面的列表可能为空。凭证仍可以写入，网关恢复后刷新即可。</p>
+              </Callout>
+            ) : null}
+
             {credentials.length ? (
               <ul className="hg-credential-list">
                 {credentials.map(credential => (
@@ -131,15 +145,17 @@ export default function ModelsPage() {
                     <div className="hg-credential-main">
                       <strong>{providerLabel(credential.provider)}</strong>
                       <code className="hg-masked-key" data-testid={`masked-${credential.provider}`}>
-                        {credential.maskedKey}
+                        {credential.masked || "已保存（无脱敏值）"}
                       </code>
                       <span className="hg-token-meta">
-                        更新于 {formatDateTime(credential.updatedAt)}
+                        {credential.type === "oauth" ? "OAuth" : credential.type || "api_key"} ·{" "}
+                        {credential.configured ? "可用" : "未生效"}
                       </span>
                     </div>
                     <button
                       className="hg-btn hg-btn-danger hg-btn-small"
                       type="button"
+                      aria-label={`移除 ${providerLabel(credential.provider)} 的凭证`}
                       onClick={() => {
                         setRemoveError("");
                         setRemoving(credential);
@@ -156,7 +172,7 @@ export default function ModelsPage() {
               providers={providers}
               onSaved={credential => {
                 setNotice(
-                  `已保存 ${providerLabel(credential.provider)} 凭证，脱敏值 ${credential.maskedKey}。`,
+                  `已保存 ${providerLabel(credential.provider)} 凭证，脱敏值 ${credential.masked || "已隐藏"}。`,
                 );
                 models.reload();
               }}
@@ -177,7 +193,7 @@ export default function ModelsPage() {
                       <th scope="col">模型</th>
                       <th scope="col">提供方</th>
                       <th scope="col">上下文</th>
-                      <th scope="col">输入 / 输出（每百万 token）</th>
+                      <th scope="col">最大输出</th>
                       <th scope="col">状态</th>
                     </tr>
                   </thead>
@@ -187,6 +203,7 @@ export default function ModelsPage() {
                         key={model.id}
                         model={model}
                         isDefault={model.id === models.data?.defaultModel}
+                        usable={configuredProviders.has(model.provider)}
                       />
                     ))}
                   </tbody>
@@ -214,20 +231,26 @@ export default function ModelsPage() {
   );
 }
 
-function ModelRow({ model, isDefault }: { model: ModelOption; isDefault: boolean }) {
-  const usable = model.available !== false;
+function ModelRow({
+  model,
+  isDefault,
+  usable,
+}: {
+  model: ModelOption;
+  isDefault: boolean;
+  usable: boolean;
+}) {
   return (
     <tr>
       <td>
         <code>{model.id}</code>
         {isDefault ? <span className="hg-badge hg-tone-amber hg-model-default">默认</span> : null}
-        <span className="hg-model-name">{model.name}</span>
+        {model.displayName ? <span className="hg-model-name">{model.displayName}</span> : null}
+        {model.kind ? <span className="hg-chip">{model.kind}</span> : null}
       </td>
       <td>{providerLabel(model.provider)}</td>
-      <td>{model.contextWindow ? `${formatTokens(model.contextWindow)} tokens` : "—"}</td>
-      <td className="hg-model-price">
-        {formatUsd(model.inputPerMillionUsd)} / {formatUsd(model.outputPerMillionUsd)}
-      </td>
+      <td>{model.contextLength ? `${formatTokens(model.contextLength)} tokens` : "—"}</td>
+      <td>{model.maxOutputTokens ? `${formatTokens(model.maxOutputTokens)} tokens` : "—"}</td>
       <td>
         <span className={usable ? "hg-badge hg-tone-mint" : "hg-badge hg-tone-neutral"}>
           {usable ? "可用" : "缺少凭证"}
@@ -269,12 +292,12 @@ function CredentialForm({
           .then(result => {
             // Drop the plaintext from component state as soon as the server confirms.
             setApiKey("");
-            const credential = result.credential ?? {
-              provider: result.provider ?? provider,
-              maskedKey: result.maskedKey ?? "已脱敏",
-              updatedAt: result.updatedAt ?? new Date().toISOString(),
-            };
-            onSaved(credential);
+            onSaved({
+              provider: result?.provider || provider,
+              type: result?.type,
+              masked: result?.masked,
+              configured: result?.configured ?? true,
+            });
           })
           .catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
           .finally(() => setBusy(false));

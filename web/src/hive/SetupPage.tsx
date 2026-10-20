@@ -97,6 +97,7 @@ export default function SetupPage({ query }: { query: URLSearchParams }) {
         <>
           <GitHubPanel status={status.data} onChanged={status.reload} />
           <TunnelPanel status={status.data} />
+          <ModelsPanel status={status.data} />
           <Panel
             title="连接本地 Agent"
             subtitle="为 Claude Code、Codex 生成 MCP 连接配置。明文 Token 只在创建后显示一次。"
@@ -340,6 +341,47 @@ function TunnelPanel({ status }: { status: SetupStatus }) {
             地址变化时平台会自动调用 GitHub 更新 webhook；同步失败会在上面显示原因。
           </p>
         </>
+      )}
+    </Panel>
+  );
+}
+
+function ModelsPanel({ status }: { status: SetupStatus }) {
+  const models = status.models ?? { available: false, configured: false, defaultModel: "" };
+  const providers = models.providers ?? [];
+  return (
+    <Panel
+      title="模型"
+      subtitle="Agent 通过平台代理调用模型；凭证由 auth broker 保管，Cell 拿不到。"
+      extra={
+        <span
+          className={models.available ? "hg-badge hg-tone-mint" : "hg-badge hg-tone-amber"}
+          data-testid="setup-models-status"
+        >
+          <span
+            className={`hg-dot ${models.available ? "hg-tone-mint" : "hg-tone-amber"}`}
+            aria-hidden="true"
+          />
+          {models.available ? "已有可用凭证" : "还没有可用凭证"}
+        </span>
+      }
+    >
+      <StatusGrid>
+        <StatusItem label="默认模型">
+          <code data-testid="setup-default-model">{models.defaultModel || "未配置"}</code>
+        </StatusItem>
+        <StatusItem label="已配置提供方">{providers.length ? providers.join("、") : "无"}</StatusItem>
+      </StatusGrid>
+      {!models.available ? (
+        <Callout tone="amber" title="先写入一个模型凭证">
+          <p>
+            到 <a href="#/models">模型</a> 页写入 API key（第一个要用的是 DeepSeek），Agent 才能调用模型。
+          </p>
+        </Callout>
+      ) : (
+        <p className="hg-muted">
+          要换 key 或添加提供方，去 <a href="#/models">模型</a> 页。
+        </p>
       )}
     </Panel>
   );

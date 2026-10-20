@@ -7,7 +7,7 @@ import { hiveAPI } from "./api";
 import type {
   EventRule,
   Methodology,
-  MethodologyEvent,
+  MethodologyChange,
   MethodologyFile,
   MethodologyManifest,
   MethodologyRole,
@@ -58,10 +58,17 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
   }
   if (!current.data) return null;
 
-  const { methodology, files } = current.data;
+  // The response is the version itself, flattened, plus its files.
+  const methodology = current.data;
+  const { files } = current.data;
+  const builtin = current.data.builtin === true;
   const versionList = versions.data?.versions ?? [];
-  const events = versions.data?.events ?? [];
-  const activeVersion = versionList.find(item => item.active)?.version ?? methodology.version;
+  const changes = versions.data?.changes ?? [];
+  const activeVersion =
+    versions.data?.activeVersion ||
+    versionList.find(item => item.active)?.version ||
+    methodology.version;
+  const versionLabel = builtin ? "内置方法论" : `v${methodology.version}`;
 
   const activate = () => {
     if (!switching) return;
@@ -111,7 +118,7 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
                     </option>
                   ))
               ) : (
-                <option value={methodology.version}>v{methodology.version}</option>
+                <option value={methodology.version}>{versionLabel}</option>
               )}
             </select>
           </label>
@@ -119,9 +126,11 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
       >
         <StatusGrid>
           <StatusItem label="版本">
-            <span className="hg-version-badge">
-              v{methodology.version}
-              {methodology.active ? (
+            <span className="hg-version-badge" data-testid="methodology-version">
+              {versionLabel}
+              {builtin ? (
+                <span className="hg-badge hg-tone-amber">平台默认</span>
+              ) : methodology.active ? (
                 <span className="hg-badge hg-tone-mint">当前生效</span>
               ) : (
                 <span className="hg-badge hg-tone-neutral">历史版本</span>
@@ -134,8 +143,8 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
           <StatusItem label="摘要">
             <code title={methodology.digest}>{shortSha(methodology.digest)}</code>
           </StatusItem>
-          <StatusItem label="修改人">{methodology.createdBy || "—"}</StatusItem>
-          <StatusItem label="时间">{formatDateTime(methodology.createdAt)}</StatusItem>
+          <StatusItem label="修改人">{builtin ? "平台内置" : methodology.createdBy || "—"}</StatusItem>
+          <StatusItem label="时间">{builtin ? "—" : formatDateTime(methodology.createdAt)}</StatusItem>
           <StatusItem label="来源">
             {methodology.source ? (
               <span className="hg-source">
@@ -143,6 +152,8 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
                 {methodology.source.sha ? ` · ${shortSha(methodology.source.sha)}` : ""}
                 {methodology.source.path ? ` · ${methodology.source.path}` : ""}
               </span>
+            ) : builtin ? (
+              "这个 Hive 还没有发布过方法论，使用平台内置版本"
             ) : (
               "控制台或 MCP 直接发布"
             )}
@@ -157,7 +168,7 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
 
       <VersionHistory
         versions={versionList}
-        events={events}
+        changes={changes}
         activeVersion={activeVersion}
         viewingVersion={methodology.version}
         onView={setViewVersion}
@@ -481,21 +492,21 @@ function fileSize(content: string): string {
 
 function VersionHistory({
   versions,
-  events,
+  changes,
   activeVersion,
   viewingVersion,
   onView,
   onSwitch,
 }: {
   versions: Methodology[];
-  events: MethodologyEvent[];
+  changes: MethodologyChange[];
   activeVersion: number;
   viewingVersion: number;
   onView: (version: number) => void;
   onSwitch: (version: Methodology) => void;
 }) {
   const sorted = [...versions].sort((left, right) => right.version - left.version);
-  const records = useMemo(() => modificationRecords(versions, events), [versions, events]);
+  const records = useMemo(() => modificationRecords(versions, changes), [versions, changes]);
   return (
     <>
       <Panel
@@ -582,7 +593,7 @@ function VersionHistory({
         ) : (
           <ol className="hg-change-log">
             {records.map(record => (
-              <li key={record.id}>
+              <li key={record.key}>
                 <span className={`hg-change-action hg-change-${record.action}`}>
                   {record.action === "activate" ? "切换" : "发布"}
                 </span>
@@ -606,22 +617,42 @@ function VersionHistory({
   );
 }
 
+type ChangeRecord = {
+  key: string;
+  action: string;
+  version: number;
+  actor: string;
+  note?: string;
+  source?: Methodology["source"];
+  createdAt: string;
+};
+
 function modificationRecords(
   versions: Methodology[],
-  events: MethodologyEvent[],
-): MethodologyEvent[] {
-  if (events.length) {
-    return [...events].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  changes: MethodologyChange[],
+): ChangeRecord[] {
+  if (changes.length) {
+    const sources = new Map(versions.map(version => [version.version, version.source]));
+    return [...changes]
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id - left.id)
+      .map(change => ({
+        key: `change-${change.id}`,
+        action: change.action,
+        version: change.version,
+        actor: change.actor,
+        note: change.note,
+        source: change.action === "publish" ? sources.get(change.version) : undefined,
+        createdAt: change.createdAt,
+      }));
   }
   // The version rows already carry who/when/note/source; show them as publishes
-  // until the append-only event table has its own rows.
+  // until the append-only change log has its own rows.
   return [...versions]
     .sort((left, right) => right.version - left.version)
     .map(version => ({
-      id: `version-${version.version}`,
-      hiveId: version.hiveId,
+      key: `version-${version.version}`,
       version: version.version,
-      action: "publish" as const,
+      action: "publish",
       actor: version.createdBy,
       note: version.note,
       source: version.source,
@@ -678,8 +709,8 @@ function DiffPanel({
     if (!base.data || !compare.data) return null;
     const fileDiffs = diffFiles(base.data.files, compare.data.files);
     const manifestLines = diffLines(
-      JSON.stringify(base.data.methodology.manifest, null, 2),
-      JSON.stringify(compare.data.methodology.manifest, null, 2),
+      JSON.stringify(base.data.manifest, null, 2),
+      JSON.stringify(compare.data.manifest, null, 2),
     );
     const compactManifest = compactDiff(manifestLines);
     const stats = diffStats(fileDiffs);

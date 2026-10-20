@@ -323,7 +323,7 @@ function ForagerDetail({
           onRetry={prRes.reload}
         />
       ) : active === "usage" ? (
-        <AgentUsagePanel hiveId={hive.id} agentId={agent.id} />
+        <AgentUsagePanel hiveId={hive.id} agentId={agent.id} roleName={agent.roleName} />
       ) : active === "handoff" ? (
         <Panel title="交接摘要" subtitle="每轮结束时更新，也是 CLI 会话丢失后的恢复依据。">
           {agent.handoff ? (
@@ -413,10 +413,8 @@ function MergePanel({
 }
 
 function MergeBody({ pr }: { pr: PRStatusResponse }) {
-  const { readiness, pull } = pr;
-  const merged = pull?.merged ?? readiness.pull?.merged;
-  const ready = readiness.ready;
-  const headSha = pull?.headSha || readiness.pull?.headSha;
+  const { merged, ready, headSha } = pr;
+  const reasons = pr.reasons ?? [];
   const tone = merged || ready ? "mint" : "coral";
   const label = merged ? "已合并" : ready ? "可合并" : "尚不可合并";
 
@@ -430,21 +428,20 @@ function MergeBody({ pr }: { pr: PRStatusResponse }) {
           {shortSha(headSha)}
         </code>
         <span className="hg-muted">
-          PR #{pull?.number ?? pr.prNumber} · {pull?.state ?? "unknown"}
-          {pull?.draft ? " · draft" : ""}
-          {pull?.baseRef ? ` → ${pull.baseRef}` : ""}
+          PR #{pr.prNumber} · {pr.state || "unknown"}
+          {pr.draft ? " · draft" : ""}
         </span>
-        {pull?.url ? (
-          <a className="hg-meta" href={pull.url} target="_blank" rel="noreferrer">
+        {pr.url ? (
+          <a className="hg-meta" href={pr.url} target="_blank" rel="noreferrer">
             <Icon name="external" size={16} />
             在 GitHub 查看
           </a>
         ) : null}
       </div>
 
-      {readiness.reasons?.length ? (
+      {reasons.length ? (
         <ul className="hg-merge-reasons">
-          {readiness.reasons.map(reason => (
+          {reasons.map(reason => (
             <li key={reason}>{reason}</li>
           ))}
         </ul>
@@ -455,7 +452,7 @@ function MergeBody({ pr }: { pr: PRStatusResponse }) {
       <section className="hg-merge-section">
         <h3>CI 检查</h3>
         <CheckList
-          checks={mergeChecks(readiness.checks ?? [])}
+          checks={mergeChecks(pr.checks ?? [])}
           empty="这个 head 上还没有检查结果。"
         />
       </section>

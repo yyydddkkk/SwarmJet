@@ -36,6 +36,15 @@ test("the conversation shows all four provenance markers", async ({ page }, test
   await page.screenshot({ path: testInfo.outputPath("message-trust-1440.png"), fullPage: true });
 });
 
+test("an unknown trust value from a newer server is shown raw", async ({ page }) => {
+  const state = await mockHiveAPI(page);
+  const message = state.messages.find(item => item.id === "msg-1");
+  if (message) message.trust = "partner";
+  await page.goto("/#/hives/swarmjet");
+
+  await expect(page.locator(".hg-stream .hg-trust-unknown").first()).toHaveText("partner");
+});
+
 test("the Inbox marks router events as external", async ({ page }) => {
   await mockHiveAPI(page);
   await page.goto("/#/hives/swarmjet/inbox");

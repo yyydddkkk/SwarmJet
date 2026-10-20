@@ -108,8 +108,8 @@ export type Message = {
   chainId: string;
   hop: number;
   body: string;
-  /** Provenance; an empty value from older rows means "agent". */
-  trust?: MessageTrust;
+  /** Provenance; an empty value from older rows means "agent". Unknown values are shown raw. */
+  trust?: MessageTrust | string;
   artifacts?: ArtifactRef[];
   state: MessageState;
   createdAt: string;
@@ -210,7 +210,10 @@ export type CellsSetup = {
 export type ModelsSetup = {
   /** Whether at least one provider has a usable credential. */
   available: boolean;
+  configured: boolean;
   defaultModel: string;
+  /** Providers with a configured credential. */
+  providers?: string[];
 };
 
 export type SetupStatus = {
@@ -254,38 +257,37 @@ export type CreatedToken = {
 // parallel; until they merge the console reads them through /api and the
 // Playwright mock supplies the fixtures.
 
+/** One catalog entry, mirroring llmproxy.Model. */
 export type ModelOption = {
   /** provider/model, e.g. "deepseek/deepseek-chat". */
   id: string;
   provider: string;
-  name: string;
-  contextWindow?: number;
-  inputPerMillionUsd?: number;
-  outputPerMillionUsd?: number;
-  /** False when the provider has no credential yet. */
-  available?: boolean;
+  displayName?: string;
+  contextLength?: number;
+  maxOutputTokens?: number;
+  kind?: string;
 };
 
+/** A provider credential as the server shows it (api.modelCredentialView). */
 export type ModelCredential = {
   provider: string;
+  type?: string;
   /** Masked by the server; the plaintext key never reaches the console. */
-  maskedKey: string;
-  updatedAt: string;
+  masked?: string;
+  configured: boolean;
 };
 
+/** GET /api/models (api.modelsResponse). */
 export type ModelsResponse = {
-  models: ModelOption[];
   defaultModel: string;
-  credentials: ModelCredential[];
+  models: ModelOption[];
+  providers: ModelCredential[];
+  /** False when the auth gateway did not answer; the catalog is then empty. */
+  gatewayAvailable: boolean;
 };
 
-/** The contract only promises the masked value, so accept both shapes. */
-export type ModelCredentialResponse = {
-  credential?: ModelCredential;
-  provider?: string;
-  maskedKey?: string;
-  updatedAt?: string;
-};
+/** PUT /api/models/credentials/{provider} answers with the credential view. */
+export type ModelCredentialResponse = ModelCredential;
 
 export type MethodologySource = {
   url: string;
@@ -355,7 +357,7 @@ export type Methodology = {
   hiveId: string;
   version: number;
   active: boolean;
-  source?: MethodologySource | null;
+  source?: MethodologySource;
   manifest: MethodologyManifest;
   digest: string;
   note?: string;
@@ -363,25 +365,29 @@ export type Methodology = {
   createdAt: string;
 };
 
-export type MethodologyResponse = {
-  methodology: Methodology;
+/** GET /methodology and POST /methodology/activate: the version flattened plus its files. */
+export type MethodologyResponse = Methodology & {
   files: MethodologyFile[];
+  /** True when the Hive has no stored version and the platform default is shown. */
+  builtin?: boolean;
 };
 
-export type MethodologyEvent = {
-  id: string;
+/** methodology.Change: one append-only publish or activate record. */
+export type MethodologyChange = {
+  id: number;
   hiveId: string;
-  version: number;
   action: "publish" | "activate" | string;
+  version: number;
   actor: string;
   note?: string;
-  source?: MethodologySource | null;
   createdAt: string;
 };
 
 export type MethodologyVersionsResponse = {
+  hiveId: string;
+  activeVersion: number;
   versions: Methodology[];
-  events: MethodologyEvent[];
+  changes: MethodologyChange[];
 };
 
 export type AttestResult = "pass" | "pass_notes" | "fail" | "blocked";
@@ -412,78 +418,56 @@ export type Attestation = {
   createdAt: string;
 };
 
+/** merge.Check */
 export type MergeCheck = {
   name: string;
   status: string;
   conclusion: string;
   url?: string;
   output?: string;
-  outputTruncated?: boolean;
-  untrusted?: boolean;
 };
 
-export type PullRequest = {
-  number: number;
-  state: string;
-  draft: boolean;
-  merged: boolean;
-  url?: string;
-  headSha?: string;
-  baseRef?: string;
-  baseRepository?: string;
-  mergeable?: boolean | null;
-  mergeableState?: string;
-};
-
-export type MergeReadiness = {
-  ready: boolean;
-  reasons: string[];
-  pull: PullRequest;
-  attestation?: Attestation | null;
-  attestationFound?: boolean;
-  checks?: MergeCheck[];
-};
-
+/** GET /api/hives/{id}/prs/{number} (api.prStatusResponse). */
 export type PRStatusResponse = {
   hiveId: string;
   prNumber: number;
-  pull: PullRequest;
-  readiness: MergeReadiness;
+  state?: string;
+  draft: boolean;
+  merged: boolean;
+  headSha?: string;
+  url?: string;
+  checks: MergeCheck[];
   attestations: Attestation[];
+  ready: boolean;
+  reasons: string[];
 };
 
-export type ModelUsage = {
-  model: string;
+/** domain.LLMUsageTotals */
+export type UsageTotals = {
+  requests: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   costUsd: number;
-  /** False when the model has no price entry; its cost is recorded as zero. */
-  priceKnown?: boolean;
+  /** Requests whose model had no price entry; their cost counts as zero. */
+  unknownPriceRequests: number;
 };
 
-export type AgentUsage = {
-  agentId: string;
-  hiveId: string;
-  roleName?: string;
-  inputTokens: number;
-  outputTokens: number;
-  costUsd: number;
-  models?: ModelUsage[];
+/** domain.LLMUsageGroup: one row of byAgent or byModel. */
+export type UsageGroup = UsageTotals & {
+  agentId?: string;
+  model?: string;
 };
 
-export type UsageLimits = {
-  maxCostPerAgentUsd?: number;
-  maxCostPerDayUsd?: number;
-};
+export type UsagePeriod = "all" | "today";
 
+/** GET /api/usage (domain.LLMUsageSummary). */
 export type UsageResponse = {
-  hiveId: string;
-  /** Local calendar day, YYYY-MM-DD. */
-  date: string;
-  totalCostUsd: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  /** Per-Agent totals for the day, highest cost first. */
-  agents: AgentUsage[];
-  limits?: UsageLimits;
+  hiveId?: string;
+  agentId?: string;
+  period: UsagePeriod | string;
+  totals: UsageTotals;
+  byAgent: UsageGroup[];
+  byModel: UsageGroup[];
 };

@@ -493,11 +493,17 @@ export const trustLabels: Record<MessageTrust, string> = {
   system: "系统",
 };
 
-export function TrustBadge({ trust }: { trust: MessageTrust }) {
+export function TrustBadge({ trust }: { trust: MessageTrust | string }) {
+  const known = Object.prototype.hasOwnProperty.call(trustLabels, trust);
+  // An unknown value from a newer server is shown as-is rather than dropped.
+  const label = known ? trustLabels[trust as MessageTrust] : trust;
   return (
-    <span className={`hg-trust hg-trust-${trust}`} title={`来源：${trustLabels[trust]}`}>
+    <span
+      className={`hg-trust ${known ? `hg-trust-${trust}` : "hg-trust-unknown"}`}
+      title={`来源：${label}`}
+    >
       {trust === "external" ? <Icon name="alert" size={16} /> : null}
-      {trustLabels[trust]}
+      {label}
     </span>
   );
 }

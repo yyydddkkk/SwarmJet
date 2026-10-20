@@ -51,8 +51,8 @@ test("the merge tab lists attestations with author flag and superseded state", a
 
 test("a not-ready PR lists the merge policy reasons", async ({ page }) => {
   const state = await mockHiveAPI(page);
-  state.prStatuses["swarmjet:88"].readiness.ready = false;
-  state.prStatuses["swarmjet:88"].readiness.reasons = [
+  state.prStatuses["swarmjet:88"].ready = false;
+  state.prStatuses["swarmjet:88"].reasons = [
     "需要一条来自非作者的 PASS 结论。",
     "integration 检查尚未通过。",
   ];
@@ -74,6 +74,17 @@ test("the usage tab shows this Agent's spend and model breakdown", async ({ page
   await expect(page.getByText("deepseek/deepseek-chat", { exact: true })).toBeVisible();
 
   await page.screenshot({ path: testInfo.outputPath("forager-usage-1440.png"), fullPage: true });
+});
+
+test("usage asks for today and an Agent without rows never borrows another's", async ({ page }) => {
+  const state = await mockHiveAPI(page);
+  await page.goto("/#/hives/swarmjet/foragers/forager-5c40/usage");
+
+  await expect(page.getByText("这只 Agent 还没有用量。", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("agent-usage-cost")).toHaveCount(0);
+  const usage = state.calls.filter(call => call.path === "/api/usage");
+  expect(usage.length).toBeGreaterThan(0);
+  for (const call of usage) expect(new URLSearchParams(call.query).get("period")).toBe("today");
 });
 
 test("the Hive usage tab shows today's total and the Agent ranking", async ({ page }, testInfo) => {

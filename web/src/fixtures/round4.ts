@@ -1,8 +1,13 @@
 // Round-4 fixtures for the Playwright mock (the console itself always calls
-// /api). Shapes follow docs/claude/round4-prompts.md; the values are fake.
+// /api). Every shape copies the json tags of the Go response types:
+//   internal/api/prs.go          prStatusResponse
+//   internal/api/methodology.go  methodologyResponse, versions map, methodology.Change
+//   internal/api/models.go       modelsResponse, modelCredentialView
+//   internal/domain/llm.go       LLMUsageSummary
+// The values are fake.
 import type {
   Methodology,
-  MethodologyEvent,
+  MethodologyChange,
   MethodologyFile,
   MethodologyManifest,
   MethodologyResponse,
@@ -211,234 +216,175 @@ export const methodologyVersions: Methodology[] = [
   },
 ];
 
-export const methodologyEvents: MethodologyEvent[] = [
+/** methodology.Change rows; ids are int64 in Go. */
+export const methodologyChanges: MethodologyChange[] = [
   {
-    id: "me-3",
+    id: 4,
     hiveId: "swarmjet",
-    version: 3,
-    action: "publish",
-    actor: "forager:forager-7f3a",
-    note: "加入 verifier 与安全规则，允许 worker 派生 verifier。",
-    source: { url: "https://github.com/yyydddkkk/swarm-methodology", ref: "main" },
-    createdAt: "2026-10-16T00:10:00Z",
-  },
-  {
-    id: "me-2-activate",
-    hiveId: "swarmjet",
-    version: 3,
     action: "activate",
+    version: 3,
     actor: "local:web-admin",
     note: "确认新版本。",
     createdAt: "2026-10-16T00:12:00Z",
   },
   {
-    id: "me-2",
+    id: 3,
     hiveId: "swarmjet",
-    version: 2,
     action: "publish",
+    version: 3,
+    actor: "forager:forager-7f3a",
+    note: "加入 verifier 与安全规则，允许 worker 派生 verifier。",
+    createdAt: "2026-10-16T00:10:00Z",
+  },
+  {
+    id: 2,
+    hiveId: "swarmjet",
+    action: "publish",
+    version: 2,
     actor: "local:web-admin",
     note: "收紧验证：只有 PASS 可以合并。",
-    source: { url: "https://github.com/yyydddkkk/swarm-methodology", ref: "v2" },
     createdAt: "2026-10-10T08:20:00Z",
   },
   {
-    id: "me-1",
+    id: 1,
     hiveId: "swarmjet",
-    version: 1,
     action: "publish",
+    version: 1,
     actor: "system",
     note: "内置最小方法论。",
     createdAt: "2026-09-02T03:10:00Z",
   },
 ];
 
+/** GET /methodology?version=N: the version flattened plus its files. */
 export const methodologyResponses: Record<number, MethodologyResponse> = Object.fromEntries(
-  methodologyVersions.map(version => [
-    version.version,
-    { methodology: version, files: files(version.version) },
-  ]),
+  methodologyVersions.map(version => [version.version, { ...version, files: files(version.version) }]),
 );
 
+/** GET /methodology for a Hive with no stored version: the platform default. */
+export function builtinMethodology(hiveId: string): MethodologyResponse {
+  return {
+    id: "",
+    hiveId,
+    version: 0,
+    active: false,
+    manifest: v1Manifest,
+    digest: "",
+    createdBy: "",
+    createdAt: "0001-01-01T00:00:00Z",
+    files: files(1),
+    builtin: true,
+  };
+}
+
+/** GET /api/models (modelsResponse); providers start empty. */
 export const modelCatalog: ModelsResponse = {
   defaultModel: "deepseek/deepseek-chat",
-  credentials: [],
   models: [
     {
       id: "deepseek/deepseek-chat",
       provider: "deepseek",
-      name: "DeepSeek Chat",
-      contextWindow: 128000,
-      inputPerMillionUsd: 0.27,
-      outputPerMillionUsd: 1.1,
-      available: false,
+      displayName: "DeepSeek Chat",
+      contextLength: 128000,
+      maxOutputTokens: 8192,
+      kind: "chat",
     },
     {
       id: "deepseek/deepseek-reasoner",
       provider: "deepseek",
-      name: "DeepSeek Reasoner",
-      contextWindow: 128000,
-      inputPerMillionUsd: 0.55,
-      outputPerMillionUsd: 2.19,
-      available: false,
+      displayName: "DeepSeek Reasoner",
+      contextLength: 128000,
+      maxOutputTokens: 32768,
+      kind: "chat",
     },
     {
       id: "openai/gpt-5-mini",
       provider: "openai",
-      name: "GPT-5 mini",
-      contextWindow: 400000,
-      inputPerMillionUsd: 0.25,
-      outputPerMillionUsd: 2,
-      available: false,
+      displayName: "GPT-5 mini",
+      contextLength: 400000,
+      maxOutputTokens: 128000,
+      kind: "chat",
     },
   ],
+  providers: [],
+  gatewayAvailable: true,
 };
 
+type Totals = Omit<UsageResponse["totals"], "requests" | "cacheReadTokens" | "cacheWriteTokens" | "unknownPriceRequests"> &
+  Partial<UsageResponse["totals"]>;
+
+function totals(value: Totals): UsageResponse["totals"] {
+  return {
+    requests: value.requests ?? 0,
+    inputTokens: value.inputTokens,
+    outputTokens: value.outputTokens,
+    cacheReadTokens: value.cacheReadTokens ?? 0,
+    cacheWriteTokens: value.cacheWriteTokens ?? 0,
+    costUsd: value.costUsd,
+    unknownPriceRequests: value.unknownPriceRequests ?? 0,
+  };
+}
+
+/** Per-Agent and per-model rows for the swarmjet Hive, today. */
+export const swarmjetUsageRows = {
+  "forager-7f3a": {
+    totals: totals({ requests: 64, inputTokens: 1_120_400, outputTokens: 132_200, cacheReadTokens: 410_000, costUsd: 6.82 }),
+    byModel: [{ model: "deepseek/deepseek-chat", ...totals({ requests: 64, inputTokens: 1_120_400, outputTokens: 132_200, cacheReadTokens: 410_000, costUsd: 6.82 }) }],
+  },
+  "forager-2b91": {
+    totals: totals({ requests: 22, inputTokens: 512_000, outputTokens: 61_400, costUsd: 3.15 }),
+    byModel: [{ model: "deepseek/deepseek-reasoner", ...totals({ requests: 22, inputTokens: 512_000, outputTokens: 61_400, costUsd: 3.15 }) }],
+  },
+  "queen-swarmjet": {
+    totals: totals({ requests: 18, inputTokens: 209_900, outputTokens: 21_200, costUsd: 2.5 }),
+    byModel: [{ model: "deepseek/deepseek-chat", ...totals({ requests: 18, inputTokens: 209_900, outputTokens: 21_200, costUsd: 2.5 }) }],
+  },
+} as const;
+
+/** GET /api/usage?hive=swarmjet&period=today (LLMUsageSummary). */
 export const swarmjetUsage: UsageResponse = {
   hiveId: "swarmjet",
-  date: "2026-10-16",
-  totalCostUsd: 12.47,
-  totalInputTokens: 1_842_300,
-  totalOutputTokens: 214_800,
-  limits: { maxCostPerAgentUsd: 5, maxCostPerDayUsd: 40 },
-  agents: [
-    {
-      agentId: "forager-7f3a",
-      hiveId: "swarmjet",
-      roleName: "worker",
-      inputTokens: 1_120_400,
-      outputTokens: 132_200,
-      costUsd: 6.82,
-      models: [
-        {
-          model: "deepseek/deepseek-chat",
-          inputTokens: 1_120_400,
-          outputTokens: 132_200,
-          costUsd: 6.82,
-          priceKnown: true,
-        },
-      ],
-    },
-    {
-      agentId: "forager-2b91",
-      hiveId: "swarmjet",
-      roleName: "verifier",
-      inputTokens: 512_000,
-      outputTokens: 61_400,
-      costUsd: 3.15,
-      models: [
-        {
-          model: "deepseek/deepseek-reasoner",
-          inputTokens: 512_000,
-          outputTokens: 61_400,
-          costUsd: 3.15,
-          priceKnown: true,
-        },
-      ],
-    },
-    {
-      agentId: "queen-swarmjet",
-      hiveId: "swarmjet",
-      roleName: "queen",
-      inputTokens: 209_900,
-      outputTokens: 21_200,
-      costUsd: 2.5,
-      models: [
-        {
-          model: "deepseek/deepseek-chat",
-          inputTokens: 209_900,
-          outputTokens: 21_200,
-          costUsd: 2.5,
-          priceKnown: true,
-        },
-      ],
-    },
+  period: "today",
+  totals: totals({
+    requests: 104,
+    inputTokens: 1_842_300,
+    outputTokens: 214_800,
+    cacheReadTokens: 410_000,
+    costUsd: 12.47,
+  }),
+  byAgent: Object.entries(swarmjetUsageRows).map(([agentId, row]) => ({ agentId, ...row.totals })),
+  byModel: [
+    { model: "deepseek/deepseek-chat", ...totals({ requests: 82, inputTokens: 1_330_300, outputTokens: 153_400, cacheReadTokens: 410_000, costUsd: 9.32 }) },
+    { model: "deepseek/deepseek-reasoner", ...totals({ requests: 22, inputTokens: 512_000, outputTokens: 61_400, costUsd: 3.15 }) },
   ],
 };
 
 export const ordersUsage: UsageResponse = {
   hiveId: "orders",
-  date: "2026-10-16",
-  totalCostUsd: 1.24,
-  totalInputTokens: 210_000,
-  totalOutputTokens: 32_000,
-  agents: [
-    {
-      agentId: "forager-1a2b",
-      hiveId: "orders",
-      roleName: "worker",
-      inputTokens: 210_000,
-      outputTokens: 32_000,
-      costUsd: 1.24,
-      models: [
-        {
-          model: "deepseek/deepseek-chat",
-          inputTokens: 210_000,
-          outputTokens: 32_000,
-          costUsd: 1.24,
-          priceKnown: true,
-        },
-      ],
-    },
-  ],
+  period: "today",
+  totals: totals({ requests: 9, inputTokens: 210_000, outputTokens: 32_000, costUsd: 1.24 }),
+  byAgent: [{ agentId: "forager-1a2b", ...totals({ requests: 9, inputTokens: 210_000, outputTokens: 32_000, costUsd: 1.24 }) }],
+  byModel: [{ model: "deepseek/deepseek-chat", ...totals({ requests: 9, inputTokens: 210_000, outputTokens: 32_000, costUsd: 1.24 }) }],
 };
 
 const headSha = "a41c9de9c3b5e2f1074c0a2b8d6f4e1c9a7b3d20";
 
+/** GET /api/hives/swarmjet/prs/88 (prStatusResponse). */
 export const pr88Status: PRStatusResponse = {
   hiveId: "swarmjet",
   prNumber: 88,
-  pull: {
-    number: 88,
-    state: "open",
-    draft: false,
-    merged: false,
-    url: "https://github.com/yyydddkkk/SwarmJet/pull/88",
-    headSha,
-    baseRef: "dev",
-    baseRepository: "yyydddkkk/SwarmJet",
-    mergeable: true,
-    mergeableState: "clean",
-  },
-  readiness: {
-    ready: true,
-    reasons: [],
-    pull: {
-      number: 88,
-      state: "open",
-      draft: false,
-      merged: false,
-      url: "https://github.com/yyydddkkk/SwarmJet/pull/88",
-      headSha,
-      baseRef: "dev",
-    },
-    attestation: {
-      id: "att-88-current",
-      hiveId: "swarmjet",
-      prNumber: 88,
-      headSha,
-      attesterId: "forager-2b91",
-      authorId: "forager-7f3a",
-      isAuthor: false,
-      result: "pass",
-      summary: "构建、单测和手动调用都通过；筛选交互没有发现阻塞问题。",
-      commentUrl: "https://github.com/yyydddkkk/SwarmJet/pull/88#issuecomment-1",
-      superseded: false,
-      createdAt: "2026-10-16T10:40:00Z",
-      findings: [
-        {
-          severity: "nit",
-          location: "web/src/hive/HivePage.tsx",
-          finding: "空状态文案可以再短一点。",
-        },
-      ],
-    },
-    attestationFound: true,
-    checks: [
-      { name: "lint", status: "completed", conclusion: "success" },
-      { name: "unit", status: "completed", conclusion: "success" },
-      { name: "integration", status: "completed", conclusion: "success" },
-    ],
-  },
+  state: "open",
+  draft: false,
+  merged: false,
+  headSha,
+  url: "https://github.com/yyydddkkk/SwarmJet/pull/88",
+  checks: [
+    { name: "lint", status: "completed", conclusion: "success" },
+    { name: "unit", status: "completed", conclusion: "success" },
+    { name: "integration", status: "completed", conclusion: "success" },
+  ],
+  ready: true,
+  reasons: [],
   attestations: [
     {
       id: "att-88-current",

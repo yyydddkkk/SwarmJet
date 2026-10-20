@@ -48,7 +48,7 @@ export function formatDateTime(value: string): string {
  * field existed default to "agent". The sender prefixes are only a fallback,
  * never a replacement for the stored value.
  */
-export function messageTrust(message: Message): MessageTrust {
+export function messageTrust(message: Message): MessageTrust | string {
   if (message.trust) return message.trust;
   if (message.from.startsWith("local:")) return "user";
   if (message.from === "system" || message.from === "hive") return "system";

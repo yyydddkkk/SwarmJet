@@ -236,7 +236,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
       ) : active === "methodology" ? (
         <MethodologySection hiveId={hive.id} />
       ) : active === "usage" ? (
-        <HiveUsagePanel hiveId={hive.id} />
+        <HiveUsagePanel hiveId={hive.id} agents={queen ? [queen, ...foragers] : foragers} />
       ) : active === "inbox" ? (
         <Panel
           title="Inbox（蜂巢收件箱）"

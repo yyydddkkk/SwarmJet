@@ -1,25 +1,31 @@
 // Spend and token usage (round 4, contract section 7: GET /api/usage).
 // Used twice: the Hive page shows today's total plus the per-Agent ranking, and
-// the Forager page shows one Agent's own spend and model breakdown.
+// the Forager page shows one Agent's own spend and model breakdown. Both ask
+// for period=today because every label here says 今天/今日. The response has
+// no role names, so they are joined from the Agents the page already loaded.
 import { hiveAPI } from "./api";
-import type { AgentUsage, UsageResponse } from "./types";
+import type { Agent, UsageGroup, UsageResponse } from "./types";
 import { BeeLoader, EmptyState, ErrorNotice, Panel, StatusGrid, StatusItem, UsageBar } from "./components";
 import { formatTokens, formatUsd } from "./format";
 import { Icon } from "./icons";
 import { useResource } from "./use-resource";
 
-function agentUsage(usage: UsageResponse, agentId: string): AgentUsage | undefined {
-  return usage.agents.find(item => item.agentId === agentId) ?? usage.agents[0];
+/** The Agent's own row, or undefined: never another Agent's row. */
+export function agentUsage(usage: UsageResponse, agentId: string): UsageGroup | undefined {
+  return (usage.byAgent ?? []).find(item => item.agentId === agentId);
 }
 
-export function HiveUsagePanel({ hiveId }: { hiveId: string }) {
+export function HiveUsagePanel({ hiveId, agents = [] }: { hiveId: string; agents?: Agent[] }) {
   const usage = useResource(
-    signal => hiveAPI.getUsage({ hive: hiveId }, signal),
+    signal => hiveAPI.getUsage({ hive: hiveId, period: "today" }, signal),
     [hiveId],
     15_000,
   );
   const data = usage.data;
-  const maxCost = Math.max(0, ...(data?.agents ?? []).map(item => item.costUsd));
+  const byAgent = data?.byAgent ?? [];
+  const totals = data?.totals;
+  const roleNames = new Map(agents.map(agent => [agent.id, agent.roleName ?? ""]));
+  const maxCost = Math.max(0, ...byAgent.map(item => item.costUsd));
 
   return (
     <Panel
@@ -59,39 +65,32 @@ export function HiveUsagePanel({ hiveId }: { hiveId: string }) {
             <div>
               <span className="hg-usage-label">今天花费</span>
               <strong className="hg-usage-total" data-testid="hive-usage-total">
-                {formatUsd(data.totalCostUsd)}
+                {formatUsd(totals?.costUsd ?? 0)}
               </strong>
               <span className="hg-muted">
-                {data.date} · 输入 {formatTokens(data.totalInputTokens)} / 输出{" "}
-                {formatTokens(data.totalOutputTokens)} tokens
+                {totals?.requests ?? 0} 次调用 · 输入 {formatTokens(totals?.inputTokens ?? 0)} / 输出{" "}
+                {formatTokens(totals?.outputTokens ?? 0)} tokens
               </span>
-            </div>
-            {data.limits?.maxCostPerDayUsd ? (
-              <div className="hg-usage-limit">
-                <span className="hg-usage-label">每日上限</span>
-                <strong>{formatUsd(data.limits.maxCostPerDayUsd)}</strong>
-                <span className="hg-muted">
-                  已用
-                  {Math.min(
-                    100,
-                    Math.round((data.totalCostUsd / data.limits.maxCostPerDayUsd) * 100),
-                  )}
-                  %
+              {totals?.unknownPriceRequests ? (
+                <span className="hg-badge hg-tone-amber">
+                  {totals.unknownPriceRequests} 次调用价格未知，按 0 计
                 </span>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
 
-          {data.agents.length === 0 ? (
+          {byAgent.length === 0 ? (
             <EmptyState
               title="今天还没有用量。"
               hint="Agent 调用模型后，这里会按花费排出名次。"
             />
           ) : (
             <ol className="hg-usage-ranking" aria-label="Agent 花费排行">
-              {[...data.agents]
+              {[...byAgent]
                 .sort((left, right) => right.costUsd - left.costUsd)
-                .map((agent, index) => (
+                .map((agent, index) => {
+                  const roleName = roleNames.get(agent.agentId ?? "");
+                  return (
                   <li key={agent.agentId} className="hg-usage-row">
                     <span className="hg-usage-rank">{index + 1}</span>
                     <div className="hg-usage-main">
@@ -99,8 +98,8 @@ export function HiveUsagePanel({ hiveId }: { hiveId: string }) {
                         <a href={`#/hives/${hiveId}/foragers/${agent.agentId}`}>
                           <code>{agent.agentId}</code>
                         </a>
-                        {agent.roleName ? (
-                          <span className="hg-badge hg-tone-neutral">{agent.roleName}</span>
+                        {roleName ? (
+                          <span className="hg-badge hg-tone-neutral">{roleName}</span>
                         ) : null}
                         <span className="hg-usage-cost">{formatUsd(agent.costUsd)}</span>
                       </div>
@@ -111,7 +110,8 @@ export function HiveUsagePanel({ hiveId }: { hiveId: string }) {
                       </span>
                     </div>
                   </li>
-                ))}
+                  );
+                })}
             </ol>
           )}
         </>
@@ -120,14 +120,24 @@ export function HiveUsagePanel({ hiveId }: { hiveId: string }) {
   );
 }
 
-export function AgentUsagePanel({ hiveId, agentId }: { hiveId: string; agentId: string }) {
+export function AgentUsagePanel({
+  hiveId,
+  agentId,
+  roleName,
+}: {
+  hiveId: string;
+  agentId: string;
+  roleName?: string;
+}) {
   const usage = useResource(
-    signal => hiveAPI.getUsage({ hive: hiveId, agent: agentId }, signal),
+    signal => hiveAPI.getUsage({ hive: hiveId, agent: agentId, period: "today" }, signal),
     [hiveId, agentId],
     15_000,
   );
   const data = usage.data;
   const agent = data ? agentUsage(data, agentId) : undefined;
+  // The request is filtered to this Agent, so byModel is its own breakdown.
+  const models = agent ? data?.byModel ?? [] : [];
 
   return (
     <Panel
@@ -171,15 +181,11 @@ export function AgentUsagePanel({ hiveId, agentId }: { hiveId: string; agentId: 
             </StatusItem>
             <StatusItem label="输入 tokens">{formatTokens(agent.inputTokens)}</StatusItem>
             <StatusItem label="输出 tokens">{formatTokens(agent.outputTokens)}</StatusItem>
-            <StatusItem label="角色">{agent.roleName || "—"}</StatusItem>
-            {data?.limits?.maxCostPerAgentUsd ? (
-              <StatusItem label="单 Agent 上限">
-                {formatUsd(data.limits.maxCostPerAgentUsd)}
-              </StatusItem>
-            ) : null}
+            <StatusItem label="调用次数">{agent.requests}</StatusItem>
+            <StatusItem label="角色">{roleName || "—"}</StatusItem>
           </StatusGrid>
 
-          {agent.models?.length ? (
+          {models.length ? (
             <div className="hg-table-wrap">
               <table className="hg-mini-table">
                 <thead>
@@ -191,11 +197,11 @@ export function AgentUsagePanel({ hiveId, agentId }: { hiveId: string; agentId: 
                   </tr>
                 </thead>
                 <tbody>
-                  {agent.models.map(model => (
+                  {models.map(model => (
                     <tr key={model.model}>
                       <td>
                         <code>{model.model}</code>
-                        {model.priceKnown === false ? (
+                        {model.unknownPriceRequests > 0 ? (
                           <span className="hg-badge hg-tone-amber hg-model-default">价格未知</span>
                         ) : null}
                       </td>

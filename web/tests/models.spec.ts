@@ -26,6 +26,7 @@ test("saving a key shows only the masked value and never puts it in the URL or s
   await page.goto("/#/models");
 
   const key = "sk-test-deepseek-not-a-real-key-1234";
+  const sessionBefore = await page.evaluate(() => JSON.stringify(sessionStorage));
   const input = page.getByLabel("API key");
   await expect(input).toHaveAttribute("type", "password");
   await input.fill(key);
@@ -37,12 +38,17 @@ test("saving a key shows only the masked value and never puts it in the URL or s
   await expect(page.getByRole("status").filter({ hasText: "已保存 DeepSeek" }).first()).toBeVisible();
   await expect(input).toHaveValue("");
   expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(key);
+  // sessionStorage is untouched: same contents as before the key was typed.
+  expect(await page.evaluate(() => JSON.stringify(sessionStorage))).toBe(sessionBefore);
+  expect(await page.evaluate(() => JSON.stringify(sessionStorage))).not.toContain(key);
   expect(page.url()).not.toContain(key);
 
   const puts = state.calls.filter(call => call.method === "PUT");
   expect(puts).toHaveLength(1);
   expect(puts[0].path).toBe("/api/models/credentials/deepseek");
   expect(puts[0].body).toEqual({ apiKey: key });
+  expect(puts[0].headers["x-requested-with"]).toBe("swarmjet");
+  expect(puts[0].query).toBe("");
   // The submitted plaintext is absent from the visible page.
   await expect(page.getByText(key, { exact: false })).toHaveCount(0);
 
@@ -57,7 +63,7 @@ test("saving a key shows only the masked value and never puts it in the URL or s
 test("removing a credential asks for confirmation", async ({ page }) => {
   const state = await mockHiveAPI(page);
   state.modelCredentials = [
-    { provider: "deepseek", maskedKey: "sk-…1234", updatedAt: "2026-10-16T09:00:00Z" },
+    { provider: "deepseek", type: "api_key", masked: "sk-…1234", configured: true },
   ];
   await page.goto("/#/models");
 
