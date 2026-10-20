@@ -120,10 +120,14 @@
 }
 .stars-status {
   position: absolute;
+  z-index: 40;
   top: 85px;
   left: 34px;
   max-width: 80vw;
   color: var(--ink2);
+  background: var(--veil);
+  border: 1px solid var(--hair);
+  padding: 10px 14px;
 }
 .stars-empty {
   position: absolute;
