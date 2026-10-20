@@ -302,12 +302,13 @@ func (ts *toolset) createForager(ctx context.Context, a domain.Agent, limits dom
 }
 
 type spawnInput struct {
-	HiveID    string `json:"hiveId" jsonschema:"the Hive to spawn into"`
-	Role      string `json:"role,omitempty" jsonschema:"methodology role for the new Agent; a user or Queen token may choose any role, other agent tokens only roles in their spawn list"`
-	Task      string `json:"task" jsonschema:"the task handed to the new Agent; also delivered as a kind=task message"`
-	Revision  string `json:"revision,omitempty" jsonschema:"commit to check out detached, for roles that inspect one revision"`
-	PRNumber  int64  `json:"pr,omitempty" jsonschema:"pull request number the new Agent relates to"`
-	RequestID string `json:"requestId,omitempty" jsonschema:"optional idempotency key; retries with the same value return the existing Agent instead of creating another"`
+	HiveID      string `json:"hiveId" jsonschema:"the Hive to spawn into"`
+	Role        string `json:"role,omitempty" jsonschema:"methodology role for the new Agent; a user or Queen token may choose any role, other agent tokens only roles in their spawn list"`
+	Task        string `json:"task" jsonschema:"the task handed to the new Agent; also delivered as a kind=task message"`
+	Revision    string `json:"revision,omitempty" jsonschema:"commit to check out detached, for roles that inspect one revision"`
+	IssueNumber int64  `json:"issue,omitempty" jsonschema:"issue number the new Agent works on"`
+	PRNumber    int64  `json:"pr,omitempty" jsonschema:"pull request number the new Agent relates to"`
+	RequestID   string `json:"requestId,omitempty" jsonschema:"optional idempotency key; retries with the same value return the existing Agent instead of creating another"`
 }
 
 type spawnOutput struct {
@@ -325,6 +326,9 @@ func (ts *toolset) spawn(ctx context.Context, _ *mcpsdk.CallToolRequest, in spaw
 	}
 	if err := ts.requireHive(in.HiveID); err != nil {
 		return nil, spawnOutput{}, err
+	}
+	if in.IssueNumber < 0 {
+		return nil, spawnOutput{}, fmt.Errorf("issue must be a positive number when provided")
 	}
 	if strings.TrimSpace(in.Task) == "" {
 		return nil, spawnOutput{}, fmt.Errorf("task is required")
@@ -369,15 +373,16 @@ func (ts *toolset) spawn(ctx context.Context, _ *mcpsdk.CallToolRequest, in spaw
 		chainID = ts.actor.agent.ChainID
 	}
 	created, msg, err := ts.createSpawnedForager(ctx, spawnRequest{
-		HiveID:    in.HiveID,
-		RoleName:  roleName,
-		Task:      in.Task,
-		Revision:  in.Revision,
-		PRNumber:  in.PRNumber,
-		ChainID:   chainID,
-		RequestID: in.RequestID,
-		ParentID:  parentID,
-		Limits:    limits,
+		HiveID:      in.HiveID,
+		RoleName:    roleName,
+		Task:        in.Task,
+		Revision:    in.Revision,
+		PRNumber:    in.PRNumber,
+		IssueNumber: in.IssueNumber,
+		ChainID:     chainID,
+		RequestID:   in.RequestID,
+		ParentID:    parentID,
+		Limits:      limits,
 	})
 	if err != nil {
 		var queued spawnQueued
