@@ -2,8 +2,6 @@
 
 SwarmJet 使用单机 Docker Compose。`api` 运行控制台、MCP、Router、River 消费者与 Cell 监管者，PostgreSQL 保存状态与消息；启用 Cells 后同时启动 omp 的凭证服务。Cell 内统一使用 oh-my-pi，不需要在容器里登录其他 Agent CLI。
 
-本文面向 v0.1.0。Queen 运行时、默认入口路由、模板目录与自动回滚、网页创建向导和 Queen 对话标为 **v0.1.0 起提供**；发布前需等待相应实现合入。
-
 ## 安装
 
 需要 Linux x86_64、Docker Engine 24+、Compose 插件 2.20+、Python 3，以及可用的模型提供方凭证。当前发布 workflow 仅构建 `linux/amd64`。
@@ -29,7 +27,7 @@ python3 deploy/install.py
 ssh -N -L 8180:127.0.0.1:8180 用户名@服务器
 ```
 
-首次登录后在 **接入** 页一键创建 GitHub App，并安装到目标仓库；在 **模型** 页填写凭证。**v0.1.0 起提供**：创建 Hive 后与 Queen 对话选方法论，再交代任务；也可以通过本地 Agent 的 MCP 连接派活。没有免费默认模型。
+首次登录后在 **接入** 页一键创建 GitHub App，并安装到目标仓库；在 **模型** 页填写凭证。创建 Hive 后与 Queen 对话选方法论，再交代任务；也可以通过本地 Agent 的 MCP 连接派活。没有免费默认模型。
 
 ### 脚本参数与运维命令
 
@@ -124,7 +122,7 @@ auth-broker 和 auth-gateway 只在专用 llm 网络，api 同时连接默认网
 
 在网页 **模型** 页写入凭证，或由 admin MCP Token 调用 `set_model_credential`。HTTP 接口为 `PUT /api/models/credentials/{provider}`，需要管理员会话及同源 CSRF 头；`GET /api/models` 只返回脱敏凭证状态与模型列表。DeepSeek 是首个支持的提供方。
 
-Cell 通过自身 Token 调用 api 的 `/llm/`，平台换成 gateway Token 转发，按 Agent 记录用量。方法论声明 `maxCostPerAgentUsd` / `maxCostPerDayUsd` 时，请求前检查预算，超限返回 `402` 并发送系统通知。`GET /api/usage?hive=&agent=` 可查看统计。**v0.1.0 起提供**：Queen 开启时系统通知默认交给 Queen。
+Cell 通过自身 Token 调用 api 的 `/llm/`，平台换成 gateway Token 转发，按 Agent 记录用量。方法论声明 `maxCostPerAgentUsd` / `maxCostPerDayUsd` 时，请求前检查预算，超限返回 `402` 并发送系统通知。`GET /api/usage?hive=&agent=` 可查看统计。Queen 开启时系统通知默认交给 Queen。
 
 GitHub 凭证只在平台侧用于检出、发布与合并。仓库扩展、hook、工具、项目 MCP 默认禁用；规则、skill、独立的 AGENTS.md / CLAUDE.md 仍加载。外部 GitHub 内容按带可信度标记的数据传递。不要向 `.env`、镜像或文档提交真实凭证。
 
@@ -157,7 +155,7 @@ python3 deploy/install.py connect --client codex
 
 发布的 Agent 镜像还预装 `codex`、`claude`、`dst`、`agy`（由 `release.yml` 的 `AGENT_CLIS` 指定）；本地构建默认不装这些额外 CLI。它们不会被 Cell 调度器选作会话运行时，Cell 与凭证服务仍统一使用 omp。首版保留这些可选工具以维持镜像兼容性；这也会增加发布镜像体积与构建依赖。
 
-## 升级与第三轮配置迁移
+## 升级与旧配置迁移
 
 先备份数据库、DATA_DIR 与 `.env`，另存 `SWARMJET_MASTER_KEY`。GHCR 安装固定到同一版本的 Compose 和镜像：
 
@@ -167,7 +165,7 @@ python3 deploy/install.py upgrade --image-source ghcr --ref v0.1.0 --version v0.
 
 仓库本地构建则先更新 checkout，再运行 `python3 deploy/install.py upgrade --image-source repo`。数据库迁移由 migrate 在 api 启动前执行，升级保留数据卷。需要回退时同时恢复相应镜像、配置与数据库备份，不要假定旧镜像能读取新 schema。
 
-**从第三轮升级同样使用新版 `upgrade`**，沿用原安装目录、项目名和 DATA_DIR。升级会保留 Cell 与隧道的启用状态，自动迁移：
+**从使用 opencode 的早期部署升级，同样使用新版 `upgrade`**，沿用原安装目录、项目名和 DATA_DIR。升级会保留 Cell 与隧道的启用状态，自动迁移：
 
 - 从已有 `AGENT_CLIS` 列表移除 `opencode`，保留其他额外 CLI；omp 始终随 Agent 镜像安装。
 - 把旧默认值 `deepseek/deepseek-chat`、`deepseek/deepseek-reasoner` 改为 `deepseek/deepseek-v4-flash`，保留其他自定义值。
@@ -203,8 +201,8 @@ docker compose --env-file .env -f compose.yaml exec -T postgres pg_dumpall -U sw
 | Cell 创建失败 | 是否启用 compose.cells.yaml、Docker socket 是否可用、Agent 镜像是否存在。 |
 | 模型不可用 / 401 | 模型页凭证状态，auth-broker / auth-gateway 日志，DATA_DIR/omp Token 文件权限；确认模型 ID 有效。 |
 | 模型返回 402 | 检查当前方法论预算与用量；调整方法论或等待预算窗口恢复。 |
-| 第三轮升级后 Unknown model / 构建拒绝旧 CLI | 使用新版 upgrade 执行 AGENT_CLIS 与默认模型迁移。 |
-| Queen 无响应 / 找不到内置模板 | 当前分支是否已合入 v0.1.0 的 Queen、模板与网页依赖；检查 Queen 开关、模型凭证与 Cell 状态。 |
+| 早期部署升级后 Unknown model / 构建拒绝旧 CLI | 使用新版 upgrade 执行 AGENT_CLIS 与默认模型迁移。 |
+| Queen 无响应 | Hive 设置里 Queen 是否开启；模型凭证是否有效；`docker ps` 中是否有 `swarmjet-cell-<queen-id>`；查看 `logs -f api` 中该 Agent 的轮次日志。 |
 
 部署测试与 Compose 校验可在仓库执行（示例配置只用于结构校验，不能直接部署）：
 

@@ -27,11 +27,18 @@
 - 网页创建 Hive 向导与 Queen 对话成为日常入口，无需常开本地 Agent；Queen 模型由用户选择。
 - 新 Hive 不预装方法论；提供 pstack 与极简模板供 Queen 引导选择，支持按需安装。
 - 新方法论生效后连续 3 个 Forager 失败时自动回滚到上一版本，并通知 Queen。
-- 内部防循环上限放宽；并发由用户设置，Queen 不占 Forager 名额，预算按方法论声明执行。
+- 内部防循环上限放宽；并发由用户设置（见已知问题），Queen 不占 Forager 名额，预算按方法论声明执行。
 - PR 关闭后结束对应 Agent；基础分支前进后仍可安全发布；并发满时排队补派；小额预算通知显示准确金额，独立验证遵循明确的阻塞准则。
 
 ### 发布与兼容性
 
 - 同步发布平台与 Agent 两个 GHCR 镜像，包含版本 tag 与 latest；Agent 固定 OMP_VERSION，凭证服务共用该镜像。首版发布平台为 linux/amd64。
-- 从旧部署运行新版 upgrade 可移除旧 AGENT_CLIS 中的 opencode，并迁移旧 DeepSeek 默认模型，见[部署指南](deploy/README.md#升级与第三轮配置迁移)。
+- 从旧部署运行新版 upgrade 可移除旧 AGENT_CLIS 中的 opencode，并迁移旧 DeepSeek 默认模型，见[部署指南](deploy/README.md#升级与旧配置迁移)。
 - 当前仅支持 GitHub 与单机部署；模型凭证由部署者提供。
+
+### 已知问题
+
+- 方法论声明的 `limits.maxConcurrentAgents` 会覆盖 Hive 设置里的并发上限，可能比你设置的更宽。计划改为取两者较小值；在此之前，如需更严的上限，请同时修改方法论。
+- 自动回滚按 Agent 结束时生效的方法论版本计数。激活新版本后，旧版本下启动的 Agent 失败会被算到新版本，可能回滚到出问题的版本。Queen 通常能发现并恢复；请留意方法论的激活记录。
+- 关闭再开启 Queen 时，会再次发送首次引导消息，即使 Hive 已有生效的方法论。
+- verifier 给出 FAIL 后的修复往返尚未做真实环境验证。
