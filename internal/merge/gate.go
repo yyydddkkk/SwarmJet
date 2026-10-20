@@ -43,6 +43,9 @@ func (s *Service) Check(ctx context.Context, hive domain.Hive, pr int64) (Readin
 		HeadSHA: pull.HeadSHA,
 		Pull: Pull{
 			Number:         pull.Number,
+			Title:          pull.Title,
+			UpdatedAt:      pull.UpdatedAt,
+			ClosedAt:       pull.ClosedAt,
 			State:          pull.State,
 			Draft:          pull.Draft,
 			Merged:         pull.Merged,
@@ -187,12 +190,33 @@ func (s *Service) checkCI(ctx context.Context, client GitHub, repositoryID, pr i
 // merged. GitHub refusals are returned with their status so the caller can
 // report them honestly.
 func (s *Service) Merge(ctx context.Context, hive domain.Hive, pr int64) (Outcome, error) {
+	return s.mergeHead(ctx, hive, pr, "")
+}
+
+// HeadChangedError means the caller reviewed a different commit.
+type HeadChangedError struct{ HeadSHA string }
+
+func (e *HeadChangedError) Error() string { return "pull request head changed; please review it again" }
+
+// MergeHead checks the expected head in the same fresh gate evaluation used to
+// submit the merge. GitHub also receives that SHA, closing the final race.
+func (s *Service) MergeHead(ctx context.Context, hive domain.Hive, pr int64, expectedSHA string) (Outcome, error) {
+	if strings.TrimSpace(expectedSHA) == "" {
+		return Outcome{}, errors.New("headSha is required")
+	}
+	return s.mergeHead(ctx, hive, pr, expectedSHA)
+}
+
+func (s *Service) mergeHead(ctx context.Context, hive domain.Hive, pr int64, expectedSHA string) (Outcome, error) {
 	if s.github == nil {
 		return Outcome{}, errors.New("merge service is not configured")
 	}
 	readiness, err := s.Check(ctx, hive, pr)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if expectedSHA != "" && readiness.HeadSHA != expectedSHA {
+		return Outcome{HeadSHA: readiness.HeadSHA}, &HeadChangedError{HeadSHA: readiness.HeadSHA}
 	}
 	if !readiness.Ready {
 		return Outcome{HeadSHA: readiness.HeadSHA}, &NotReadyError{Readiness: readiness}
@@ -213,6 +237,13 @@ func (s *Service) Merge(ctx context.Context, hive domain.Hive, pr int64) (Outcom
 	}
 	result, err := client.RequestMerge(ctx, repositoryID, pr, readiness.HeadSHA, method)
 	if err != nil {
+		// REST and merge-queue errors do not reliably identify a SHA conflict.
+		// Read the head again before classifying a failed web merge as stale.
+		if expectedSHA != "" {
+			if current, readErr := client.GetPullState(ctx, repositoryID, pr); readErr == nil && current.HeadSHA != expectedSHA {
+				return Outcome{HeadSHA: current.HeadSHA, Method: method}, &HeadChangedError{HeadSHA: current.HeadSHA}
+			}
+		}
 		return Outcome{HeadSHA: readiness.HeadSHA, Method: method}, fmt.Errorf("GitHub refused the merge: %w", err)
 	}
 	outcome := Outcome{

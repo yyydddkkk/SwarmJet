@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/github"
 )
 
 func requireAllPolicy() domain.MergePolicy {
@@ -314,5 +315,71 @@ func TestPermissionsUseMethodologyRoles(t *testing.T) {
 	}
 	if _, err = svc.Permissions(context.Background(), "hive-1", "missing"); err == nil {
 		t.Fatal("unknown role was accepted")
+	}
+}
+
+func TestMergeHeadRejectsChangedHead(t *testing.T) {
+	stub := readyStub()
+	service := newTestService(t, stub, &fakeStore{hive: testHive()}, &fakeAttestations{latest: passAttestation()}, methodologyWith(requireAllPolicy()), nil)
+	_, err := service.MergeHead(context.Background(), testHive(), 7, "old")
+	var changed *HeadChangedError
+	if !errors.As(err, &changed) || changed.HeadSHA != "head" {
+		t.Fatalf("error=%v", err)
+	}
+	if stub.mergeRequested {
+		t.Fatal("changed head was merged")
+	}
+}
+
+type failedWebMergeGitHub struct {
+	GitHub
+	failure   error
+	movedHead string
+	attempted bool
+}
+
+func (f *failedWebMergeGitHub) RequestMerge(context.Context, int64, int64, string, string) (github.MergeResult, error) {
+	f.attempted = true
+	return github.MergeResult{}, f.failure
+}
+func (f *failedWebMergeGitHub) GetPullState(ctx context.Context, id, pr int64) (github.PullState, error) {
+	pull, err := f.GitHub.GetPullState(ctx, id, pr)
+	if f.attempted && f.movedHead != "" {
+		pull.HeadSHA = f.movedHead
+	}
+	return pull, err
+}
+func TestMergeHeadClassifiesHeadChangeAfterGate(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		failure error
+		head    string
+		changed bool
+	}{
+		{"REST SHA conflict", &github.APIError{StatusCode: 409}, "new-head", true},
+		{"merge queue failure", errors.New("GitHub GraphQL request failed"), "new-head", true},
+		{"request preflight", errors.New("pull request head changed"), "new-head", true},
+		{"unchanged head refusal", &github.APIError{StatusCode: 403}, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newTestService(t, readyStub(), &fakeStore{hive: testHive()}, &fakeAttestations{latest: passAttestation()}, methodologyWith(requireAllPolicy()), nil)
+			client, id, err := svc.github.GitHub(context.Background(), testHive().Repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			moving := &failedWebMergeGitHub{GitHub: client, failure: tc.failure, movedHead: tc.head}
+			svc.github = StaticSource{Client: moving, RepositoryID: id}
+			_, err = svc.MergeHead(context.Background(), testHive(), 7, "head")
+			var changed *HeadChangedError
+			if errors.As(err, &changed) != tc.changed || !moving.attempted {
+				t.Fatalf("attempted=%v error=%v", moving.attempted, err)
+			}
+			if tc.changed && changed.HeadSHA != "new-head" {
+				t.Fatalf("head=%s", changed.HeadSHA)
+			}
+			if !tc.changed && !errors.Is(err, tc.failure) {
+				t.Fatalf("original refusal lost: %v", err)
+			}
+		})
 	}
 }
