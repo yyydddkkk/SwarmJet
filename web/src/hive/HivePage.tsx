@@ -90,7 +90,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
           title="找不到这个 Hive。"
           hint="它可能已经被删除，或者链接不对。"
           action={
-            <a className="hg-btn" href="#/hives">
+            <a className="hg-btn" href="#/legacy/hives">
               返回 Hive 列表
             </a>
           }
@@ -142,14 +142,14 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
 
   const tabs = sections.map(item => ({
     ...item,
-    href: item.id === "conversation" ? `#/hives/${hive.id}` : `#/hives/${hive.id}/${item.id}`,
+    href: item.id === "conversation" ? `#/legacy/hives/${hive.id}` : `#/legacy/hives/${hive.id}/${item.id}`,
     count: item.id === "swarm" ? foragers.length : item.id === "inbox" ? inboxBacklog : undefined,
   }));
 
   return (
     <div className="hg-page">
       <nav className="hg-crumbs" aria-label="面包屑">
-        <a href="#/hives">Hive</a>
+        <a href="#/legacy/hives">Hive</a>
         <span aria-hidden="true">/</span>
         <span>{hive.name}</span>
       </nav>
@@ -218,7 +218,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
             {queenEnabled ? (
               <QueenComposer hiveId={hive.id} onSent={refreshAfterSend} />
             ) : null}
-            {!queenEnabled ? <EmptyState title="Queen 未开启" hint="打开 Queen 后，就可以在这里对话并选择方法论。" action={<a className="hg-btn hg-btn-primary" href={`#/hives/${hive.id}/settings`}>去设置页开启 Queen</a>} /> : null}
+            {!queenEnabled ? <EmptyState title="Queen 未开启" hint="打开 Queen 后，就可以在这里对话并选择方法论。" action={<a className="hg-btn hg-btn-primary" href={`#/legacy/hives/${hive.id}/settings`}>去设置页开启 Queen</a>} /> : null}
             {!queenEnabled || dispatchOpen ? (
               <DispatchForm
                 hive={hive}
@@ -526,7 +526,7 @@ function SwarmPanel({
             return (
               <li key={forager.id}>
                 <div className="hg-swarm-item">
-                  <a className="hg-swarm-item-link" href={`#/hives/${hive.id}/foragers/${forager.id}`}>
+                  <a className="hg-swarm-item-link" href={`#/legacy/hives/${hive.id}/foragers/${forager.id}`}>
                     <ForagerAvatar
                       id={forager.id}
                       state={forager.state}

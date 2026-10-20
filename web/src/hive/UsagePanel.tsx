@@ -95,7 +95,7 @@ export function HiveUsagePanel({ hiveId, agents = [] }: { hiveId: string; agents
                     <span className="hg-usage-rank">{index + 1}</span>
                     <div className="hg-usage-main">
                       <div className="hg-usage-row-head">
-                        <a href={`#/hives/${hiveId}/foragers/${agent.agentId}`}>
+                        <a href={`#/legacy/hives/${hiveId}/foragers/${agent.agentId}`}>
                           <code>{agent.agentId}</code>
                         </a>
                         {roleName ? (

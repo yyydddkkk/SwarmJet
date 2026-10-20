@@ -1,0 +1,174 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  DataProvider,
+  useDataSource,
+  createProjectStore,
+  type HiveOverview,
+  type Principal,
+  type DataSource,
+} from "../data";
+import CanvasSlot from "./CanvasSlot";
+import TimelineSlot from "./TimelineSlot";
+import PanelsSlot from "./PanelsSlot";
+import PeripherySlot from "./PeripherySlot";
+import LoginSlot from "./LoginSlot";
+import { createStarsUI } from "./ui";
+import "./stars.css";
+export default function StarsApp({ source }: { source?: DataSource } = {}) {
+  return (
+    <DataProvider source={source}>
+      <StarsSession />
+    </DataProvider>
+  );
+}
+function StarsSession() {
+  const source = useDataSource();
+  const [principal, setPrincipal] = useState<Principal>();
+  const [anonymous, setAnonymous] = useState(false);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const expired = () => {
+      setPrincipal(undefined);
+      setAnonymous(true);
+    };
+    window.addEventListener("swarmjet:session-expired", expired);
+    return () =>
+      window.removeEventListener("swarmjet:session-expired", expired);
+  }, []);
+  useEffect(() => {
+    let active = true;
+    source.api
+      .getSession()
+      .then((p) => {
+        if (active) {
+          setPrincipal(p);
+          setAnonymous(false);
+          setError("");
+        }
+      })
+      .catch((e) => {
+        if (active) {
+          if (e.status === 401) setAnonymous(true);
+          else setError(e.message);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [source, attempt]);
+  if (anonymous) return <LoginSlot onLogin={() => setAttempt((v) => v + 1)} />;
+  if (!principal)
+    return (
+      <main className="stars-app">
+        <p role={error ? "alert" : "status"}>{error || "正在连接项目…"}</p>
+        {error && (
+          <button onClick={() => setAttempt((v) => v + 1)}>重试</button>
+        )}
+      </main>
+    );
+  return (
+    <StarsWorkspace
+      principal={principal}
+      onLogout={() => {
+        setPrincipal(undefined);
+        setAnonymous(true);
+      }}
+    />
+  );
+}
+export function StarsWorkspace({
+  principal,
+  onLogout,
+}: {
+  principal: Principal;
+  onLogout(): void;
+}) {
+  const source = useDataSource();
+  const ui = useMemo(() => createStarsUI(), []);
+  const [projects, setProjects] = useState<HiveOverview[]>([]);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const [, render] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    source.api
+      .listHives(controller.signal)
+      .then((r) => {
+        setProjects(r.hives);
+        setError("");
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(e.message);
+      });
+    return () => controller.abort();
+  }, [source, attempt]);
+  const ids = projects.map((p) => p.hive.id).join("\0");
+  const stores = useMemo(
+    () =>
+      new Map(
+        projects.map((p) => [p.hive.id, createProjectStore(p.hive.id, source)]),
+      ),
+    [ids, source],
+  );
+  useEffect(() => {
+    const unsubscribe = [...stores.values()].map((s) => {
+      s.start();
+      return s.subscribe(() => {
+        if (s.getSnapshot().errorStatus === 401) onLogout();
+        render((v) => v + 1);
+      });
+    });
+    return () => {
+      unsubscribe.forEach((fn) => fn());
+      stores.forEach((s) => s.stop());
+    };
+  }, [stores]);
+  useEffect(() => {
+    if (location.hash.startsWith("#/setup"))
+      ui.openPlatform("setup", location.hash.split("?")[1]);
+  }, [ui]);
+  const props = {
+    ui,
+    projects: projects.map((p) => ({
+      ...p,
+      hive: stores.get(p.hive.id)?.getSnapshot().snapshot?.hive ?? p.hive,
+    })),
+    stores,
+    principal,
+    onLogout: async () => {
+      await source.api.logout();
+      onLogout();
+    },
+    reloadProjects: () => setAttempt((v) => v + 1),
+  };
+  const status = [...stores.values()]
+    .find((s) => s.getSnapshot().error)
+    ?.getSnapshot();
+  return (
+    <main className="stars-app">
+      <CanvasSlot {...props} />
+      <PeripherySlot {...props} />
+      <PanelsSlot {...props} />
+      <TimelineSlot {...props} />
+      {(error || status?.error) && (
+        <div className="stars-status" role="alert">
+          {error || status?.error}
+          <button
+            onClick={() => {
+              setAttempt((v) => v + 1);
+              stores.forEach((s) => void s.refresh());
+            }}
+          >
+            重试
+          </button>
+        </div>
+      )}
+      {!projects.length && !error && (
+        <p className="stars-empty">
+          还没有项目。<a href="#/legacy/hives">创建第一个项目</a>
+        </p>
+      )}
+    </main>
+  );
+}

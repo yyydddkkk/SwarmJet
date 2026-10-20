@@ -52,7 +52,7 @@ async function uninstalledHive(page: Page, missing = false) {
 
 test("catalog installation requires confirmation and shows builtin source after installing", async ({ page }, testInfo) => {
   const state = await uninstalledHive(page);
-  await page.goto("/#/hives/swarmjet/methodology");
+  await page.goto("/#/legacy/hives/swarmjet/methodology");
   await expect(page.getByText("尚未选择方法论，可以在对话里请 Queen 推荐", { exact: true })).toBeVisible();
   await expect(page.getByRole("list", { name: "内置方法论目录" }).getByRole("listitem")).toHaveCount(2);
   await page.screenshot({ path: testInfo.outputPath("methodology-catalog-1440.png"), fullPage: true });
@@ -77,7 +77,7 @@ test("catalog installation requires confirmation and shows builtin source after 
 test("a missing methodology exposes the catalog and failed installs can be retried", async ({ page }) => {
   const state = await uninstalledHive(page, true);
   state.fail();
-  await page.goto("/#/hives/swarmjet/methodology");
+  await page.goto("/#/legacy/hives/swarmjet/methodology");
   await page.getByRole("button", { name: "安装 PStack 团队" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "确认安装" }).click();

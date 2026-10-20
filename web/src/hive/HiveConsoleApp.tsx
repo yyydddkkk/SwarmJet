@@ -1,6 +1,6 @@
 // Entry point and shell for the "honey garden" console (ADR section 18).
-// After sign-in every route lives here: Hive list/pages, 接入 (#/setup) and
-// 模型 (#/models). Unknown and empty routes fall back to #/hives. The #/icons
+// After sign-in every route lives here: Hive list/pages, 接入 (#/legacy/setup) and
+// 模型 (#/legacy/models). Unknown and empty routes fall back to #/legacy/hives. The #/legacy/icons
 // reference page stays reachable directly but is not part of the navigation.
 import { useEffect, useState } from "react";
 import HivesPage from "./HivesPage";
@@ -30,9 +30,9 @@ function parseRoute(hash: string): Route {
   const raw = hash.replace(/^#/, "");
   const [rawPath, rawQuery = ""] = raw.split("?");
   const path = rawPath || "/";
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.replace(/^\/legacy(?=\/|$)/, "").split("/").filter(Boolean);
   const query = new URLSearchParams(rawQuery);
-  if (path === "/") return { name: "redirect" };
+  if (path === "/" || path === "/legacy/") return { name: "redirect" };
   if (parts[0] === "setup") return { name: "setup", query };
   if (parts[0] === "models") return { name: "models" };
   if (parts[0] === "icons") return { name: "icons" };
@@ -94,9 +94,9 @@ export default function HiveConsoleApp() {
     };
   }, [attempt]);
 
-  // "#/" and every retired route land on the Hive list.
+  // "#/legacy/" and every retired route land on the Hive list.
   useEffect(() => {
-    if (route.name === "redirect") location.replace("#/hives");
+    if (route.name === "redirect") location.replace("#/legacy/hives");
   }, [route]);
 
   if (session.state === "loading") {
@@ -120,7 +120,7 @@ export default function HiveConsoleApp() {
       <LoginScreen
         onLogin={() => {
           const raw = location.hash.replace(/^#/, "");
-          if (!raw || raw === "/") location.hash = "/hives";
+          if (!raw || raw === "/") location.hash = "/legacy/hives";
           setAttempt(value => value + 1);
         }}
       />
@@ -143,7 +143,7 @@ export default function HiveConsoleApp() {
         跳至主要内容
       </a>
       <header className="hg-topbar">
-        <a className="hg-brand" href="#/hives">
+        <a className="hg-brand" href="#/legacy/hives">
           <span className="hg-brand-mark" aria-hidden="true">
             <Icon name="bee" size={32} />
           </span>
@@ -151,18 +151,18 @@ export default function HiveConsoleApp() {
           <span className="hg-brand-note">蜂巢控制台</span>
         </a>
         <nav className="hg-nav" aria-label="控制台导航">
-          <a href="#/hives" className={inHive ? "is-active" : undefined} aria-current={inHive ? "page" : undefined}>
+          <a href="#/legacy/hives" className={inHive ? "is-active" : undefined} aria-current={inHive ? "page" : undefined}>
             Hive
           </a>
           <a
-            href="#/setup"
+            href="#/legacy/setup"
             className={route.name === "setup" ? "is-active" : undefined}
             aria-current={route.name === "setup" ? "page" : undefined}
           >
             接入
           </a>
           <a
-            href="#/models"
+            href="#/legacy/models"
             className={route.name === "models" ? "is-active" : undefined}
             aria-current={route.name === "models" ? "page" : undefined}
           >

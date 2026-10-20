@@ -319,3 +319,77 @@ test("theme CSS and choices survive reload and denied storage", async ({
   await page.getByLabel("主题", { exact: true }).selectOption("paper");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
 });
+
+test("corrupted theme names fall back to a usable theme", async ({ page }) => {
+  await mockHiveAPI(page);
+  await page.addInitScript(() => {
+    localStorage.setItem("sj-theme", "constructor");
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "显示", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-theme",
+    /bright|night/,
+  );
+  await page.getByLabel("主题", { exact: true }).selectOption("paper");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
+});
+
+test("a ready snapshot supersedes late signal fetches and stopped stores stay unchanged", async () => {
+  const initial = fixture();
+  let resolve!: (value: { signals: ProjectSnapshot["signals"] }) => void;
+  const mock = createMockDataSource(
+    { swarmjet: initial },
+    {
+      listSignals: async () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
+    },
+  );
+  const store = createProjectStore("swarmjet", mock.source);
+  store.start();
+  await flush();
+  mock.push("swarmjet", {
+    type: "message",
+    data: { ...message("external"), trust: "external" },
+  });
+  const next = fixture();
+  next.signals = [
+    {
+      messageId: "canonical",
+      source: "github",
+      kind: "issue",
+      number: 9,
+      title: "real issue",
+      url: "https://example.com/issue/9",
+      claimed: false,
+      claimedBy: "",
+      createdAt: "2026-10-20T00:00:00Z",
+    },
+  ];
+  mock.setSnapshot("swarmjet", next);
+  mock.ready("swarmjet");
+  await flush();
+  resolve({ signals: [] });
+  await flush();
+  expect(store.getSnapshot().snapshot?.signals).toEqual(next.signals);
+  store.stop();
+  const revision = store.getSnapshot().revision;
+  await flush();
+  expect(store.getSnapshot().revision).toBe(revision);
+});
+
+test("default shell handles session expiry and opens GitHub callbacks in platform setup", async ({
+  page,
+}) => {
+  await mockHiveAPI(page);
+  await page.goto("/#/setup?github=connected");
+  await expect(page.getByRole("heading", { name: "平台设置" })).toBeVisible();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("swarmjet:session-expired")),
+  );
+  await expect(
+    page.getByRole("heading", { name: "登录 SwarmJet" }),
+  ).toBeVisible();
+});

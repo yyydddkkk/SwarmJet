@@ -1,4 +1,4 @@
-// 模型 (#/models): the round-4 replacement for the retired CLI login terminal.
+// 模型 (#/legacy/models): the round-4 replacement for the retired CLI login terminal.
 // It shows whether a provider credential exists, the Hive default model, the
 // catalog from GET /api/models, and a form that writes a provider key through
 // PUT /api/models/credentials/{provider}. The server only ever returns the

@@ -33,7 +33,7 @@ export default function LoginScreen({
   return (
     <div className="hg-app hg-login">
       <section className="hg-login-story" aria-label="SwarmJet 简介">
-        <a className="hg-brand" href="#/hives">
+        <a className="hg-brand" href="#/legacy/hives">
           <span className="hg-brand-mark" aria-hidden="true">
             <Icon name="bee" size={32} />
           </span>

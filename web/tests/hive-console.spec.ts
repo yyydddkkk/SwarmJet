@@ -6,7 +6,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 test("Hive list renders cards from the API, filters, and falls back to an empty state", async ({ page }, testInfo) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives");
+  await page.goto("/#/legacy/hives");
 
   await expect(page.getByRole("heading", { name: "Hive（蜂巢）" })).toBeVisible();
   await expect(page.getByRole("link", { name: /SwarmJet 平台/ })).toBeVisible();
@@ -26,7 +26,7 @@ test("Hive list renders cards from the API, filters, and falls back to an empty 
 
 test("Hive conversation shows real messages and sends to the Queen", async ({ page }, testInfo) => {
   const state = await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet");
+  await page.goto("/#/legacy/hives/swarmjet");
 
   await expect(page.getByRole("heading", { name: "SwarmJet 平台", level: 1 })).toBeVisible();
   await expect(page.getByText("Queen（蜂王）已开启", { exact: true })).toBeVisible();
@@ -57,7 +57,7 @@ test("Hive conversation shows real messages and sends to the Queen", async ({ pa
 
 test("Hive with Queen disabled dispatches a Forager through the API", async ({ page }, testInfo) => {
   const state = await mockHiveAPI(page);
-  await page.goto("/#/hives/orders");
+  await page.goto("/#/legacy/hives/orders");
 
   await expect(page.getByText("Queen（蜂王）未开启", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "直接派 Forager", level: 2 })).toBeVisible();
@@ -83,7 +83,7 @@ test("Hive with Queen disabled dispatches a Forager through the API", async ({ p
 
 test("Forager detail uses the real conversation and handoff", async ({ page }, testInfo) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet/foragers/forager-7f3a");
+  await page.goto("/#/legacy/hives/swarmjet/foragers/forager-7f3a");
 
   await expect(page.getByRole("heading", { name: /forager-7f3a/ })).toBeVisible();
   await expect(page.getByText("为 Hive 页的 Forager 列表增加按状态筛选", { exact: true })).toBeVisible();
@@ -95,7 +95,7 @@ test("Forager detail uses the real conversation and handoff", async ({ page }, t
   await page.screenshot({ path: testInfo.outputPath("forager-conversation-1440.png"), fullPage: true });
 
   await page.getByRole("link", { name: "交接摘要" }).click();
-  await expect(page).toHaveURL(/#\/hives\/swarmjet\/foragers\/forager-7f3a\/handoff$/);
+  await expect(page).toHaveURL(/#\/legacy\/hives\/swarmjet\/foragers\/forager-7f3a\/handoff$/);
   await expect(page.getByRole("heading", { name: "交接摘要", level: 2 })).toBeVisible();
   await expect(page.getByText("在 Swarm 面板增加按状态筛选 Forager 的入口", { exact: true })).toBeVisible();
   await expect(page.getByText("前端筛选交互与空结果提示", { exact: true })).toBeVisible();
@@ -105,7 +105,7 @@ test("Forager detail uses the real conversation and handoff", async ({ page }, t
 
 test("Hive Inbox shows unhandled external events", async ({ page }) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet/inbox");
+  await page.goto("/#/legacy/hives/swarmjet/inbox");
 
   await expect(page.getByRole("heading", { name: "Inbox（蜂巢收件箱）", level: 2 })).toBeVisible();
   await expect(page.getByText(/GitHub issues\.opened：#142/)).toBeVisible();
@@ -114,7 +114,7 @@ test("Hive Inbox shows unhandled external events", async ({ page }) => {
 
 test("Cancel writes a control message and the Swarm badge follows the API", async ({ page }) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet");
+  await page.goto("/#/legacy/hives/swarmjet");
 
   const item = page.locator(".hg-swarm-item").filter({ hasText: "forager-7f3a" });
   await item.getByRole("button", { name: "取消", exact: true }).click();
@@ -126,7 +126,7 @@ test("Cancel writes a control message and the Swarm badge follows the API", asyn
 
 test("Conversation and Swarm panel refresh on the five-second poll", async ({ page }) => {
   const state = await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet");
+  await page.goto("/#/legacy/hives/swarmjet");
   await expect(page.getByRole("link", { name: /forager-7f3a/ })).toBeVisible();
 
   state.messages.push({
@@ -160,20 +160,20 @@ test("Conversation and Swarm panel refresh on the five-second poll", async ({ pa
 
 test("API failures show a readable error instead of pretending to be empty", async ({ page }) => {
   await mockHiveAPI(page, { failures: { hives: 500 }, errorMessage: "数据库暂时不可用" });
-  await page.goto("/#/hives");
+  await page.goto("/#/legacy/hives");
   await expect(page.getByRole("alert")).toContainText("数据库暂时不可用");
 });
 
 test("A 401 tells the user to sign in again", async ({ page }) => {
   await mockHiveAPI(page, { failures: { hives: 401 }, errorMessage: "invalid session" });
-  await page.goto("/#/hives");
+  await page.goto("/#/legacy/hives");
   await expect(page.getByRole("alert")).toContainText("会话已过期或未登录");
   await expect(page.getByRole("link", { name: "去登录" })).toHaveAttribute("href", "/");
 });
 
 test("A 403 explains that a platform administrator is required", async ({ page }) => {
   await mockHiveAPI(page, { failures: { hives: 403 }, errorMessage: "platform administrator required" });
-  await page.goto("/#/hives");
+  await page.goto("/#/legacy/hives");
   const alert = page.getByRole("alert");
   await expect(alert).toContainText("需要平台管理员权限");
   await expect(alert).toContainText("需要管理员会话才能继续");
@@ -185,7 +185,7 @@ test("A 403 explains that a platform administrator is required", async ({ page }
 // and the empty state — on a light and on a dark surface.
 test("Pixel reference shows the whole design spec on light and dark surfaces", async ({ page }, testInfo) => {
   await mockHiveAPI(page);
-  await page.goto("/#/icons");
+  await page.goto("/#/legacy/icons");
 
   await expect(page.getByRole("heading", { name: "像素规范", level: 1 })).toBeVisible();
   const surfaces = page.locator(".hg-icon-lab-panel");
@@ -249,7 +249,7 @@ const pixelSignature = (handle: Locator) =>
 
 test("A Forager keeps the same bee, and every state draws a different one", async ({ page }) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet");
+  await page.goto("/#/legacy/hives/swarmjet");
 
   // Same Forager, same size, in the Swarm rail and in the conversation stream.
   const same = page.locator('.hg-px-avatar[aria-label="Forager forager-7f3a"]');
@@ -273,7 +273,7 @@ test("A Forager keeps the same bee, and every state draws a different one", asyn
   expect(await pixelSignature(other)).not.toBe(railSignature);
 
   // Eight states, eight distinct drawings on the reference page.
-  await page.goto("/#/icons");
+  await page.goto("/#/legacy/icons");
   const states = page
     .locator("#forager-avatars .hg-icon-lab-panel")
     .first()
@@ -297,7 +297,7 @@ test("A Forager keeps the same bee, and every state draws a different one", asyn
 
 test("The bee loader flaps between two wing frames", async ({ page }) => {
   await mockHiveAPI(page);
-  await page.goto("/#/icons");
+  await page.goto("/#/legacy/icons");
   const loader = page.locator(".hg-loader").first();
   await expect(loader).toBeVisible();
   await expect(loader.locator(".hg-loader-frame")).toHaveCount(2);
@@ -325,7 +325,7 @@ test.describe("reduced motion", () => {
 
   test("The loader parks on its first frame when motion is reduced", async ({ page }) => {
     await mockHiveAPI(page);
-    await page.goto("/#/icons");
+    await page.goto("/#/legacy/icons");
     const loader = page.locator(".hg-loader").first();
     await expect(loader).toBeVisible();
     // The reduced-motion rule sets animation: none; wait for the stylesheet so a

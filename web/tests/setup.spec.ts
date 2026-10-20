@@ -1,4 +1,4 @@
-// 接入 page (#/setup): every request is mocked with page.route through
+// 接入 page (#/legacy/setup): every request is mocked with page.route through
 // mockHiveAPI; these tests never touch the real backend (it lands in tasks D/E).
 import { expect, test } from "@playwright/test";
 import { mockHiveAPI } from "./hive-api-mock";
@@ -23,7 +23,7 @@ test("GitHub not configured offers the one-click manifest flow", async ({ page }
       },
     },
   });
-  await page.goto("/#/setup");
+  await page.goto("/#/legacy/setup");
 
   await expect(page.getByRole("heading", { name: "接入", level: 1 })).toBeVisible();
   await expect(page.getByText("未配置", { exact: true })).toBeVisible();
@@ -71,7 +71,7 @@ test("GitHub configured shows the App, its source and install links", async ({ p
       },
     },
   });
-  await page.goto("/#/setup");
+  await page.goto("/#/legacy/setup");
 
   await expect(page.getByRole("heading", { name: "接入", level: 1 })).toBeVisible();
   await expect(page.getByText("已配置", { exact: true })).toBeVisible();
@@ -106,21 +106,21 @@ test("an App configured from the environment is labelled as such", async ({ page
       },
     },
   });
-  await page.goto("/#/setup");
+  await page.goto("/#/legacy/setup");
 
   await expect(page.getByText("由环境变量配置", { exact: true })).toBeVisible();
 });
 
 test("the GitHub callback reports success", async ({ page }) => {
   await mockHiveAPI(page);
-  await page.goto("/#/setup?github=connected");
+  await page.goto("/#/legacy/setup?github=connected");
 
   await expect(page.getByRole("status").filter({ hasText: "GitHub App 已创建并保存" })).toBeVisible();
 });
 
 test("the GitHub callback reports a failure", async ({ page }) => {
   await mockHiveAPI(page);
-  await page.goto("/#/setup?error=state_mismatch");
+  await page.goto("/#/legacy/setup?error=state_mismatch");
 
   const alert = page.getByRole("alert").filter({ hasText: "GitHub App 连接失败" });
   await expect(alert).toBeVisible();
@@ -129,7 +129,7 @@ test("the GitHub callback reports a failure", async ({ page }) => {
 
 test("the tunnel shows how to enable it when it is off", async ({ page }) => {
   await mockHiveAPI(page);
-  await page.goto("/#/setup");
+  await page.goto("/#/legacy/setup");
 
   await expect(page.getByText("隧道未启用", { exact: true })).toBeVisible();
   await expect(page.getByText(/安装脚本里选择启用隧道/)).toBeVisible();
@@ -146,7 +146,7 @@ test("the enabled tunnel shows its public URL, sync state and last error", async
       },
     },
   });
-  await page.goto("/#/setup");
+  await page.goto("/#/legacy/setup");
 
   await expect(page.getByText("已启用", { exact: true })).toBeVisible();
   await expect(
@@ -167,7 +167,7 @@ test("a failing tunnel sync surfaces its last error", async ({ page }) => {
       },
     },
   });
-  await page.goto("/#/setup");
+  await page.goto("/#/legacy/setup");
 
   await expect(page.getByText("未同步", { exact: true })).toBeVisible();
   await expect(page.getByText("github: 401 bad credentials", { exact: true })).toBeVisible();
@@ -175,7 +175,7 @@ test("a failing tunnel sync surfaces its last error", async ({ page }) => {
 
 test("tokens can be revoked after a confirmation", async ({ page }) => {
   const state = await mockHiveAPI(page);
-  await page.goto("/#/setup");
+  await page.goto("/#/legacy/setup");
 
   await expect(page.getByText("工作笔记本", { exact: true })).toBeVisible();
   const tokenID = state.tokens[0].id;
@@ -193,7 +193,7 @@ test("tokens can be revoked after a confirmation", async ({ page }) => {
 
 test("creating a token shows the plaintext once, plus copyable client configs", async ({ page }, testInfo) => {
   const state = await mockHiveAPI(page, { tokens: [] });
-  await page.goto("/#/setup");
+  await page.goto("/#/legacy/setup");
 
   await page.getByRole("button", { name: "新建连接" }).click();
   const dialog = page.getByRole("dialog");
