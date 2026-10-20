@@ -38,6 +38,7 @@ function openBrowserStream() {
     });
   };
   stream.addEventListener("ready", () => {
+    if (browserStream !== stream) return;
     browserReady = true;
     [...browserSubscribers].forEach((client) => client.ready());
   });
@@ -50,6 +51,7 @@ function openBrowserStream() {
     "hive",
   ] as const) {
     stream.addEventListener(type, (event) => {
+      if (browserStream !== stream) return;
       try {
         const data = JSON.parse((event as MessageEvent).data);
         // These two payloads intentionally have no hiveId in backend JSON. We

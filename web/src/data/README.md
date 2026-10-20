@@ -13,7 +13,7 @@ shell 在 `StarsApp.tsx` 为每个项目创建且持有一个 `ProjectStore`，�
 - 浏览器只开一条不带 hive 参数的 `/api/events` 连接，按 hiveId（hive 事件按 id）分发，避免HTTP/1.1六连接上限。queue/methodology JSON没有hiveId，不能猜所属项目，收到时让所有项目重新拉快照；mock仍可精确推给指定项目。
 - 每次 ready（含重连）重新拉快照，拉取期间缓存增量，快照完成后按收到顺序重放；旧请求不能覆盖新快照。
 - message 依据 ID 去重；只有实际事件产生脉冲（同一事件 ID 一次，快照不产生脉冲）。`pulses` 至多保留最新100条，画布消费后 acknowledge。
-- agent 按 id、pr 按 number 浅合并。PR 事件还会回拉 canonical 列表，补齐 title/attestations/ownerId，保留当前快照周期内已观察到的SSE head/state/merged/ready，防30秒后端缓存回退；signals 在 external message 或 agent 事件后回拉。
+- agent 按 id、pr 按 number 浅合并。PR 事件还会回拉 canonical 列表，补齐 title/attestations/ownerId，保留当前快照周期内已观察到的SSE head/state/merged/ready，防30秒后端缓存回退；后续快照会对已观察的PR使用无缓存 getPRStatus 校准再接续增量，因此断线期间真实的新head也会生效；signals 在 external message 或 agent 事件后回拉。
 - 重连 1、2、4、8、16、30 秒，之后最大30秒；ready 快照成功才重置。显示 `连接已断开，正在重连`。
 - `snapshot.messages` 是 `LiveMessage = Message | MessagePreview`。SSE 没有完整 body/state/hop，使用 `messagePreview()` 显示简短内容；完整对话通过 `api.listMessages` 分页读取。初始快照会遍历各 inbox 分页并去重，包含当前管理员地址。
 - `derived`：`nodes`、`decisions`、`needsAttention`、`agentStatuses`；`deriveProject` / `agentStatus` / `messageEndpoint` / `messagePreview` 可独立使用。verifier 判断 `roleName`，卫星 `parentId = hiveId:pr:number`；queen ID 为 `hiveId:queen`；Agent ID 保持原 id。
@@ -43,7 +43,7 @@ shell 在 `StarsApp.tsx` 为每个项目创建且持有一个 `ProjectStore`，�
 
 ## 可注入 mock
 
-`createMockDataSource({[hiveId]: snapshot}, partialApiOverrides?)` 返回 `source`、`calls`、`snapshots`、`setSnapshot(id,next)`、`ready(id)`、`push(id,event)`、`disconnect(id)`、`connections`。创建 store 时传 `mock.source`，或 `<StarsApp source={mock.source}/>` / `<DataProvider source={mock.source}>`。未配置的操作明确报错，不能悄悄调用真实API；默认 getMethodology/listPRs/listSignals 从快照返回。ready 和断线由测试手工触发，没有隐藏测试URL或生产window开关。
+`createMockDataSource({[hiveId]: snapshot}, partialApiOverrides?)` 返回 `source`、`calls`、`snapshots`、`setSnapshot(id,next)`、`ready(id)`、`push(id,event)`、`disconnect(id)`、`connections`。创建 store 时传 `mock.source`，或 `<StarsApp source={mock.source}/>` / `<DataProvider source={mock.source}>`。未配置的操作明确报错，不能悄悄调用真实API；默认 getMethodology/listPRs/listSignals/getPRStatus 从快照返回。ready 和断线由测试手工触发，没有隐藏测试URL或生产window开关。
 
 ## B/C/D 文件槽与 UI 语义
 
