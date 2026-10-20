@@ -3,6 +3,56 @@ import { mockHiveAPI } from "./hive-api-mock";
 
 test.use({ viewport: { width: 1440, height: 1000 } });
 
+test("default Queen conversation includes its Hive bootstrap report without unrelated messages or duplicates", async ({ page }) => {
+  const state = await mockHiveAPI(page);
+  const report = {
+    id: "queen-bootstrap", hiveId: "swarmjet", from: "queen", to: "hive",
+    kind: "report" as const, chainId: "system-bootstrap", hop: 1,
+    body: "首次引导：仓库已检查，请选择方法论。", trust: "agent" as const,
+    state: "handled" as const, createdAt: "2026-10-16T09:03:00Z",
+  };
+  state.messages.unshift(report, { ...report });
+  state.messages.push(
+    { ...report, id: "other-local", to: "local:another-admin", body: "另一个本地用户的私信" },
+    { ...report, id: "other-queen-task", to: "forager:other", body: "Queen 给其他 Forager 的任务" },
+    { ...report, id: "other-hive", from: "forager:other", body: "其他 Hive 汇报" },
+  );
+  await page.goto("/#/hives/swarmjet");
+  const stream = page.locator(".hg-stream");
+  const bootstrap = stream.locator("li").filter({ hasText: report.body });
+  await expect(bootstrap).toHaveCount(1);
+  await expect(bootstrap.locator(".hg-msg-author")).toHaveText("Queen（蜂王）");
+  await expect(bootstrap.locator(".hg-trust")).toContainText("Agent");
+  await expect(stream.locator("li").first()).toContainText(report.body);
+  for (const body of ["另一个本地用户的私信", "Queen 给其他 Forager 的任务", "其他 Hive 汇报", "GitHub issues.opened：#142"]) {
+    await expect(stream).not.toContainText(body);
+  }
+});
+
+test("Queen conversation shows Hive inbox errors and can retry the bootstrap report", async ({ page }) => {
+  const state = await mockHiveAPI(page);
+  state.messages.push({
+    id: "bootstrap-retry", hiveId: "swarmjet", from: "queen", to: "hive",
+    kind: "report", chainId: "system-bootstrap", hop: 1, body: "重试后显示首次引导",
+    trust: "agent", state: "handled", createdAt: "2026-10-16T09:03:00Z",
+  });
+  let unavailable = true;
+  await page.route("**/api/hives/swarmjet/messages?to=hive", async route => {
+    if (unavailable) {
+      await route.fulfill({ status: 503, json: { error: "Hive inbox 暂时不可用" } });
+    } else {
+      await route.fallback();
+    }
+  });
+  await page.goto("/#/hives/swarmjet");
+  await expect(page.getByRole("alert")).toContainText("Hive inbox 暂时不可用");
+  await expect(page.locator(".hg-stream")).toContainText("收到。我先把 #142");
+  unavailable = false;
+  await page.getByRole("alert").getByRole("button").click();
+  await expect(page.locator(".hg-stream")).toContainText("重试后显示首次引导");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
 test("Queen status comes from its endpoint and the conversation is ordered plain text", async ({ page }, testInfo) => {
   const state = await mockHiveAPI(page);
   state.agents.swarmjet.find(agent => agent.role === "queen")!.state = "hibernated";
@@ -32,10 +82,17 @@ test("Queen status comes from its endpoint and the conversation is ordered plain
 });
 
 test("disabled Queen links to settings and enabling it restores conversation", async ({ page }, testInfo) => {
-  await mockHiveAPI(page);
+  const state = await mockHiveAPI(page);
+  state.messages.push({
+    id: "disabled-queen-report", hiveId: "orders", from: "queen", to: "hive",
+    kind: "report", chainId: "system-bootstrap", hop: 1, body: "Queen 关闭前的引导报告",
+    trust: "agent", state: "handled", createdAt: "2026-10-15T20:10:00Z",
+  });
   await page.goto("/#/hives/orders");
   await expect(page.getByText("Queen 未开启", { exact: true })).toBeVisible();
   await expect(page.getByLabel("对 Queen（蜂王）说话")).toHaveCount(0);
+  await expect(page.locator(".hg-stream")).toContainText("Queen 关闭前的引导报告");
+  await expect(page.locator(".hg-stream")).not.toContainText("这条事件已存入 Hive Inbox");
   await page.screenshot({ path: testInfo.outputPath("queen-disabled-1440.png"), fullPage: true });
   await page.getByRole("link", { name: "去设置页开启 Queen" }).click();
   await page.getByRole("checkbox", { name: /开启 Queen/ }).check();
