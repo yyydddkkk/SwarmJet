@@ -16,15 +16,26 @@ func TestMethodologyTemplatesListAndInstallPermissions(t *testing.T) {
 			t.Fatalf("templates = %+v", templates)
 		}
 	}
+	var original domain.Methodology
 	for i, token := range []string{env.userToken, env.queenToken, env.adminToken} {
 		out := decode[publishMethodologyOutput](t, callTool(t, env.connect(token), "install_methodology_template", map[string]any{"hiveId": env.hive.ID, "name": "minimal", "note": "chosen by user"}))
 		m := out.Methodology
-		if m.Version != i+1 || !m.Active || m.Builtin || m.Note != "chosen by user" || m.Source == nil || m.Source.URL != "builtin:minimal" || m.Source.Ref == "" {
+		if m.Version != 1 || !m.Active || m.Builtin || m.Note != "chosen by user" || m.Source == nil || m.Source.URL != "builtin:minimal" || m.Source.Ref == "" {
 			t.Fatalf("installed = %+v", m)
 		}
-		if i == 1 && m.CreatedBy != domain.AddressQueen {
-			t.Fatalf("Queen publisher = %s", m.CreatedBy)
+		if i == 0 {
+			original = m.Methodology
+		} else if m.ID != original.ID || m.CreatedBy != original.CreatedBy {
+			t.Fatalf("repeat install changed original version: %+v", m)
 		}
+	}
+	changes, err := env.backend.MethodologyChanges(context.Background(), env.hive.ID)
+	if err != nil || len(changes) != 1 {
+		t.Fatalf("repeat install changes = %+v, %v", changes, err)
+	}
+	queenInstall := decode[publishMethodologyOutput](t, callTool(t, env.connect(env.queenToken), "install_methodology_template", map[string]any{"hiveId": env.hive.ID, "name": "pstack"}))
+	if queenInstall.Methodology.Version != 2 || queenInstall.Methodology.CreatedBy != domain.AddressQueen {
+		t.Fatalf("Queen install = %+v", queenInstall.Methodology)
 	}
 	// Even a role allowed to publish arbitrary methodologies cannot install templates.
 	callTool(t, env.connect(env.userToken), "publish_methodology", map[string]any{"hiveId": env.hive.ID, "manifest": methodologyYAML("publisher", true)})
@@ -46,7 +57,7 @@ func TestMethodologyTemplatesListAndInstallPermissions(t *testing.T) {
 		}
 	}
 	versions, err := env.backend.MethodologyVersions(context.Background(), env.hive.ID)
-	if err != nil || len(versions) != 4 {
+	if err != nil || len(versions) != 3 {
 		t.Fatalf("versions = %+v, %v", versions, err)
 	}
 }

@@ -50,11 +50,17 @@ func TestMethodologyTemplateAPIInstallsVersionAndNotifies(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := "/api/hives/" + hive.ID + "/methodology/install"
-	for version := 1; version <= 2; version++ {
+	var installedID string
+	for attempt := 0; attempt < 2; attempt++ {
 		installed := hiveDecode[methodologyResponse](t, hiveDo(t, handler, cookie, http.MethodPost, path,
 			map[string]any{"name": template.Name, "note": "install from console"}), http.StatusCreated)
-		if installed.Version != version || !installed.Active || installed.Builtin || installed.Digest == "" || installed.CreatedBy != domain.LocalAddress("web-admin") || installed.Note != "install from console" {
+		if installed.Version != 1 || !installed.Active || installed.Builtin || installed.Digest == "" || installed.CreatedBy != domain.LocalAddress("web-admin") || installed.Note != "install from console" {
 			t.Fatalf("installed = %+v", installed)
+		}
+		if attempt == 0 {
+			installedID = installed.ID
+		} else if installed.ID != installedID {
+			t.Fatalf("repeat install changed version id: %s/%s", installedID, installed.ID)
 		}
 		if installed.Source == nil || installed.Source.URL != "builtin:"+template.Name || installed.Source.Ref != template.Version {
 			t.Fatalf("source = %+v", installed.Source)
@@ -65,22 +71,29 @@ func TestMethodologyTemplateAPIInstallsVersionAndNotifies(t *testing.T) {
 	}
 	active := hiveDecode[methodologyResponse](t, hiveDo(t, handler, cookie, http.MethodGet,
 		"/api/hives/"+hive.ID+"/methodology", nil), http.StatusOK)
-	if active.Version != 2 || active.Source == nil || active.Source.URL != "builtin:"+template.Name {
+	if active.Version != 1 || active.Source == nil || active.Source.URL != "builtin:"+template.Name {
 		t.Fatalf("active = %+v", active)
 	}
 	changes, err := s.MethodologyChanges(context.Background(), hive.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changes) != 2 || changes[1].Action != methodology.ActionPublish || changes[1].Note != "install from console" {
+	if len(changes) != 1 || changes[0].Action != methodology.ActionPublish || changes[0].Note != "install from console" {
 		t.Fatalf("changes = %+v", changes)
 	}
 	inbox, err := s.Inbox(context.Background(), hive.ID, domain.AddressHive, "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inbox) != 2 || inbox[0].From != domain.AddressSystem || !strings.Contains(inbox[0].Body, "methodology publish") {
+	// Install requests still notify the Hive, including a repeat of the active
+	// template. Both notifications must refer to the version actually stored.
+	if len(inbox) != 2 {
 		t.Fatalf("notifications = %+v", inbox)
+	}
+	for _, message := range inbox {
+		if message.From != domain.AddressSystem || !strings.Contains(message.Body, "methodology publish") || !strings.Contains(message.Body, "version 1") {
+			t.Fatalf("notification = %+v", message)
+		}
 	}
 }
 

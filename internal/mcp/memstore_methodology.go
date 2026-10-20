@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/methodology"
@@ -32,6 +33,15 @@ func (m *MemoryBackend) PublishMethodology(ctx context.Context, v domain.Methodo
 		return domain.Methodology{}, domain.ErrNotFound
 	}
 	list := m.methodologies[v.HiveID]
+	if v.Source != nil && strings.HasPrefix(v.Source.URL, "builtin:") && v.Source.Ref != "" {
+		for _, item := range list {
+			current := item.version
+			if current.Active && current.Source != nil && current.Source.URL == v.Source.URL &&
+				current.Source.Ref == v.Source.Ref && current.Digest == digest {
+				return current, nil
+			}
+		}
+	}
 	for i := range list {
 		list[i].version.Active = false
 	}
