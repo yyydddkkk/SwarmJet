@@ -537,3 +537,42 @@ test("手动打开的图例不会被已关闭的首次图例计时器收起", as
   await page.waitForTimeout(3000);
   await expect(legend).toBeVisible();
 });
+
+for (const next of ["draft", "command"] as const) {
+  test(`消息尚在发送时保留后续输入或命令 ${next}`, async ({ page }) => {
+    await mockStarsHTTP(page);
+    let release!: () => void;
+    let pending = false;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    await page.route("**/api/hives/swarmjet/messages", async (route) => {
+      if (route.request().method() === "POST") {
+        pending = true;
+        await gate;
+      }
+      await route.fallback();
+    });
+    try {
+      await page.goto("/");
+      await closeBrief(page);
+      await page.getByRole("dialog", { name: "列表", exact: true })
+        .getByRole("button", { name: "关闭", exact: true }).click();
+      await page.getByLabel("选择项目", { exact: true }).selectOption("swarmjet");
+      const say = page.getByLabel("对话与命令", { exact: true });
+      await say.fill("第一条需要发送的消息");
+      await say.press("Enter");
+      await expect.poll(() => pending).toBe(true);
+      if (next === "draft") {
+        await say.fill("下一条尚未发送的草稿");
+        release();
+        await expect(page.locator(".stars-say").getByRole("button", { name: "发送", exact: true })).toBeEnabled();
+        await expect(say).toHaveValue("下一条尚未发送的草稿");
+      } else {
+        await say.fill("模型");
+        await say.press("Enter");
+        await expect(page.getByRole("dialog", { name: "平台设置", exact: true })).toBeVisible();
+      }
+    } finally {
+      release();
+    }
+  });
+}

@@ -893,8 +893,9 @@ export default function PeripherySlot(props: StarsSlotProps) {
             setError("先选择一个项目，再对主 Agent 说话。");
             return;
           }
-          if (await act("say", () => api.talkToQueen(current.id, text)))
-            setText("");
+          const submitted = text;
+          if (await act("say", () => api.talkToQueen(current.id, submitted)))
+            setText((draft) => draft === submitted ? "" : draft);
         }}
       >
         <input
@@ -907,7 +908,7 @@ export default function PeripherySlot(props: StarsSlotProps) {
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
-        <button disabled={!!busy || !text.trim()}>
+        <button disabled={!text.trim() || (!!busy && !route)}>
           {route ? "前往" : "发送"}
         </button>
         <small id="periphery-say-hint">
