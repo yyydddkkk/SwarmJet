@@ -45,6 +45,9 @@ type HiveConfig struct {
 	TurnTimeoutMinutes      int           `json:"turnTimeoutMinutes"`      // default 120
 	ForagerMaxLifetimeHours int           `json:"foragerMaxLifetimeHours"` // default 168
 	Triggers                []TriggerRule `json:"triggers"`
+	// Round 5. QueenModel is the provider/model the user picked for the Queen;
+	// empty uses the deployment default.
+	QueenModel string `json:"queenModel,omitempty"`
 }
 
 // TriggerRule starts a Forager for a matching GitHub event.
