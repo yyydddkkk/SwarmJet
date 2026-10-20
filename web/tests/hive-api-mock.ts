@@ -635,6 +635,8 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
       const template = methodologyTemplates.find(item => item.name === input.name);
       if (!template) return json(route, 404, { error: "template not found" });
       const versions = state.methodologies[hiveID] ?? [];
+      const current = versions.find(item => item.active && item.source?.url === `builtin:${input.name}` && item.source.ref === template.version);
+      if (current) return json(route, 201, { ...current, files: state.methodologyFiles[hiveID]?.[current.version] ?? [] });
       const versionNumber = Math.max(0, ...versions.map(item => item.version)) + 1;
       const response = clone(input.name === "minimal" ? builtinMethodology(hiveID) : methodologyResponses[3]);
       const { files, builtin: _builtin, ...base } = response;
