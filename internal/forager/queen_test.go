@@ -3,6 +3,7 @@ package forager
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -317,6 +318,47 @@ func TestQueenLargeStyleLeavesRoomForInbox(t *testing.T) {
 	prompt := buildQueenPrompt(header, []domain.Message{{From: domain.AddressSystem, Trust: domain.TrustSystem, Kind: domain.MessageTask, Body: "Read this real task"}})
 	if !strings.HasPrefix(prompt, core) || !strings.Contains(prompt, "Read this real task") {
 		t.Fatal("large Queen style displaced core instructions or Inbox input")
+	}
+}
+
+func TestQueenOnlyHandlesMessagesIncludedInPrompt(t *testing.T) {
+	for _, large := range []bool{false, true} {
+		name := "message-count-budget"
+		if large {
+			name = "character-budget"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newQueenFixture(t, nil)
+			count := MaxPromptMessages + 1
+			body := "Read this task"
+			if large {
+				count = 2
+				body = strings.Repeat("x", domain.MaxMessageBody)
+				f.store.methodology = &domain.Methodology{Manifest: domain.MethodologyManifest{Queen: domain.QueenStyle{Prompt: "style.md"}}}
+				f.store.methodologyFiles = []domain.MethodologyFile{{Path: "style.md", Content: strings.Repeat("style", MaxPromptChars)}}
+			}
+			var messages []domain.Message
+			for i := 0; i < count; i++ {
+				messages = append(messages, f.store.addMessage(domain.Message{
+					ID: fmt.Sprintf("budget-%d", i), HiveID: testHiveID, From: domain.LocalAddress("user"),
+					To: domain.AddressQueen, Kind: domain.MessageTask, Body: body,
+				}))
+			}
+			scanQueen(t, f)
+			waitQueenTurn(t, f, messages[0].ID)
+			if f.store.isHandled(messages[len(messages)-1].ID) {
+				t.Fatal("omitted message was marked handled")
+			}
+			prompts := f.runtime.script(testQueenID).prompts()
+			if len(prompts) != 1 || !strings.Contains(prompts[0], body) {
+				t.Fatal("first message was not delivered in full")
+			}
+			scanQueen(t, f)
+			waitQueenTurn(t, f, messages[len(messages)-1].ID)
+			if f.runtime.script(testQueenID).promptTotal() != 2 {
+				t.Fatal("omitted message was not delivered on the next scan")
+			}
+		})
 	}
 }
 
