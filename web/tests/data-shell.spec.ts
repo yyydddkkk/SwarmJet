@@ -239,6 +239,39 @@ test("decisions match current administrator and nonempty reply chains", () => {
   );
   expect(deriveProject(s).decisions).toHaveLength(2);
 });
+test("message ordering compares RFC3339 instants when fractional seconds differ", () => {
+  const s = fixture();
+  s.agents = [{ ...s.agents[0], state: "active" }];
+  const from = `forager:${s.agents[0].id}`;
+  s.messages = [
+    { ...message("question"), createdAt: "2026-10-20T12:00:00Z" },
+    {
+      ...message("answer"),
+      from: s.localAddress,
+      to: "queen",
+      kind: "reply",
+      chainId: "question",
+      createdAt: "2026-10-20T12:00:00.5Z",
+    },
+    {
+      ...message("older"),
+      from,
+      kind: "report",
+      preview: "先前进展",
+      createdAt: "2026-10-20T12:00:00Z",
+    },
+    {
+      ...message("newer"),
+      from,
+      kind: "report",
+      preview: "最新进展",
+      createdAt: "2026-10-20T12:00:00.5Z",
+    },
+  ];
+  const result = deriveProject(s);
+  expect(result.decisions).toHaveLength(0);
+  expect(result.agentStatuses[s.agents[0].id]).toBe("最新进展");
+});
 test("retry doubles to thirty seconds and stops cleanly", async ({ page }) => {
   await page.route("**/api/**", (r) =>
     r.fulfill({ status: 401, contentType: "application/json", body: "{}" }),

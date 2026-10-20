@@ -36,3 +36,14 @@
 - 主代理独立读取字体：Noto 两个子集各覆盖 4,295 个字符，字重轴 400–500；WOFF2 共 2,572,424 字节，public 中没有 TTF。六套字体许可证齐全，IBM Plex 使用官方原始 WOFF2，避免修改保留名称字体。当前界面无 Google Fonts 外部请求依赖。
 - A 的画布和面板仍是约定的基础槽位；详细视觉与功能由 B/C/D 完成。A 的旧 HTTP mock 没有新列表、事件接口，因此其骨架截图展示断线和空 Agent，并不构成本轮集成视觉验收；D 将提供完整的新前端 mock，最终截图在集成后重做。
 - B/C/D 从审查通过的 `ce3bd86` 分出，各自在独立 worktree 开发。
+
+## 集成修复
+
+- 消息时间比较：主代理新增真实回归用例，`12:00:00Z` 的提问在 `12:00:00.5Z` 收到回答后仍显示待决定，修复前测试失败。原因是 RFC3339 可省略小数秒，字符串顺序不代表时间顺序。快照排序、Agent 最新外发消息和问答配对改为比较解析后的时间；数据层 15 项测试和构建通过。此修复独立提交，不改变共享接口。
+
+## 合并与验证进度
+
+- A → E 已按顺序执行 `git merge --no-ff`，均无冲突；每次合并后 `cd web && npm run build` 通过。GitHub PR 尚未合并。
+- `python3 -m unittest discover -s deploy -p 'test_*.py'`：28 项通过。
+- `cd deploy && docker compose --env-file .env.example -f compose.yaml -f compose.cells.yaml config -q`：退出码 0。
+- 指定测试数据库的全量 Go race 测试运行中；B/C/D 仅改前端，后续按最终文件范围判断是否复用未受影响结果。

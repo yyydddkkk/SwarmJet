@@ -121,7 +121,7 @@ export async function fetchProjectSnapshot(
   );
   const messages = [
     ...new Map(pages.flat().map((m) => [m.id, m])).values(),
-  ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  ].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
   return {
     hive: detail.hive,
     localAddress: detail.localAddress,

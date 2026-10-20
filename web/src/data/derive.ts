@@ -39,7 +39,7 @@ export function agentStatus(
     return `空闲 ${hours} 小时，仍占着名额`;
   const latest = messages
     .filter((m) => m.from === `forager:${agent.id}`)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
   if (latest)
     return [...messagePreview(latest).split(/[\n。！？]/)[0]]
       .slice(0, 24)
@@ -132,7 +132,7 @@ export function deriveProject(snapshot: ProjectSnapshot, now = Date.now()) {
               r.from === snapshot.localAddress &&
               r.to === m.from &&
               r.chainId === m.chainId &&
-              r.createdAt >= m.createdAt,
+              Date.parse(r.createdAt) >= Date.parse(m.createdAt),
           ),
       )
       .map((message) => ({
