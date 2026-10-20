@@ -393,3 +393,87 @@ test("default shell handles session expiry and opens GitHub callbacks in platfor
     page.getByRole("heading", { name: "登录 SwarmJet" }),
   ).toBeVisible();
 });
+
+test("canonical PR hydration never overwrites an observed head or ready value", async () => {
+  const initial = fixture();
+  let stale = { ...initial.prs[0] };
+  const mock = createMockDataSource(
+    { swarmjet: initial },
+    { listPRs: async () => ({ prs: [stale] }) },
+  );
+  const store = createProjectStore("swarmjet", mock.source);
+  store.start();
+  await flush();
+  const latest = {
+    hiveId: "swarmjet",
+    number: 1,
+    headSha: "head-new",
+    ready: true,
+    state: "open",
+    merged: false,
+  };
+  mock.push("swarmjet", { type: "pr", data: latest });
+  await flush();
+  expect(store.getSnapshot().snapshot?.prs[0]).toMatchObject({
+    ...latest,
+    title: "Actual title",
+  });
+  stale = { ...stale, headSha: "head-new", ready: false };
+  mock.push("swarmjet", { type: "pr", data: latest });
+  await flush();
+  expect(store.getSnapshot().snapshot?.prs[0].ready).toBe(true);
+  store.stop();
+});
+
+test("browser data source multiplexes projects and resyncs unattributable events", async ({
+  page,
+}) => {
+  await page.route("**/api/**", (r) =>
+    r.fulfill({ status: 401, contentType: "application/json", body: "{}" }),
+  );
+  await page.goto("/");
+  const result = await page.evaluate(async () => {
+    const streams: EventTarget[] = [];
+    let closed = 0;
+    class FakeSource extends EventTarget {
+      static urls: string[] = [];
+      onerror?: () => void;
+      constructor(url: string) {
+        super();
+        FakeSource.urls.push(url);
+        streams.push(this);
+      }
+      close() {
+        closed++;
+      }
+    }
+    Object.assign(window, { EventSource: FakeSource });
+    const path = "/src/data/store.ts";
+    const { browserDataSource } = await import(path);
+    const ready: number[] = [];
+    const events: number[] = [];
+    const connections = Array.from({ length: 8 }, (_, id) =>
+      browserDataSource.connect(
+        `hive-${id}`,
+        () => ready.push(id),
+        () => events.push(id),
+        () => {},
+      ),
+    );
+    streams[0].dispatchEvent(new MessageEvent("ready", { data: "{}" }));
+    streams[0].dispatchEvent(
+      new MessageEvent("hive", { data: JSON.stringify({ id: "hive-3" }) }),
+    );
+    streams[0].dispatchEvent(
+      new MessageEvent("queue", {
+        data: JSON.stringify({ agentId: "unknown-project" }),
+      }),
+    );
+    connections.forEach((c: { close(): void }) => c.close());
+    return { urls: FakeSource.urls, ready, events, closed };
+  });
+  expect(result.urls).toEqual(["/api/events"]);
+  expect(result.events).toEqual([3]);
+  expect(result.ready).toHaveLength(16);
+  expect(result.closed).toBe(1);
+});

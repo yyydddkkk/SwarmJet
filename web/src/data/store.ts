@@ -14,35 +14,83 @@ export type DataSource = {
     onError: () => void,
   ): EventConnection;
 };
+type BrowserSubscriber = {
+  id: string;
+  ready(): void;
+  event(event: ProjectEvent): void;
+  error(): void;
+};
+const browserSubscribers = new Set<BrowserSubscriber>();
+let browserStream: EventSource | undefined;
+let browserReady = false;
+function openBrowserStream() {
+  if (browserStream) return;
+  // A single all-project stream avoids the six HTTP/1.1 connections per origin
+  // limit, which would otherwise prevent project snapshot requests from running.
+  const stream = new EventSource("/api/events", { withCredentials: true });
+  browserStream = stream;
+  const failed = () => {
+    if (browserStream !== stream) return;
+    [...browserSubscribers].forEach((client) => client.error());
+    void api.getSession().catch((error) => {
+      if (error instanceof APIError && error.status === 401)
+        window.dispatchEvent(new Event("swarmjet:session-expired"));
+    });
+  };
+  stream.addEventListener("ready", () => {
+    browserReady = true;
+    [...browserSubscribers].forEach((client) => client.ready());
+  });
+  for (const type of [
+    "message",
+    "agent",
+    "pr",
+    "methodology",
+    "queue",
+    "hive",
+  ] as const) {
+    stream.addEventListener(type, (event) => {
+      try {
+        const data = JSON.parse((event as MessageEvent).data);
+        // These two payloads intentionally have no hiveId in backend JSON. We
+        // cannot safely attribute them: resnapshot canonical per-project lists.
+        if (type === "queue" || type === "methodology") {
+          [...browserSubscribers].forEach((client) => client.ready());
+          return;
+        }
+        const hiveId = type === "hive" ? data.id : data.hiveId;
+        [...browserSubscribers]
+          .filter((client) => client.id === hiveId)
+          .forEach((client) => client.event({ type, data } as ProjectEvent));
+      } catch {
+        failed();
+      }
+    });
+  }
+  stream.onerror = failed;
+}
 export const browserDataSource: DataSource = {
   api,
   snapshot: fetchProjectSnapshot,
   connect(id, ready, event, error) {
-    const source = new EventSource(
-      `/api/events?hive=${encodeURIComponent(id)}`,
-      { withCredentials: true },
-    );
-    source.addEventListener("ready", ready);
-    for (const type of [
-      "message",
-      "agent",
-      "pr",
-      "methodology",
-      "queue",
-      "hive",
-    ] as const)
-      source.addEventListener(type, (e) => {
-        try {
-          event({
-            type,
-            data: JSON.parse((e as MessageEvent).data),
-          } as ProjectEvent);
-        } catch {
-          error();
-        }
+    const client = { id, ready, event, error };
+    browserSubscribers.add(client);
+    const alreadyReady = browserReady;
+    openBrowserStream();
+    if (alreadyReady)
+      queueMicrotask(() => {
+        if (browserSubscribers.has(client)) ready();
       });
-    source.onerror = error;
-    return source;
+    return {
+      close() {
+        browserSubscribers.delete(client);
+        if (!browserSubscribers.size) {
+          browserStream?.close();
+          browserStream = undefined;
+          browserReady = false;
+        }
+      },
+    };
   },
 };
 export type ProjectState = {
@@ -76,6 +124,10 @@ export class ProjectStore {
   private prSequence = 0;
   private clock?: ReturnType<typeof setInterval>;
   private pulsed = new Set<string>();
+  private observedPRs = new Map<
+    number,
+    import("./types").EventPayloads["pr"]
+  >();
   constructor(
     readonly hiveId: string,
     readonly source: DataSource = browserDataSource,
@@ -151,6 +203,7 @@ export class ProjectStore {
       );
       if (generation !== this.generation || this.stopped) return;
       const queued = this.pending ?? [];
+      this.observedPRs.clear();
       this.pending = undefined;
       this.publish({
         snapshot,
@@ -222,6 +275,7 @@ export class ProjectStore {
         void this.refreshSignals();
         break;
       case "pr":
+        this.observedPRs.set(event.data.number, event.data);
         next.prs = upsert(snapshot.prs, event.data, (p) => p.number);
         void this.refreshPRs();
         break;
@@ -305,7 +359,21 @@ export class ProjectStore {
         sequence === this.prSequence &&
         this.state.snapshot
       )
-        this.publish({ snapshot: { ...this.state.snapshot, prs: result.prs } });
+        this.publish({
+          snapshot: {
+            ...this.state.snapshot,
+            prs: result.prs
+              .map((pr) => ({ ...pr, ...this.observedPRs.get(pr.number) }))
+              .concat(
+                this.state.snapshot.prs.filter(
+                  (pr) =>
+                    !result.prs.some(
+                      (canonical) => canonical.number === pr.number,
+                    ) && this.observedPRs.has(pr.number),
+                ),
+              ),
+          },
+        });
     } catch (e) {
       if (generation === this.generation && sequence === this.prSequence)
         this.reportError(e);
