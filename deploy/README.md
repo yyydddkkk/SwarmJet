@@ -155,6 +155,8 @@ python3 deploy/install.py connect --client codex
 
 命令在 api 容器内执行 `swarmjet connect`。本地客户端需要能访问控制台同一主机的 `/mcp`；远程部署可使用前述 SSH 转发，webhook 隧道不承载 MCP。
 
+发布的 Agent 镜像还预装 `codex`、`claude`、`dst`、`agy`（由 `release.yml` 的 `AGENT_CLIS` 指定）；本地构建默认不装这些额外 CLI。它们不会被 Cell 调度器选作会话运行时，Cell 与凭证服务仍统一使用 omp。首版保留这些可选工具以维持镜像兼容性；这也会增加发布镜像体积与构建依赖。
+
 ## 升级与第三轮配置迁移
 
 先备份数据库、DATA_DIR 与 `.env`，另存 `SWARMJET_MASTER_KEY`。GHCR 安装固定到同一版本的 Compose 和镜像：
