@@ -26,9 +26,10 @@ type eventClient struct {
 	done   chan struct{}
 }
 type eventHub struct {
-	mu      sync.Mutex
-	clients map[*eventClient]struct{}
-	done    chan struct{}
+	mu       sync.Mutex
+	clients  map[*eventClient]struct{}
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 func (h *eventHub) add(hiveID string) *eventClient {
@@ -67,13 +68,15 @@ func (h *eventHub) broadcast(e streamEvent) {
 	}
 }
 func (h *eventHub) stop() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	close(h.done)
-	for c := range h.clients {
-		delete(h.clients, c)
-		close(c.done)
-	}
+	h.stopOnce.Do(func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		close(h.done)
+		for c := range h.clients {
+			delete(h.clients, c)
+			close(c.done)
+		}
+	})
 }
 
 func (a *server) eventHub(ctx context.Context) (*eventHub, error) {
@@ -86,17 +89,39 @@ func (a *server) eventHub(ctx context.Context) (*eventHub, error) {
 			return a.events, nil
 		}
 	}
-	refs, unsubscribe, err := a.s.SubscribeEvents(ctx)
+	subscription, err := a.s.SubscribeEvents(ctx)
 	if err != nil {
 		return nil, err
 	}
 	h := &eventHub{clients: make(map[*eventClient]struct{}), done: make(chan struct{})}
 	a.events = h
 	go func() {
-		defer unsubscribe()
+		select {
+		case <-subscription.Done():
+			h.stop()
+		case <-h.done:
+		}
+	}()
+	go func() {
+		defer subscription.Close()
 		defer h.stop()
-		for ref := range refs {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		for {
+			select {
+			case <-subscription.Done():
+				return
+			default:
+			}
+			var ref store.EventRef
+			select {
+			case <-subscription.Done():
+				return
+			case next, ok := <-subscription.Events:
+				if !ok {
+					return
+				}
+				ref = next
+			}
+			ctx, cancel := context.WithTimeout(subscription.Context(), 10*time.Second)
 			data, err := a.eventData(ctx, ref)
 			cancel()
 			// Other database schemas share NOTIFY channels; never hydrate their rows.
@@ -198,6 +223,11 @@ func (a *server) eventStream(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(25 * time.Second)
 	defer heartbeat.Stop()
 	for {
+		select {
+		case <-c.done:
+			return
+		default:
+		}
 		select {
 		case <-r.Context().Done():
 			return

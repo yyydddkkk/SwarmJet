@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -246,5 +248,92 @@ func TestEventsOverrideServerWriteTimeout(t *testing.T) {
 	var got map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data: "))), &got); err != nil || got["id"] != message.ID {
 		t.Fatalf("data=%+v err=%v", got, err)
+	}
+}
+
+type blockingEventMergeStatus struct {
+	started  chan struct{}
+	canceled chan struct{}
+	calls    atomic.Int32
+}
+
+func (b *blockingEventMergeStatus) Check(ctx context.Context, _ domain.Hive, _ int64) (merge.Readiness, error) {
+	if b.calls.Add(1) == 1 {
+		close(b.started)
+	}
+	<-ctx.Done()
+	close(b.canceled)
+	return merge.Readiness{}, ctx.Err()
+}
+func (*blockingEventMergeStatus) Attestations(context.Context, string, int64) ([]domain.Attestation, error) {
+	return nil, nil
+}
+
+func TestEventsCancelBackloggedHydration(t *testing.T) {
+	for _, cause := range []string{"disconnect", "overflow"} {
+		t.Run(cause, func(t *testing.T) {
+			s, _, cookie := newHiveAPITest(t)
+			t.Cleanup(s.Close)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			hive, err := s.CreateHive(ctx, domain.Hive{Name: "backlog", Repository: "acme/backlog"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			blocked := &blockingEventMergeStatus{started: make(chan struct{}), canceled: make(chan struct{})}
+			a := &server{s: s, cfg: Config{Merge: blocked}}
+			server := httptest.NewServer(http.HandlerFunc(a.serve))
+			defer server.Close()
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/events?hive="+hive.ID, nil)
+			req.AddCookie(cookie)
+			response, err := server.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			reader := bufio.NewReader(response.Body)
+			for i := 0; i < 3; i++ {
+				if _, err := reader.ReadString('\n'); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := s.PublishPREvent(ctx, hive.ID, 7); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-blocked.started:
+			case <-ctx.Done():
+				t.Fatal("hydration did not start")
+			}
+			count := 32
+			if cause == "overflow" {
+				count = 300
+			}
+			if _, err := s.Pool.Exec(ctx, `SELECT pg_notify('swarmjet_events',json_build_object('type','pr','hiveId',$1::text,'id',n::text)::text) FROM generate_series(1,$2::integer) n`, hive.ID, count); err != nil {
+				t.Fatal(err)
+			}
+			if cause == "disconnect" {
+				s.Close()
+			}
+			select {
+			case <-blocked.canceled:
+			case <-time.After(time.Second):
+				t.Fatal("listener termination did not cancel hydration")
+			}
+			// The same real HTTP connection ends promptly; stale buffered refs never
+			// reach another Check and the watcher exits even while hydration unwinds.
+			if _, err := reader.ReadString('\n'); err != io.EOF {
+				t.Fatalf("HTTP stream did not close: %v", err)
+			}
+			if blocked.calls.Load() != 1 {
+				t.Fatalf("drained stale events: %d calls", blocked.calls.Load())
+			}
+			a.events.mu.Lock()
+			active := len(a.events.clients)
+			a.events.mu.Unlock()
+			if active != 0 {
+				t.Fatalf("retained %d HTTP subscribers", active)
+			}
+		})
 	}
 }

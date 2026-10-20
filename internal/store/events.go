@@ -26,7 +26,23 @@ type EventRef struct {
 	HiveID string `json:"hiveId"`
 	ID     string `json:"id"`
 }
-type eventWaiter struct{ events chan EventRef }
+type eventWaiter struct {
+	events chan EventRef
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// EventSubscription carries invalidations until the listener disconnects or
+// its buffer overflows. Done cancels hydration without draining stale events.
+type EventSubscription struct {
+	Events <-chan EventRef
+	ctx    context.Context
+	close  func()
+}
+
+func (s *EventSubscription) Context() context.Context { return s.ctx }
+func (s *EventSubscription) Done() <-chan struct{}    { return s.ctx.Done() }
+func (s *EventSubscription) Close()                   { s.close() }
 
 // eventListener owns the single shared LISTEN connection for a Store. It
 // reconnects on its own; connection loss closes subscribers for a fresh snapshot.
@@ -78,6 +94,7 @@ func (l *eventListener) waitReady(ctx context.Context) error {
 func (l *eventListener) add(w *eventWaiter) {
 	l.mu.Lock()
 	if l.stopped {
+		w.cancel()
 		close(w.events)
 	} else {
 		l.waiters[w] = struct{}{}
@@ -87,7 +104,11 @@ func (l *eventListener) add(w *eventWaiter) {
 
 func (l *eventListener) remove(w *eventWaiter) {
 	l.mu.Lock()
-	delete(l.waiters, w)
+	if _, ok := l.waiters[w]; ok {
+		w.cancel()
+		close(w.events)
+		delete(l.waiters, w)
+	}
 	l.mu.Unlock()
 }
 
@@ -107,6 +128,7 @@ func (l *eventListener) run(ctx context.Context) {
 		defer l.mu.Unlock()
 		l.stopped = true
 		for w := range l.waiters {
+			w.cancel()
 			close(w.events)
 			delete(l.waiters, w)
 		}
@@ -143,6 +165,7 @@ func (l *eventListener) run(ctx context.Context) {
 		backoff = 100 * time.Millisecond
 		l.mu.Lock()
 		for w := range l.waiters {
+			w.cancel()
 			close(w.events)
 			delete(l.waiters, w)
 		}
@@ -158,6 +181,7 @@ func (l *eventListener) run(ctx context.Context) {
 		_ = conn.Close(context.Background())
 		l.mu.Lock()
 		for w := range l.waiters {
+			w.cancel()
 			close(w.events)
 			delete(l.waiters, w)
 		}
@@ -184,6 +208,7 @@ func (l *eventListener) dispatch(payload string) {
 		select {
 		case w.events <- ref:
 		default:
+			w.cancel()
 			close(w.events)
 			delete(l.waiters, w)
 		}
@@ -191,14 +216,15 @@ func (l *eventListener) dispatch(payload string) {
 }
 
 // SubscribeEvents shares one LISTEN connection. Overflow closes the subscription.
-func (s *Store) SubscribeEvents(ctx context.Context) (<-chan EventRef, func(), error) {
+func (s *Store) SubscribeEvents(ctx context.Context) (*EventSubscription, error) {
 	l := s.eventListener()
 	if err := l.waitReady(ctx); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	w := &eventWaiter{events: make(chan EventRef, 256)}
+	subscriptionCtx, cancel := context.WithCancel(context.Background())
+	w := &eventWaiter{events: make(chan EventRef, 256), ctx: subscriptionCtx, cancel: cancel}
 	l.add(w)
-	return w.events, func() { l.remove(w) }, nil
+	return &EventSubscription{Events: w.events, ctx: w.ctx, close: func() { l.remove(w) }}, nil
 }
 
 // PublishPREvent is used only for PR changes that have no persisted event row.

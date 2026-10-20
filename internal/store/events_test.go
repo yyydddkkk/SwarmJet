@@ -52,16 +52,16 @@ func TestPublishPREvent(t *testing.T) {
 	s := testStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	refs, unsubscribe, err := s.SubscribeEvents(ctx)
+	subscription, err := s.SubscribeEvents(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer unsubscribe()
+	defer subscription.Close()
 	if err := s.PublishPREvent(ctx, "hive-event", 42); err != nil {
 		t.Fatal(err)
 	}
 	select {
-	case got := <-refs:
+	case got := <-subscription.Events:
 		if got != (EventRef{Type: "pr", HiveID: "hive-event", ID: "42"}) {
 			t.Fatalf("ref=%+v", got)
 		}
@@ -74,17 +74,17 @@ func TestEventSubscriptionsShareListenerAndClose(t *testing.T) {
 	s := testStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	first, removeFirst, err := s.SubscribeEvents(ctx)
+	first, err := s.SubscribeEvents(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer removeFirst()
+	defer first.Close()
 	listener := s.events
-	second, removeSecond, err := s.SubscribeEvents(ctx)
+	second, err := s.SubscribeEvents(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer removeSecond()
+	defer second.Close()
 	if s.events != listener {
 		t.Fatal("multiple shared listeners")
 	}
@@ -95,7 +95,7 @@ func TestEventSubscriptionsShareListenerAndClose(t *testing.T) {
 		t.Fatalf("subscribers=%d", count)
 	}
 	listener.stop()
-	for _, events := range []<-chan EventRef{first, second} {
+	for _, events := range []<-chan EventRef{first.Events, second.Events} {
 		select {
 		case _, ok := <-events:
 			if ok {
@@ -165,5 +165,32 @@ func TestEventDataNormalizesNonUTCTimestamps(t *testing.T) {
 		if created.Location() != time.UTC || updated.Location() != time.UTC || created.IsZero() || updated.IsZero() {
 			t.Fatalf("non-UTC event: %+v", value)
 		}
+	}
+}
+
+func TestEventSubscriptionOverflowCancelsBeforeDrain(t *testing.T) {
+	s := testStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	subscription, err := s.SubscribeEvents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+	listener := s.events
+	payload := `{"type":"message","hiveId":"hive","id":"message"}`
+	for i := 0; i < 257; i++ {
+		listener.dispatch(payload)
+	}
+	select {
+	case <-subscription.Done():
+	default:
+		t.Fatal("full buffer did not cancel subscription")
+	}
+	if len(subscription.Events) != 256 {
+		t.Fatalf("buffer unexpectedly drained: %d", len(subscription.Events))
+	}
+	if err := subscription.Context().Err(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("hydration context remains live: %v", err)
 	}
 }
