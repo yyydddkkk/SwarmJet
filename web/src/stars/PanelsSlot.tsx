@@ -8,7 +8,7 @@ import Models from "./panels/ModelsPage";
 import Setup from "./panels/SetupPage";
 import { HiveUsagePanel } from "./panels/UsagePanel";
 import { ObjectPanel, Ledger } from "./panels/ObjectPanel";
-import { useFocus } from "./panels/primitives";
+import { useFocus, ErrorNotice } from "./panels/primitives";
 import "./panels/panels.css";
 const projectTabs: [ProjectTab, string][] = [
   ["methodology", "方法论"],
@@ -67,7 +67,14 @@ function ProjectPanel({
         ))}
       </nav>
       {!data ? (
-        <p>正在读取项目…</p>
+        state.error ? (
+          <ErrorNotice
+            message={state.error}
+            onRetry={() => void store.refresh()}
+          />
+        ) : (
+          <p>正在读取项目…</p>
+        )
       ) : tab === "methodology" ? (
         <Methodology hiveId={data.hive.id} />
       ) : tab === "settings" ? (
@@ -110,6 +117,7 @@ export default function PanelsSlot(props: StarsSlotProps) {
     <>
       {state.projectPanel && store && (
         <ProjectPanel
+          key={state.hiveId}
           store={store}
           ui={ui}
           tab={state.projectPanel}
@@ -118,7 +126,7 @@ export default function PanelsSlot(props: StarsSlotProps) {
       )}{" "}
       {state.selection && store && (
         <ObjectPanel
-          key={`${state.selection.kind}:${state.selection.id}`}
+          key={`${state.selection.hiveId}:${state.selection.kind}:${state.selection.id}`}
           {...props}
           store={store}
           selection={state.selection}

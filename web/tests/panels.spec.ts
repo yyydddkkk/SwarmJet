@@ -648,3 +648,65 @@ test("same-head not-ready SSE disables stale ready checks immediately", async ({
     state.calls.filter((c) => c.method === "POST" && c.path.endsWith("/merge")),
   ).toHaveLength(0);
 });
+
+for (const failure of [false, true]) {
+  test(`switching projects resets methodology version and never shows previous project data (${failure ? "failure" : "success"})`, async ({
+    page,
+  }) => {
+    const state = await open(page);
+    const version = structuredClone(
+      state.methodologies.swarmjet.find((v) => v.version === 1)!,
+    );
+    version.hiveId = "orders";
+    version.version = 1;
+    version.active = true;
+    version.note = "B项目独有备注";
+    version.manifest.standingOrders = ["B项目独有规则"];
+    state.methodologies.orders = [version];
+    state.methodologyFiles.orders = {
+      1: [{ path: "methodology.yaml", content: "B项目独有文件正文" }],
+    };
+    await page.getByRole("button", { name: "项目", exact: true }).click();
+    await page.getByLabel("查看方法论版本", { exact: true }).selectOption("2");
+    await expect(page.getByTestId("methodology-version")).toContainText("v2");
+    const oldBody = await page
+      .getByTestId("methodology-file-content")
+      .innerText();
+    if (failure)
+      await page.route("**/api/hives/orders/methodology?*", (route) =>
+        route.fulfill({ status: 503, json: { error: "B项目方法论读取失败" } }),
+      );
+    if (failure)
+      await page.route("**/api/hives/orders/methodology", (route) =>
+        route.fulfill({ status: 503, json: { error: "B项目方法论读取失败" } }),
+      );
+    await page.getByRole("button", { name: "切到B项目", exact: true }).click();
+    const panel = page.getByRole("region", { name: "项目面板" });
+    await expect(
+      panel.getByRole("heading", {
+        name: state.hives.find((p) => p.hive.id === "orders")!.hive.name,
+        exact: true,
+      }),
+    ).toBeVisible();
+    if (failure) {
+      await expect(panel.getByRole("alert")).toContainText(
+        "B项目方法论读取失败",
+      );
+      await expect(page.getByTestId("methodology-file-content")).toHaveCount(0);
+    } else {
+      await expect(page.getByTestId("methodology-version")).toContainText("v1");
+      await expect(page.getByTestId("methodology-file-content")).toHaveText(
+        "B项目独有文件正文",
+      );
+      await expect(panel).toContainText("B项目独有规则");
+    }
+    await expect(panel).not.toContainText(oldBody);
+    expect(
+      state.calls.filter(
+        (c) =>
+          c.path === "/api/hives/orders/methodology" &&
+          c.query.includes("version=2"),
+      ),
+    ).toHaveLength(0);
+  });
+}

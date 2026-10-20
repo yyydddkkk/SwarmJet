@@ -55,11 +55,23 @@ const mock = createMockDataSource(
   },
   { ...api },
 );
+mock.setSnapshot("orders", {
+  ...mock.snapshots.swarmjet,
+  hive: hives[1],
+  agents: [],
+  prs: [],
+  methodology: { ...methodologyResponses[3], hiveId: "orders", version: 1 },
+});
+const ordersStore = createProjectStore("orders", mock.source);
+ordersStore.start();
 const store = createProjectStore("swarmjet", mock.source);
 store.start();
 const props = {
   ui,
-  stores: new Map([["swarmjet", store]]),
+  stores: new Map([
+    ["swarmjet", store],
+    ["orders", ordersStore],
+  ]),
   projects: [
     { hive: hives[0], activeForagers: 1, pendingApprovals: 1, inboxBacklog: 0 },
   ],
@@ -90,6 +102,14 @@ createRoot(document.getElementById("root")!).render(
         style={{ position: "fixed", top: 0, left: 450, zIndex: 30 }}
       >
         <button onClick={() => ui.openProject("methodology")}>项目</button>
+        <button
+          onClick={() => {
+            ui.selectProject("orders");
+            ui.openProject("methodology");
+          }}
+        >
+          切到B项目
+        </button>
         <button
           onClick={() =>
             mock.push("swarmjet", {

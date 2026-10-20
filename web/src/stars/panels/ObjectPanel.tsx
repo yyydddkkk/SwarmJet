@@ -201,7 +201,11 @@ export function ObjectPanel({
       )}{" "}
       {notice && <p role="status">{notice}</p>}
       {selection.kind === "pr" ? (
-        <PRPanel store={store} number={selection.number!} />
+        <PRPanel
+          key={`${selection.hiveId}:${selection.number}`}
+          store={store}
+          number={selection.number!}
+        />
       ) : selection.kind === "signal" ? (
         <>
           {snapshot.signals
@@ -406,7 +410,11 @@ export function ObjectPanel({
               <details>
                 <summary>验证与合并</summary>
                 {agent.prNumber ? (
-                  <PRPanel store={store} number={agent.prNumber} />
+                  <PRPanel
+                    key={`${snapshot.hive.id}:${agent.prNumber}`}
+                    store={store}
+                    number={agent.prNumber}
+                  />
                 ) : (
                   <p>还没有关联 PR。</p>
                 )}
