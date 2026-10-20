@@ -30,8 +30,9 @@
 | C | 方法论目录、安装工具、自动回滚、`queen` 段校验 | `internal/methodology`（目录与校验）、新包 `internal/methodology/catalog`、`internal/store` 新文件、`internal/mcp`、`internal/api` 新文件、`methodologies/` | 公共契约 |
 | D | 网页：创建 Hive 向导、Queen 对话页、方法论目录与安装 | `web/` | 公共契约（接口先用模拟数据） |
 | E | 文档与发布准备 | `README.md`、`deploy/README.md`、`docs/`（`docs/claude` 除外）、`.github/workflows/release.yml` 的核对、`CHANGELOG.md` | 公共契约 |
+| F | 第四轮补充验收（`docs/claude/acceptance-round4.md`）发现的五个问题 | `internal/router`、`internal/cell/docker/publisher.go`、`internal/forager`、`internal/llmproxy`、`methodologies/pstack/roles/` 与 `skills/verify-revision/` | 无（2026-10-20 追加） |
 
-**合并顺序**：A → B → C → D → E。A、B 都会改 `internal/mcp`，A、C 都会改 `cmd/swarmjet`，冲突由审查方解决。
+**合并顺序**：A → B → F → C → D → E。A、B 都会改 `internal/mcp`，A、C 都会改 `cmd/swarmjet`，冲突由审查方解决。
 
 ---
 
@@ -287,4 +288,52 @@ SwarmJet 经过四轮重构，已经变成"自托管的 Agent swarm"：每个 Hi
 
 ## 交付
 提交信息用英文约定式前缀（docs:）。向 dev 开 PR，不要合并。
+````
+
+---
+
+## 任务 F：第四轮补充验收问题修复（2026-10-20 追加）
+
+````text
+# 任务：修复第四轮补充验收发现的五个问题
+
+## 背景
+SwarmJet 第四轮补充验收（docs/claude/acceptance-round4.md）发现了五个问题：四个属于平台的可用性，一个属于 pstack 方法论。先读这份报告的第 4 节、ADR（docs/claude/adr-hive-queen-forager.md）第 2 节和第 8 节的状态机、docs/claude/round5-prompts.md 的"已定决策"（第五轮有其他任务在并行改 Router、MCP 和 methodologies/，注意下面的约束），以及 internal/router/router.go、internal/cell/docker/publisher.go、internal/forager/actor.go、internal/llmproxy/proxy.go、methodologies/pstack/roles/。
+
+## 要做的事
+1. PR 关闭即结束 owner：ADR 第 8 节规定 PR 合并或被关闭时，Forager 进入 completed，但这一点没有实现。现在 PR 合并后，owner 被 closed 事件唤醒，又去发布，然后失败并一直 parked，占着并发名额。修法：
+   - Router 收到某个 Forager 拥有的 PR 的 pull_request.closed 时（合并或不合并都算），给 owner 发一条 "complete" 控制消息，复用 finish_task 的机制；
+   - 原事件仍作为本轮内容交给 owner，让它能写最后的汇报；
+   - 监管者处理完这一轮后结束这个 Agent，不再发布；合并与否写进汇报。
+2. base 前进不再阻断发布：Publisher 现在要求最新的 base 是 Forager 分支的祖先，所以只要别的 PR 先合并，其他 worker 的发布就会失败。修法：
+   - 改为要求 Forager 分支和最新 base 有共同历史（merge-base 存在）即可推送；冲突交给 GitHub 的 PR 状态体现；保留防止推送无关历史的检查，并在 PR 描述里说明为什么这样仍然安全。
+   - 发布失败时，除了现有的汇报，再给 Forager 本人的收件箱发一条 trust=system 的消息，写明失败原因和建议的处理（例如"把 base 合进你的分支后结束本轮"），让它下一轮能自己处理。
+3. 因并发上限没能派生的 Agent 稍后补派：Router 的事件规则（包括 pr_head）和 MCP 的 spawn 遇到并发上限时，现在事件直接进收件箱，名额空出后也不会补派。修法：
+   - 把这次派生请求放进一个等待队列。用存储加 River Job，或者监管者扫描，选一个并说明理由；迁移编号从 12 开始取第一个空闲号，在 PR 描述里写明。
+   - 名额空出时按先后顺序补派；同一个派生请求（同一个确定性 Agent ID）只补一次。
+   - 等待超过 24 小时就放弃并发通知：Queen 开启时通知 queen，否则通知 Hive 收件箱。
+   - MCP spawn 遇到并发上限时，返回"已排队"及队列位置，不再直接报错。
+4. 小额金额格式：llmproxy 里预算相关的通知和错误信息，改为按金额大小保留足够的有效位数（比如小于 0.01 时保留 4 位有效数字），并补一个微额预算的格式测试。
+5. pstack 方法论：
+   - methodologies/pstack/roles/verifier.md 和 skills/verify-revision/SKILL.md 写清楚：改动违反任务明确要求的规格或标准（包括任务点名的 RFC 或协议）时，结论是 fail，不是 pass_notes；pass_notes 只用于不影响任务要求的问题。加一个正反对照的小例子。
+   - roles/worker.md 写明：自己的 PR 被合并或关闭后，平台会结束这个 Agent，不要再提交。
+   - 不要改 methodology.yaml（另一个任务在改它）。
+
+## 约束
+- 第五轮其他任务也在改 internal/router（入口路由）、internal/mcp 和 methodologies/pstack/methodology.yaml。你的改动尽量放在新文件里；已有文件只改必要的几行，冲突由审查方解决。
+- 不修改 internal/domain 的契约类型。
+- 不碰 web/、deploy/。
+- 不在 Go 代码里写工作流程；第 1、3 条都是生命周期和可用性机制。
+- 不要对整个文件运行 gofmt；代码、测试、文档里不得出现真实凭证。
+
+## 验收标准
+- go build ./... 和 go vet ./... 通过；起临时 Postgres，go test -race ./... 通过；go test ./internal/methodology/ 通过（方法论包校验）。
+- 测试覆盖：
+  - PR 合并和关闭时，owner 都会结束；最后一轮能拿到 closed 事件；之后不再发布；
+  - base 前进后发布成功；没有共同历史时仍然拒绝；发布失败时 owner 收到系统消息；
+  - 并发满时派生请求排队，名额空出后补派，同一请求只补一次，超时放弃并通知；MCP spawn 返回已排队；
+  - 微额金额格式。
+
+## 交付
+提交信息用英文约定式前缀（fix:）。向 dev 开 PR，不要合并。
 ````
