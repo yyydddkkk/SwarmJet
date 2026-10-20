@@ -479,7 +479,7 @@ function ManifestView({ manifest }: { manifest: MethodologyManifest }) {
               </table>
             </div>
           ) : (
-            <p className="pc-muted">没有事件规则；事件会留在 Inbox。</p>
+            <p className="pc-muted">没有事件规则；事件会留在待处理区域。</p>
           )}
         </Panel>
       </div>
