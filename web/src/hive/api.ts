@@ -115,6 +115,7 @@ export async function request<T>(
     // expired. /session is expected to 401 while signed out.
     if (response.status === 401 && path !== "/login" && path !== "/session") {
       message = "会话已过期或未登录，请重新登录。";
+      window.dispatchEvent(new Event("swarmjet:session-expired"));
     }
     if (response.status === 403) {
       message = "需要管理员会话才能继续。";

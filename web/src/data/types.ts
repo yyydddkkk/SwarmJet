@@ -108,12 +108,7 @@ export type Agent = {
 export type MessageTrust = "user" | "agent" | "external" | "system";
 
 export type MessageKind =
-  | "event"
-  | "task"
-  | "report"
-  | "question"
-  | "reply"
-  | "control";
+  "event" | "task" | "report" | "question" | "reply" | "control";
 
 export type MessageState = "pending" | "delivered" | "handled";
 
@@ -143,7 +138,8 @@ export type HiveOverview = {
   inboxBacklog: number;
 };
 
-export type QueenActionKind = "spawn_forager" | "cancel_forager" | "request_approval";
+export type QueenActionKind =
+  "spawn_forager" | "cancel_forager" | "request_approval";
 
 /** A structured card for a Queen action inside the conversation stream. */
 export type QueenAction = {
@@ -492,16 +488,77 @@ export type UsageResponse = {
 };
 
 // Round 6 actual list and stream JSON (internal/api and internal/store/web_lists.go).
-export type PullRequest = { number: number; title?: string; url?: string; headSha: string; state: string; merged: boolean; ready: boolean; reasons?: string[]; ownerId?: string; attestations?: Attestation[]; updatedAt?: string };
-export type QueueItem = { agentId: string; role: string; task: string; position: number; createdAt: string; expiresAt: string };
-export type Signal = { messageId: string; source: string; kind: string; number: number; title: string; url: string; claimed: boolean; claimedBy: string; createdAt: string };
-export type MethodologyEvent = { version: number; action: string; actor: string; note: string; createdAt: string };
+export type PullRequest = {
+  number: number;
+  title?: string;
+  url?: string;
+  headSha: string;
+  state: string;
+  merged: boolean;
+  ready: boolean;
+  reasons?: string[];
+  ownerId?: string;
+  attestations?: Attestation[];
+  updatedAt?: string;
+};
+export type QueueItem = {
+  agentId: string;
+  role: string;
+  task: string;
+  position: number;
+  createdAt: string;
+  expiresAt: string;
+};
+export type Signal = {
+  messageId: string;
+  source: string;
+  kind: string;
+  number: number;
+  title: string;
+  url: string;
+  claimed: boolean;
+  claimedBy: string;
+  createdAt: string;
+};
+export type MethodologyEvent = {
+  version: number;
+  action: string;
+  actor: string;
+  note: string;
+  createdAt: string;
+};
 export type MethodologyVersion = MethodologyResponse;
 export type Usage = UsageResponse;
 export type ModelsState = ModelsResponse;
 export type Token = TokenSummary;
-export type MessagePreview = Pick<Message, "id" | "hiveId" | "from" | "to" | "kind" | "trust" | "chainId" | "createdAt"> & { preview: string };
+export type MessagePreview = Pick<
+  Message,
+  "id" | "hiveId" | "from" | "to" | "kind" | "trust" | "chainId" | "createdAt"
+> & { preview: string };
 export type LiveMessage = Message | MessagePreview;
-export type ProjectSnapshot = { hive: Hive; localAddress: string; agents: Agent[]; queen: QueenStatus; queenAgent?: Agent; prs: PullRequest[]; queue: QueueItem[]; signals: Signal[]; methodology: MethodologyVersion; methodologyEvents: MethodologyEvent[]; messages: LiveMessage[] };
-export type ProjectEvent = { [K in keyof EventPayloads]: { type: K; data: EventPayloads[K] } }[keyof EventPayloads];
-export type EventPayloads = { message: MessagePreview; agent: Agent; pr: Pick<PullRequest, "number" | "headSha" | "state" | "ready" | "merged"> & { hiveId: string }; methodology: MethodologyEvent; queue: QueueItem & { state: "waiting" | "started" | "expired" }; hive: Hive };
+export type ProjectSnapshot = {
+  hive: Hive;
+  localAddress: string;
+  agents: Agent[];
+  queen: QueenStatus;
+  queenAgent?: Agent | null;
+  prs: PullRequest[];
+  queue: QueueItem[];
+  signals: Signal[];
+  methodology: MethodologyVersion;
+  methodologyEvents: MethodologyEvent[];
+  messages: LiveMessage[];
+};
+export type ProjectEvent = {
+  [K in keyof EventPayloads]: { type: K; data: EventPayloads[K] };
+}[keyof EventPayloads];
+export type EventPayloads = {
+  message: MessagePreview;
+  agent: Agent;
+  pr: Pick<PullRequest, "number" | "headSha" | "state" | "ready" | "merged"> & {
+    hiveId: string;
+  };
+  methodology: MethodologyEvent;
+  queue: QueueItem & { state: "waiting" | "started" | "expired" };
+  hive: Hive;
+};
