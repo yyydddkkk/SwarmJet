@@ -16,9 +16,10 @@ import {
 import { Icon } from "./icons";
 import { ForagerAvatar, QueenAvatar, foragerNeedsYou } from "./pixel";
 import { ConversationStream } from "./ConversationStream";
+import HiveSettings from "./HiveSettings";
 import MethodologySection from "./MethodologyPage";
 import { HiveUsagePanel } from "./UsagePanel";
-import { isUnhandled, messageEntries, mergeMessages } from "./format";
+import { formatDateTime, isUnhandled, messageEntries, mergeMessages } from "./format";
 import { useResource } from "./use-resource";
 
 const sections = [
@@ -50,6 +51,7 @@ const placeholders: Record<string, { title: string; hint: string }> = {
 export default function HivePage({ hiveId, section }: { hiveId: string; section: string }) {
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const hiveRes = useResource(signal => hiveAPI.getHive(hiveId, signal), [hiveId]);
+  const queenRes = useResource(signal => hiveAPI.getQueen(hiveId, signal), [hiveId], 5000);
   const localAddress = hiveRes.data?.localAddress ?? "";
   const agentsRes = useResource(
     signal => hiveAPI.listForagers(hiveId, signal),
@@ -110,7 +112,12 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
   }
 
   const { hive } = hiveRes.data;
-  const queen = agentsRes.data?.queen;
+  const queenStatus = queenRes.data;
+  const queenEnabled = queenStatus?.enabled ?? hive.queenEnabled;
+  const queen = agentsRes.data?.queen ? {
+    ...agentsRes.data.queen,
+    state: queenStatus?.state ?? agentsRes.data.queen.state,
+  } : undefined;
   const foragers = agentsRes.data?.foragers ?? [];
   const entries = conversationRes.data ?? [];
   const inboxMessages = inboxRes.data?.messages ?? [];
@@ -156,13 +163,15 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
         </div>
         <div className="hg-head-badges">
           <StatusBadge
-            state={queen?.state ?? (hive.queenEnabled ? "active" : "disabled")}
-            label={`Queen（蜂王）${hive.queenEnabled ? "已开启" : "未开启"}`}
+            state={queenStatus?.state ?? "disabled"}
+            label={`Queen（蜂王）${queenEnabled ? "已开启" : "未开启"}`}
           />
           <span className="hg-badge hg-tone-neutral">{foragers.length} 只 Forager</span>
         </div>
       </header>
 
+      {queenRes.error ? <ErrorNotice message={queenRes.error} onRetry={queenRes.reload} auth={queenRes.errorStatus === 401} admin={queenRes.errorStatus === 403} /> : null}
+      {queenStatus ? <p className="hg-muted" role="status">Queen 状态：{stateLabels[queenStatus.state]} · 模型：{queenStatus.model || "部署默认模型"}{queenStatus.lastTurnAt ? ` · 最近运行：${formatDateTime(queenStatus.lastTurnAt)}` : ""}</p> : null}
       <Tabs items={tabs} active={active} label={`${hive.name} 分区`} />
 
       {active === "conversation" ? (
@@ -171,7 +180,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
             <Panel
               title="对话"
               subtitle={
-                hive.queenEnabled
+                queenEnabled
                   ? "Queen（蜂王）在这里汇报进展、请求审批；外部事件会以消息卡片插入。"
                   : "Queen 未开启，来自 GitHub 的事件会留在 Hive Inbox，等本地 Agent 或人处理。"
               }
@@ -189,26 +198,27 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
                 agents={foragers}
                 emptyTitle="对话还是空的。"
                 emptyHint={
-                  hive.queenEnabled
+                  queenEnabled
                     ? "在下面跟 Queen 说点什么。"
                     : "在下面直接派一只 Forager。"
                 }
               />
             </Panel>
-            {hive.queenEnabled ? (
+            {queenEnabled ? (
               <QueenComposer hiveId={hive.id} onSent={refreshAfterSend} />
             ) : null}
-            {!hive.queenEnabled || dispatchOpen ? (
+            {!queenEnabled ? <EmptyState title="Queen 未开启" hint="打开 Queen 后，就可以在这里对话并选择方法论。" action={<a className="hg-btn hg-btn-primary" href={`#/hives/${hive.id}/settings`}>去设置页开启 Queen</a>} /> : null}
+            {!queenEnabled || dispatchOpen ? (
               <DispatchForm
                 hive={hive}
                 onSpawned={refreshAfterSpawn}
-                onClose={hive.queenEnabled ? () => setDispatchOpen(false) : undefined}
+                onClose={queenEnabled ? () => setDispatchOpen(false) : undefined}
               />
             ) : null}
           </div>
           <aside className="hg-conversation-side">
             <SwarmPanel
-              hive={hive}
+              hive={{ ...hive, queenEnabled }}
               queen={queen}
               foragers={foragers}
               entries={entries}
@@ -221,7 +231,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
       ) : active === "swarm" ? (
         <div className="hg-conversation single">
           <SwarmPanel
-            hive={hive}
+            hive={{ ...hive, queenEnabled }}
             queen={queen}
             foragers={foragers}
             entries={entries}
@@ -235,6 +245,8 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
         </div>
       ) : active === "methodology" ? (
         <MethodologySection hiveId={hive.id} />
+      ) : active === "settings" ? (
+        <HiveSettings key={hive.id} hive={hive} onSaved={() => { hiveRes.reload(); queenRes.reload(); agentsRes.reload(); }} />
       ) : active === "usage" ? (
         <HiveUsagePanel hiveId={hive.id} agents={queen ? [queen, ...foragers] : foragers} />
       ) : active === "inbox" ? (

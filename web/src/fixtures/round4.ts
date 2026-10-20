@@ -268,11 +268,18 @@ export function builtinMethodology(hiveId: string): MethodologyResponse {
     hiveId,
     version: 0,
     active: false,
-    manifest: v1Manifest,
+    manifest: {
+      defaultRole: "worker",
+      roles: { worker: { ...workerRole, permissions: { publish: true, message: true, attest: false, merge: false, methodology: false } } },
+      merge: { requireAttestation: false, requireNonAuthor: false, requireChecks: false, auto: false },
+    },
     digest: "",
     createdBy: "",
     createdAt: "0001-01-01T00:00:00Z",
-    files: files(1),
+    files: [
+      { path: "methodology.yaml", content: "defaultRole: worker\nroles:\n  worker:\n    prompt: roles/worker.md\n" },
+      { path: "roles/worker.md", content: "完成用户交付的任务，汇报结果。不自动合并。" },
+    ],
     builtin: true,
   };
 }

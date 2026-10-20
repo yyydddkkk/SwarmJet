@@ -63,6 +63,7 @@ test("#/ and retired routes redirect to #/hives", async ({ page }) => {
 
 test("新建 Hive picks a repository from the GitHub App installation", async ({ page }, testInfo) => {
   const state = await mockHiveAPI(page);
+  state.modelCredentials = [{ provider: "deepseek", configured: true }];
   await page.goto("/#/hives");
 
   await page.getByRole("button", { name: "新建 Hive" }).click();
@@ -71,6 +72,8 @@ test("新建 Hive picks a repository from the GitHub App installation", async ({
   await page.getByLabel("名称").fill("订单服务");
   await dialog.getByLabel("仓库", { exact: true }).selectOption("yyydddkkk/orders-api");
   await page.screenshot({ path: testInfo.outputPath("hive-create-1440.png"), fullPage: true });
+  await dialog.getByRole("button", { name: "下一步" }).click();
+  await dialog.getByRole("button", { name: "下一步" }).click();
   await dialog.getByRole("button", { name: "创建 Hive" }).click();
 
   await expect(page).toHaveURL(/#\/hives\/hive-new-1$/);
@@ -89,6 +92,7 @@ test("without a GitHub App the dialog explains how to connect and still accepts 
   const state = await mockHiveAPI(page, {
     setup: { github: { configured: false, source: "", appSlug: "" } },
   });
+  state.modelCredentials = [{ provider: "deepseek", configured: true }];
   await page.goto("/#/hives");
 
   await page.getByRole("button", { name: "新建 Hive" }).click();
@@ -98,6 +102,8 @@ test("without a GitHub App the dialog explains how to connect and still accepts 
 
   await page.getByLabel("名称").fill("手动仓库");
   await dialog.getByLabel("仓库", { exact: true }).fill("owner/repo");
+  await dialog.getByRole("button", { name: "下一步" }).click();
+  await dialog.getByRole("button", { name: "下一步" }).click();
   await dialog.getByRole("button", { name: "创建 Hive" }).click();
 
   await expect(page).toHaveURL(/#\/hives\/hive-new-1$/);
