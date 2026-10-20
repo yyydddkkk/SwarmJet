@@ -353,7 +353,15 @@ func (ts *toolset) mergePRFor(ctx context.Context, in mergePRInput) (mergePROutp
 	if ts.opts.Merge == nil {
 		return mergePROutput{}, errors.New("merge_pr is not configured: the merge service is unavailable")
 	}
-	if ts.actor.isAgent() {
+	if ts.actor.isQueen() {
+		m, found, err := ts.activeMethodology(ctx, in.HiveID)
+		if err != nil {
+			return mergePROutput{}, err
+		}
+		if !found || !m.Manifest.Queen.Merge {
+			return mergePROutput{}, fmt.Errorf("permission denied: the methodology does not allow Queen merge (queen.merge)")
+		}
+	} else if ts.actor.isAgent() {
 		permissions, err := ts.opts.Merge.Permissions(ctx, in.HiveID, ts.actor.agent.RoleName)
 		if err != nil {
 			return mergePROutput{}, err

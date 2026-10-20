@@ -11,6 +11,7 @@ import (
 	"github.com/yyydddkkk/SwarmJet/internal/cell/omp"
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/methodology"
+	"github.com/yyydddkkk/SwarmJet/internal/queen"
 )
 
 // errTerminal means a Forager reached a terminal state while a turn was in
@@ -34,9 +35,13 @@ type promptResult struct {
 // actor serializes turns for one Forager. At most one turn runs at a time;
 // messages that arrive meanwhile wait in queue and become the next turn.
 type actor struct {
-	sup    *Supervisor
-	id     string
-	hiveID string
+	sup       *Supervisor
+	id        string
+	hiveID    string
+	queen     bool
+	scanMu    sync.Mutex
+	runCancel context.CancelFunc
+	runDone   chan struct{}
 
 	mu            sync.Mutex
 	queue         []domain.Message
@@ -75,14 +80,21 @@ func (a *actor) enqueue(_ context.Context, msgs ...domain.Message) error {
 	wasRunning := a.running
 	cancel := false
 	for _, m := range msgs {
-		if isCancelMessage(m) {
+		if !a.queen && isCancelMessage(m) {
 			a.cancelPending = true
 			cancel = true
 		}
 		a.queue = append(a.queue, m)
 	}
+	var runCtx context.Context
+	var done chan struct{}
+	var cancelRun context.CancelFunc
 	if !a.running {
 		a.running = true
+		runCtx, cancelRun = context.WithCancel(a.sup.baseContext())
+		a.runCancel = cancelRun
+		done = make(chan struct{})
+		a.runDone = done
 	}
 	a.mu.Unlock()
 
@@ -93,7 +105,7 @@ func (a *actor) enqueue(_ context.Context, msgs ...domain.Message) error {
 		}
 	}
 	if !wasRunning {
-		go a.loop(a.sup.baseContext())
+		go func() { defer close(done); defer cancelRun(); a.loop(runCtx) }()
 	}
 	return nil
 }
@@ -114,12 +126,12 @@ func (a *actor) loop(ctx context.Context) {
 			a.stopRunning()
 			return
 		}
-		if hasCancelMessage(batch) {
+		if !a.queen && hasCancelMessage(batch) {
 			a.terminate(ctx, domain.AgentCancelled, "cancelled by control message", batch, "")
 			a.stopRunning()
 			return
 		}
-		if hasCompleteMessage(batch) {
+		if !a.queen && hasCompleteMessage(batch) {
 			a.terminate(ctx, domain.AgentCompleted, "finished its task", batch, "")
 			a.stopRunning()
 			return
@@ -147,7 +159,7 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		a.sup.log.Warn("forager: load agent failed", "agent", a.id, "error", err)
 		return false
 	}
-	if agent.Role != domain.RoleForager || isTerminal(agent.State) {
+	if ((a.queen && agent.Role != domain.RoleQueen) || (!a.queen && agent.Role != domain.RoleForager)) || isTerminal(agent.State) || agent.State == domain.AgentDisabled {
 		a.mu.Lock()
 		a.terminal = true
 		a.queue = nil
@@ -159,6 +171,9 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		a.sup.log.Warn("forager: load hive failed", "agent", a.id, "hive", agent.HiveID, "error", err)
 		return false
 	}
+	if a.queen && !hive.QueenEnabled {
+		return false
+	}
 	firstTurn := agent.SessionRef == ""
 
 	// Unhandled is authoritative: a duplicate notification for an already
@@ -168,11 +183,11 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		a.sup.log.Warn("forager: read unhandled messages failed", "agent", agent.ID, "error", err)
 		consumed = dedupeMessages(batch)
 	}
-	if hasCancelMessage(consumed) {
+	if !a.queen && hasCancelMessage(consumed) {
 		a.terminate(ctx, domain.AgentCancelled, "cancelled by control message", consumed, "")
 		return false
 	}
-	if hasCompleteMessage(consumed) {
+	if !a.queen && hasCompleteMessage(consumed) {
 		a.terminate(ctx, domain.AgentCompleted, "finished its task", consumed, "")
 		return false
 	}
@@ -206,7 +221,13 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		a.sup.log.Warn("forager: read unhandled messages failed", "agent", agent.ID, "error", err)
 		consumed = dedupeMessages(batch)
 	}
-	text := buildPrompt(agent, hive, consumed, firstTurn)
+	var text string
+	if a.queen {
+		source, _ := store.(MethodologyStore)
+		text = buildQueenPrompt(queen.Header(ctx, source, hive.ID), consumed)
+	} else {
+		text = buildPrompt(agent, hive, consumed, firstTurn)
+	}
 	timeout := time.Duration(hive.Config.TurnTimeoutMinutes) * time.Minute
 	if timeout <= 0 {
 		timeout = 120 * time.Minute
@@ -249,9 +270,26 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 			return false
 		case <-a.sup.clock.After(a.sup.opts.RetryBackoff(attempt)):
 		}
+		if a.queen {
+			_ = session.Close()
+			if err := a.sup.opts.Runtime.Stop(ctx, agent.ID); err != nil && !errors.Is(err, cell.ErrNoCell) {
+				a.terminate(ctx, domain.AgentFailed, "failed to stop crashed Queen Cell", consumed, lastText)
+				return false
+			}
+			session, spec, err = a.start(ctx, agent, hive)
+			if err != nil {
+				if ctx.Err() == nil {
+					a.terminate(ctx, domain.AgentFailed, "failed to restart Queen Cell", consumed, lastText)
+				}
+				return false
+			}
+			if err := store.SetAgentSession(ctx, agent.ID, session.Ref()); err != nil {
+				a.sup.log.Warn("queen: save session failed", "error", err)
+			}
+		}
 	}
 	a.resetFailures()
-	if a.cancelRequested() {
+	if !a.queen && a.cancelRequested() {
 		a.terminate(ctx, domain.AgentCancelled, "cancelled by control message", consumed, lastText)
 		return false
 	}
@@ -341,6 +379,9 @@ func (a *actor) start(ctx context.Context, agent domain.Agent, hive domain.Hive)
 // model comes from the role (or the Hive default); the Cell only receives its
 // own Agent token for both MCP and the model proxy.
 func (a *actor) spec(ctx context.Context, agent domain.Agent, hive domain.Hive, token string) (cell.Spec, error) {
+	if a.queen {
+		return a.queenSpec(ctx, agent, hive, token)
+	}
 	manifest, files := a.activeMethodology(ctx, hive.ID)
 	role, err := methodology.Resolve(manifest, agent.RoleName)
 	if err != nil {
@@ -433,7 +474,7 @@ func (a *actor) token(ctx context.Context, agentID string) (string, error) {
 }
 
 func (a *actor) collectMessages(ctx context.Context, hiveID string) ([]domain.Message, error) {
-	msgs, err := a.sup.opts.Store.Unhandled(ctx, hiveID, domain.ForagerAddress(a.id), a.sup.opts.UnhandledLimit)
+	msgs, err := a.sup.opts.Store.Unhandled(ctx, hiveID, a.address(), a.sup.opts.UnhandledLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -506,6 +547,10 @@ func (a *actor) awaitPrompt(ctx context.Context, done <-chan promptResult) promp
 // Cell and its Agent tokens. It is idempotent and never blocks on a running
 // prompt: it cancels the session and closes it.
 func (a *actor) terminate(ctx context.Context, state domain.AgentState, reason string, consumed []domain.Message, output string) {
+	if a.queen {
+		a.failQueen(ctx, reason)
+		return
+	}
 	a.mu.Lock()
 	if a.terminal {
 		a.mu.Unlock()
@@ -556,7 +601,7 @@ func (a *actor) transitionTo(ctx context.Context, target domain.AgentState) (dom
 		if agent.State == target {
 			return agent, nil
 		}
-		if isTerminal(agent.State) {
+		if isTerminal(agent.State) || (a.queen && agent.State == domain.AgentDisabled) {
 			return agent, errTerminal
 		}
 		if err := store.TransitionAgent(ctx, agent.ID, agent.State, target); err != nil {
@@ -597,13 +642,13 @@ func (a *actor) report(ctx context.Context, agent domain.Agent, consumed []domai
 		first := consumed[0]
 		chainID = first.ChainID
 		hop = first.Hop + 1
-		if first.From == domain.AddressQueen || isLocalAddress(first.From) {
+		if (!a.queen && first.From == domain.AddressQueen) || isLocalAddress(first.From) {
 			to = first.From
 		}
 	}
 	msg := domain.Message{
 		HiveID:  hiveID,
-		From:    domain.ForagerAddress(a.id),
+		From:    a.address(),
 		To:      to,
 		Kind:    domain.MessageReport,
 		ChainID: chainID,
@@ -618,6 +663,18 @@ func (a *actor) report(ctx context.Context, agent domain.Agent, consumed []domai
 // scan applies the Hive's lifecycle limits and picks up messages whose
 // notification was missed.
 func (a *actor) scan(ctx context.Context, agent domain.Agent, hive domain.Hive) error {
+	if a.queen {
+		a.scanMu.Lock()
+		defer a.scanMu.Unlock()
+		var err error
+		agent, err = a.prepareQueen(ctx, agent, hive)
+		if err != nil {
+			return err
+		}
+		if agent.State == domain.AgentDisabled {
+			return nil
+		}
+	}
 	now := a.sup.clock.Now()
 	if isTerminal(agent.State) {
 		a.mu.Lock()
@@ -625,14 +682,14 @@ func (a *actor) scan(ctx context.Context, agent domain.Agent, hive domain.Hive) 
 		a.mu.Unlock()
 		return nil
 	}
-	if lifetime := time.Duration(hive.Config.ForagerMaxLifetimeHours) * time.Hour; lifetime > 0 &&
+	if lifetime := time.Duration(hive.Config.ForagerMaxLifetimeHours) * time.Hour; !a.queen && lifetime > 0 &&
 		!agent.CreatedAt.IsZero() && now.Sub(agent.CreatedAt) >= lifetime {
 		a.terminate(ctx, domain.AgentFailed,
 			fmt.Sprintf("forager exceeded its %d-hour lifetime", hive.Config.ForagerMaxLifetimeHours), nil, "")
 		return nil
 	}
 
-	msgs, err := a.sup.opts.Store.Unhandled(ctx, agent.HiveID, domain.ForagerAddress(agent.ID), a.sup.opts.UnhandledLimit)
+	msgs, err := a.sup.opts.Store.Unhandled(ctx, agent.HiveID, a.address(), a.sup.opts.UnhandledLimit)
 	if err != nil {
 		return err
 	}

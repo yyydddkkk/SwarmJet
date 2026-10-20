@@ -54,6 +54,8 @@ func (a *server) hives(w http.ResponseWriter, r *http.Request) {
 		a.hiveCollection(w, r)
 	case len(parts) == 2 && parts[0] == "hives":
 		a.hiveItem(w, r, parts[1])
+	case len(parts) == 3 && parts[0] == "hives" && parts[2] == "queen":
+		a.hiveQueen(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "hives" && parts[2] == "foragers":
 		a.hiveForagers(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "hives" && parts[2] == "messages":

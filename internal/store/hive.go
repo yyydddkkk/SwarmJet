@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -94,8 +95,8 @@ func scanHive(row pgx.Row) (domain.Hive, error) {
 	return h, nil
 }
 
-// CreateHive inserts a Hive and its disabled Queen in one transaction. The
-// stored config keeps the caller's zero values; reads apply defaults.
+// CreateHive inserts a Hive, its Queen and any initial bootstrap in one
+// transaction. Stored config keeps caller zero values; reads apply defaults.
 func (s *Store) CreateHive(ctx context.Context, h domain.Hive) (domain.Hive, error) {
 	now := time.Now().UTC()
 	if h.ID == "" {
@@ -137,6 +138,11 @@ func (s *Store) CreateHive(ctx context.Context, h domain.Hive) (domain.Hive, err
 		queenID, h.ID, cli, now); err != nil {
 		return domain.Hive{}, domainErr(err)
 	}
+	if h.QueenEnabled {
+		if err = s.bootstrapQueen(ctx, tx, h.ID, h.Version, now); err != nil {
+			return domain.Hive{}, err
+		}
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return domain.Hive{}, err
 	}
@@ -177,25 +183,57 @@ func (s *Store) UpdateHive(ctx context.Context, h domain.Hive) (domain.Hive, err
 	if err != nil {
 		return domain.Hive{}, err
 	}
-	tag, err := s.Pool.Exec(ctx, `UPDATE hives SET name=$3,repository=$4,queen_enabled=$5,config=$6,version=version+1,updated_at=$7 WHERE id=$1 AND version=$2`,
-		h.ID, h.Version, h.Name, h.Repository, h.QueenEnabled, config, now)
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
+		return domain.Hive{}, err
+	}
+	defer tx.Rollback(ctx)
+	var enabled bool
+	var version int
+	if err = tx.QueryRow(ctx, `SELECT queen_enabled,version FROM hives WHERE id=$1 FOR UPDATE`, h.ID).Scan(&enabled, &version); err != nil {
 		return domain.Hive{}, domainErr(err)
 	}
-	if tag.RowsAffected() == 0 {
-		var exists bool
-		if err = s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM hives WHERE id=$1)`, h.ID).Scan(&exists); err != nil {
+	if version != h.Version {
+		return domain.Hive{}, domain.ErrConflict
+	}
+	if _, err = tx.Exec(ctx, `UPDATE hives SET name=$3,repository=$4,queen_enabled=$5,config=$6,version=version+1,updated_at=$7 WHERE id=$1 AND version=$2`,
+		h.ID, h.Version, h.Name, h.Repository, h.QueenEnabled, config, now); err != nil {
+		return domain.Hive{}, domainErr(err)
+	}
+	if !enabled && h.QueenEnabled {
+		if err = s.bootstrapQueen(ctx, tx, h.ID, h.Version+1, now); err != nil {
 			return domain.Hive{}, err
 		}
-		if !exists {
-			return domain.Hive{}, domain.ErrNotFound
-		}
-		return domain.Hive{}, domain.ErrConflict
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return domain.Hive{}, err
 	}
 	h.Version++
 	h.UpdatedAt = now
 	applyHiveDefaults(&h.Config)
 	return h, nil
+}
+
+// bootstrapQueen runs inside the Hive mutation transaction. The version identifies
+// one enable transition; retrying a stale update cannot enqueue another task.
+func (s *Store) bootstrapQueen(ctx context.Context, tx pgx.Tx, hiveID string, version int, now time.Time) error {
+	id := fmt.Sprintf("queen-bootstrap:%s:%d", hiveID, version)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "inbox:"+hiveID); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO messages(id,hive_id,from_addr,to_addr,kind,chain_id,hop,body,trust,state,created_at)
+		VALUES($1,$2,'system','queen','task','',0,'新 Hive，请开始首次引导','system','pending',$3) ON CONFLICT(id) DO NOTHING`, id, hiveID, now)
+	if err != nil {
+		return domainErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil
+	}
+	if err = s.insertMessageJob(ctx, tx, id); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `SELECT pg_notify($1,$2)`, inboxChannel, notifyPayload(hiveID, domain.AddressQueen))
+	return err
 }
 
 func scanAgent(row pgx.Row) (domain.Agent, error) {

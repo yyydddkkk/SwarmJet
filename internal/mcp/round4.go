@@ -90,10 +90,10 @@ func (ts *toolset) callerRole(ctx context.Context, hiveID string) (domain.Role, 
 	return role, true, nil
 }
 
-// mayMessage reports whether an agent token's role may message any Agent in
-// the Hive. A Hive without a methodology keeps the platform default: allowed.
+// mayMessage checks a Forager role's message permission. Queens may always
+// message Agents in their Hive as part of their platform-defined duties.
 func (ts *toolset) mayMessage(ctx context.Context, hiveID string) (bool, error) {
-	if !ts.actor.isAgent() {
+	if !ts.actor.isAgent() || ts.actor.isQueen() {
 		return true, nil
 	}
 	role, found, err := ts.callerRole(ctx, hiveID)
@@ -106,10 +106,10 @@ func (ts *toolset) mayMessage(ctx context.Context, hiveID string) (bool, error) 
 	return role.Permissions.Message, nil
 }
 
-// maySpawn enforces the caller role's spawn list. A Hive without a methodology
-// keeps the platform default: allowed.
+// maySpawn enforces a Forager role's spawn list. Queens may spawn any defined
+// role; spawn validates role existence before calling this permission check.
 func (ts *toolset) maySpawn(ctx context.Context, hiveID, roleName string) error {
-	if !ts.actor.isAgent() {
+	if !ts.actor.isAgent() || ts.actor.isQueen() {
 		return nil
 	}
 	role, found, err := ts.callerRole(ctx, hiveID)
@@ -272,7 +272,7 @@ func (ts *toolset) createForager(ctx context.Context, a domain.Agent, limits dom
 
 type spawnInput struct {
 	HiveID    string `json:"hiveId" jsonschema:"the Hive to spawn into"`
-	Role      string `json:"role,omitempty" jsonschema:"methodology role for the new Agent; a user token may choose any role, an agent token only roles in its spawn list"`
+	Role      string `json:"role,omitempty" jsonschema:"methodology role for the new Agent; a user or Queen token may choose any role, other agent tokens only roles in their spawn list"`
 	Task      string `json:"task" jsonschema:"the task handed to the new Agent; also delivered as a kind=task message"`
 	Revision  string `json:"revision,omitempty" jsonschema:"commit to check out detached, for roles that inspect one revision"`
 	PRNumber  int64  `json:"pr,omitempty" jsonschema:"pull request number the new Agent relates to"`
