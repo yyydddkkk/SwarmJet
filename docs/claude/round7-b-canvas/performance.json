@@ -1,0 +1,41 @@
+{
+  "scenario": "300 Agents + 50 PRs + Queen + 2 signals + queue, injected createMockDataSource and fake SSE",
+  "measurement": "performance.now() elapsed during Canvas 2D draw callback; excludes browser compositing; no CPU throttling; full Playwright suite uses two workers",
+  "run": "PLAYWRIGHT_PORT=5275 npx playwright test",
+  "results": [
+    {
+      "agents": 300,
+      "prs": 50,
+      "viewport": "1440x1000",
+      "dpr": 1,
+      "browser": "Chromium 153.0.8010.12",
+      "theme": "bright",
+      "style": "classic",
+      "reducedMotion": false,
+      "mode": "all",
+      "samples": 110,
+      "p50": 1.399999976158142,
+      "p95": 1.899999976158142,
+      "max": 2.799999952316284,
+      "idleWindowMs": 1000,
+      "idleFrames": 0
+    },
+    {
+      "agents": 300,
+      "prs": 50,
+      "viewport": "1440x1000",
+      "dpr": 1,
+      "browser": "Chromium 153.0.8010.12",
+      "theme": "bright",
+      "style": "classic",
+      "reducedMotion": false,
+      "mode": "project",
+      "samples": 81,
+      "p50": 2.5,
+      "p95": 4.199999988079071,
+      "max": 5.100000023841858,
+      "idleWindowMs": 1000,
+      "idleFrames": 0
+    }
+  ]
+}
