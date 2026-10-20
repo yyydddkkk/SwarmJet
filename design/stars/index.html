@@ -6,18 +6,21 @@
 <title>SwarmJet</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Noto+Serif+SC:wght@300;400&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;1,8..60,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;1,400&family=Noto+Serif+SC:wght@400;500&family=Noto+Sans+SC:wght@400;500&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
 :root{
-  --paper:#E6E5DF;--ink:#1B2233;--ink2:rgba(27,34,51,.58);--ink3:rgba(27,34,51,.30);--hair:rgba(27,34,51,.12);--accent:#94701F;--veil:rgba(230,229,223,.95);
-  --serif:"IM Fell English","Noto Serif SC",serif;--mono:"JetBrains Mono",ui-monospace,monospace;
+  --paper:#F4F3EF;--ink:#131927;--ink2:rgba(19,25,39,.74);--ink3:rgba(19,25,39,.46);--hair:rgba(19,25,39,.10);--accent:#8A6716;--veil:rgba(244,243,239,.96);
+  --title:"IM Fell English","Noto Serif SC",serif;--serif:"Source Serif 4","Noto Serif SC",serif;--sans:"IBM Plex Sans","Noto Sans SC",system-ui,sans-serif;--body:var(--serif);--mono:"JetBrains Mono",ui-monospace,monospace;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
-  --paper:#0A1020;--ink:#DCE3EF;--ink2:rgba(220,227,239,.56);--ink3:rgba(220,227,239,.27);--hair:rgba(220,227,239,.09);--accent:#D7B35E;--veil:rgba(10,16,32,.95);
+  --paper:#0A1020;--ink:#DCE3EF;--ink2:rgba(220,227,239,.70);--ink3:rgba(220,227,239,.44);--hair:rgba(220,227,239,.09);--accent:#D7B35E;--veil:rgba(10,16,32,.95);
 }}
-:root[data-theme=dark]{--paper:#0A1020;--ink:#DCE3EF;--ink2:rgba(220,227,239,.56);--ink3:rgba(220,227,239,.27);--hair:rgba(220,227,239,.09);--accent:#D7B35E;--veil:rgba(10,16,32,.95);}
+:root[data-theme=dark]{--paper:#0A1020;--ink:#DCE3EF;--ink2:rgba(220,227,239,.70);--ink3:rgba(220,227,239,.44);--hair:rgba(220,227,239,.09);--accent:#D7B35E;--veil:rgba(10,16,32,.95);}
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;overflow:hidden;background:var(--paper);color:var(--ink);font-family:var(--serif);-webkit-font-smoothing:antialiased}
+html,body{height:100%;overflow:hidden;background:var(--paper);color:var(--ink);font-family:var(--body);-webkit-font-smoothing:antialiased}
+:root[data-style=simple]{--body:var(--sans);--title:var(--sans)}
+:root[data-style=simple] body *{font-style:normal!important}
+#mark b,#time .b,#cartouche h1,#almanac h2,#ap-nav h2,#ap-body h3,#catalogue h2,.note h4,#lens h2,#brief h2,#legend h4{font-family:var(--title)}
 canvas{position:fixed;inset:0;display:block}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 input{font:inherit;color:inherit;background:none;border:0;outline:none}
@@ -129,6 +132,37 @@ body.timing #say{opacity:0;pointer-events:none}
 #cat-t tr.grp td{border:0;padding:40px 8px 8px;font-size:24px;font-style:italic}
 #cat-t tr.grp small{font-size:15px;color:var(--ink3);margin-left:14px}
 
+
+#catbtn,#grid,#theme,#exposure{display:none}
+#tools{position:fixed;right:60px;bottom:47px;display:flex;gap:24px;z-index:4}
+#tools button{font-size:16px;color:var(--ink2);padding:2px 0;border-bottom:1px solid transparent}
+#tools button:hover{color:var(--ink)}#tools button.on{color:var(--ink);border-color:var(--ink3)}
+.pop{position:fixed;right:52px;bottom:88px;background:var(--veil);border:1px solid var(--hair);outline:1px solid var(--hair);outline-offset:3px;padding:22px 26px;opacity:0;pointer-events:none;transform:translateY(6px);transition:opacity .3s,transform .3s;z-index:7}
+.pop.open{opacity:1;pointer-events:auto;transform:none}
+#legend{width:300px}
+#legend h4{font-weight:400;font-size:20px;margin-bottom:12px}
+#legend .k{display:flex;align-items:center;gap:14px;font-size:15px;color:var(--ink2);padding:5px 0}
+#legend .k svg{width:22px;height:22px;flex:none;color:var(--ink)}
+#display{width:380px}
+#display .opt{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;font-size:15px;color:var(--ink2)}
+#display .opt span{display:flex;gap:14px}
+#display .opt button{font-size:15px;color:var(--ink3)}#display .opt button:hover{color:var(--ink2)}#display .opt button.on{color:var(--ink);border-bottom:1px solid var(--ink3)}
+#cv{transition:opacity .6s}
+body.briefing #cv{opacity:.13}
+body.briefing #cartouche,body.briefing #observer,body.briefing #hint,body.briefing #say{opacity:0;pointer-events:none}
+#brief{position:fixed;left:60px;top:118px;width:min(480px,calc(100vw - 120px));max-height:calc(100vh - 230px);overflow-y:auto;scrollbar-width:none;opacity:0;pointer-events:none;transform:translateY(10px);transition:opacity .5s,transform .5s;z-index:5}
+body.briefing #brief{opacity:1;pointer-events:auto;transform:none}
+#brief h2{font-weight:400;font-size:40px;line-height:1.2}
+#brief .sub{font-size:17px;color:var(--ink2);margin-top:10px}
+#brief h3{font-weight:400;font-size:15px;color:var(--ink3);margin-top:26px;padding-bottom:6px;border-bottom:1px solid var(--hair)}
+#brief .it{display:flex;justify-content:space-between;align-items:baseline;gap:18px;width:100%;text-align:left;padding:10px 0;border-bottom:1px solid var(--hair);font-size:17px;color:var(--ink)}
+#brief .it span{font-size:15px;color:var(--ink3);text-align:right}
+#brief .it:hover{color:var(--ink2)}
+#brief .it.need{color:var(--accent)}
+#brief .foot{display:flex;align-items:center;gap:26px;margin-top:18px;font-size:15px;color:var(--ink3)}
+#brief .foot .go{font-size:17px;color:var(--ink);border-bottom:1px solid var(--ink)}
+#brief .foot label{display:flex;gap:8px;align-items:center;cursor:pointer}
+#brief .foot input{accent-color:var(--ink)}
 #hint{position:fixed;left:50%;top:54px;transform:translateX(-50%);font-style:italic;font-size:15px;color:var(--ink3);transition:opacity 1.6s;pointer-events:none}
 
 .note{position:fixed;background:var(--veil);border:1px solid var(--hair);outline:1px solid var(--hair);outline-offset:3px;padding:16px 20px 14px;min-width:180px;max-width:260px;opacity:0;pointer-events:none;transition:opacity .3s;z-index:5}
@@ -167,11 +201,11 @@ body.timing #say{opacity:0;pointer-events:none}
 
 <div id="mark"><b>SwarmJet</b><nav id="crumbs"></nav></div>
 <div id="time"><div class="s" id="clock"></div><div class="b" id="big">22:00</div></div>
-<div id="hint">把深空的信号拖向恒星</div>
+<div id="hint">把 Issue 拖到中间的主 Agent 上，就是派活</div>
 <div id="cartouche"><h1 id="c-title"></h1><p id="c-line"></p></div>
 
 <button id="observer" aria-label="观测者"><svg viewBox="-10 -10 20 20"><circle r="7" fill="none" stroke="currentColor" stroke-width="1"/><circle r="1.6" fill="currentColor"/></svg></button>
-<input id="say" placeholder="向恒星发信" autocomplete="off">
+<input id="say" placeholder="对主 Agent 说：新任务、问题都可以" autocomplete="off">
 <button id="grid" title="经纬线（G）" aria-label="切换经纬线"><svg viewBox="-12 -12 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle r="9"/><ellipse rx="9" ry="3.6"/><ellipse rx="3.6" ry="9"/></svg></button>
 <button id="theme" title="切换深浅色（D）" aria-label="切换深浅色"><svg viewBox="-12 -12 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle r="8"/><path d="M0-8A8 8 0 0 1 0 8Z" fill="currentColor"/></svg></button>
 <button id="exposure" title="长曝光" aria-label="长曝光"><svg viewBox="-12 -12 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle r="10"/><path d="M-3.5-9.4 4.8 4.9M8.4-4.6-5.4 2M5.1 8.6-1.2-6M-4.8 8.9 3.6-2.6M-9.9.6 4.3 1.6M-.6-10 -3.3 5.6"/></svg></button>
@@ -189,18 +223,28 @@ body.timing #say{opacity:0;pointer-events:none}
   <input id="l-say" placeholder="插一句话">
 </aside>
 
-<aside id="almanac" aria-label="星系志"><button class="sheet-x" id="al-x" aria-label="关闭">×</button>
+<aside id="almanac" aria-label="项目面板"><button class="sheet-x" id="al-x" aria-label="关闭">×</button>
   <h2 id="al-title"></h2><p class="lead" id="al-lead"></p>
   <h3>方法论</h3><div id="al-method"></div>
   <h3>设置</h3><div id="al-settings"></div>
-  <h3>燃料</h3><div id="al-fuel"></div>
-  <h3>记忆</h3><p class="mute">尚未形成。经验积累之后，会在星系一角慢慢聚成星云。</p>
+  <h3>花费</h3><div id="al-fuel"></div>
+  <h3>记忆</h3><p class="mute">还没有。Agent 积累下来的经验以后会显示在这里。</p>
 </aside>
-<section id="appendix" aria-label="附录"><button class="sheet-x" id="ap-x" aria-label="关闭">×</button><nav id="ap-nav"><h2>附录</h2></nav><div id="ap-body"></div></section>
+<section id="appendix" aria-label="平台设置"><button class="sheet-x" id="ap-x" aria-label="关闭">×</button><nav id="ap-nav"><h2>平台设置</h2></nav><div id="ap-body"></div></section>
 <div id="tl"><button id="tl-play" title="把这段时间曝光成星轨">曝光</button><div id="tl-track"><b id="tl-handle"></b><div id="tl-ticks"></div></div><button id="tl-now">回到现在</button></div>
 <div id="say-hint"></div>
-<button id="catbtn" title="星表（C）" aria-label="星表"><svg viewBox="-12 -12 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M-8-9h16v18h-16z M-4-4h8 M-4 0h8 M-4 4h5"/></svg></button>
-<div id="catalogue" aria-label="星表"><button class="sheet-x" id="cat-x" aria-label="关闭">×</button><div class="inner"><h2>星表</h2><input id="cat-q" placeholder="查找星系、彗星或 PR" autocomplete="off"><table id="cat-t"></table></div></div>
+<button id="catbtn" title="列表（C）" aria-label="列表"><svg viewBox="-12 -12 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M-8-9h16v18h-16z M-4-4h8 M-4 0h8 M-4 4h5"/></svg></button>
+<div id="catalogue" aria-label="列表"><button class="sheet-x" id="cat-x" aria-label="关闭">×</button><div class="inner"><h2>列表</h2><input id="cat-q" placeholder="查找项目、Agent 或 PR" autocomplete="off"><table id="cat-t"></table></div></div>
+
+<nav id="tools" aria-label="工具"><button id="t-brief">简报</button><button id="t-list">列表</button><button id="t-time">时间</button><button id="t-legend">图例</button><button id="t-display">显示</button></nav>
+<div class="pop" id="legend" role="dialog" aria-label="图例"><h4>图例</h4><div id="legend-k"></div></div>
+<div class="pop" id="display" role="dialog" aria-label="显示">
+  <div class="opt">风格<span><button data-style="classic">经典</button><button data-style="simple">简洁</button></span></div>
+  <div class="opt">主题<span id="theme-opts"></span></div>
+  <div class="opt">经纬线<span><button data-grid="on">显示</button><button data-grid="off">隐藏</button></span></div>
+</div>
+<section id="brief" aria-label="简报"><h2 id="b-title"></h2><p class="sub" id="b-sub"></p>
+  <div class="foot"><button class="go" id="b-enter">进入星图</button><label><input type="checkbox" id="b-skip">下次直接进入星图</label></div><div id="b-body"></div></section>
 
 <script>
 const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -210,13 +254,25 @@ let W=0,H=0,DPR=1;
 function resize(){DPR=devicePixelRatio||1;W=innerWidth;H=innerHeight;for(const c of[cv,exp]){c.width=W*DPR;c.height=H*DPR}cv.style.width=W+'px';cv.style.height=H+'px';ctx.setTransform(DPR,0,0,DPR,0,0);ex.setTransform(DPR,0,0,DPR,0,0)}
 resize();
 const P={};
-function palette(){const s=getComputedStyle(document.documentElement);for(const k of['paper','ink','ink2','ink3','hair','accent'])P[k]=s.getPropertyValue('--'+k).trim();P.dark=typeof isDark==='function'?isDark():matchMedia('(prefers-color-scheme: dark)').matches;makeGrain()}
+function palette(){const s=getComputedStyle(document.documentElement);for(const k of['paper','ink','ink2','ink3','hair','accent'])P[k]=s.getPropertyValue('--'+k).trim();P.dark=typeof isDark==='function'?isDark():matchMedia('(prefers-color-scheme: dark)').matches;P.body=s.getPropertyValue('--body').trim()||'serif';P.title=s.getPropertyValue('--title').trim()||'serif';P.simple=document.documentElement.dataset.style==='simple';const R=(typeof THEMES!=='undefined'?THEMES[themeId()].render:{grain:.025,dotted:true,tick:22,halo:0,haloColor:'#fff',lw:1,sz:1,starA:.75,grid:true});Object.assign(P,{grain:R.grain,dotted:R.dotted,tick:R.tick,halo:R.halo,haloColor:R.haloColor,starA:R.starA,gridDefault:R.grid});P.lw=P.simple?1.4:R.lw;P.sz=P.simple?1:R.sz;makeGrain()}
 let grain=null;
 function makeGrain(){const g=document.createElement('canvas');g.width=g.height=180;const c=g.getContext('2d'),d=c.createImageData(180,180);for(let i=0;i<d.data.length;i+=4){const v=Math.random()*255;d.data[i]=d.data[i+1]=d.data[i+2]=v;d.data[i+3]=Math.random()<.5?255:0}c.putImageData(d,0,0);grain=ctx.createPattern(g,'repeat')}
-try{const t=localStorage.getItem('sj-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}
-palette();matchMedia('(prefers-color-scheme: dark)').addEventListener('change',palette);
-function isDark(){const t=document.documentElement.dataset.theme;return t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches}
-function toggleTheme(){const t=isDark()?'light':'dark';document.documentElement.dataset.theme=t;try{localStorage.setItem('sj-theme',t)}catch(e){}palette()}
+// 主题表：新增主题只需在这里加一项。colors 写入 CSS 变量；render 控制画布细节。
+const THEMES={
+  bright:{label:'明亮',dark:false,colors:{paper:'#F4F3EF',ink:'#131927',ink2:'rgba(19,25,39,.74)',ink3:'rgba(19,25,39,.46)',hair:'rgba(19,25,39,.10)',accent:'#8A6716',veil:'rgba(244,243,239,.96)'},
+    render:{grain:0,dotted:false,tick:44,halo:.62,haloColor:'#FFFFFF',lw:1.2,sz:1.15,starA:.32,grid:false}},
+  paper:{label:'纸本',dark:false,colors:{paper:'#E6E5DF',ink:'#1B2233',ink2:'rgba(27,34,51,.70)',ink3:'rgba(27,34,51,.48)',hair:'rgba(27,34,51,.12)',accent:'#94701F',veil:'rgba(230,229,223,.95)'},
+    render:{grain:.045,dotted:true,tick:22,halo:0,haloColor:'#FFFFFF',lw:1,sz:1,starA:.5,grid:true}},
+  night:{label:'夜空',dark:true,colors:{paper:'#0A1020',ink:'#DCE3EF',ink2:'rgba(220,227,239,.70)',ink3:'rgba(220,227,239,.44)',hair:'rgba(220,227,239,.09)',accent:'#D7B35E',veil:'rgba(10,16,32,.95)'},
+    render:{grain:.025,dotted:true,tick:22,halo:0,haloColor:'#FFFFFF',lw:1,sz:1,starA:.75,grid:true}}};
+const SYSTEM_THEME={light:'bright',dark:'night'};
+let themeChoice='system';try{const t=localStorage.getItem('sj-theme');if(t&&(t==='system'||THEMES[t]))themeChoice=t;else if(t==='dark')themeChoice='night';else if(t==='light')themeChoice='bright'}catch(e){}
+const themeId=()=>themeChoice==='system'?SYSTEM_THEME[matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light']:themeChoice;
+function applyThemeVars(){const t=THEMES[themeId()],st=document.documentElement.style;document.documentElement.dataset.theme=themeId();for(const[k,v]of Object.entries(t.colors))st.setProperty('--'+k,v)}
+applyThemeVars();
+palette();matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{if(themeChoice==='system'){applyThemeVars();palette();if(typeof syncDisplay==='function')syncDisplay()}});
+function isDark(){return THEMES[themeId()].dark}
+function toggleTheme(){setTheme(isDark()?'bright':'night')}
 const SERIF='"IM Fell English","Noto Serif SC",serif',MONO='"JetBrains Mono",monospace';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),ease=t=>1-Math.pow(1-t,3),TAU=Math.PI*2;
 let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
@@ -235,35 +291,36 @@ const comet=(s,id,label,r,o={})=>add(Object.assign({id,sys:s,kind:'comet',label,
 const pr=(s,id,label,ang,o={})=>add(Object.assign({id,sys:s,kind:'pr',label,ang,state:'open',grow:1},o));
 const moon=(s,id,prId,o={})=>add(Object.assign({id,sys:s,kind:'moon',label:'verifier',pr:prId,a:rnd()*TAU,script:'verifier'},o));
 const signal=(s,id,label,ang,o={})=>add(Object.assign({id,sys:s,kind:'signal',label,ang,claimed:true},o));
-const queue=(s,id)=>add({id,sys:s,kind:'queue',label:'等待入轨'});
+const queue=(s,id)=>add({id,sys:s,kind:'queue',label:'排队中'});
 
 const T=S.tfm,A=S.api,D=S.docs;
 signal(T,'t:i12','Issue #12',3.55);signal(T,'t:i13','Issue #13',4.05);signal(T,'t:ci','CI',4.75,{ci:true});
 signal(T,'t:i14','Issue #14',2.55,{claimed:false});
 pr(T,'t:pr9','PR #9',.35);pr(T,'t:pr8','PR #8',1.35,{state:'ready'});
-comet(T,'t:w12','worker #12',122,{target:'t:i12',now:'在跑单元测试，第二次迭代',diff:'wc'});
-comet(T,'t:w13','worker #13',142,{target:'t:i13',now:'在读代码，准备改 --lines 的边界',diff:'cli'});
-comet(T,'t:w8','worker #8',132,{target:'t:pr8',state:'parked',now:'PR #8 已就绪，等你决定',diff:'wc'});
-comet(T,'t:w3','worker #3',156,{state:'parked',stale:true,now:'PR 早已合并，它仍停在轨道上，占着一个名额'});
+comet(T,'t:w12','worker #12',122,{short:'跑测试',target:'t:i12',now:'在跑单元测试，第二次迭代',diff:'wc'});
+comet(T,'t:w13','worker #13',142,{short:'读代码',target:'t:i13',now:'在读代码，准备改 --lines 的边界',diff:'cli'});
+comet(T,'t:w8','worker #8',132,{short:'等你合并',target:'t:pr8',state:'parked',now:'PR #8 已就绪，等你决定',diff:'wc'});
+comet(T,'t:w3','worker #3',156,{short:'空闲 18 小时',state:'parked',stale:true,now:'PR 早已合并，它还停在这里，占着一个名额'});
 moon(T,'t:v9','t:pr9',{now:'在干净检出上复现 PR #9'});
 queue(T,'t:q1');
 
 [3.3,3.7,4.1,4.5].forEach((g,i)=>signal(A,'a:s'+i,'Issue #'+(41+i),g));signal(A,'a:ci','CI',5.0,{ci:true});
 pr(A,'a:p0','PR #120',.2);pr(A,'a:p1','PR #121',1.1);pr(A,'a:p2','PR #122',2.0);
-[118,130,142,154,166].forEach((r,i)=>comet(A,'a:c'+i,'worker',r,{target:'a:s'+(i%4),now:'实现中',diff:'go'}));
+[118,130,142,154,166].forEach((r,i)=>comet(A,'a:c'+i,'worker',r,{short:'实现中',target:'a:s'+(i%4),now:'实现中',diff:'go'}));
 moon(A,'a:m0','a:p0',{now:'跑集成测试'});moon(A,'a:m1','a:p1',{now:'读 diff'});
 queue(A,'a:q0');queue(A,'a:q1');queue(A,'a:q2');
 
 signal(D,'d:s0','Issue #2',3.9,{claimed:false});signal(D,'d:s1','Issue #3',4.4,{claimed:false});
-comet(D,'d:c0','worker #2',128,{state:'failed',now:'模型返回 401，连续三次失败'});
-comet(D,'d:c1','worker #5',150,{state:'parked',now:'等待模型恢复'});
+comet(D,'d:c0','worker #2',128,{short:'失败',state:'failed',now:'模型返回 401，连续三次失败'});
+comet(D,'d:c1','worker #5',150,{short:'空闲',state:'parked',now:'等待模型恢复'});
 
 const stars=[];for(let i=0;i<520;i++)stars.push({x:(rnd()-.5)*5200,y:(rnd()-.5)*3400,r:rnd()<.9?.4+rnd()*.8:1.2+rnd()*.8,a:.25+rnd()*.6,cross:rnd()<.06});
 const needs=[{sys:'tfm',pr:'t:pr8'}];
 const you={kind:'you',x:0,y:0,alpha:1,born:1};
 
 const cam={x:0,y:0,s:.3,tx:0,ty:0,ts:.3};
-let showGrid=true;try{showGrid=localStorage.getItem('sj-grid')!=='off'}catch(e){}
+let showGrid=null;try{const g=localStorage.getItem('sj-grid');if(g)showGrid=g!=='off'}catch(e){}
+const gridOn=()=>showGrid===null?P.gridDefault:showGrid;
 let mode='cosmos',focus=null,sel=null,hover=null,speed=1,frame=0,dz=0,replay=null,expAlpha=0;
 const toS=(x,y)=>({x:(x-cam.x)*cam.s+W/2,y:(y-cam.y)*cam.s+H/2}),toW=(x,y)=>({x:(x-W/2)/cam.s+cam.x,y:(y-H/2)/cam.s+cam.y});
 
@@ -288,14 +345,15 @@ function routes(s){const R=[];if(!s.on)return R;const st=s.star;
     if(b.kind==='comet'&&b.state==='busy'){R.push([st,b],[b,st]);const t=b.target&&get(b.target);if(t)R.push([b,t])}
     if(b.kind==='moon'){R.push([b,st]);const h=get(b.pr);if(h)R.push([h,b])}}
   return R}
-SYS.forEach(s=>s.star={kind:'star',sys:s,x:s.x,y:s.y,alpha:1,born:1,label:s.on?'Queen':'Queen（已熄灭）'});
+SYS.forEach(s=>s.star={kind:'star',sys:s,x:s.x,y:s.y,alpha:1,born:1,label:s.on?'主 Agent':'主 Agent（已停用）'});
 function emit(a,b,me=false,v=1){pulses.push({a,b,me,p:0,v:(3.2+rnd()*1.6)*v})}
 
 function line(x1,y1,x2,y2,w,c,al){ctx.globalAlpha=al;ctx.strokeStyle=c;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()}
-function label(t,x,y,size=14,c=P.ink2,al=1,align='center',italic=true){ctx.globalAlpha=al;ctx.fillStyle=c;ctx.font=`${italic?'italic ':''}400 ${size}px ${SERIF}`;ctx.textAlign=align;ctx.fillText(t,x,y)}
+function label(t,x,y,size=14,c=P.ink2,al=1,align='center',italic=true){ctx.globalAlpha=al;ctx.fillStyle=c;ctx.font=`${italic&&!P.simple?'italic ':''}400 ${size}px ${P.body}`;ctx.textAlign=align;ctx.fillText(t,x,y)}
+function tlabel(t,x,y,size,c,al){ctx.globalAlpha=al;ctx.fillStyle=c;ctx.font=`${P.simple?'':'italic '}400 ${size}px ${P.title}`;ctx.textAlign='center';ctx.fillText(t,x,y)}
 
-function drawFrame(){const m=26,i=6;ctx.globalAlpha=1;ctx.strokeStyle=P.hair;ctx.lineWidth=1;ctx.strokeRect(m+.5,m+.5,W-2*m-1,H-2*m-1);ctx.strokeRect(m+i+.5,m+i+.5,W-2*(m+i)-1,H-2*(m+i)-1);
-  const o=m+i,step=22;ctx.beginPath();
+function drawFrame(){const m=26,i=6;ctx.globalAlpha=1;ctx.strokeStyle=P.hair;ctx.lineWidth=1*P.lw;ctx.strokeRect(m+.5,m+.5,W-2*m-1,H-2*m-1);ctx.strokeRect(m+i+.5,m+i+.5,W-2*(m+i)-1,H-2*(m+i)-1);
+  const o=m+i,step=P.tick;ctx.beginPath();
   for(let x=o+step,k=1;x<W-o;x+=step,k++){const L=k%5?3:7;ctx.moveTo(x+.5,o);ctx.lineTo(x+.5,o+L);ctx.moveTo(x+.5,H-o);ctx.lineTo(x+.5,H-o-L)}
   for(let y=o+step,k=1;y<H-o;y+=step,k++){const L=k%5?3:7;ctx.moveTo(o,y+.5);ctx.lineTo(o+L,y+.5);ctx.moveTo(W-o,y+.5);ctx.lineTo(W-o-L,y+.5)}
   ctx.stroke();
@@ -312,39 +370,40 @@ function draw(){
   const s=cam.s;
   ctx.globalAlpha=1;ctx.fillStyle=P.paper;ctx.fillRect(0,0,W,H);
 
-  for(const st of stars){const x=(st.x-cam.x*.35)*Math.max(.35,s*.55)+W/2,y=(st.y-cam.y*.35)*Math.max(.35,s*.55)+H/2;if(x<0||y<0||x>W||y>H)continue;
-    ctx.globalAlpha=st.a*(P.dark?.75:.5);ctx.fillStyle=P.ink;if(st.cross){ctx.strokeStyle=P.ink;ctx.lineWidth=.6;ctx.beginPath();ctx.moveTo(x-3,y);ctx.lineTo(x+3,y);ctx.moveTo(x,y-3);ctx.lineTo(x,y+3);ctx.stroke()}else{ctx.beginPath();ctx.arc(x,y,st.r,0,TAU);ctx.fill()}}
+  for(const st of stars){if(P.simple&&st.r<1.15)continue;const x=(st.x-cam.x*.35)*Math.max(.35,s*.55)+W/2,y=(st.y-cam.y*.35)*Math.max(.35,s*.55)+H/2;if(x<0||y<0||x>W||y>H)continue;
+    ctx.globalAlpha=st.a*P.starA;ctx.fillStyle=P.ink;if(st.cross){ctx.strokeStyle=P.ink;ctx.lineWidth=.6*P.lw;ctx.beginPath();ctx.moveTo(x-3,y);ctx.lineTo(x+3,y);ctx.moveTo(x,y-3);ctx.lineTo(x,y+3);ctx.stroke()}else{ctx.beginPath();ctx.arc(x,y,st.r,0,TAU);ctx.fill()}}
 
-  const gA=showGrid?(1-dz)*.9:0;if(gA>.02){const c=toS(0,0);ctx.strokeStyle=P.hair;ctx.lineWidth=1;ctx.globalAlpha=gA;for(let r=420;r<2600;r+=420){ctx.beginPath();ctx.ellipse(c.x,c.y,r*s,r*s*.62,TILT*.5,0,TAU);ctx.stroke()}
+  const gA=gridOn()&&!P.simple?(1-dz)*.9:0;if(gA>.02){const c=toS(0,0);ctx.strokeStyle=P.hair;ctx.lineWidth=1*P.lw;ctx.globalAlpha=gA;for(let r=420;r<2600;r+=420){ctx.beginPath();ctx.ellipse(c.x,c.y,r*s,r*s*.62,TILT*.5,0,TAU);ctx.stroke()}
     for(let k=0;k<12;k++){const a=k*TAU/12;ctx.beginPath();ctx.moveTo(c.x+Math.cos(a)*420*s,c.y+Math.sin(a)*420*s*.62);ctx.lineTo(c.x+Math.cos(a)*2600*s,c.y+Math.sin(a)*2600*s*.62);ctx.stroke()}}
 
   if(pastF<1)drawPast();
   if(expAlpha>0){ctx.globalAlpha=expAlpha;ctx.drawImage(exp,0,0,W,H)}
 
   for(const sy of SYS){const c=toS(sy.x,sy.y),dim=(mode!=='cosmos'&&sy!==focus)?.12:1;
-    ctx.globalAlpha=.9*dim;ctx.strokeStyle=P.ink3;ctx.lineWidth=.8;ctx.setLineDash([1,5]);ctx.beginPath();ctx.ellipse(c.x,c.y,R_HELIO*s,R_HELIO*AS*s,TILT,0,TAU);ctx.stroke();ctx.setLineDash([]);
-    ctx.globalAlpha=.55*dim;ctx.strokeStyle=P.hair;ctx.lineWidth=1;for(const r of[130,R_PR]){ctx.beginPath();ctx.ellipse(c.x,c.y,r*s,r*AS*s,TILT,0,TAU);ctx.stroke()}
+    if(P.halo>0&&dim===1){ctx.globalAlpha=P.halo;ctx.fillStyle=P.haloColor;ctx.beginPath();ctx.ellipse(c.x,c.y,R_HELIO*s,R_HELIO*AS*s,TILT,0,TAU);ctx.fill()}
+    ctx.globalAlpha=(P.dotted?.9:.55)*dim;ctx.strokeStyle=P.ink3;ctx.lineWidth=.8*P.lw;ctx.setLineDash(P.dotted?[1,5]:[]);ctx.beginPath();ctx.ellipse(c.x,c.y,R_HELIO*s,R_HELIO*AS*s,TILT,0,TAU);ctx.stroke();ctx.setLineDash([]);
+    ctx.globalAlpha=.55*dim;ctx.strokeStyle=P.hair;ctx.lineWidth=1*P.lw;for(const r of[130,R_PR]){ctx.beginPath();ctx.ellipse(c.x,c.y,r*s,r*AS*s,TILT,0,TAU);ctx.stroke()}
     sy.dim=dim}
 
-  for(const t of trails){const c=toS(t.sys.x,t.sys.y);ctx.globalAlpha=t.al*(t.sys.dim??1);ctx.strokeStyle=P.ink2;ctx.lineWidth=.9;ctx.setLineDash([1,3]);ctx.beginPath();ctx.ellipse(c.x,c.y,t.r*s,t.r*AS*s,TILT,t.a0,t.a1);ctx.stroke();ctx.setLineDash([]);t.al=Math.max(.16,t.al-.0008)}
+  for(const t of trails){const c=toS(t.sys.x,t.sys.y);ctx.globalAlpha=t.al*(t.sys.dim??1);ctx.strokeStyle=P.ink2;ctx.lineWidth=.9*P.lw;ctx.setLineDash([1,3]);ctx.beginPath();ctx.ellipse(c.x,c.y,t.r*s,t.r*AS*s,TILT,t.a0,t.a1);ctx.stroke();ctx.setLineDash([]);t.al=Math.max(.16,t.al-.0008)}
 
-  for(const sy of SYS){const R=routes(sy);const rate=(sy.id==='api'?.075:.04)*speed;if(R.length&&rnd()<rate){const r=R[Math.floor(rnd()*R.length)];emit(r[0],r[1])}}
+  for(const sy of SYS){const R=routes(sy);const rate=(sy.id==='api'?.03:.016)*speed;if(R.length&&rnd()<rate){const r=R[Math.floor(rnd()*R.length)];emit(r[0],r[1])}}
   pulses=pulses.filter(p=>p.p<1&&!p.a.dead&&!p.b.dead);
   for(const p of pulses){const len=Math.hypot(p.b.x-p.a.x,p.b.y-p.a.y)||1;p.p+=p.v*speed/len;const hx=p.a.x+(p.b.x-p.a.x)*p.p,hy=p.a.y+(p.b.y-p.a.y)*p.p,h=toS(hx,hy),ux=(p.b.x-p.a.x)/len,uy=(p.b.y-p.a.y)/len,L=p.me?16:11;
     const dim=(p.a.sys&&p.a.sys.dim)??1;line(h.x,h.y,h.x-ux*L,h.y-uy*L,p.me?1.4:1,p.me?P.accent:P.ink,(p.me?1:.75)*dim)}
 
-  for(const f of flares){const c=toS(f.sys.x,f.sys.y);f.t+=.012*speed;ctx.globalAlpha=(1-f.t)*.8;ctx.strokeStyle=P.ink;ctx.lineWidth=.8;ctx.beginPath();ctx.arc(c.x,c.y,(14+f.t*90)*s,0,TAU);ctx.stroke()}flares=flares.filter(f=>f.t<1);
+  for(const f of flares){const c=toS(f.sys.x,f.sys.y);f.t+=.012*speed;ctx.globalAlpha=(1-f.t)*.8;ctx.strokeStyle=P.ink;ctx.lineWidth=.8*P.lw;ctx.beginPath();ctx.arc(c.x,c.y,(14+f.t*90)*s,0,TAU);ctx.stroke()}flares=flares.filter(f=>f.t<1);
 
   const behind=[],front=[];for(const b of B){(b.y<b.sys.y&&b.kind!=='signal'?behind:front).push(b)}
   behind.forEach(b=>drawBody(b,.7));SYS.forEach(drawStar);front.forEach(b=>drawBody(b,1));
 
-  if(dz<.98)for(const sy of SYS){const c=toS(sy.x,sy.y),y=c.y+R_HELIO*AS*s+30,a=1-dz;label(sy.name,c.x,y,18,P.ink,a);
+  if(dz<.98)for(const sy of SYS){const c=toS(sy.x,sy.y),y=c.y+R_HELIO*AS*s+30,a=1-dz;tlabel(sy.name,c.x,y,19,P.ink,a);
     if(needs.some(n=>n.sys===sy.id)){ctx.globalAlpha=a;ctx.fillStyle=P.accent;ctx.beginPath();ctx.arc(c.x+ctx.measureText(sy.name).width/2+10,y-5,2.5,0,TAU);ctx.fill()}}
 
   if(hover&&hover.kind!=='star'||hover&&mode!=='cosmos'){const h=hover,p=toS(h.x,h.y);if(h!==sel)label(h.label,p.x,p.y-(h.kind==='star'?30:16),14,P.ink,1)}
 
-  if(P.dark===false&&grain){ctx.globalAlpha=.045;ctx.fillStyle=grain;ctx.fillRect(0,0,W,H)}else if(grain){ctx.globalAlpha=.025;ctx.fillStyle=grain;ctx.fillRect(0,0,W,H)}
-  drawFrame();ctx.globalAlpha=1;
+  if(P.simple||!P.grain){}else if(grain){ctx.globalAlpha=P.grain;ctx.fillStyle=grain;ctx.fillRect(0,0,W,H)}
+  if(!P.simple)drawFrame();ctx.globalAlpha=1;
 
   if(replay)recordExposure();
   if(noteFor)placeNote();
@@ -352,41 +411,42 @@ function draw(){
 }
 
 function drawStar(sy){const c=toS(sy.x,sy.y),s=cam.s,r=Math.max(9*s,3.5),d=sy.dim;ctx.globalAlpha=d;
-  if(sy.on){ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(c.x,c.y,r,0,TAU);ctx.fill();ctx.strokeStyle=P.ink;ctx.lineWidth=.6;
+  if(sy.on){ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(c.x,c.y,r,0,TAU);ctx.fill();ctx.strokeStyle=P.ink;ctx.lineWidth=.6*P.lw;
     for(const k of[1.8,2.6,3.6]){ctx.globalAlpha=d*(.55/k*1.6);ctx.beginPath();ctx.arc(c.x,c.y,r*k,0,TAU);ctx.stroke()}
     ctx.globalAlpha=d*.5;const rot=RM?0:frame*.0015;ctx.beginPath();for(let k=0;k<24;k++){const a=rot+k*TAU/24,i=r*4.3,o=r*(k%2?4.9:5.6);ctx.moveTo(c.x+Math.cos(a)*i,c.y+Math.sin(a)*i);ctx.lineTo(c.x+Math.cos(a)*o,c.y+Math.sin(a)*o)}ctx.stroke()}
-  else{ctx.strokeStyle=P.ink3;ctx.lineWidth=1;ctx.beginPath();ctx.arc(c.x,c.y,r,0,TAU);ctx.stroke();ctx.beginPath();ctx.moveTo(c.x-r*.6,c.y-r*.6);ctx.lineTo(c.x+r*.6,c.y+r*.6);ctx.stroke()}
-  if(sel===sy.star){ctx.globalAlpha=d;ctx.strokeStyle=P.ink2;ctx.lineWidth=.8;ctx.beginPath();ctx.arc(c.x,c.y,r*6.6,0,TAU);ctx.stroke()}}
+  else{ctx.strokeStyle=P.ink3;ctx.lineWidth=1*P.lw;ctx.beginPath();ctx.arc(c.x,c.y,r,0,TAU);ctx.stroke();ctx.beginPath();ctx.moveTo(c.x-r*.6,c.y-r*.6);ctx.lineTo(c.x+r*.6,c.y+r*.6);ctx.stroke()}
+  if(sel===sy.star){ctx.globalAlpha=d;ctx.strokeStyle=P.ink2;ctx.lineWidth=.8*P.lw;ctx.beginPath();ctx.arc(c.x,c.y,r*6.6,0,TAU);ctx.stroke()}}
 
 function drawBody(b,depth){if(b.alpha<=0)return;const p=toS(b.x,b.y),s=cam.s,d=(b.sys.dim??1)*b.alpha*depth;ctx.globalAlpha=d;
-  if(b.kind==='comet'){const st=b.sys,dx=b.x-st.x,dy=b.y-st.y,len=Math.hypot(dx,dy)||1,ux=dx/len,uy=dy/len,hr=Math.max(4*Math.min(s,1.6),2.2);
-    if(b.state==='busy'||b.state==='done'){const L=(b.state==='done'?16:38+(RM?0:Math.sin(frame/9+b.r)*4))*Math.min(Math.max(s,.5),1.8)*b.born;ctx.lineWidth=.6;ctx.strokeStyle=P.ink;
+  if(b.kind==='comet'){const st=b.sys,dx=b.x-st.x,dy=b.y-st.y,len=Math.hypot(dx,dy)||1,ux=dx/len,uy=dy/len,hr=Math.max(4*Math.min(s,1.6),2.2)*P.sz;
+    if((b.state==='busy'||b.state==='done')&&dz<.45){ctx.globalAlpha=d;ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(p.x,p.y,hr,0,TAU);ctx.fill()}
+    else if(b.state==='busy'||b.state==='done'){const L=(b.state==='done'?16:38)*Math.min(Math.max(s,.5),1.8)*b.born;ctx.lineWidth=.6*P.lw;ctx.strokeStyle=P.ink;
       for(let k=0;k<7;k++){const o=(k-3)*.055,cx=Math.cos(o),sx=Math.sin(o),vx=ux*cx-uy*sx,vy=ux*sx+uy*cx,l=L*(1-Math.abs(k-3)*.13);ctx.globalAlpha=d*(.55-Math.abs(k-3)*.11);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x+vx*l,p.y+vy*l);ctx.stroke()}
-      ctx.globalAlpha=d;ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(p.x,p.y,hr,0,TAU);ctx.fill();ctx.globalAlpha=d*.35;ctx.strokeStyle=P.ink;ctx.lineWidth=.6;ctx.beginPath();ctx.arc(p.x,p.y,hr+3.5,0,TAU);ctx.stroke()}
-    else if(b.state==='parked'){ctx.strokeStyle=P.ink2;ctx.lineWidth=1;ctx.beginPath();ctx.arc(p.x,p.y,hr,0,TAU);ctx.stroke();ctx.setLineDash([1.5,2.5]);ctx.beginPath();ctx.moveTo(p.x+ux*(hr+2),p.y+uy*(hr+2));ctx.lineTo(p.x+ux*(hr+12),p.y+uy*(hr+12));ctx.stroke();ctx.setLineDash([]);
+      ctx.globalAlpha=d;ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(p.x,p.y,hr,0,TAU);ctx.fill();ctx.globalAlpha=d*.35;ctx.strokeStyle=P.ink;ctx.lineWidth=.6*P.lw;ctx.beginPath();ctx.arc(p.x,p.y,hr+3.5,0,TAU);ctx.stroke()}
+    else if(b.state==='parked'){ctx.strokeStyle=P.ink2;ctx.lineWidth=1*P.lw;ctx.beginPath();ctx.arc(p.x,p.y,hr,0,TAU);ctx.stroke();ctx.setLineDash([1.5,2.5]);ctx.beginPath();ctx.moveTo(p.x+ux*(hr+2),p.y+uy*(hr+2));ctx.lineTo(p.x+ux*(hr+12),p.y+uy*(hr+12));ctx.stroke();ctx.setLineDash([]);
       if(b.stale){ctx.globalAlpha=d*.7;ctx.setLineDash([1,2.5]);ctx.beginPath();ctx.arc(p.x,p.y,hr+5,0,TAU);ctx.stroke();ctx.setLineDash([])}}
-    else if(b.state==='failed'){ctx.strokeStyle=P.ink2;ctx.lineWidth=1;const k=hr+1;ctx.beginPath();ctx.moveTo(p.x-k,p.y-k);ctx.lineTo(p.x+k,p.y+k);ctx.moveTo(p.x+k,p.y-k);ctx.lineTo(p.x-k,p.y+k);ctx.stroke();
+    else if(b.state==='failed'){ctx.strokeStyle=P.ink2;ctx.lineWidth=1*P.lw;const k=hr+1;ctx.beginPath();ctx.moveTo(p.x-k,p.y-k);ctx.lineTo(p.x+k,p.y+k);ctx.moveTo(p.x+k,p.y-k);ctx.lineTo(p.x-k,p.y+k);ctx.stroke();
       ctx.setLineDash([2,5]);ctx.globalAlpha=d*.5;ctx.beginPath();ctx.moveTo(p.x+ux*6,p.y+uy*6);ctx.lineTo(p.x+ux*34*Math.min(s,1.4),p.y+uy*34*Math.min(s,1.4));ctx.stroke();ctx.setLineDash([])}
     if(b.state==='done'){b.alpha-=.008*speed;if(b.alpha<=0)b.dead=true}
-    const t=b.target&&get(b.target);if(t&&t.kind==='pr'&&b.state!=='done'){const q=toS(t.x,t.y);ctx.globalAlpha=d*.35;ctx.strokeStyle=P.ink2;ctx.lineWidth=.6;ctx.setLineDash([1,4]);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke();ctx.setLineDash([])}}
-  else if(b.kind==='pr'){const r=Math.max(7*Math.min(s,1.5),3)*b.grow,RT=-.38;ctx.lineWidth=1.1;ctx.strokeStyle=P.ink;
+    const t=b.target&&get(b.target);if(t&&t.kind==='pr'&&b.state!=='done'){const q=toS(t.x,t.y);ctx.globalAlpha=d*.35;ctx.strokeStyle=P.ink2;ctx.lineWidth=.6*P.lw;ctx.setLineDash([1,4]);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke();ctx.setLineDash([])}}
+  else if(b.kind==='pr'){const r=Math.max(7*Math.min(s,1.5),3)*b.grow*P.sz,RT=-.38;ctx.lineWidth=1.1*P.lw;ctx.strokeStyle=P.ink;
     ctx.beginPath();ctx.ellipse(p.x,p.y,r*2.15,r*.62,RT,Math.PI,TAU);ctx.stroke();
     ctx.beginPath();ctx.arc(p.x,p.y,r,0,TAU);ctx.fillStyle=b.state==='merging'?P.ink:P.paper;ctx.fill();ctx.stroke();
-    if(b.state!=='merging'){ctx.globalAlpha=d*.5;ctx.lineWidth=.6;ctx.beginPath();ctx.arc(p.x,p.y,r*.55,-.4,1.9);ctx.stroke();ctx.globalAlpha=d;ctx.lineWidth=1.1}
+    if(b.state!=='merging'){ctx.globalAlpha=d*.5;ctx.lineWidth=.6*P.lw;ctx.beginPath();ctx.arc(p.x,p.y,r*.55,-.4,1.9);ctx.stroke();ctx.globalAlpha=d;ctx.lineWidth=1.1*P.lw}
     ctx.beginPath();ctx.ellipse(p.x,p.y,r*2.15,r*.62,RT,0,Math.PI);ctx.stroke();
-    if(b.state==='ready'){ctx.strokeStyle=P.accent;ctx.lineWidth=1;ctx.setLineDash([2,3]);ctx.lineDashOffset=-frame*.2;ctx.globalAlpha=d;ctx.beginPath();ctx.arc(p.x,p.y,r+7,0,TAU);ctx.stroke();ctx.setLineDash([]);ctx.lineDashOffset=0}}
-  else if(b.kind==='moon'){const h=get(b.pr);if(h){const q=toS(h.x,h.y);ctx.globalAlpha=d*.6;ctx.strokeStyle=P.ink3;ctx.lineWidth=.7;ctx.setLineDash([1,2]);ctx.beginPath();ctx.ellipse(q.x,q.y,15*s,9*s,0,0,TAU);ctx.stroke();ctx.setLineDash([])}
+    if(b.state==='ready'){ctx.strokeStyle=P.accent;ctx.lineWidth=1*P.lw;ctx.setLineDash([2,3]);ctx.lineDashOffset=-frame*.2;ctx.globalAlpha=d;ctx.beginPath();ctx.arc(p.x,p.y,r+7,0,TAU);ctx.stroke();ctx.setLineDash([]);ctx.lineDashOffset=0}}
+  else if(b.kind==='moon'){const h=get(b.pr);if(h){const q=toS(h.x,h.y);ctx.globalAlpha=d*.6;ctx.strokeStyle=P.ink3;ctx.lineWidth=.7*P.lw;ctx.setLineDash([1,2]);ctx.beginPath();ctx.ellipse(q.x,q.y,15*s,9*s,0,0,TAU);ctx.stroke();ctx.setLineDash([])}
     ctx.globalAlpha=d;ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(p.x,p.y,Math.max(2.5*Math.min(s,1.5),1.5),0,TAU);ctx.fill()}
   else if(b.kind==='signal'){const k=Math.max(5*Math.min(s,1.4),2.8);ctx.strokeStyle=b.claimed?P.ink2:P.ink;ctx.lineWidth=b.claimed?.8:1.1;
     if(b.ci){ctx.beginPath();ctx.moveTo(p.x,p.y-k);ctx.lineTo(p.x+k,p.y);ctx.lineTo(p.x,p.y+k);ctx.lineTo(p.x-k,p.y);ctx.closePath();ctx.stroke()}
     else{ctx.beginPath();ctx.moveTo(p.x-k,p.y);ctx.lineTo(p.x+k,p.y);ctx.moveTo(p.x,p.y-k);ctx.lineTo(p.x,p.y+k);ctx.stroke();
       if(!b.claimed){ctx.globalAlpha=d*(.35+.35*Math.sin(frame/30));ctx.beginPath();ctx.arc(p.x,p.y,k+6,0,TAU);ctx.stroke()}}}
-  else if(b.kind==='queue'){ctx.strokeStyle=P.ink2;ctx.lineWidth=.8;ctx.beginPath();ctx.arc(p.x,p.y,Math.max(3*Math.min(s,1.4),1.8),0,TAU);ctx.stroke()}
+  else if(b.kind==='queue'){ctx.strokeStyle=P.ink2;ctx.lineWidth=.8*P.lw;ctx.beginPath();ctx.arc(p.x,p.y,Math.max(3*Math.min(s,1.4),1.8),0,TAU);ctx.stroke()}
   if(dz>.5&&b.sys===focus&&hover!==b&&sel!==b){const la=(dz-.5)*2*b.alpha;
     if(b.kind==='pr'||b.kind==='signal')label(b.label,p.x,p.y+(b.kind==='pr'?22:19),12,P.ink3,la);
-    else if(b.kind==='comet'){const st=b.sys,dx=b.x-st.x,dy=b.y-st.y,l=Math.hypot(dx,dy)||1;label(b.label.replace('worker ','').replace('worker','新'),p.x-dx/l*17,p.y-dy/l*17+4,12,P.ink2,la)}
-    else if(b.kind==='moon')label('verifier',p.x,p.y-12,11,P.ink3,la)}
-  if(sel===b){ctx.globalAlpha=1;ctx.strokeStyle=P.ink2;ctx.lineWidth=.8;ctx.beginPath();ctx.arc(p.x,p.y,13,0,TAU);ctx.stroke()}
+    else if(b.kind==='comet'){const st=b.sys,dx=b.x-st.x,dy=b.y-st.y,l=Math.hypot(dx,dy)||1;const num=b.label.replace('worker ','').replace(/^worker$/,'新'),txt=num+'  '+(b.short||{busy:'工作中',parked:'空闲',failed:'失败',done:'完成'}[b.state]),lf=dx/l>0;label(txt,p.x+(lf?-15:15),p.y+4,13,b.state==='failed'?P.ink3:P.ink2,la,lf?'right':'left',false)}
+    else if(b.kind==='moon')label('verifier 验证中',p.x,p.y-22,12,P.ink3,la,'center',false)}
+  if(sel===b){ctx.globalAlpha=1;ctx.strokeStyle=P.ink2;ctx.lineWidth=.8*P.lw;ctx.beginPath();ctx.arc(p.x,p.y,13,0,TAU);ctx.stroke()}
   ctx.globalAlpha=1}
 
 function recordExposure(){ex.globalAlpha=1;for(const b of B){if(b.alpha<=0||(b.sys.dim??1)<.5)continue;const p=toS(b.x,b.y);
@@ -395,11 +455,11 @@ function recordExposure(){ex.globalAlpha=1;for(const b of B){if(b.alpha<=0||(b.s
   for(const q of pulses){const hx=q.a.x+(q.b.x-q.a.x)*q.p,hy=q.a.y+(q.b.y-q.a.y)*q.p,p=toS(hx,hy);ex.globalAlpha=.07;ex.fillStyle=q.me?P.accent:P.ink;ex.fillRect(p.x,p.y,1,1)}}
 
 function setCart(){let t,l;
-  if(mode==='cosmos'){const n=B.filter(b=>b.kind==='comet'&&b.state==='busy').length+B.filter(b=>b.kind==='moon').length;t='宇宙';l=`${SYS.length} 个星系，${n} 颗在轨${needs.length?'，一件事等你决定':''}。`}
+  if(mode==='cosmos'){const n=B.filter(b=>b.kind==='comet'&&b.state==='busy').length+B.filter(b=>b.kind==='moon').length;t='全部项目';l=`${SYS.length} 个项目，${n} 个 Agent 在工作${needs.length?'，一件事等你决定':''}。`}
   else{const f=focus,n=B.filter(b=>b.sys===f&&(b.kind==='comet'&&b.state==='busy'||b.kind==='moon')).length,q=B.filter(b=>b.sys===f&&b.kind==='queue').length;
-    t=mode==='lens'&&sel?sel.label:f.name;l=f.on?`${n} 颗在轨${q?'，'+q+' 颗等待入轨':''}${needs.some(x=>x.sys===f.id)?'，一件事等你决定':''}。`:'恒星已熄灭：模型凭证失效。'}
+    t=mode==='lens'&&sel?sel.label:f.name;l=f.on?`${n} 个 Agent 在工作${q?'，'+q+' 个排队中':''}${needs.some(x=>x.sys===f.id)?'，一件事等你决定':''}。`:'主 Agent 已停用：模型凭证失效。'}
   const h=$('c-title'),p=$('c-line');h.style.opacity=p.style.opacity=0;setTimeout(()=>{h.textContent=t;p.textContent=l;h.style.opacity=p.style.opacity=1},250);
-  const c=$('crumbs');c.innerHTML='';const items=[['宇宙',goCosmos]];if(focus)items.push([focus.name,()=>goSys(focus)]);if(mode==='lens'&&sel)items.push([sel.label,null]);
+  const c=$('crumbs');c.innerHTML='';const items=[['全部项目',goCosmos]];if(focus)items.push([focus.name,()=>goSys(focus)]);if(mode==='lens'&&sel)items.push([sel.label,null]);
   items.forEach(([x,f],i)=>{if(i){const e=document.createElement('i');e.textContent='/';c.appendChild(e)}const a=document.createElement('a');a.textContent=x;if(i===items.length-1)a.className='on';if(f)a.onclick=f;c.appendChild(a)})}
 
 const cosmosScale=()=>Math.max(.12,Math.min((W-200)/2500,(H-300)/900));
@@ -411,7 +471,7 @@ const SCRIPT={worker:[['read','wordcount.py'],['grep','"def count" -n'],['edit',
   verifier:[['git','checkout a3f9c01'],['bash','python3 -m unittest'],['pass','8 tests'],['bash','printf "\\xff" | wc --bytes'],['pass','1'],['read','diff · 3 files'],['attest','PASS · a3f9c01']]};
 const DIFF={wc:['<span class="d">data = f.read()</span>','<span class="a">data = f.buffer.read()</span>','<span class="a">if args.bytes: print(len(data))</span>'],cli:['<span class="a">p.add_argument("--lines")</span>'],go:['<span class="d">return nil</span>','<span class="a">return ctx.Err()</span>']};
 let logT=null,logI=0;
-function openLens(b){$('lens').classList.add('open');$('l-k').textContent=(b.kind==='moon'?'只读验证，':b.state==='busy'?'在轨工作，':b.state==='failed'?'已坠落，':'静止，')+'属于 '+b.sys.name;
+function openLens(b){$('lens').classList.add('open');$('l-k').textContent=(b.kind==='moon'?'只读验证中':b.state==='busy'?'工作中':b.state==='failed'?'已失败':'空闲')+'，项目 '+b.sys.name;
   $('l-title').textContent=b.label;$('l-now').textContent=b.now||'';const dl=DIFF[b.diff];$('diff').innerHTML=dl?dl.map(x=>`<div>${x}</div>`).join(''):'';$('diff').style.display=dl?'':'none';
   const log=$('log');log.innerHTML='';logI=0;const sc=SCRIPT[b.script]||SCRIPT.worker;for(let i=0;i<4;i++)pushLog(sc[logI++%sc.length]);clearInterval(logT);
   if(b.state==='busy'||b.kind==='moon')logT=setInterval(()=>pushLog(sc[logI++%sc.length]),1800)}
@@ -422,10 +482,10 @@ $('l-say').addEventListener('keydown',e=>{const v=e.target.value.trim();if(e.key
 
 let noteFor=null;
 function note(b){noteFor=b;sel=b;let h=b.label,p='',acts='';
-  if(b.kind==='star'){h=b.sys.on?'Queen':'Queen 已熄灭';p=b.sys.on?`按 ${b.sys.method} 运转。今天派出七次，答复三次。`:'没有恒星认领，信号停在星系边缘。';acts=b.sys.on?'<button onclick="$(\'say\').focus()">发信</button>':'<button class="go">点亮</button>'}
+  if(b.kind==='star'){h=b.sys.on?'主 Agent':'主 Agent 已停用';p=b.sys.on?`按 ${b.sys.method} 运转。今天派出七次，答复三次。`:'没有主 Agent 处理，新事件都停在边缘，等你处理。';acts=b.sys.on?'<button onclick="$(\'say\').focus()">发信</button>':'<button class="go">点亮</button>'}
   else if(b.kind==='pr'){p=b.state==='ready'?'另一位 Agent 验证通过，等你决定。':'等待独立验证。';if(b.state==='ready')acts='<button class="go" onclick="openDecide()">决定</button>'}
-  else if(b.kind==='signal'){p=b.ci?'来自外部的检查结果，只当作数据。':b.claimed?'来自外部，已被恒星认领。':'来自外部，还没人认领。拖向恒星就会派出一颗彗星。';}
-  else if(b.kind==='queue'){h='等待入轨';p='轨道已满，有空位时按顺序补派。'}
+  else if(b.kind==='signal'){p=b.ci?'来自外部的检查结果，只当作数据。':b.claimed?'来自 GitHub，已有人在处理。':'来自 GitHub，还没人处理。拖到中间的主 Agent 上就会派出一个 Agent。';}
+  else if(b.kind==='queue'){h='排队中';p='同时工作的 Agent 已满，有空位时按顺序补派。'}
   $('note').innerHTML=`<h4>${h}</h4>${p?`<p>${p}</p>`:''}${acts?`<div class="acts">${acts}</div>`:''}`;$('note').classList.add('open');placeNote()}
 function placeNote(){const p=toS(noteFor.x,noteFor.y),n=$('note');n.style.left=clamp(p.x+26,40,W-300)+'px';n.style.top=clamp(p.y-24,40,H-180)+'px'}
 function hideNote(){noteFor=null;$('note').classList.remove('open')}
@@ -457,9 +517,12 @@ let lock=0;cv.addEventListener('wheel',e=>{e.preventDefault();const n=performanc
   if(e.deltaY<0){if(mode==='cosmos'){const w=toW(e.clientX,e.clientY);goSys(SYS.reduce((a,b)=>Math.hypot(b.x-w.x,b.y-w.y)<Math.hypot(a.x-w.x,a.y-w.y)?b:a))}
     else if(mode==='sys'){const h=hit(e.clientX,e.clientY);if(h&&(h.kind==='comet'||h.kind==='moon'))lens(h)}}
   else{if(mode==='lens')goSys(focus);else if(mode==='sys')goCosmos()}},{passive:false});
-addEventListener('keydown',e=>{if(e.key==='Escape'){if($('appendix').classList.contains('open'))return closeAppendix();if($('catalogue').classList.contains('open'))return closeCatalogue();if(tlOpen&&document.activeElement.tagName!=='INPUT')return closeTimeline();if($('decide').classList.contains('open'))return $('decide').classList.remove('open');if(document.activeElement.tagName==='INPUT')return document.activeElement.blur();if(mode==='lens')goSys(focus);else if(almOpen)closeAlmanac();else if(mode==='sys')goCosmos()}
+addEventListener('keydown',e=>{if(e.key==='Escape'){if(briefOpen())return closeBrief();if($('legend').classList.contains('open'))return pop('legend');if($('display').classList.contains('open'))return pop('display');if($('appendix').classList.contains('open'))return closeAppendix();if($('catalogue').classList.contains('open'))return closeCatalogue();if(tlOpen&&document.activeElement.tagName!=='INPUT')return closeTimeline();if($('decide').classList.contains('open'))return $('decide').classList.remove('open');if(document.activeElement.tagName==='INPUT')return document.activeElement.blur();if(mode==='lens')goSys(focus);else if(almOpen)closeAlmanac();else if(mode==='sys')goCosmos()}
   const free=document.activeElement.tagName!=='INPUT';
   if(free&&(e.key==='c'||e.key==='C'))openCatalogue();
+  if(free&&(e.key==='b'||e.key==='B'))briefOpen()?closeBrief():openBrief();
+  if(free&&(e.key==='l'||e.key==='L'))pop('legend');
+  if(free&&(e.key==='s'||e.key==='S')){const v=P.simple?'classic':'simple';store('sj-style',v);applyStyle(v)}
   if(free&&(e.key==='a'||e.key==='A')&&mode!=='cosmos')toggleAlmanac();
   if(free&&e.key===',')openAppendix();
   if(free&&(e.key==='t'||e.key==='T'))toggleTimeline();
@@ -467,12 +530,12 @@ addEventListener('keydown',e=>{if(e.key==='Escape'){if($('appendix').classList.c
   if((e.key==='g'||e.key==='G')&&document.activeElement.tagName!=='INPUT')toggleGrid();
   if((e.key==='d'||e.key==='D')&&document.activeElement.tagName!=='INPUT')toggleTheme()});
 $('theme').onclick=toggleTheme;
-function toggleGrid(){showGrid=!showGrid;$('grid').classList.toggle('on',showGrid);try{localStorage.setItem('sj-grid',showGrid?'on':'off')}catch(e){}}
+function toggleGrid(){showGrid=!gridOn();$('grid').classList.toggle('on',showGrid);try{localStorage.setItem('sj-grid',showGrid?'on':'off')}catch(e){}}
 $('grid').onclick=toggleGrid;$('grid').classList.toggle('on',showGrid);
 addEventListener('resize',()=>{resize();if(mode==='cosmos')cam.ts=cosmosScale();else if(mode==='sys')goSys(focus)});
 
 let born=60;
-function spawn(sy,lbl,target){const c=comet(sy,sy.id+':n'+born++,lbl,118+rnd()*52,{born:0,target,now:'刚离开恒星，正在读任务',diff:'wc'});setTimeout(()=>emit(sy.star,c,false,1.5),250);return c}
+function spawn(sy,lbl,target){const c=comet(sy,sy.id+':n'+born++,lbl,118+rnd()*52,{born:0,target,short:'刚出发',now:'刚出发，正在读任务',diff:'wc'});setTimeout(()=>emit(sy.star,c,false,1.5),250);return c}
 function assign(s){s.claimed=true;emit(s,s.sys.star,false,1.6);setTimeout(()=>emit(s,s.sys.star,false,1.6),160);setTimeout(()=>{spawn(s.sys,'worker #'+s.label.replace(/\D/g,''),s.id);setCart()},1100);$('hint').style.opacity=0}
 $('say').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const v=e.target.value.trim();if(!v)return;e.target.value='';e.target.blur();sayHint('');const rt=route(v);if(rt){rt.go();return}const sy=focus&&focus.on?focus:T;
   for(let i=0;i<4;i++)setTimeout(()=>emit(you,sy.star,true,2.2),i*130);setTimeout(()=>{spawn(sy,'worker',null);setCart()},1900)});
@@ -490,24 +553,24 @@ function startReplay(m0=22*60,span=600){if(replay)return;hideNote();closeLens();
 
 let almOpen=false,tlOpen=false,pastF=1;
 const METH={pstack:{roles:['worker','verifier'],rules:['带 swarmjet 标签的 Issue，交给 worker。','评论以 /swarmjet run 开头时，交给 worker。','PR 每有一次新提交，派一位 verifier 去验证。','合并需要另一位 Agent 验证通过、检查全部通过，最后由你决定。'],files:['methodology.yaml','queen.md','roles/worker.md','roles/verifier.md','rules/swarmjet-principles.md','skills/bug-fix/','skills/feature/','skills/verify-revision/']},
-  minimal:{roles:['worker'],rules:['Queen 判断之后派出 worker。','合并由你决定。'],files:['methodology.yaml','roles/worker.md']}};
-const INFO={tfm:{ver:4,note:'今天 05:39 由 Queen 从内置的 pstack 安装',older:[3,2,1],limit:4,today:.41,week:2.86,spark:[.2,.35,.1,.5,.42,.28,.41]},
+  minimal:{roles:['worker'],rules:['主 Agent 判断之后派出 worker。','合并由你决定。'],files:['methodology.yaml','roles/worker.md']}};
+const INFO={tfm:{ver:4,note:'今天 05:39 由主 Agent 从内置的 pstack 安装',older:[3,2,1],limit:4,today:.41,week:2.86,spark:[.2,.35,.1,.5,.42,.28,.41]},
   api:{ver:7,note:'昨天你修改了 verifier 的提示词',older:[6,5,4,3,2,1],limit:6,today:2.1,week:11.4,spark:[1.2,1.8,2.4,1.1,2.9,2.2,2.1]},
   docs:{ver:1,note:'三天前从内置的 minimal 安装',older:[],limit:2,today:.02,week:.31,spark:[.1,.05,.04,.06,.03,.01,.02]}};
 const money=v=>'$'+(v<1?v.toFixed(2):v.toFixed(2));
 function renderAlmanac(sy){if(!sy)return;const I=INFO[sy.id],M=METH[sy.method];$('al-title').textContent=sy.name;
-  $('al-lead').textContent=sy.on?`按 ${sy.method} 第 ${I.ver} 版运转。`:'恒星已熄灭，信号停在边缘，无人认领。';
+  $('al-lead').textContent=sy.on?`按 ${sy.method} 第 ${I.ver} 版运转。`:'主 Agent 已停用，新事件停在边缘，无人处理。';
   const orb=M.roles.map((ro,i)=>{const rx=i?104:56,ry=i?38:20;return `<ellipse rx="${rx}" ry="${ry}"/><text x="0" y="${-ry-6}" text-anchor="middle">${ro}</text>`}).join('');
   $('al-method').innerHTML=`<svg class="mini" viewBox="-124 -50 248 96">${orb}<circle r="5"/></svg><div class="rules">${M.rules.map(x=>`<p>${x}</p>`).join('')}</div>
     <div class="files">${M.files.join('<br>')}</div>
     <div class="vers">第 ${I.ver} 版，${I.note}。${I.older.length?'<br>'+I.older.map(v=>`<a data-v="${v}">回到第 ${v} 版</a>`).join(''):''}</div>`;
   $('al-method').querySelectorAll('a[data-v]').forEach(a=>a.onclick=()=>{I.older=I.older.filter(x=>x!=a.dataset.v);I.older.unshift(I.ver);I.ver=+a.dataset.v;I.note='刚刚由你回滚';renderAlmanac(sy);setCart()});
   const occ=B.filter(b=>b.sys===sy&&b.kind==='comet'&&(b.state==='busy'||b.state==='parked')).length+B.filter(b=>b.sys===sy&&b.kind==='moon').length;
-  $('al-settings').innerHTML=`<div class="line"><span>同时在轨</span><span class="slots"><button class="step" id="lim-">−</button>${Array.from({length:I.limit},(_,i)=>`<i class="slot${i<occ?' f':''}"></i>`).join('')}<button class="step" id="lim+">+</button></span></div>
-    <div class="line"><span>Queen ${sy.on?'正在照看这个星系':'已熄灭'}</span><button id="q-tog">${sy.on?'熄灭恒星':'点亮恒星'}</button></div>
-    <div class="line"><span>Queen 使用 deepseek-v4-flash</span><button>更换</button></div>`;
+  $('al-settings').innerHTML=`<div class="line"><span>同时工作的 Agent</span><span class="slots"><button class="step" id="lim-">−</button>${Array.from({length:I.limit},(_,i)=>`<i class="slot${i<occ?' f':''}"></i>`).join('')}<button class="step" id="lim+">+</button></span></div>
+    <div class="line"><span>主 Agent ${sy.on?'正在照看这个项目':'已停用'}</span><button id="q-tog">${sy.on?'停用':'启用'}</button></div>
+    <div class="line"><span>主 Agent 使用 deepseek-v4-flash</span><button>更换</button></div>`;
   $('lim-').onclick=()=>{I.limit=Math.max(1,I.limit-1);renderAlmanac(sy)};$('lim+').onclick=()=>{I.limit=Math.min(12,I.limit+1);renderAlmanac(sy)};
-  $('q-tog').onclick=()=>{sy.on=!sy.on;sy.star.label=sy.on?'Queen':'Queen（已熄灭）';renderAlmanac(sy);setCart()};
+  $('q-tog').onclick=()=>{sy.on=!sy.on;sy.star.label=sy.on?'主 Agent':'主 Agent（已停用）';renderAlmanac(sy);setCart()};
   const mx=Math.max(...I.spark),pts=I.spark.map((v,i)=>[i*(300/6),40-v/mx*34]);
   $('al-fuel').innerHTML=`<svg class="spark" viewBox="-4 0 308 44" preserveAspectRatio="none"><path d="M${pts.map(p=>p.join(' ')).join(' L')}"/><circle cx="${pts[6][0]}" cy="${pts[6][1]}" r="2.5"/></svg>
     <p class="mute" style="color:var(--ink2)">今天 ${money(I.today)}，本周 ${money(I.week)}。</p><p class="mute">${sy.method==='pstack'?'pstack 规定：每个 Agent 不超过 $2，每天不超过 $10。':'这套方法论没有设定预算。'}</p>`}
@@ -528,11 +591,11 @@ const AP={
     <div class="row">默认模型<span>deepseek-v4-flash</span></div>
     <div class="row">本月调用<span>1,284 次</span></div>
     <div class="acts"><button class="go">更换凭证</button><button>添加提供方</button></div>`,
-  '连接':()=>`<h3>连接</h3><p>让本地的 Agent 通过 MCP 连到这片宇宙。每个连接的令牌只显示一次。</p>
+  '连接':()=>`<h3>连接</h3><p>让你本地的 Agent（Claude Code、Codex 等）通过 MCP 连到这个平台。每个连接的令牌只显示一次。</p>
     <div class="row">这台电脑上的 Claude Code<span>default 权限，2 分钟前使用</span></div>
     <div class="row">Codex<span>admin 权限，昨天使用</span></div>
     <div class="acts"><button class="go">新建连接</button><button>吊销</button></div>`,
-  '账簿':()=>{const t=SYS.map(sy=>[sy.name,INFO[sy.id].week]),mx=Math.max(...t.map(x=>x[1]));return `<h3>账簿</h3><p>本周所有星系一共花费 ${money(t.reduce((a,x)=>a+x[1],0))}。</p>`+
+  '账簿':()=>{const t=SYS.map(sy=>[sy.name,INFO[sy.id].week]),mx=Math.max(...t.map(x=>x[1]));return `<h3>账簿</h3><p>本周所有项目一共花费 ${money(t.reduce((a,x)=>a+x[1],0))}。</p>`+
     t.map(([n,v])=>`<div class="row" style="display:block">${n}<span style="float:right">${money(v)}</span><div class="bar" style="width:${v/mx*100}%"></div></div>`).join('')},
   '账号':()=>`<h3>账号</h3><p>这是一套单管理员部署。</p><div class="row">管理员<span>admin</span></div><div class="row">本次登录<span>今天 00:12，来自本机</span></div><div class="acts"><button>退出登录</button></div>`};
 function apShow(k){$('ap-body').innerHTML=AP[k]();$('ap-nav').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.textContent===k))}
@@ -541,7 +604,7 @@ function openAppendix(k='接入'){hideNote();closeCatalogue();closeTimeline();$(
 function closeAppendix(){$('appendix').classList.remove('open')}
 $('ap-x').onclick=closeAppendix;$('mark').querySelector('b').onclick=()=>openAppendix();
 
-const STATUS=b=>b.kind==='star'?(b.sys.on?'照看着这个星系':'已熄灭'):b.kind==='comet'?(b.stale?'静止 18 小时，仍占着名额':{busy:'在轨工作',parked:'静止',failed:'坠落',done:'已完成'}[b.state]):b.kind==='moon'?'正在验证':b.kind==='pr'?({ready:'等你决定',merging:'正在合并'}[b.state]||'等待验证'):b.kind==='signal'?(b.ci?'外部检查':b.claimed?'已被认领':'无人认领'):'等待入轨';
+const STATUS=b=>b.kind==='star'?(b.sys.on?'正在照看这个项目':'已停用'):b.kind==='comet'?(b.stale?'空闲 18 小时，仍占着名额':{busy:'工作中',parked:'空闲',failed:'失败',done:'已完成'}[b.state]):b.kind==='moon'?'正在验证':b.kind==='pr'?({ready:'等你决定',merging:'正在合并'}[b.state]||'等待验证'):b.kind==='signal'?(b.ci?'外部检查':b.claimed?'已被认领':'无人认领'):'排队中';
 const GLY={star:'<circle r="4.5" fill="currentColor"/>',busy:'<circle r="3" fill="currentColor"/><path d="M3 -1.5l7 -3M3 0l8 -1.5M3 1.5l7 0" stroke="currentColor" stroke-width=".8"/>',parked:'<circle r="3" fill="none" stroke="currentColor"/><path d="M4.5 -1.5l5 -2" stroke="currentColor" stroke-dasharray="1.5 1.5"/>',
   failed:'<path d="M-3.5 -3.5l7 7M3.5 -3.5l-7 7" stroke="currentColor"/>',moon:'<ellipse rx="7" ry="4" fill="none" stroke="currentColor" stroke-dasharray="1 1.5"/><circle cx="7" r="1.8" fill="currentColor"/>',
   pr:'<ellipse rx="9" ry="2.6" transform="rotate(-20)" fill="none" stroke="currentColor"/><circle r="4" fill="var(--paper)" stroke="currentColor"/>',signal:'<path d="M-5 0h10M0 -5v10" stroke="currentColor"/>',ci:'<path d="M0 -5l5 5-5 5-5-5z" fill="none" stroke="currentColor"/>',queue:'<circle r="3" fill="none" stroke="currentColor"/>'};
@@ -578,21 +641,57 @@ $('tl-play').onclick=()=>{const f=pastF<.999?pastF:0,d=timeAt(f),m0=d.getHours()
 function route(v){const q=v.toLowerCase().replace(/\s/g,'');if(q.length>14)return null;
   const sy=SYS.find(x=>q.includes(x.name.toLowerCase()));if(sy)return{label:'前往 '+sy.name,go:()=>{closeAppendix();goSys(sy)}};
   const m=v.match(/pr\s*#?\s*(\d+)/i)||v.match(/#(\d+)/);if(m){const b=B.find(b=>(b.kind==='pr'&&b.label==='PR #'+m[1])||(b.kind==='comet'&&b.label.endsWith('#'+m[1])));if(b)return{label:'前往 '+b.label,go:()=>flyTo(b)}}
-  const ap=[['模型','模型'],['凭证','模型'],['接入','接入'],['github','接入'],['隧道','接入'],['webhook','接入'],['连接','连接'],['mcp','连接'],['令牌','连接'],['账簿','账簿'],['账号','账号'],['退出','账号'],['附录','接入']].find(([k])=>q.includes(k));
-  if(ap)return{label:'打开附录里的'+ap[1],go:()=>openAppendix(ap[1])};
-  if(/方法论|设置|燃料|用量|星系志/.test(q))return{label:'打开星系志',go:()=>{if(mode==='cosmos')goSys(T);setTimeout(openAlmanac,mode==='cosmos'?600:0)}};
-  if(/星表|目录/.test(q))return{label:'打开星表',go:openCatalogue};
+  const ap=[['模型','模型'],['凭证','模型'],['接入','接入'],['github','接入'],['隧道','接入'],['webhook','接入'],['连接','连接'],['mcp','连接'],['令牌','连接'],['账簿','账簿'],['账号','账号'],['退出','账号'],['设置','接入'],['平台','接入']].find(([k])=>q.includes(k));
+  if(ap)return{label:'打开平台设置里的'+ap[1],go:()=>openAppendix(ap[1])};
+  if(/方法论|项目设置|花费|用量|项目面板/.test(q))return{label:'打开项目面板',go:()=>{if(mode==='cosmos')goSys(T);setTimeout(openAlmanac,mode==='cosmos'?600:0)}};
+  if(/列表|星表|目录/.test(q))return{label:'打开列表',go:openCatalogue};
   if(/时间|回放|昨夜/.test(q))return{label:'打开时间轴',go:openTimeline};
   return null}
 function sayHint(t){$('say-hint').textContent=t;$('say-hint').classList.toggle('on',!!t)}
-$('say').addEventListener('input',e=>{const v=e.target.value.trim();if(!v)return sayHint('');const rt=route(v);sayHint(rt?'回车'+rt.label:'回车发信给 Queen')});
+$('say').addEventListener('input',e=>{const v=e.target.value.trim();if(!v)return sayHint('');const rt=route(v);sayHint(rt?'回车'+rt.label:'回车发给主 Agent')});
 $('say').addEventListener('blur',()=>sayHint(''));
+
+function store(k,v){try{v===undefined?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}}
+function read(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function applyStyle(v){if(v==='simple')document.documentElement.dataset.style='simple';else delete document.documentElement.dataset.style;palette();syncDisplay()}
+function setTheme(v){themeChoice=v;store('sj-theme',v==='system'?undefined:v);applyThemeVars();palette();syncDisplay()}
+$('theme-opts').innerHTML=Object.entries(THEMES).map(([k,t])=>`<button data-theme="${k}">${t.label}</button>`).join('')+'<button data-theme="system">跟随系统</button>';
+function syncDisplay(){const st=document.documentElement.dataset.style==='simple'?'simple':'classic',th=themeChoice;
+  $('display').querySelectorAll('[data-style]').forEach(b=>b.classList.toggle('on',b.dataset.style===st));
+  $('display').querySelectorAll('[data-theme]').forEach(b=>b.classList.toggle('on',b.dataset.theme===th));
+  $('display').querySelectorAll('[data-grid]').forEach(b=>b.classList.toggle('on',(b.dataset.grid==='on')===gridOn()))}
+$('display').querySelectorAll('[data-style]').forEach(b=>b.onclick=()=>{store('sj-style',b.dataset.style);applyStyle(b.dataset.style)});
+$('display').querySelectorAll('[data-theme]').forEach(b=>b.onclick=()=>setTheme(b.dataset.theme));
+$('display').querySelectorAll('[data-grid]').forEach(b=>b.onclick=()=>{if((b.dataset.grid==='on')!==gridOn())toggleGrid();syncDisplay()});
+function pop(id){const el=$(id),open=!el.classList.contains('open');['legend','display'].forEach(x=>{$(x).classList.remove('open');$('t-'+x).classList.remove('on')});if(open){el.classList.add('open');$('t-'+id).classList.add('on')}}
+$('t-legend').onclick=()=>pop('legend');$('t-display').onclick=()=>{syncDisplay();pop('display')};
+$('t-list').onclick=openCatalogue;$('t-time').onclick=toggleTimeline;$('t-brief').onclick=()=>briefOpen()?closeBrief():openBrief();
+const LEG=[['star','主 Agent，每个项目中间的那颗'],['busy','工作中的 Agent，尾巴越长越忙'],['parked','空闲的 Agent'],['failed','失败的 Agent'],['pr','PR'],['ready','等你决定的 PR'],['moon','正在验证 PR 的 verifier'],['signal','GitHub 上的 Issue'],['queue','排队等待的任务'],['you','你']];
+const LGLY=Object.assign({},GLY,{ready:GLY.pr+'<circle r="9" fill="none" stroke="var(--accent)" stroke-dasharray="2 2"/>',you:'<circle r="7" fill="none" stroke="currentColor"/><circle r="1.6" fill="currentColor"/>'});
+$('legend-k').innerHTML=LEG.map(([k,t])=>`<div class="k"><svg viewBox="-12 -12 24 24">${LGLY[k]}</svg>${t}</div>`).join('');
+const briefOpen=()=>document.body.classList.contains('briefing');
+function renderBrief(){const allBusy=B.filter(b=>b.kind==='comet'&&b.state==='busy'&&b.sys.on),busy=allBusy.slice(0,3),need=needs.length;
+  $('b-title').textContent=need?'有一件事需要你。':'一切正常，不需要你做什么。';
+  $('b-sub').textContent=`${SYS.length} 个项目里有 ${B.filter(b=>b.kind==='comet'&&b.state==='busy').length+B.filter(b=>b.kind==='moon').length} 个 Agent 正在工作。`;
+  let h='';if(need)h+=`<h3>需要你</h3><button class="it need" data-go="t:pr8">PR #8 可以合并了<span>test-for-myself，另一位 Agent 已验证通过</span></button>`;
+  h+=`<h3>正在进行</h3>`+busy.map(b=>`<button class="it" data-go="${b.id}">${b.label} ${b.short||'工作中'}<span>${b.sys.name}</span></button>`).join('')+(allBusy.length>3?`<button class="it" data-list="1">还有 ${allBusy.length-3} 个<span>在列表里查看</span></button>`:'');
+  h+=`<h3>需要留意</h3><button class="it" data-go="d:c0">docs-site 的模型凭证失效了<span>worker #2 连续三次失败</span></button><button class="it" data-go="t:w3">worker #3 空闲了 18 小时<span>仍占着一个名额</span></button>`;
+  h+=`<h3>昨晚完成</h3><button class="it" data-replay="1">合并了 6 个 PR，处理了 9 个 Issue<span>花费 $1.27，回放一下</span></button>`;
+  $('b-body').innerHTML=h;
+  $('b-body').querySelectorAll('[data-go]').forEach(x=>x.onclick=()=>{const b=get(x.dataset.go);closeBrief();if(b)flyTo(b)});
+  $('b-body').querySelectorAll('[data-list]').forEach(x=>x.onclick=()=>{closeBrief();openCatalogue()});
+  $('b-body').querySelectorAll('[data-replay]').forEach(x=>x.onclick=()=>{closeBrief();if(mode==='cosmos')goSys(T);setTimeout(()=>startReplay(),700)})}
+function openBrief(){renderBrief();hideNote();closeLens();closeAlmanac();document.body.classList.add('briefing');$('t-brief').classList.add('on')}
+function closeBrief(){if(!briefOpen())return;document.body.classList.remove('briefing');$('t-brief').classList.remove('on');if(!read('sj-legend-seen')){store('sj-legend-seen','1');setTimeout(()=>{pop('legend');setTimeout(()=>{if($('legend').classList.contains('open'))pop('legend')},7000)},900)}}
+$('b-enter').onclick=()=>{closeBrief();if(mode==='cosmos')goSys(T)};
+$('b-skip').onchange=e=>store('sj-brief',e.target.checked?'off':undefined);
 
 function clock(){const d=new Date();$('clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
 clock();setInterval(clock,15000);
 setTimeout(()=>$('hint').style.opacity=0,7000);
-cam.s=cam.ts=cosmosScale()*.8;goCosmos();$('observer').classList.add('wait');
-setTimeout(()=>{if(mode==='cosmos')goSys(T)},2800);
+if(read('sj-style')==='simple')applyStyle('simple');syncDisplay();
+cam.s=cam.ts=cosmosScale()*.8;goCosmos();if(read('sj-brief')!=='off'){$('b-skip').checked=false;openBrief()}else{$('b-skip').checked=true}$('observer').classList.add('wait');
+setTimeout(()=>{if(mode==='cosmos'&&!briefOpen())goSys(T)},2800);
 draw();
 </script>
 </body>
