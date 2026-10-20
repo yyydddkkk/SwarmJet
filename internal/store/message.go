@@ -98,6 +98,32 @@ func (s *Store) SendMessage(ctx context.Context, m domain.Message) (domain.Messa
 }
 
 func (s *Store) sendMessageTx(ctx context.Context, tx pgx.Tx, m domain.Message) (domain.Message, error) {
+	return s.persistMessageTx(ctx, tx, m, true)
+}
+
+// SendHiveDiagnostic records a platform failure report in the Hive inbox even
+// when its Queen is enabled. Ordinary system notifications still use SendMessage
+// and follow the Hive's normal routing policy.
+func (s *Store) SendHiveDiagnostic(ctx context.Context, hiveID, body string) (domain.Message, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	defer tx.Rollback(ctx)
+	m, err := s.persistMessageTx(ctx, tx, domain.Message{
+		HiveID: hiveID, From: domain.AddressSystem, To: domain.AddressHive,
+		Kind: domain.MessageReport, Trust: domain.TrustSystem, Body: body,
+	}, false)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return domain.Message{}, err
+	}
+	return m, nil
+}
+
+func (s *Store) persistMessageTx(ctx context.Context, tx pgx.Tx, m domain.Message, routeToQueen bool) (domain.Message, error) {
 	if utf8.RuneCountInString(m.Body) > domain.MaxMessageBody {
 		return domain.Message{}, domain.ErrMessageTooLarge
 	}
@@ -105,7 +131,7 @@ func (s *Store) sendMessageTx(ctx context.Context, tx pgx.Tx, m domain.Message) 
 	if err != nil {
 		return domain.Message{}, err
 	}
-	if hive.QueenEnabled && m.To == domain.AddressHive && m.From != domain.AddressQueen {
+	if routeToQueen && hive.QueenEnabled && m.To == domain.AddressHive && m.From != domain.AddressQueen {
 		m.To = domain.AddressQueen
 	}
 	if m.Hop > hive.Config.MaxHops {

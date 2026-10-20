@@ -155,11 +155,13 @@ func (a *actor) failQueen(ctx context.Context, reason string) {
 	if err := a.sup.opts.Store.RevokeAgentTokens(cleanup, a.id); err != nil {
 		a.sup.log.Warn("queen: revoke tokens", "agent", a.id, "error", err)
 	}
-	_, err := a.sup.opts.Store.SendMessage(cleanup, domain.Message{
-		HiveID: a.hiveID, From: domain.AddressSystem, To: domain.AddressHive,
-		Kind: domain.MessageReport, Trust: domain.TrustSystem,
-		Body: truncateRunes(fmt.Sprintf("Queen failed: %s. Recovery will be retried on the next scan while Queen remains enabled.", reason), domain.MaxMessageBody),
-	})
+	store, ok := a.sup.opts.Store.(QueenStore)
+	if !ok {
+		a.sup.log.Warn("queen: failure diagnostics unavailable", "agent", a.id)
+		return
+	}
+	_, err := store.SendHiveDiagnostic(cleanup, a.hiveID,
+		truncateRunes(fmt.Sprintf("Queen failed: %s. Recovery will be retried on the next scan while Queen remains enabled.", reason), domain.MaxMessageBody))
 	if err != nil {
 		a.sup.log.Warn("queen: failure notification", "agent", a.id, "error", err)
 	}

@@ -14,6 +14,13 @@ import (
 
 const testQueenID = "queen-1"
 
+func (s *fakeStore) SendHiveDiagnostic(ctx context.Context, hiveID, body string) (domain.Message, error) {
+	return s.SendMessage(ctx, domain.Message{
+		HiveID: hiveID, From: domain.AddressSystem, To: domain.AddressHive,
+		Kind: domain.MessageReport, Trust: domain.TrustSystem, Body: body,
+	})
+}
+
 func (s *fakeStore) Queen(_ context.Context, hiveID string) (domain.Agent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
