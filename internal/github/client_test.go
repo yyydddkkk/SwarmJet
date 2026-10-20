@@ -320,3 +320,24 @@ func TestHiddenDependenciesFailClosed(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+func TestClassicProtectionForbiddenFallsBackToRulesets(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/pulls/"):
+			fmt.Fprint(w, `{"head":{"sha":"head"},"base":{"ref":"main"}}`)
+		case strings.Contains(r.URL.Path, "/protection/"):
+			// The App has no Administration permission.
+			w.WriteHeader(http.StatusForbidden)
+		case strings.Contains(r.URL.Path, "/rules/branches/"):
+			fmt.Fprint(w, `[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]`)
+		case strings.HasSuffix(r.URL.Path, "/check-runs"):
+			fmt.Fprint(w, `{"check_runs":[{"id":1,"name":"test","head_sha":"head","status":"completed","conclusion":"success","app":{"id":7}}]}`)
+		default:
+			fmt.Fprint(w, `[]`)
+		}
+	})
+	r, e := c.RequiredChecks(context.Background(), 1, 3, "head")
+	if e != nil || r.RequiredCount != 1 || !r.Ready {
+		t.Fatalf("%+v %v", r, e)
+	}
+}
