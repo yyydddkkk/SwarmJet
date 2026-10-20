@@ -40,12 +40,12 @@ func (ts *toolset) registerMethodology(s *mcpsdk.Server) {
 
 	addTool(ts, s, &mcpsdk.Tool{
 		Name:        "publish_methodology",
-		Description: "Publish a new methodology version from methodology.yaml text plus its files. The YAML is validated strictly (unknown fields, referenced roles and prompt files, path safety, 500 files / 2 MiB) and the new version becomes active immediately. Requires a user token, or an agent token whose methodology role has permissions.methodology. Records who published it and notifies the Hive.",
+		Description: "Publish a new methodology version from methodology.yaml text plus its files. The YAML is validated strictly (unknown fields, referenced roles and prompt files, path safety, 500 files / 2 MiB) and the new version becomes active immediately. Requires a user token, a Queen token, or an agent token whose methodology role has permissions.methodology. Records who published it and notifies the Hive.",
 	}, ts.publishMethodology)
 
 	addTool(ts, s, &mcpsdk.Tool{
 		Name:        "activate_methodology",
-		Description: "Switch a Hive to an existing methodology version, for example to roll back. Requires a user token, or an agent token whose methodology role has permissions.methodology. Records who activated it and notifies the Hive.",
+		Description: "Switch a Hive to an existing methodology version, for example to roll back. Requires a user token, a Queen token, or an agent token whose methodology role has permissions.methodology. Records who activated it and notifies the Hive.",
 	}, ts.activateMethodology)
 }
 
@@ -252,7 +252,8 @@ func (ts *toolset) activateMethodology(ctx context.Context, _ *mcpsdk.CallToolRe
 }
 
 // requireMethodologyWrite allows user tokens and agent tokens whose effective
-// methodology role carries permissions.methodology. The active manifest is
+// methodology role carries permissions.methodology. Queens manage their own
+// Hive independently of methodology role permissions. The active manifest is
 // read on every call, so a role permission change applies immediately.
 func (ts *toolset) requireMethodologyWrite(ctx context.Context, hiveID string) error {
 	if ts.token.Scope != domain.TokenAgent {
@@ -266,6 +267,9 @@ func (ts *toolset) requireMethodologyWrite(ctx context.Context, hiveID string) e
 	}
 	if err := ts.requireHive(hiveID); err != nil {
 		return err
+	}
+	if ts.actor.isQueen() {
+		return nil
 	}
 	manifest := domain.MethodologyManifest{}
 	m, _, err := ts.backend.ActiveMethodology(ctx, hiveID)

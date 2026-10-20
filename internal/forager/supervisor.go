@@ -109,7 +109,7 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-// Supervisor owns one serial executor per live Forager.
+// Supervisor owns one serial executor per live Queen or Forager.
 type Supervisor struct {
 	opts  Options
 	clock Clock
@@ -141,14 +141,38 @@ func New(opts Options) (*Supervisor, error) {
 }
 
 // Notify accepts a delivered Inbox message. It matches store.MessageSink so it
-// can be installed on store.Store later. Messages for anything but a Forager
-// are ignored.
+// can be installed on store.Store. Queen and Forager Inboxes wake their actors.
 func (s *Supervisor) Notify(ctx context.Context, m domain.Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if m.To == domain.AddressQueen {
+		store, ok := s.opts.Store.(QueenStore)
+		if !ok {
+			return nil
+		}
+		agent, err := store.Queen(ctx, m.HiveID)
+		if err != nil {
+			return err
+		}
+		hive, err := s.opts.Store.Hive(ctx, m.HiveID)
+		if err != nil {
+			return err
+		}
+		return s.actor(agent.ID, agent.HiveID, true).scan(ctx, agent, hive)
+	}
 	id, ok := foragerID(m.To)
 	if !ok {
+		return nil
+	}
+	agent, err := s.opts.Store.Agent(ctx, id)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if agent.Role != domain.RoleForager || agent.HiveID != m.HiveID {
 		return nil
 	}
 	return s.actor(id, m.HiveID).enqueue(s.baseContext(), m)
@@ -188,6 +212,15 @@ func (s *Supervisor) Scan(ctx context.Context) error {
 	}
 	var errs []error
 	for _, hive := range hives {
+		if store, ok := s.opts.Store.(QueenStore); ok {
+			agent, err := store.Queen(ctx, hive.ID)
+			if err == nil {
+				err = s.actor(agent.ID, hive.ID, true).scan(ctx, agent, hive)
+			}
+			if err != nil && !errors.Is(err, domain.ErrNotFound) {
+				errs = append(errs, err)
+			}
+		}
 		foragers, err := s.opts.Store.Foragers(ctx, hive.ID,
 			domain.AgentCreating, domain.AgentActive, domain.AgentParked, domain.AgentHibernated)
 		if err != nil {
@@ -208,7 +241,7 @@ func (s *Supervisor) Scan(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (s *Supervisor) actor(id, hiveID string) *actor {
+func (s *Supervisor) actor(id, hiveID string, queen ...bool) *actor {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if a, ok := s.actors[id]; ok {
@@ -218,6 +251,7 @@ func (s *Supervisor) actor(id, hiveID string) *actor {
 		return a
 	}
 	a := newActor(s, id, hiveID)
+	a.queen = len(queen) > 0 && queen[0]
 	s.actors[id] = a
 	return a
 }
