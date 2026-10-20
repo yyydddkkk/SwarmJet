@@ -294,7 +294,7 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 		return false
 	}
 
-	if hasCompleteMessage(consumed) {
+	if !a.queen && hasCompleteMessage(consumed) {
 		a.terminate(ctx, domain.AgentCompleted, completionReason(consumed), consumed, lastText)
 		return false
 	}
