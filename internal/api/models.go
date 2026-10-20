@@ -177,7 +177,12 @@ func (a *server) usage(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "usage filter is too long")
 		return
 	}
-	summary, err := a.s.LLMUsageSummary(r.Context(), hiveID, agentID)
+	period := strings.TrimSpace(r.URL.Query().Get("period"))
+	if period != "" && period != "all" && period != "today" {
+		problem(w, http.StatusBadRequest, `period must be "all" or "today"`)
+		return
+	}
+	summary, err := a.s.LLMUsageSummary(r.Context(), hiveID, agentID, period == "today")
 	if err != nil {
 		failure(w, err)
 		return

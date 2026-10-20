@@ -60,16 +60,26 @@ func (s *Store) HiveCostToday(ctx context.Context, hiveID string) (float64, erro
 	return cost, err
 }
 
-// LLMUsageSummary aggregates the ledger. Empty hiveID/agentID mean "all".
-func (s *Store) LLMUsageSummary(ctx context.Context, hiveID, agentID string) (domain.LLMUsageSummary, error) {
+// LLMUsageSummary aggregates the ledger. Empty hiveID/agentID mean "all";
+// today limits it to rows since the start of the current day, the same window
+// HiveCostToday and the daily budget use.
+func (s *Store) LLMUsageSummary(ctx context.Context, hiveID, agentID string, today bool) (domain.LLMUsageSummary, error) {
+	period := "all"
+	if today {
+		period = "today"
+	}
 	summary := domain.LLMUsageSummary{
 		HiveID:  hiveID,
 		AgentID: agentID,
+		Period:  period,
 		ByAgent: []domain.LLMUsageGroup{},
 		ByModel: []domain.LLMUsageGroup{},
 	}
-	const filter = `WHERE ($1::text = '' OR hive_id = $1::text)
+	filter := `WHERE ($1::text = '' OR hive_id = $1::text)
 		AND ($2::text = '' OR agent_id = $2::text)`
+	if today {
+		filter += ` AND created_at >= date_trunc('day', now())`
+	}
 	totals := `count(*), COALESCE(sum(input_tokens),0), COALESCE(sum(output_tokens),0),
 		COALESCE(sum(cache_read_tokens),0), COALESCE(sum(cache_write_tokens),0),
 		COALESCE(sum(cost_usd),0)::float8,

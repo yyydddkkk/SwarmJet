@@ -39,7 +39,7 @@ func TestLLMUsageCostsAndSummary(t *testing.T) {
 		t.Fatalf("hive cost today = %v", hiveToday)
 	}
 
-	summary, err := s.LLMUsageSummary(ctx, "hive-1", "")
+	summary, err := s.LLMUsageSummary(ctx, "hive-1", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,15 @@ func TestLLMUsageCostsAndSummary(t *testing.T) {
 		t.Fatalf("by model = %+v", summary.ByModel)
 	}
 
-	agentSummary, err := s.LLMUsageSummary(ctx, "", "agent-2")
+	today, err := s.LLMUsageSummary(ctx, "hive-1", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if today.Period != "today" || today.Totals.Requests != 2 || today.Totals.CostUSD != 1.5 {
+		t.Fatalf("today = %+v", today)
+	}
+
+	agentSummary, err := s.LLMUsageSummary(ctx, "", "agent-2", false)
 	if err != nil {
 		t.Fatal(err)
 	}

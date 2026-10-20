@@ -41,8 +41,10 @@ type LLMUsageGroup struct {
 // LLMUsageSummary is the console's usage view. HiveID and AgentID echo the
 // filters; an empty filter means "all".
 type LLMUsageSummary struct {
-	HiveID  string          `json:"hiveId,omitempty"`
-	AgentID string          `json:"agentId,omitempty"`
+	HiveID  string `json:"hiveId,omitempty"`
+	AgentID string `json:"agentId,omitempty"`
+	// Period is "all" or "today" (since local midnight on the database clock).
+	Period  string          `json:"period"`
 	Totals  LLMUsageTotals  `json:"totals"`
 	ByAgent []LLMUsageGroup `json:"byAgent"`
 	ByModel []LLMUsageGroup `json:"byModel"`
