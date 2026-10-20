@@ -47,7 +47,10 @@ function ProjectPanel({
       <button
         className="pc-close"
         aria-label="关闭项目面板"
-        onClick={() => ui.close()}
+        onClick={() => {
+          ui.closeProject();
+          document.querySelector<HTMLElement>(".pc-right button")?.focus();
+        }}
       >
         ×
       </button>
@@ -126,7 +129,7 @@ export default function PanelsSlot(props: StarsSlotProps) {
           <button
             className="pc-close"
             aria-label="关闭平台设置"
-            onClick={() => ui.close()}
+            onClick={() => ui.closePlatform()}
           >
             ×
           </button>

@@ -408,3 +408,38 @@ test("logout delegates once to the shell and exposes failures for retry", async 
     )
     .toBe(1);
 });
+
+test("each close button dismisses its own side while Escape semantics stay layered", async ({
+  page,
+}) => {
+  await open(page);
+  await page.getByRole("button", { name: "项目", exact: true }).click();
+  await page.getByRole("button", { name: "Agent详情", exact: true }).click();
+  await page.getByRole("button", { name: "关闭项目面板" }).click();
+  await expect(page.getByRole("region", { name: "项目面板" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "对象详情" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "关闭对象详情" }),
+  ).toBeFocused();
+  await page.getByRole("button", { name: "项目", exact: true }).click();
+  await page.getByRole("button", { name: "关闭对象详情" }).click();
+  await expect(page.getByRole("region", { name: "对象详情" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "项目面板" })).toBeVisible();
+  const result = await page.evaluate(async () => {
+    const path = "/src/stars/ui.ts";
+    const { createStarsUI } = await import(path);
+    const ui = createStarsUI({
+      hiveId: "h",
+      projectPanel: "settings",
+      selection: { hiveId: "h", id: "a", kind: "agent" },
+    });
+    ui.close();
+    const afterObject = ui.getSnapshot();
+    ui.close();
+    return { afterObject, afterProject: ui.getSnapshot() };
+  });
+  expect(result.afterObject.projectPanel).toBe("settings");
+  expect(result.afterObject.selection).toBeUndefined();
+  expect(result.afterProject.projectPanel).toBeUndefined();
+  expect(result.afterProject.hiveId).toBe("h");
+});

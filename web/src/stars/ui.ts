@@ -68,6 +68,18 @@ export function createStarsUI(initial: StarsUIState = {}) {
           : {}),
       });
     },
+    closeProject() {
+      update({ projectPanel: undefined });
+    },
+    closeObject() {
+      update({ selection: undefined });
+    },
+    closePlatform() {
+      update({ platformPanel: undefined, setupQuery: undefined });
+    },
+    closeOverlay() {
+      update({ overlay: undefined });
+    },
     close() {
       if (state.overlay) update({ overlay: undefined });
       else if (state.platformPanel) update({ platformPanel: undefined });

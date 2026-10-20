@@ -164,7 +164,7 @@ export function ObjectPanel({
         role="region"
         aria-label="对象详情"
       >
-        <button onClick={() => ui.close()}>关闭详情</button>正在读取…
+        <button onClick={() => ui.closeObject()}>关闭详情</button>正在读取…
       </div>
     );
   const target =
@@ -185,7 +185,7 @@ export function ObjectPanel({
       <button
         className="pc-close"
         aria-label="关闭对象详情"
-        onClick={() => ui.close()}
+        onClick={() => ui.closeObject()}
       >
         ×
       </button>
