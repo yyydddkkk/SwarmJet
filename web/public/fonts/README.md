@@ -20,12 +20,12 @@ uv run --with fonttools==4.67.0 --with brotli==1.2.0 python web/scripts/subset-f
 | `IBMPlexSans-Medium.woff2` | 66,740 |
 | `IBMPlexSans-MediumItalic.woff2` | 71,204 |
 | `IBMPlexSans-Regular.woff2` | 63,020 |
-| `IMFeENit28P.woff2` | 66,276 |
-| `IMFeENrm28P.woff2` | 65,200 |
-| `JetBrainsMono[wght].woff2` | 20,700 |
-| `NotoSansSC[wght].woff2` | 912,848 |
-| `NotoSerifSC[wght].woff2` | 1,166,372 |
-| `SourceSerif4-Italic[opsz,wght].woff2` | 36,860 |
-| `SourceSerif4[opsz,wght].woff2` | 35,984 |
+| `IMFeENit28P.woff2` | 66,216 |
+| `IMFeENrm28P.woff2` | 65,220 |
+| `JetBrainsMono[wght].woff2` | 20,988 |
+| `NotoSansSC[wght].woff2` | 914,152 |
+| `NotoSerifSC[wght].woff2` | 1,166,744 |
+| `SourceSerif4-Italic[opsz,wght].woff2` | 36,864 |
+| `SourceSerif4[opsz,wght].woff2` | 35,976 |
 
-总WOFF2：2,572,424 字节。
+总WOFF2：2,574,344 字节（集成 B/C/D 后按最终界面用字重新生成）。
