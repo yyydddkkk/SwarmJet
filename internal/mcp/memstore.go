@@ -397,6 +397,9 @@ func (m *MemoryBackend) SendMessage(ctx context.Context, msg domain.Message) (do
 		return domain.Message{}, domain.ErrNotFound
 	}
 	cfg := withConfigDefaults(h.Config)
+	if h.QueenEnabled && msg.To == domain.AddressHive && msg.From != domain.AddressQueen {
+		msg.To = domain.AddressQueen
+	}
 
 	if utf8.RuneCountInString(msg.Body) > domain.MaxMessageBody {
 		return domain.Message{}, domain.ErrMessageTooLarge
@@ -631,10 +634,10 @@ func withConfigDefaults(c domain.HiveConfig) domain.HiveConfig {
 		c.MaxConcurrentForagers = 4
 	}
 	if c.MaxHops <= 0 {
-		c.MaxHops = 10
+		c.MaxHops = 50
 	}
 	if c.MaxForagersPerChain <= 0 {
-		c.MaxForagersPerChain = 10
+		c.MaxForagersPerChain = 50
 	}
 	if c.IdleParkMinutes <= 0 {
 		c.IdleParkMinutes = 30

@@ -34,7 +34,7 @@ const (
 	ActionDelivered Action = "delivered"
 	// ActionForagerCreated means a trigger rule started a new Forager.
 	ActionForagerCreated Action = "forager_created"
-	// ActionInbox means the event was filed in the Hive Inbox.
+	// ActionInbox means the event was filed in the Queen or Hive Inbox.
 	ActionInbox Action = "inbox"
 )
 
@@ -159,7 +159,7 @@ func normalizeAppSlug(raw string) string {
 //  1. find the Hive for the repository (ignore unknown repositories);
 //  2. a matching trigger rule starts a Forager (or reuses the Issue's Forager);
 //  3. an event that belongs to an existing non-terminal Forager is delivered to it;
-//  4. everything else goes to the Hive Inbox.
+//  4. everything else goes to the Queen Inbox when enabled, or the Hive Inbox.
 func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
 	repository := strings.TrimSpace(e.Repository)
 	if repository == "" {
@@ -627,11 +627,15 @@ func (r *Router) toInbox(ctx context.Context, hive domain.Hive, e Event, reason 
 	if reason != "" {
 		body = "Not auto-routed: " + reason + "\n\n" + body
 	}
+	target := domain.AddressHive
+	if hive.QueenEnabled {
+		target = domain.AddressQueen
+	}
 	message := domain.Message{
-		ID:      messageID(e, domain.AddressHive),
+		ID:      messageID(e, target),
 		HiveID:  hive.ID,
 		From:    domain.AddressSystem,
-		To:      domain.AddressHive,
+		To:      target,
 		Kind:    domain.MessageEvent,
 		ChainID: chainIDFor(e),
 		Body:    body,
@@ -803,10 +807,10 @@ func resolveConfig(c domain.HiveConfig) domain.HiveConfig {
 		c.MaxConcurrentForagers = 4
 	}
 	if c.MaxHops <= 0 {
-		c.MaxHops = 10
+		c.MaxHops = 50
 	}
 	if c.MaxForagersPerChain <= 0 {
-		c.MaxForagersPerChain = 10
+		c.MaxForagersPerChain = 50
 	}
 	if c.IdleParkMinutes <= 0 {
 		c.IdleParkMinutes = 30

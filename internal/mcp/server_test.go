@@ -391,7 +391,7 @@ func TestSendValidationErrors(t *testing.T) {
 		want string
 	}{
 		{"too large", map[string]any{"hiveId": h.ID, "body": strings.Repeat("x", domain.MaxMessageBody+1)}, "too large"},
-		{"hop limit", map[string]any{"hiveId": h.ID, "body": "hi", "hop": 11}, "hop limit"},
+		{"hop limit", map[string]any{"hiveId": h.ID, "body": "hi", "hop": 51}, "hop limit"},
 		{"unknown hive", map[string]any{"hiveId": "hive_missing", "body": "hi"}, "not found"},
 		{"bad address", map[string]any{"hiveId": h.ID, "body": "hi", "to": "nonsense"}, "invalid address"},
 		{"unknown kind", map[string]any{"hiveId": h.ID, "body": "hi", "kind": "gossip"}, "invalid kind"},

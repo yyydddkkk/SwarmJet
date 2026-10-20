@@ -20,14 +20,15 @@ import (
 )
 
 type fakeBackend struct {
-	mu        sync.Mutex
-	tokens    map[string]domain.Token
-	agents    map[string]domain.Agent
-	agentCost map[string]float64
-	hiveCost  map[string]float64
-	usages    []domain.LLMUsage
-	messages  []domain.Message
-	inbox     map[string][]domain.Message
+	queenEnabled bool
+	mu           sync.Mutex
+	tokens       map[string]domain.Token
+	agents       map[string]domain.Agent
+	agentCost    map[string]float64
+	hiveCost     map[string]float64
+	usages       []domain.LLMUsage
+	messages     []domain.Message
+	inbox        map[string][]domain.Message
 }
 
 func newFakeBackend() *fakeBackend {
@@ -44,6 +45,12 @@ func newFakeBackend() *fakeBackend {
 		hiveCost:  map[string]float64{},
 		inbox:     map[string][]domain.Message{},
 	}
+}
+
+func (f *fakeBackend) Hive(_ context.Context, id string) (domain.Hive, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return domain.Hive{ID: id, QueenEnabled: f.queenEnabled}, nil
 }
 
 func (f *fakeBackend) TokenByPlaintext(_ context.Context, plaintext string) (domain.Token, error) {

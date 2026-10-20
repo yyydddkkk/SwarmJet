@@ -223,7 +223,7 @@ func TestHiveAPIHiveLifecycle(t *testing.T) {
 	if created.ID == "" || created.Version != 1 || created.QueenEnabled {
 		t.Fatalf("created hive: %+v", created)
 	}
-	if created.Config.CLI != "opencode" || created.Config.MaxHops != 10 {
+	if created.Config.CLI != "opencode" || created.Config.MaxHops != 50 {
 		t.Fatalf("defaults not applied: %+v", created.Config)
 	}
 
