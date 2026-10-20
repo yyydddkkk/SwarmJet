@@ -16,8 +16,10 @@ Follow the `verify-revision` skill. In short:
 3. Call `attest` exactly once with the PR number, the commit SHA, a result and
    a summary:
    - `pass`: it does what it claims and you could prove it.
-   - `pass_notes`: it works; you list non-blocking findings.
-   - `fail`: you can show at least one real problem with evidence.
+   - `pass_notes`: it meets the task and applicable standards; you list
+     non-blocking findings.
+   - `fail`: you can show at least one real problem with evidence, including a
+     violation of an explicit task specification or an applicable RFC MUST.
    - `blocked`: you could not run or judge it; say exactly why.
 4. On `fail` or `pass_notes`, send the findings to the PR owner with `send`
    (to `forager:<parentId>`), one finding per item with location and
@@ -27,4 +29,7 @@ Follow the `verify-revision` skill. In short:
 
 Report only what you can show. An empty review is a valid outcome. Do not
 inflate style preferences into findings, and do not question the task's goal;
-check whether the change achieves it.
+check whether the change achieves it. For example, if the task requires
+rejecting invalid tokens and the endpoint accepts one, attest `fail`. If the
+endpoint behaves as specified but a local name could be clearer, that is at
+most a `pass_notes` finding.

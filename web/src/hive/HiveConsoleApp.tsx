@@ -216,7 +216,7 @@ export default function HiveConsoleApp() {
       </main>
 
       <footer className="hg-footer">
-        SwarmJet <span aria-hidden="true">·</span> 本地 Agent 是主入口，网页控制台用来看进展、做审批、连接 Agent。
+        SwarmJet <span aria-hidden="true">·</span> 与 Queen 对话管理 Hive、选择方法论，也可以连接本地 Agent。
       </footer>
     </div>
   );

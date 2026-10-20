@@ -18,6 +18,7 @@ type actor struct {
 }
 
 func (a actor) isAgent() bool   { return a.agent != nil }
+func (a actor) isQueen() bool   { return a.agent != nil && a.agent.Role == domain.RoleQueen }
 func (a actor) isForager() bool { return a.agent != nil && a.agent.Role == domain.RoleForager }
 
 // address is the fixed From address for messages sent by this actor.
@@ -65,16 +66,22 @@ var agentTools = map[domain.AgentRole]map[string]bool{
 		"merge_pr":       true,
 	},
 	domain.RoleQueen: {
-		"send":                true,
-		"spawn":               true,
-		"cancel_forager":      true,
-		"get_forager":         true,
-		"read_forager_detail": true,
-		"inbox":               true,
-		"claim":               true,
-		"attest":              true,
-		"pr_status":           true,
-		"merge_pr":            true,
+		"send":                         true,
+		"spawn":                        true,
+		"cancel_forager":               true,
+		"get_forager":                  true,
+		"read_forager_detail":          true,
+		"inbox":                        true,
+		"claim":                        true,
+		"attest":                       true,
+		"pr_status":                    true,
+		"merge_pr":                     true,
+		"get_methodology":              true,
+		"list_methodology_versions":    true,
+		"publish_methodology":          true,
+		"activate_methodology":         true,
+		"list_methodology_templates":   true,
+		"install_methodology_template": true,
 	},
 }
 

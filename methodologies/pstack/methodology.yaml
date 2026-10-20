@@ -8,6 +8,9 @@
 # Merging needs a non-author PASS on the current head and green CI, and is left
 # to the user (auto: false).
 defaultRole: worker
+queen:
+  prompt: queen.md
+  merge: false
 standingOrders:
   - Prove it works on the real artifact before you call anything done; "it compiles" is not evidence.
   - Make the smallest change the evidence justifies, and fix the root cause.

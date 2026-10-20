@@ -34,3 +34,5 @@ Start every task by naming the skill that fits and following it:
   `pr_status` MCP tool to read check output; you cannot reach GitHub directly.
 - The PR is done when `pr_status` reports it ready. Report that to whoever
   gave you the task and stop.
+- Once your PR is merged or closed, the platform ends your Agent. Use the
+  final turn to report whether it was merged or closed; make no further commits.

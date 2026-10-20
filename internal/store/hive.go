@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -59,10 +60,10 @@ func applyHiveDefaults(c *domain.HiveConfig) {
 		c.MaxConcurrentForagers = 4
 	}
 	if c.MaxHops == 0 {
-		c.MaxHops = 10
+		c.MaxHops = 50
 	}
 	if c.MaxForagersPerChain == 0 {
-		c.MaxForagersPerChain = 10
+		c.MaxForagersPerChain = 50
 	}
 	if c.IdleParkMinutes == 0 {
 		c.IdleParkMinutes = 30
@@ -94,8 +95,8 @@ func scanHive(row pgx.Row) (domain.Hive, error) {
 	return h, nil
 }
 
-// CreateHive inserts a Hive and its disabled Queen in one transaction. The
-// stored config keeps the caller's zero values; reads apply defaults.
+// CreateHive inserts a Hive, its Queen and any initial bootstrap in one
+// transaction. Stored config keeps caller zero values; reads apply defaults.
 func (s *Store) CreateHive(ctx context.Context, h domain.Hive) (domain.Hive, error) {
 	now := time.Now().UTC()
 	if h.ID == "" {
@@ -137,6 +138,11 @@ func (s *Store) CreateHive(ctx context.Context, h domain.Hive) (domain.Hive, err
 		queenID, h.ID, cli, now); err != nil {
 		return domain.Hive{}, domainErr(err)
 	}
+	if h.QueenEnabled {
+		if err = s.bootstrapQueen(ctx, tx, h.ID, h.Version, now); err != nil {
+			return domain.Hive{}, err
+		}
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return domain.Hive{}, err
 	}
@@ -177,25 +183,57 @@ func (s *Store) UpdateHive(ctx context.Context, h domain.Hive) (domain.Hive, err
 	if err != nil {
 		return domain.Hive{}, err
 	}
-	tag, err := s.Pool.Exec(ctx, `UPDATE hives SET name=$3,repository=$4,queen_enabled=$5,config=$6,version=version+1,updated_at=$7 WHERE id=$1 AND version=$2`,
-		h.ID, h.Version, h.Name, h.Repository, h.QueenEnabled, config, now)
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
+		return domain.Hive{}, err
+	}
+	defer tx.Rollback(ctx)
+	var enabled bool
+	var version int
+	if err = tx.QueryRow(ctx, `SELECT queen_enabled,version FROM hives WHERE id=$1 FOR NO KEY UPDATE`, h.ID).Scan(&enabled, &version); err != nil {
 		return domain.Hive{}, domainErr(err)
 	}
-	if tag.RowsAffected() == 0 {
-		var exists bool
-		if err = s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM hives WHERE id=$1)`, h.ID).Scan(&exists); err != nil {
+	if version != h.Version {
+		return domain.Hive{}, domain.ErrConflict
+	}
+	if _, err = tx.Exec(ctx, `UPDATE hives SET name=$3,repository=$4,queen_enabled=$5,config=$6,version=version+1,updated_at=$7 WHERE id=$1 AND version=$2`,
+		h.ID, h.Version, h.Name, h.Repository, h.QueenEnabled, config, now); err != nil {
+		return domain.Hive{}, domainErr(err)
+	}
+	if !enabled && h.QueenEnabled {
+		if err = s.bootstrapQueen(ctx, tx, h.ID, h.Version+1, now); err != nil {
 			return domain.Hive{}, err
 		}
-		if !exists {
-			return domain.Hive{}, domain.ErrNotFound
-		}
-		return domain.Hive{}, domain.ErrConflict
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return domain.Hive{}, err
 	}
 	h.Version++
 	h.UpdatedAt = now
 	applyHiveDefaults(&h.Config)
 	return h, nil
+}
+
+// bootstrapQueen runs inside the Hive mutation transaction. The version identifies
+// one enable transition; retrying a stale update cannot enqueue another task.
+func (s *Store) bootstrapQueen(ctx context.Context, tx pgx.Tx, hiveID string, version int, now time.Time) error {
+	id := fmt.Sprintf("queen-bootstrap:%s:%d", hiveID, version)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "inbox:"+hiveID); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO messages(id,hive_id,from_addr,to_addr,kind,chain_id,hop,body,trust,state,created_at)
+		VALUES($1,$2,'system','queen','task','',0,'新 Hive，请开始首次引导','system','pending',$3) ON CONFLICT(id) DO NOTHING`, id, hiveID, now)
+	if err != nil {
+		return domainErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil
+	}
+	if err = s.insertMessageJob(ctx, tx, id); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `SELECT pg_notify($1,$2)`, inboxChannel, notifyPayload(hiveID, domain.AddressQueen))
+	return err
 }
 
 func scanAgent(row pgx.Row) (domain.Agent, error) {
@@ -234,14 +272,27 @@ func (s *Store) CreateForagerWithLimits(ctx context.Context, a domain.Agent, lim
 }
 
 func (s *Store) createForager(ctx context.Context, a domain.Agent, limits domain.Limits) (domain.Agent, error) {
-	now := time.Now().UTC()
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return domain.Agent{}, err
 	}
 	defer tx.Rollback(ctx)
+	a, err = s.createForagerTx(ctx, tx, a, limits)
+	if err != nil {
+		return domain.Agent{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return domain.Agent{}, err
+	}
+	return a, nil
+}
+
+// createForagerTx lets queued creation and its task delivery share a transaction.
+func (s *Store) createForagerTx(ctx context.Context, tx pgx.Tx, a domain.Agent, limits domain.Limits) (domain.Agent, error) {
+	now := time.Now().UTC()
+	var err error
 	var config []byte
-	if err = tx.QueryRow(ctx, `SELECT config FROM hives WHERE id=$1 FOR UPDATE`, a.HiveID).Scan(&config); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT config FROM hives WHERE id=$1 FOR NO KEY UPDATE`, a.HiveID).Scan(&config); err != nil {
 		return domain.Agent{}, domainErr(err)
 	}
 	cfg := domain.HiveConfig{}
@@ -262,12 +313,34 @@ func (s *Store) createForager(ctx context.Context, a domain.Agent, limits domain
 	if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND role='forager' AND state IN ('creating','active','parked')`, a.HiveID).Scan(&active); err != nil {
 		return domain.Agent{}, err
 	}
+	if a.ID != "" && ctx.Value(spawnQueueDrainKey{}) == nil {
+		var state string
+		queueErr := tx.QueryRow(ctx, `SELECT state FROM spawn_queue WHERE agent_id=$1`, a.ID).Scan(&state)
+		if queueErr == nil {
+			if state == "waiting" {
+				return domain.Agent{}, domain.ErrHiveLimit
+			}
+			return domain.Agent{}, domain.ErrConflict
+		}
+		if !errors.Is(queueErr, pgx.ErrNoRows) {
+			return domain.Agent{}, queueErr
+		}
+	}
 	if active >= maxConcurrent {
 		return domain.Agent{}, domain.ErrHiveLimit
 	}
+	if ctx.Value(spawnQueueDrainKey{}) == nil {
+		var waiting bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM spawn_queue WHERE hive_id=$1 AND state='waiting')`, a.HiveID).Scan(&waiting); err != nil {
+			return domain.Agent{}, err
+		}
+		if waiting {
+			return domain.Agent{}, domain.ErrHiveLimit
+		}
+	}
 	if a.ChainID != "" {
 		var chained int
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND chain_id=$2`, a.HiveID, a.ChainID).Scan(&chained); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND role='forager' AND chain_id=$2`, a.HiveID, a.ChainID).Scan(&chained); err != nil {
 			return domain.Agent{}, err
 		}
 		if chained >= maxPerChain {
@@ -308,9 +381,6 @@ func (s *Store) createForager(ctx context.Context, a domain.Agent, limits domain
 		a.IssueNumber, a.PRNumber, a.NodeID, a.ChainID, a.SessionRef, handoff,
 		a.RoleName, a.Revision, a.ParentID, a.CreatedAt, a.UpdatedAt); err != nil {
 		return domain.Agent{}, domainErr(err)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return domain.Agent{}, err
 	}
 	return a, nil
 }
@@ -375,6 +445,9 @@ func (s *Store) ForagerByBranch(ctx context.Context, hiveID, branch string) (dom
 
 // TransitionAgent is a compare-and-swap on the Agent state.
 func (s *Store) TransitionAgent(ctx context.Context, id string, from, to domain.AgentState) error {
+	if to == domain.AgentFailed || to == domain.AgentCompleted {
+		return s.transitionMethodologyOutcome(ctx, id, from, to)
+	}
 	tag, err := s.Pool.Exec(ctx, `UPDATE agents SET state=$3,updated_at=now() WHERE id=$1 AND state=$2`, id, string(from), string(to))
 	if err != nil {
 		return domainErr(err)

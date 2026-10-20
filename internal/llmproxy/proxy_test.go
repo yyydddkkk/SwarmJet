@@ -20,14 +20,15 @@ import (
 )
 
 type fakeBackend struct {
-	mu        sync.Mutex
-	tokens    map[string]domain.Token
-	agents    map[string]domain.Agent
-	agentCost map[string]float64
-	hiveCost  map[string]float64
-	usages    []domain.LLMUsage
-	messages  []domain.Message
-	inbox     map[string][]domain.Message
+	queenEnabled bool
+	mu           sync.Mutex
+	tokens       map[string]domain.Token
+	agents       map[string]domain.Agent
+	agentCost    map[string]float64
+	hiveCost     map[string]float64
+	usages       []domain.LLMUsage
+	messages     []domain.Message
+	inbox        map[string][]domain.Message
 }
 
 func newFakeBackend() *fakeBackend {
@@ -44,6 +45,12 @@ func newFakeBackend() *fakeBackend {
 		hiveCost:  map[string]float64{},
 		inbox:     map[string][]domain.Message{},
 	}
+}
+
+func (f *fakeBackend) Hive(_ context.Context, id string) (domain.Hive, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return domain.Hive{ID: id, QueenEnabled: f.queenEnabled}, nil
 }
 
 func (f *fakeBackend) TokenByPlaintext(_ context.Context, plaintext string) (domain.Token, error) {
@@ -374,6 +381,54 @@ func TestProxyBudgetPerAgentNotifiesOnce(t *testing.T) {
 	if message.From != domain.AddressSystem || message.To != domain.AddressQueen ||
 		message.Trust != domain.TrustSystem || !strings.Contains(message.Body, "maxCostPerAgentUsd") {
 		t.Fatalf("message = %+v", message)
+	}
+}
+
+func TestFormatBudgetUSD(t *testing.T) {
+	for _, tc := range []struct {
+		amount float64
+		want   string
+	}{
+		{0, "0.00"},
+		{1.5, "1.50"},
+		{0.009876, "0.009876"},
+		{0.00000123, "0.000001230"},
+	} {
+		if got := formatBudgetUSD(tc.amount); got != tc.want {
+			t.Errorf("formatBudgetUSD(%g) = %q, want %q", tc.amount, got, tc.want)
+		}
+	}
+}
+
+func TestProxyMicroBudgetShowsAmountsInErrorAndNotice(t *testing.T) {
+	backend := newFakeBackend()
+	backend.agentCost["agent-1"] = 0.0001234
+	limits := LimitsFunc(func(context.Context, string) (domain.Limits, error) {
+		return domain.Limits{MaxCostPerAgentUSD: 0.00012}, nil
+	})
+	proxy := newTestProxy(t, "http://unused.invalid", backend, limits, nil)
+
+	req := agentRequest(t, http.MethodPost, proxy.URL+"/v1/chat/completions", strings.NewReader(`{"model":"x"}`))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var got struct {
+		Message    string  `json:"message"`
+		LimitUSD   float64 `json:"limitUsd"`
+		CurrentUSD float64 `json:"currentUsd"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusPaymentRequired || got.LimitUSD != 0.00012 || got.CurrentUSD != 0.0001234 {
+		t.Fatalf("status = %d, error = %+v", resp.StatusCode, got)
+	}
+	for _, amount := range []string{"0.0001200 USD", "0.0001234 USD"} {
+		if !strings.Contains(got.Message, amount) || !strings.Contains(backend.lastMessage().Body, amount) {
+			t.Fatalf("amount %q missing from error %q or notice %q", amount, got.Message, backend.lastMessage().Body)
+		}
 	}
 }
 

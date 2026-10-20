@@ -200,17 +200,21 @@ func TestConcurrentActivationsLeaveOneActiveVersion(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	errs := make([]error, versions)
+	results := make([]domain.Methodology, versions)
 	for i := 0; i < versions; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = s.ActivateMethodology(ctx, h.ID, (i%versions)+1, domain.LocalAddress("tester"), "race")
+			results[i], errs[i] = s.ActivateMethodology(ctx, h.ID, i+1, domain.LocalAddress("tester"), "race")
 		}(i)
 	}
 	wg.Wait()
 	for i, err := range errs {
 		if err != nil {
 			t.Fatalf("activate %d: %v", i, err)
+		}
+		if results[i].Version != i+1 || !results[i].Active {
+			t.Fatalf("activate %d returned %+v", i+1, results[i])
 		}
 	}
 
@@ -219,9 +223,11 @@ func TestConcurrentActivationsLeaveOneActiveVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	active := 0
+	activeVersion := 0
 	for _, version := range list {
 		if version.Active {
 			active++
+			activeVersion = version.Version
 		}
 	}
 	if active != 1 {
@@ -231,8 +237,33 @@ func TestConcurrentActivationsLeaveOneActiveVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changes) != versions*2 {
-		t.Fatalf("changes = %d, want %d", len(changes), versions*2)
+	// Every target is requested once. Targets 1..5 must switch; target 6 is
+	// already active initially and only switches if another request runs first.
+	if len(changes) != versions*2-1 && len(changes) != versions*2 {
+		t.Fatalf("changes = %d, want %d or %d", len(changes), versions*2-1, versions*2)
+	}
+	for i, change := range changes[:versions] {
+		if change.Action != methodology.ActionPublish || change.Version != i+1 {
+			t.Fatalf("publish audit %d = %+v", i, change)
+		}
+	}
+	previous := versions
+	seen := map[int]bool{}
+	for _, change := range changes[versions:] {
+		if change.Action != methodology.ActionActivate || change.Actor != domain.LocalAddress("tester") || change.Note != "race" ||
+			change.Version < 1 || change.Version > versions || change.Version == previous || seen[change.Version] {
+			t.Fatalf("invalid activation audit after version %d: %+v", previous, change)
+		}
+		seen[change.Version] = true
+		previous = change.Version
+	}
+	for version := 1; version < versions; version++ {
+		if !seen[version] {
+			t.Fatalf("missing activation audit for version %d: %+v", version, changes)
+		}
+	}
+	if previous != activeVersion {
+		t.Fatalf("last audited version = %d, active version = %d", previous, activeVersion)
 	}
 }
 

@@ -58,7 +58,7 @@ function MessageRow({
     return (
       <div className="hg-msg hg-msg-local">
         <div className="hg-msg-meta">
-          <span className="hg-msg-author">你（本地 Agent）</span>
+          <span className="hg-msg-author">{from.startsWith("local:web-") ? "你（网页）" : "你（本地 Agent）"}</span>
           <TrustBadge trust={trust} />
           <span className="hg-msg-kind">{kindLabels[message.kind]}</span>
           <time className="hg-time">{at}</time>

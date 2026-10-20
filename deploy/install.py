@@ -321,6 +321,17 @@ def tag_from_image(image: str) -> str:
     return ""
 
 
+def migrate_legacy_values(values: dict) -> None:
+    """Update retired Agent settings without changing deployment credentials."""
+    # omp is always installed; the Agent image rejects the retired OpenCode CLI.
+    if "AGENT_CLIS" in values:
+        kept = [c.strip() for c in values["AGENT_CLIS"].split(",") if c.strip() and c.strip() != "opencode"]
+        values["AGENT_CLIS"] = ",".join(kept)
+    # DeepSeek V4 replaced these names in omp's model catalog.
+    if values.get("SWARMJET_DEFAULT_MODEL") in ("deepseek/deepseek-chat", "deepseek/deepseek-reasoner"):
+        values["SWARMJET_DEFAULT_MODEL"] = "deepseek/deepseek-v4-flash"
+
+
 def build_values(
     existing: dict,
     *,
@@ -343,16 +354,7 @@ def build_values(
         elif key in existing and not _missing(existing[key]):
             values[key] = existing[key]
 
-    # Round 4 replaced OpenCode with omp, which the Agent image always
-    # installs. Older .env files listed opencode here, which the image build
-    # now rejects, so drop it on upgrade.
-    # deepseek-chat left omp's model catalog with DeepSeek V4; the gateway
-    # answers "Unknown model" for it.
-    if values.get("SWARMJET_DEFAULT_MODEL") in ("deepseek/deepseek-chat", "deepseek/deepseek-reasoner"):
-        values["SWARMJET_DEFAULT_MODEL"] = "deepseek/deepseek-v4-flash"
-    if "AGENT_CLIS" in values:
-        kept = [c.strip() for c in values["AGENT_CLIS"].split(",") if c.strip() and c.strip() != "opencode"]
-        values["AGENT_CLIS"] = ",".join(kept)
+    migrate_legacy_values(values)
 
     password = values.get("POSTGRES_PASSWORD") or secrets.token_hex(24)
     values["POSTGRES_PASSWORD"] = password
@@ -832,6 +834,7 @@ def upgrade(args) -> int:
     if not env_path.exists():
         raise InstallError(f"未找到 {env_path}；请先运行 install。")
     values = read_env(env_path)
+    migrate_legacy_values(values)
     if is_quick_tunnel(values.get("PUBLIC_ORIGIN", "")):
         values["PUBLIC_ORIGIN"] = console_origin(values["PUBLIC_ORIGIN"], values.get("HTTP_PORT", DEFAULT_PORT))
         say(f"PUBLIC_ORIGIN 曾被设为临时隧道地址，已改回 {values['PUBLIC_ORIGIN']}。")

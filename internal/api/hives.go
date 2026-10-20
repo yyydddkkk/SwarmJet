@@ -54,6 +54,8 @@ func (a *server) hives(w http.ResponseWriter, r *http.Request) {
 		a.hiveCollection(w, r)
 	case len(parts) == 2 && parts[0] == "hives":
 		a.hiveItem(w, r, parts[1])
+	case len(parts) == 3 && parts[0] == "hives" && parts[2] == "queen":
+		a.hiveQueen(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "hives" && parts[2] == "foragers":
 		a.hiveForagers(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "hives" && parts[2] == "messages":
@@ -187,6 +189,10 @@ func (a *server) createHive(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *server) hiveItem(w http.ResponseWriter, r *http.Request, hiveID string) {
+	if r.Method == http.MethodPatch {
+		a.updateHive(w, r, hiveID)
+		return
+	}
 	if r.Method != http.MethodGet {
 		problem(w, http.StatusMethodNotAllowed, "method not allowed")
 		return

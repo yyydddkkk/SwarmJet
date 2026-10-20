@@ -21,8 +21,13 @@ Green CI is an input to your verdict, not the verdict.
    `git worktree add /tmp/base origin/<base>` when you need to run the old
    behaviour side by side.
 4. **Read the diff adversarially** for correctness, security, data loss,
-   concurrency and missed cases. A finding needs a concrete location and
-   evidence; "I would have done it differently" is not a finding.
+   concurrency and missed cases. Check every explicit task requirement and
+   applicable standard, including RFC MUST requirements. A demonstrated
+   violation is `fail`, even if the changed code otherwise works. For example,
+   if the task requires rejecting invalid tokens and the endpoint accepts one,
+   attest `fail`. A clearer local name in otherwise conforming code is at most
+   `pass_notes`. A finding needs a concrete location and evidence; "I would
+   have done it differently" is not a finding.
 5. **Attest once** with `attest`: `pr`, `sha` (your exact commit), `result`,
    `summary`, and `findings` (severity critical / warning / nit, location,
    finding, evidence).

@@ -1,4 +1,5 @@
-// Hive 方法论 (round 4, contract sections 2, 3 and 7). The page renders the
+// Hive 方法论: round-5 catalog installation and round-4 version management.
+// The page renders the
 // manifest as structured cards instead of raw YAML, exposes every file, keeps
 // the append-only version history and modification log, diffs any two versions,
 // and switches versions behind a confirmation.
@@ -11,6 +12,7 @@ import type {
   MethodologyFile,
   MethodologyManifest,
   MethodologyRole,
+  MethodologyTemplate,
   RolePermissions,
 } from "./types";
 import {
@@ -46,6 +48,16 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
   if (current.loading && !current.data) {
     return <BeeLoader label="正在读取方法论…" />;
   }
+  const installed = () => {
+    setViewVersion(undefined);
+    setNotice("方法论已安装；新派出的 Forager 会使用这个版本。");
+    current.reload();
+    versions.reload();
+  };
+
+  if (current.errorStatus === 404 && viewVersion === undefined && !current.data) {
+    return <MethodologyCatalog hiveId={hiveId} onInstalled={installed} />;
+  }
   if (current.error && !current.data) {
     return (
       <ErrorNotice
@@ -58,10 +70,13 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
   }
   if (!current.data) return null;
 
+  // The platform's minimal fallback is not an installed methodology.
+  const builtin = current.data.builtin === true;
+  if (builtin) return <MethodologyCatalog hiveId={hiveId} onInstalled={installed} />;
+
   // The response is the version itself, flattened, plus its files.
   const methodology = current.data;
   const { files } = current.data;
-  const builtin = current.data.builtin === true;
   const versionList = versions.data?.versions ?? [];
   const changes = versions.data?.changes ?? [];
   const activeVersion =
@@ -90,6 +105,7 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
 
   return (
     <div className="hg-methodology">
+      {builtin ? <MethodologyCatalog hiveId={hiveId} onInstalled={installed} /> : null}
       {notice ? (
         <div className="hg-flash hg-flash-success" role="status">
           <Icon name="check" size={16} />
@@ -203,6 +219,93 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
         </ConfirmDialog>
       ) : null}
     </div>
+  );
+}
+
+function MethodologyCatalog({
+  hiveId,
+  onInstalled,
+}: {
+  hiveId: string;
+  onInstalled: () => void;
+}) {
+  const templates = useResource(signal => hiveAPI.listMethodologyTemplates(signal), []);
+  const [selected, setSelected] = useState<MethodologyTemplate | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const install = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      await hiveAPI.installMethodology(hiveId, selected.name);
+      setSelected(null);
+      onInstalled();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Panel title="选择方法论" subtitle="尚未选择方法论，可以在对话里请 Queen 推荐">
+      <Callout>
+        安装前不会自动派出 Forager。选择适合团队的方法论后，它会作为新版本立即生效。
+      </Callout>
+      {templates.loading && !templates.data ? (
+        <BeeLoader label="正在读取内置目录…" />
+      ) : templates.error ? (
+        <ErrorNotice
+          message={templates.error}
+          onRetry={templates.reload}
+          auth={templates.errorStatus === 401}
+          admin={templates.errorStatus === 403}
+        />
+      ) : templates.data?.length ? (
+        <ul className="hg-role-grid" aria-label="内置方法论目录">
+          {templates.data.map(template => (
+            <li key={template.name}>
+              <article className="hg-role-card">
+                <h3>{template.title}</h3>
+                <p className="hg-role-desc">{template.description}</p>
+                <p className="hg-muted"><code>builtin:{template.name}</code> · {template.version}</p>
+                <button
+                  type="button"
+                  className="hg-btn hg-btn-primary"
+                  aria-label={`安装 ${template.title}`}
+                  onClick={() => {
+                    setSelected(template);
+                    setError("");
+                  }}
+                >
+                  安装
+                </button>
+              </article>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="hg-muted">内置目录暂时没有可用方法论，可以请 Queen 帮你创建。</p>
+      )}
+      {selected ? (
+        <ConfirmDialog
+          title={`安装 ${selected.title}？`}
+          confirmLabel="确认安装"
+          busy={busy}
+          error={error}
+          onConfirm={() => void install()}
+          onCancel={() => setSelected(null)}
+        >
+          <p>{selected.description}</p>
+          <p>
+            将安装 <code>builtin:{selected.name}</code>（{selected.version}），发布并立即启用这个版本。
+            新派出的 Forager 会遵循其中的角色、权限和合并规则。
+          </p>
+        </ConfirmDialog>
+      ) : null}
+    </Panel>
   );
 }
 

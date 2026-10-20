@@ -20,10 +20,10 @@ func TestSendMessageValidation(t *testing.T) {
 	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.ForagerAddress("a"), To: domain.ForagerAddress("b"), Kind: domain.MessageEvent}); err != nil {
 		t.Fatalf("peer message rejected: %v", err)
 	}
-	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.AddressSystem, To: domain.AddressHive, Kind: domain.MessageEvent, Hop: 11}); !errors.Is(err, domain.ErrHopLimit) {
+	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.AddressSystem, To: domain.AddressHive, Kind: domain.MessageEvent, Hop: 51}); !errors.Is(err, domain.ErrHopLimit) {
 		t.Fatalf("hop limit not enforced: %v", err)
 	}
-	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.AddressSystem, To: domain.AddressHive, Kind: domain.MessageEvent, Hop: 10, Body: "at limit"}); err != nil {
+	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.AddressSystem, To: domain.AddressHive, Kind: domain.MessageEvent, Hop: 50, Body: "at limit"}); err != nil {
 		t.Fatalf("hop at limit rejected: %v", err)
 	}
 	if _, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, To: domain.AddressHive, Body: strings.Repeat("é", domain.MaxMessageBody+1)}); !errors.Is(err, domain.ErrMessageTooLarge) {
@@ -67,6 +67,69 @@ func TestSendMessageIdempotencyAndConflict(t *testing.T) {
 	b, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, To: domain.AddressHive, Body: "b"})
 	if err != nil || b.ID == a.ID {
 		t.Fatalf("generated ids not unique: %q %q (%v)", a.ID, b.ID, err)
+	}
+}
+
+func TestSendMessageRoutesHiveToEnabledQueen(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	h := newTestHive(t, s, "acme/queen-routing")
+	type source struct {
+		name  string
+		from  domain.Address
+		trust domain.MessageTrust
+	}
+	sources := []source{
+		{"local", domain.LocalAddress("operator"), domain.TrustUser},
+		{"forager", domain.ForagerAddress("worker"), domain.TrustAgent},
+		{"system", domain.AddressSystem, domain.TrustSystem},
+		{"external", domain.AddressSystem, domain.TrustExternal},
+	}
+	// With the switch off, the Hive inbox remains the destination.
+	off, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.AddressSystem, To: domain.AddressHive, Kind: domain.MessageEvent})
+	if err != nil || off.To != domain.AddressHive {
+		t.Fatalf("disabled queen: %+v %v", off, err)
+	}
+	h.QueenEnabled = true
+	h, err = s.UpdateHive(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range sources {
+		t.Run(tc.name, func(t *testing.T) {
+			m := domain.Message{HiveID: h.ID, From: tc.from, To: domain.AddressHive, Kind: domain.MessageEvent, Body: tc.name}
+			if tc.name == "external" {
+				m.Trust = domain.TrustExternal
+			}
+			sent, err := s.SendMessage(ctx, m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sent.To != domain.AddressQueen || sent.From != tc.from || sent.Trust != tc.trust {
+				t.Fatalf("routed message = %+v", sent)
+			}
+			stored, err := scanMessage(s.Pool.QueryRow(ctx, `SELECT `+messageColumns+` FROM messages WHERE id=$1`, sent.ID))
+			if err != nil || stored.To != domain.AddressQueen || stored.From != tc.from || stored.Trust != tc.trust {
+				t.Fatalf("stored message = %+v, %v", stored, err)
+			}
+		})
+	}
+	// Queen replies to Hive must stay there, without bouncing back to Queen.
+	reply, err := s.SendMessage(ctx, domain.Message{HiveID: h.ID, From: domain.AddressQueen, To: domain.AddressHive, Kind: domain.MessageEvent})
+	if err != nil || reply.To != domain.AddressHive {
+		t.Fatalf("queen reply: %+v %v", reply, err)
+	}
+	hiveInbox, err := s.Inbox(ctx, h.ID, domain.AddressHive, "", 10)
+	if err != nil || len(hiveInbox) != 2 || hiveInbox[0].ID != off.ID || hiveInbox[1].ID != reply.ID {
+		t.Fatalf("hive inbox = %+v, %v", hiveInbox, err)
+	}
+	queenInbox, err := s.Inbox(ctx, h.ID, domain.AddressQueen, "", 10)
+	if err != nil || len(queenInbox) != len(sources)+1 {
+		t.Fatalf("queen inbox = %+v, %v", queenInbox, err)
+	}
+	bootstrap := queenInbox[0]
+	if bootstrap.From != domain.AddressSystem || bootstrap.Trust != domain.TrustSystem || bootstrap.Kind != domain.MessageTask || bootstrap.Body != "新 Hive，请开始首次引导" {
+		t.Fatalf("expected enable bootstrap before routed messages, got %+v", bootstrap)
 	}
 }
 

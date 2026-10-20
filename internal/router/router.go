@@ -34,20 +34,23 @@ const (
 	ActionDelivered Action = "delivered"
 	// ActionForagerCreated means a trigger rule started a new Forager.
 	ActionForagerCreated Action = "forager_created"
-	// ActionInbox means the event was filed in the Hive Inbox.
+	// ActionInbox means the event was filed in the Queen or Hive Inbox.
 	ActionInbox Action = "inbox"
+	// ActionQueued means a matching trigger is waiting for a concurrency slot.
+	ActionQueued Action = "queued"
 )
 
 // Decision describes what the Router did with an event. It is used for logging
 // and is the primary assertion surface in tests.
 type Decision struct {
-	Action     Action         `json:"action"`
-	Reason     string         `json:"reason,omitempty"`
-	Repository string         `json:"repository,omitempty"`
-	HiveID     string         `json:"hiveId,omitempty"`
-	ForagerID  string         `json:"foragerId,omitempty"`
-	Target     domain.Address `json:"target,omitempty"`
-	MessageID  string         `json:"messageId,omitempty"`
+	Action        Action         `json:"action"`
+	Reason        string         `json:"reason,omitempty"`
+	Repository    string         `json:"repository,omitempty"`
+	HiveID        string         `json:"hiveId,omitempty"`
+	ForagerID     string         `json:"foragerId,omitempty"`
+	Target        domain.Address `json:"target,omitempty"`
+	MessageID     string         `json:"messageId,omitempty"`
+	QueuePosition int            `json:"queuePosition,omitempty"`
 }
 
 // PRRecorder records the PR number a Forager opened. It matches the round-2
@@ -159,7 +162,7 @@ func normalizeAppSlug(raw string) string {
 //  1. find the Hive for the repository (ignore unknown repositories);
 //  2. a matching trigger rule starts a Forager (or reuses the Issue's Forager);
 //  3. an event that belongs to an existing non-terminal Forager is delivered to it;
-//  4. everything else goes to the Hive Inbox.
+//  4. everything else goes to the Queen Inbox when enabled, or the Hive Inbox.
 func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
 	repository := strings.TrimSpace(e.Repository)
 	if repository == "" {
@@ -171,6 +174,9 @@ func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
 	}
 	if err != nil {
 		return Decision{}, err
+	}
+	if decision, handled, err := r.closePROwner(ctx, hive, e); handled || err != nil {
+		return decision, err
 	}
 	cfg := resolveConfig(hive.Config)
 
@@ -443,11 +449,43 @@ func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.
 			agent.ChainID = owner.ChainID
 		}
 	}
+	if agent.ID == "" {
+		agent.ID = triggerAgentID(hive.ID, e, rule)
+	}
 	created, err := r.backend.CreateForager(ctx, agent)
+	if errors.Is(err, domain.ErrHiveLimit) {
+		if queue, ok := r.backend.(interface {
+			EnqueueSpawn(context.Context, domain.Agent, domain.Message, domain.Limits) (string, int, error)
+		}); ok {
+			message := domain.Message{
+				ID: messageID(e, domain.ForagerAddress(agent.ID)), HiveID: hive.ID,
+				From: domain.AddressSystem, Kind: domain.MessageTask,
+				ChainID: agent.ChainID, Body: task, Trust: domain.TrustExternal,
+			}
+			id, position, queueErr := queue.EnqueueSpawn(ctx, agent, message, domain.Limits{})
+			if errors.Is(queueErr, domain.ErrConflict) {
+				if revisionEvent && rule.Event == MethodologyEventCheckFailed {
+					if _, err := r.deliverToForager(ctx, hive, e, owner, domain.MessageEvent, ""); err != nil {
+						return Decision{}, err
+					}
+				}
+				return Decision{Action: ActionIgnored, Reason: rule.Event + " rule already started an Agent for this request", Repository: e.Repository, HiveID: hive.ID, ForagerID: agent.ID}, nil
+			}
+			if queueErr != nil {
+				return Decision{}, queueErr
+			}
+			if revisionEvent && rule.Event == MethodologyEventCheckFailed {
+				if _, err := r.deliverToForager(ctx, hive, e, owner, domain.MessageEvent, ""); err != nil {
+					return Decision{}, err
+				}
+			}
+			return Decision{Action: ActionQueued, Reason: "trigger " + rule.Event + " waiting for concurrency slot", Repository: e.Repository, HiveID: hive.ID, ForagerID: id, QueuePosition: position}, nil
+		}
+	}
 	if errors.Is(err, domain.ErrHiveLimit) || errors.Is(err, domain.ErrChainLimit) {
 		return r.toInbox(ctx, hive, e, "cannot start Forager: "+err.Error())
 	}
-	if revisionEvent && errors.Is(err, domain.ErrConflict) {
+	if errors.Is(err, domain.ErrConflict) {
 		err = nil
 		created = domain.Agent{}
 	}
@@ -627,11 +665,15 @@ func (r *Router) toInbox(ctx context.Context, hive domain.Hive, e Event, reason 
 	if reason != "" {
 		body = "Not auto-routed: " + reason + "\n\n" + body
 	}
+	target := domain.AddressHive
+	if hive.QueenEnabled {
+		target = domain.AddressQueen
+	}
 	message := domain.Message{
-		ID:      messageID(e, domain.AddressHive),
+		ID:      messageID(e, target),
 		HiveID:  hive.ID,
 		From:    domain.AddressSystem,
-		To:      domain.AddressHive,
+		To:      target,
 		Kind:    domain.MessageEvent,
 		ChainID: chainIDFor(e),
 		Body:    body,
@@ -803,10 +845,10 @@ func resolveConfig(c domain.HiveConfig) domain.HiveConfig {
 		c.MaxConcurrentForagers = 4
 	}
 	if c.MaxHops <= 0 {
-		c.MaxHops = 10
+		c.MaxHops = 50
 	}
 	if c.MaxForagersPerChain <= 0 {
-		c.MaxForagersPerChain = 10
+		c.MaxForagersPerChain = 50
 	}
 	if c.IdleParkMinutes <= 0 {
 		c.IdleParkMinutes = 30

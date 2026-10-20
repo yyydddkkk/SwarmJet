@@ -10,6 +10,7 @@ import (
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/jobs"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 // Checker evaluates the merge conditions. *Service implements it.
@@ -133,8 +134,8 @@ func (s *Scheduler) notifyReady(ctx context.Context, hive domain.Hive, readiness
 	return nil
 }
 
-// dispatcher reports who should hear "可以合并": the sender of the PR owner's
-// newest task, then the Queen when enabled, then the Hive Inbox.
+// dispatcher preserves the owner chain and routes the notice to the Queen
+// when enabled, otherwise to the sender of the owner's newest task.
 func (s *Scheduler) dispatcher(ctx context.Context, hive domain.Hive, pr int64, headRef string) (domain.Address, string, error) {
 	owner, err := s.store.PRAuthorByBranch(ctx, hive.ID, headRef)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -145,21 +146,12 @@ func (s *Scheduler) dispatcher(ctx context.Context, hive domain.Hive, pr int64, 
 		if sendErr != nil {
 			return "", "", sendErr
 		}
-		if sender != "" && sender != domain.AddressSystem {
-			return sender, owner.ChainID, nil
-		}
-		if hive.QueenEnabled {
-			return domain.AddressQueen, owner.ChainID, nil
-		}
-		return domain.AddressHive, owner.ChainID, nil
+		return store.NotificationTarget(hive, sender), owner.ChainID, nil
 	}
 	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return "", "", err
 	}
-	if hive.QueenEnabled {
-		return domain.AddressQueen, "", nil
-	}
-	return domain.AddressHive, "", nil
+	return store.NotificationTarget(hive, ""), "", nil
 }
 
 // latestTaskSender walks the owner's Inbox from oldest to newest and returns

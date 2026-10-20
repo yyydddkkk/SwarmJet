@@ -10,6 +10,8 @@ import type {
   Message,
   MessageKind,
   MethodologyResponse,
+  MethodologyTemplate,
+  QueenStatus,
   MethodologyVersionsResponse,
   ModelCredentialResponse,
   ModelsResponse,
@@ -207,11 +209,27 @@ export const hiveAPI = {
     return request<HiveDetailResponse>(`/hives/${segment(hiveId)}`, "GET", undefined, signal);
   },
 
+  getQueen(hiveId: string, signal?: AbortSignal) {
+    return request<QueenStatus>(`/hives/${segment(hiveId)}/queen`, "GET", undefined, signal);
+  },
+
+  updateHive(hiveId: string, input: { name?: string; queenEnabled?: boolean; config?: Partial<Hive["config"]> }, signal?: AbortSignal) {
+    return request<HiveDetailResponse>(`/hives/${segment(hiveId)}`, "PATCH", input, signal);
+  },
+
   createHive(input: CreateHiveInput, signal?: AbortSignal) {
     return request<HiveDetailResponse>("/hives", "POST", input, signal);
   },
 
   /* ---- methodology (round 4, contract sections 2, 3 and 7) ---- */
+
+  listMethodologyTemplates(signal?: AbortSignal) {
+    return request<MethodologyTemplate[]>("/methodology-templates", "GET", undefined, signal);
+  },
+
+  installMethodology(hiveId: string, name: string, note?: string, signal?: AbortSignal) {
+    return request<MethodologyResponse>(`/hives/${segment(hiveId)}/methodology/install`, "POST", { name, ...(note ? { note } : {}) }, signal);
+  },
 
   getMethodology(hiveId: string, version?: number, signal?: AbortSignal) {
     const query = version ? `?version=${encodeURIComponent(String(version))}` : "";

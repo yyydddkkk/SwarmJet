@@ -6,6 +6,7 @@ network.
 import contextlib
 import importlib.util
 import io
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -61,14 +62,14 @@ def make_values(**overrides):
 
 
 class EnvironmentTests(unittest.TestCase):
-    def test_upgrade_drops_opencode_from_agent_clis(self):
+    def test_build_values_drops_opencode_from_agent_clis(self):
         common = dict(data_dir="/tmp/data", port=8180, listen_host="127.0.0.1",
                       public_origin="http://localhost:8180", cells=True, tunnel=False,
                       image="swarmjet:local", agent_image="swarmjet-agent:local", admin_username="admin")
         self.assertEqual(installer.build_values({"AGENT_CLIS": "opencode"}, **common)["AGENT_CLIS"], "")
         self.assertEqual(installer.build_values({"AGENT_CLIS": "opencode, codex"}, **common)["AGENT_CLIS"], "codex")
 
-    def test_upgrade_replaces_retired_deepseek_default(self):
+    def test_build_values_replaces_retired_deepseek_default(self):
         common = dict(data_dir="/tmp/data", port=8180, listen_host="127.0.0.1",
                       public_origin="http://localhost:8180", cells=True, tunnel=False,
                       image="swarmjet:local", agent_image="swarmjet-agent:local", admin_username="admin")
@@ -247,6 +248,33 @@ class ArgumentTests(unittest.TestCase):
             self.assertTrue(any("/dev/deploy/install.py" in url for url in urls))
 
 
+class ReleaseImageContractTests(unittest.TestCase):
+    def test_release_tags_and_omp_match_installer_and_builds(self):
+        workflow = (HERE.parent / ".github/workflows/release.yml").read_text()
+        # Render the two GitHub expressions used in image names so changing
+        # either side of the release/install contract breaks this check.
+        owner = installer.REPOSITORY.split("/", 1)[0]
+        rendered = workflow.replace("${{ github.repository_owner }}", owner)
+        rendered = rendered.replace("${{ github.ref_name }}", "v0.1.0")
+        published = re.findall(r"^\s+(ghcr\.io/\S+)\s*$", rendered, re.MULTILINE)
+        for version in ("v0.1.0", "latest"):
+            for image in installer.image_values("ghcr", version):
+                self.assertIn(image, published)
+        omp_version = make_values()["OMP_VERSION"]
+        self.assertIn(f"OMP_VERSION={omp_version}", workflow)
+        self.assertIn(f"ARG OMP_VERSION={omp_version}\n", (HERE / "Dockerfile.agent").read_text())
+        self.assertIn(f"OMP_VERSION: ${{OMP_VERSION:-{omp_version}}}", (HERE / "compose.build.yaml").read_text())
+
+    def test_broker_and_gateway_share_the_published_agent_image(self):
+        # Each model service must use AGENT_IMAGE, which the GHCR installer
+        # fills with the published /agent tag, rather than a local-only name.
+        cells = (HERE / "compose.cells.yaml").read_text()
+        for name in ("auth-broker", "auth-gateway"):
+            service = re.search(rf"^  {name}:\n(.*?)(?=^  [a-z]|^networks:|\Z)", cells, re.MULTILINE | re.DOTALL)
+            self.assertIsNotNone(service, name)
+            self.assertIn("image: ${AGENT_IMAGE:-swarmjet-agent:local}", service.group(1))
+
+
 class ConnectTests(unittest.TestCase):
     def test_local_mcp_url_uses_installed_port_and_host(self):
         self.assertEqual(installer.local_mcp_url({"HTTP_PORT": "8190"}), "http://127.0.0.1:8190/mcp")
@@ -395,14 +423,17 @@ class InstallFlowTests(unittest.TestCase):
                 code = installer.main([
                     "install", "--dir", str(standalone), "--data-dir", str(root / "data"),
                     "--port", "18180", "--image-source", "ghcr", "--version", "v1.2.3",
-                    "--yes", "--no-cells", "--no-tunnel",
+                    "--yes", "--cells", "--no-tunnel",
                 ])
             self.assertEqual(code, 0)
             download.assert_not_called()
             parsed = installer.read_env(standalone / ".env")
             self.assertEqual(parsed["IMAGE"], "ghcr.io/yyydddkkk/swarmjet:v1.2.3")
             self.assertEqual(parsed["AGENT_IMAGE"], "ghcr.io/yyydddkkk/swarmjet/agent:v1.2.3")
-            self.assertTrue(any("pull" in call for call in calls))
+            pull_calls = [call for call in calls if "pull" in call]
+            self.assertEqual(len(pull_calls), 1)
+            self.assertIn(str(standalone / "compose.cells.yaml"), pull_calls[0])
+            self.assertEqual(parsed["SWARMJET_CELLS"], "1")
             self.assertFalse(any("build" in call for call in calls))
 
     def test_existing_postgres_volume_without_env_is_rejected(self):
@@ -425,6 +456,78 @@ class InstallFlowTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertFalse((deploy / ".env").exists())
             self.assertFalse(any("build" in call or "up" in call for call in calls))
+
+
+class UpgradeFlowTests(unittest.TestCase):
+    def test_upgrade_migrates_legacy_settings_and_preserves_deployment(self):
+        for source in ("repo", "ghcr"):
+            for enabled in (False, True):
+                for model in ("deepseek/deepseek-chat", "deepseek/deepseek-reasoner", "custom/provider-model"):
+                    with self.subTest(source=source, enabled=enabled, model=model), tempfile.TemporaryDirectory() as directory:
+                        root = Path(directory)
+                        deploy = make_repo(root)
+                        env_path = deploy / ".env"
+                        existing = {key: "" for key, _ in installer.ENV_ORDER}
+                        existing.update({
+                            "COMPOSE_PROJECT_NAME": "upgrade-test",
+                            "POSTGRES_PASSWORD": "test-db-password",
+                            "DATABASE_URL": "postgres://swarmjet:test-db-password@postgres:5432/swarmjet?sslmode=disable",
+                            "ADMIN_PASSWORD": "test-admin-password",
+                            "SWARMJET_MASTER_KEY": "a" * 64,
+                            "GITHUB_WEBHOOK_SECRET": "test-webhook-secret",
+                            "DATA_DIR": str(root / "data"),
+                            "IMAGE": "swarmjet:old",
+                            "AGENT_IMAGE": "swarmjet-agent:old",
+                            "AGENT_CLIS": " opencode, codex, claude ",
+                            "SWARMJET_DEFAULT_MODEL": model,
+                            "SWARMJET_CELLS": "1" if enabled else "0",
+                            "SWARMJET_TUNNEL_URL": "http://tunnel:2000" if enabled else "",
+                            "PUBLIC_ORIGIN": "https://swarmjet.example.com",
+                            "CUSTOM_KEY": "keep-me",
+                        })
+                        env_path.write_text("".join(f"{key}={value}\n" for key, value in existing.items()))
+                        env_path.chmod(0o600)
+                        calls = []
+                        written_at_run = []
+
+                        def run(argv, **kwargs):
+                            calls.append(list(argv))
+                            written_at_run.append(installer.read_env(env_path))
+                            return completed(argv)
+
+                        with patch.object(installer, "script_dir", return_value=deploy), \
+                             patch.object(installer, "check_docker"), \
+                             patch.object(installer, "run", side_effect=run), \
+                             patch.object(installer, "ensure_sources") as sources, \
+                             patch.object(installer, "ensure_llm_tokens") as tokens, \
+                             patch.object(installer.secrets, "token_hex", side_effect=AssertionError("must preserve secrets")), \
+                             patch.object(installer, "warn_legacy"), \
+                             patch.object(installer, "print_summary"), \
+                             contextlib.redirect_stdout(io.StringIO()):
+                            code = installer.main([
+                                "upgrade", "--dir", str(deploy), "--image-source", source,
+                                "--version", "v1.2.3",
+                            ])
+
+                        self.assertEqual(code, 0)
+                        expected = dict(existing, AGENT_CLIS="codex,claude")
+                        expected["SWARMJET_DEFAULT_MODEL"] = (
+                            model if model == "custom/provider-model" else "deepseek/deepseek-v4-flash"
+                        )
+                        expected["IMAGE"], expected["AGENT_IMAGE"] = installer.image_values(source, "v1.2.3")
+                        self.assertEqual(installer.read_env(env_path), expected)
+                        self.assertEqual(written_at_run, [expected, expected])
+                        self.assertEqual(env_path.stat().st_mode & 0o777, 0o600)
+                        sources.assert_not_called()
+                        if enabled:
+                            tokens.assert_called_once_with(existing["DATA_DIR"])
+                        else:
+                            tokens.assert_not_called()
+                        self.assertEqual(calls[0][-1], "build" if source == "repo" else "pull")
+                        self.assertEqual(calls[1][-5:], ["up", "-d", "--wait", "--wait-timeout", "300"])
+                        for call in calls:
+                            self.assertEqual(str(deploy / "compose.cells.yaml") in call, enabled)
+                            self.assertEqual("tunnel" in call, enabled)
 
 
 class UninstallTests(unittest.TestCase):

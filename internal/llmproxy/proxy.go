@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -16,10 +17,12 @@ import (
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/store"
 )
 
 // Backend is the storage surface the proxy needs. *store.Store satisfies it.
 type Backend interface {
+	Hive(ctx context.Context, id string) (domain.Hive, error)
 	TokenByPlaintext(ctx context.Context, plaintext string) (domain.Token, error)
 	Agent(ctx context.Context, id string) (domain.Agent, error)
 	AgentCost(ctx context.Context, agentID string) (float64, error)
@@ -186,8 +189,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"limitUsd":   exceeded.limit,
 			"currentUsd": exceeded.current,
 			"agentId":    agent.ID,
-			"message": fmt.Sprintf("%s exceeded: limit %.2f USD, current spend %.2f USD",
-				exceeded.name, exceeded.limit, exceeded.current),
+			"message": fmt.Sprintf("%s exceeded: limit %s USD, current spend %s USD",
+				exceeded.name, formatBudgetUSD(exceeded.limit), formatBudgetUSD(exceeded.current)),
 		})
 		return
 	}
@@ -266,6 +269,16 @@ type budgetExceeded struct {
 	current float64
 }
 
+// formatBudgetUSD keeps cents for ordinary amounts and four significant digits
+// for smaller limits and spends, which would otherwise display as 0.00 USD.
+func formatBudgetUSD(amount float64) string {
+	if amount == 0 || math.Abs(amount) >= 0.01 {
+		return fmt.Sprintf("%.2f", amount)
+	}
+	decimals := 3 - int(math.Floor(math.Log10(math.Abs(amount))))
+	return fmt.Sprintf("%.*f", decimals, amount)
+}
+
 func (p *Proxy) checkBudget(ctx context.Context, agent domain.Agent) *budgetExceeded {
 	limits, err := p.limits.Limits(ctx, agent.HiveID)
 	if err != nil {
@@ -293,19 +306,26 @@ func (p *Proxy) checkBudget(ctx context.Context, agent domain.Agent) *budgetExce
 	return nil
 }
 
-// notifyBudget sends one system message per Agent and limit. The dispatcher is
-// the Agent's parent when known, otherwise the sender of its latest task.
+// notifyBudget sends one system message per Agent and limit to the Queen when
+// enabled, otherwise to the Agent's dispatcher.
 func (p *Proxy) notifyBudget(ctx context.Context, agent domain.Agent, exceeded *budgetExceeded) {
 	key := agent.ID + "|" + exceeded.name
 	if _, loaded := p.notified.LoadOrStore(key, struct{}{}); loaded {
 		return
 	}
-	to := p.dispatcher(ctx, agent)
-	if to == "" {
+	hive, err := p.store.Hive(ctx, agent.HiveID)
+	if err != nil {
+		p.notified.Delete(key)
+		p.logger.Warn("llmproxy: could not read notification Hive", "agent", agent.ID, "error", err)
 		return
 	}
-	body := fmt.Sprintf("Model budget limit %s reached for agent %s: limit %.2f USD, current spend %.2f USD. Its model requests are paused until the budget is raised.",
-		exceeded.name, agent.ID, exceeded.limit, exceeded.current)
+	var dispatcher domain.Address
+	if !hive.QueenEnabled {
+		dispatcher = p.dispatcher(ctx, agent)
+	}
+	to := store.NotificationTarget(hive, dispatcher)
+	body := fmt.Sprintf("Model budget limit %s reached for agent %s: limit %s USD, current spend %s USD. Its model requests are paused until the budget is raised.",
+		exceeded.name, agent.ID, formatBudgetUSD(exceeded.limit), formatBudgetUSD(exceeded.current))
 	message := domain.Message{
 		HiveID:  agent.HiveID,
 		From:    domain.AddressSystem,

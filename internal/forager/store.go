@@ -55,3 +55,10 @@ type Store interface { // Agent reads one Agent, including SessionRef and Handof
 type MethodologyStore interface {
 	ActiveMethodology(ctx context.Context, hiveID string) (domain.Methodology, []domain.MethodologyFile, error)
 }
+
+// QueenStore locates the platform-managed Queen independently of Foragers.
+type QueenStore interface {
+	Queen(ctx context.Context, hiveID string) (domain.Agent, error)
+	// SendHiveDiagnostic preserves a platform failure report in the Hive inbox.
+	SendHiveDiagnostic(ctx context.Context, hiveID, body string) (domain.Message, error)
+}

@@ -4,6 +4,7 @@
 
 export type HiveConfig = {
   cli: string;
+  queenModel?: string;
   maxConcurrentForagers: number;
   maxHops: number;
   maxForagersPerChain: number;
@@ -32,6 +33,21 @@ export type Hive = {
   version: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type QueenStatus = {
+  enabled: boolean;
+  state: AgentState;
+  model: string;
+  agentId: string;
+  lastTurnAt: string | null;
+};
+
+export type MethodologyTemplate = {
+  name: string;
+  title: string;
+  description: string;
+  version: string;
 };
 
 export type AgentRole = "queen" | "forager";
@@ -345,6 +361,7 @@ export type MethodologyLimits = {
 
 export type MethodologyManifest = {
   defaultRole: string;
+  queen?: { prompt?: string; merge?: boolean };
   roles: Record<string, MethodologyRole>;
   standingOrders?: string[];
   events?: EventRule[];

@@ -3,6 +3,7 @@
 // state, so tests can mutate it and watch the five-second polls pick it up.
 // Round-4 responses copy the json tags of the Go handlers exactly (see
 // web/src/fixtures/round4.ts for the struct each one mirrors).
+import { methodologyTemplates } from "../src/fixtures/round5";
 import type { Page, Route } from "@playwright/test";
 import { hiveAgents, hiveOverviews } from "../src/fixtures/hive-console";
 import {
@@ -49,6 +50,8 @@ export type MockFailure = Partial<
     | "send"
     | "spawn"
     | "cancel"
+    | "queen"
+    | "updateHive"
     | "models"
     | "methodology"
     | "usage"
@@ -552,12 +555,13 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
           id,
           name: body.name,
           repository: body.repository,
-          queenEnabled: Boolean(body.queenEnabled),
+          queenEnabled: body.queenEnabled ?? true,
           config: {
             cli: "opencode",
             maxConcurrentForagers: 4,
-            maxHops: 10,
-            maxForagersPerChain: 10,
+            queenModel: "",
+            maxHops: 50,
+            maxForagersPerChain: 50,
             idleParkMinutes: 30,
             hibernateHours: 24,
             turnTimeoutMinutes: 120,
@@ -580,7 +584,7 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
             id: `queen-${id}`,
             hiveId: id,
             role: "queen",
-            state: body.queenEnabled ? "active" : "disabled",
+            state: hive.queenEnabled ? "parked" : "disabled",
             roleName: "queen",
             cli: "opencode",
             createdAt: now(),
@@ -592,6 +596,64 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
     }
 
     const hiveMatch = path.match(/^\/api\/hives\/([^/]+)$/);
+    if (hiveMatch && method === "PATCH") {
+      if (failure.updateHive) return fail(failure.updateHive);
+      const hiveID = decodeURIComponent(hiveMatch[1]);
+      const hive = state.hives.find(item => item.hive.id === hiveID)?.hive;
+      if (!hive) return json(route, 404, { error: "not found" });
+      const input = request.postDataJSON() as { queenEnabled?: boolean; config?: Partial<Hive["config"]> };
+      hive.config = { ...hive.config, ...input.config };
+      if (input.queenEnabled !== undefined) hive.queenEnabled = input.queenEnabled;
+      hive.version++;
+      hive.updatedAt = now();
+      const queen = state.agents[hiveID]?.find(agent => agent.role === "queen");
+      if (queen) queen.state = hive.queenEnabled ? "parked" : "disabled";
+      return json(route, 200, { hive, localAddress: state.localAddress });
+    }
+    const queenMatch = path.match(/^\/api\/hives\/([^/]+)\/queen$/);
+    if (queenMatch && method === "GET") {
+      if (failure.queen) return fail(failure.queen);
+      const hiveID = decodeURIComponent(queenMatch[1]);
+      const hive = state.hives.find(item => item.hive.id === hiveID)?.hive;
+      if (!hive) return json(route, 404, { error: "not found" });
+      const queen = state.agents[hiveID]?.find(agent => agent.role === "queen");
+      return json(route, 200, {
+        enabled: hive.queenEnabled, state: queen?.state ?? "disabled",
+        model: hive.config.queenModel || state.models.defaultModel,
+        agentId: queen?.id ?? "", lastTurnAt: null,
+      });
+    }
+    if (path === "/api/methodology-templates" && method === "GET") {
+      return json(route, 200, methodologyTemplates);
+    }
+    const installMatch = path.match(/^\/api\/hives\/([^/]+)\/methodology\/install$/);
+    if (installMatch && method === "POST") {
+      if (failure.methodology) return fail(failure.methodology);
+      const hiveID = decodeURIComponent(installMatch[1]);
+      if (!state.hives.some(item => item.hive.id === hiveID)) return json(route, 404, { error: "not found" });
+      const input = request.postDataJSON() as { name: string; note?: string };
+      const template = methodologyTemplates.find(item => item.name === input.name);
+      if (!template) return json(route, 404, { error: "template not found" });
+      const versions = state.methodologies[hiveID] ?? [];
+      const response = clone(input.name === "minimal" ? builtinMethodology(hiveID) : methodologyResponses[3]);
+      const current = versions.find(item => item.active && item.source?.url === `builtin:${input.name}` && item.source.ref === template.version && item.digest === response.digest);
+      if (current) return json(route, 201, { ...current, files: state.methodologyFiles[hiveID]?.[current.version] ?? [] });
+      const versionNumber = Math.max(0, ...versions.map(item => item.version)) + 1;
+      const { files, builtin: _builtin, ...base } = response;
+      const version: Methodology = {
+        ...base, id: `methodology-${hiveID}-${versionNumber}`, hiveId: hiveID,
+        version: versionNumber, active: true, source: { url: `builtin:${input.name}`, ref: template.version },
+        createdBy: state.localAddress, createdAt: now(), note: input.note,
+      };
+      versions.forEach(item => { item.active = false; });
+      state.methodologies[hiveID] = [...versions, version];
+      state.methodologyFiles[hiveID] = { ...state.methodologyFiles[hiveID], [versionNumber]: files };
+      state.methodologyChanges[hiveID] = [...(state.methodologyChanges[hiveID] ?? []), {
+        id: state.nextID++, hiveId: hiveID, action: "publish", version: versionNumber,
+        actor: state.localAddress, note: input.note, createdAt: now(),
+      }];
+      return json(route, 201, { ...version, files });
+    }
     if (hiveMatch && method === "GET") {
       if (failure.hive) return fail(failure.hive);
       const hiveID = decodeURIComponent(hiveMatch[1]);
