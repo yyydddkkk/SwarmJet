@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"strings"
 	"testing"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
@@ -97,4 +98,20 @@ func TestQueenBootstrapTransactionRollback(t *testing.T) {
 	if err != nil || len(messages) != 0 {
 		t.Fatalf("failed update persisted bootstrap: %+v %v", messages, err)
 	}
+}
+
+func TestQueenReenableKeepsExistingMethodology(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	h := newTestHive(t, s, "acme/reenable")
+	publishTestMethodology(t, s, h.ID, "existing")
+	h.QueenEnabled = true
+	if _, err := s.UpdateHive(ctx, h); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := s.Inbox(ctx, h.ID, domain.AddressQueen, "", 100)
+	if err != nil || len(messages) != 1 || !strings.Contains(messages[0].Body, "主 Agent 已重新开启") || strings.Contains(messages[0].Body, "首次引导") {
+		t.Fatalf("reenable messages = %+v %v", messages, err)
+	}
+	activeVersion(t, s, h.ID, 1)
 }

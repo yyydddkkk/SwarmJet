@@ -221,8 +221,16 @@ func (s *Store) bootstrapQueen(ctx context.Context, tx pgx.Tx, hiveID string, ve
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "inbox:"+hiveID); err != nil {
 		return err
 	}
+	var hasMethodology bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM methodologies WHERE hive_id=$1 AND active)`, hiveID).Scan(&hasMethodology); err != nil {
+		return err
+	}
+	body := "新 Hive，请开始首次引导"
+	if hasMethodology {
+		body = "主 Agent 已重新开启，请继续使用当前生效的方法论处理项目消息。"
+	}
 	tag, err := tx.Exec(ctx, `INSERT INTO messages(id,hive_id,from_addr,to_addr,kind,chain_id,hop,body,trust,state,created_at)
-		VALUES($1,$2,'system','queen','task','',0,'新 Hive，请开始首次引导','system','pending',$3) ON CONFLICT(id) DO NOTHING`, id, hiveID, now)
+		VALUES($1,$2,'system','queen','task','',0,$3,'system','pending',$4) ON CONFLICT(id) DO NOTHING`, id, hiveID, body, now)
 	if err != nil {
 		return domainErr(err)
 	}
