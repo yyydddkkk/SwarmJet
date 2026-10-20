@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { useDataAPI, type Principal } from "../data";
+import "./periphery.css";
+import { APIError, useDataAPI, type Principal } from "../data";
 // Task D owns the login surface. Authentication uses the injectable shared API.
 export default function LoginSlot({
   onLogin,
@@ -21,7 +22,13 @@ export default function LoginSlot({
       );
       onLogin(await api.getSession());
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        e instanceof APIError && e.status === 401
+          ? "用户名或密码不正确，请重新输入。"
+          : e instanceof APIError && e.status === 429
+            ? "登录尝试过于频繁，请稍后重试。"
+            : "无法连接登录服务，请检查网络后重试。",
+      );
     } finally {
       setBusy(false);
     }
