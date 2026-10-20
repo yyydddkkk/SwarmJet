@@ -131,16 +131,7 @@ export class StarMap {
     );
     this.cleanups.push(
       ui.subscribe(() => {
-        if (ui.getSnapshot().overlay === "timeline") {
-          if (!this.frozen) {
-            this.frozen = this.systems;
-            this.frozenTrails = new Map(this.trails);
-          }
-        } else if (this.frozen) {
-          this.frozen = undefined;
-          this.merging.clear();
-          this.completing.clear();
-        }
+        this.syncTimeline();
         this.updateCamera();
         this.schedule();
       }),
@@ -151,7 +142,7 @@ export class StarMap {
         this.schedule();
       }),
     );
-    this.cleanups.push(timelineFor(ui).subscribe(() => this.schedule()));
+    this.cleanups.push(timelineFor(ui).subscribe(this.syncTimeline));
     const motion = () => {
       if (this.reduced.matches) {
         this.pulses = [];
@@ -194,7 +185,25 @@ export class StarMap {
     });
     on("wheel", (e) => this.wheel(e), { passive: false });
     this.sync();
+    this.syncTimeline();
   }
+  private syncTimeline = () => {
+    const clock = timelineFor(this.ui).getSnapshot();
+    const past =
+      this.ui.getSnapshot().overlay === "timeline" &&
+      (clock.fraction < 1 || clock.playing);
+    if (past && !this.frozen) {
+      this.frozen = this.systems;
+      this.frozenTrails = new Map(this.trails);
+    } else if (!past && this.frozen) {
+      this.frozen = undefined;
+      // Returning to the present shows the latest shared state immediately,
+      // without replaying transitions received while inspecting the past.
+      this.merging.clear();
+      this.completing.clear();
+    }
+    this.schedule();
+  };
   destroy() {
     this.destroyed = true;
     clearTimeout(this.createTimer);

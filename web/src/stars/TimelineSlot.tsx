@@ -46,7 +46,7 @@ export default function TimelineSlot({ ui }: StarsSlotProps) {
   return (
     <section className="stars-timeline" aria-label="示意时间轴">
       <p className="stars-timeline-notice">
-        示意回放，不代表真实历史；画面使用打开时间轴时的快照。
+        示意回放，不代表真实历史；查看过去时冻结画面，回到现在显示当前状态。
       </p>
       <div className="stars-timeline-controls">
         <button

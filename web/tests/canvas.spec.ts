@@ -709,3 +709,76 @@ test("delayed font readiness and loading completion each redraw once without dat
     ),
   ).toBe(revision);
 });
+
+test("timeline opens live, freezes only in the past, and now restores current nodes and time", async ({
+  page,
+}) => {
+  await mount(page);
+  const openedAt = await page.evaluate(async () => {
+    const x = (window as any).__canvas;
+    const { timelineFor } = await x.load("/src/stars/timeline-state.ts");
+    x.clock = timelineFor(x.ui);
+    (window as any).__timelineNow = Date.now() + 120000;
+    Date.now = () => (window as any).__timelineNow;
+    x.ui.openOverlay("timeline");
+    return Date.now();
+  });
+  await expect(page.getByRole("slider")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__canvas.clock.getSnapshot().anchor),
+    )
+    .toBe(openedAt);
+  await page.evaluate(() => {
+    const x = (window as any).__canvas;
+    x.mock.push(x.hive.id, {
+      type: "agent",
+      data: { ...x.agent, id: "open-live" },
+    });
+  });
+  await expect.poll(() => point(page, "open-live")).toBeTruthy();
+  await page.getByRole("slider").fill("200");
+  await settle(page);
+  const frozen = await page
+    .locator(".stars-canvas")
+    .evaluate((el: HTMLCanvasElement) => el.toDataURL());
+  await page.evaluate(() => {
+    const x = (window as any).__canvas;
+    x.mock.push(x.hive.id, {
+      type: "agent",
+      data: { ...x.agent, id: "arrived-in-past" },
+    });
+    x.mock.push(x.hive.id, {
+      type: "agent",
+      data: { ...x.agent, id: "worker-1", state: "completed" },
+    });
+    (window as any).__timelineNow += 60000;
+  });
+  await settle(page);
+  expect(await point(page, "arrived-in-past")).toBeUndefined();
+  expect(await point(page, "worker-1")).toBeTruthy();
+  expect(
+    await page
+      .locator(".stars-canvas")
+      .evaluate((el: HTMLCanvasElement) => el.toDataURL()),
+  ).toBe(frozen);
+  await page.getByRole("button", { name: "现在", exact: true }).click();
+  await expect.poll(() => point(page, "arrived-in-past")).toBeTruthy();
+  await expect.poll(() => point(page, "worker-1")).toBeUndefined();
+  expect(
+    await page.evaluate(
+      () => (window as any).__canvas.clock.getSnapshot().anchor,
+    ),
+  ).toBe(openedAt + 60000);
+  await page.getByRole("button", { name: "关闭时间轴" }).click();
+  await page.evaluate(() => {
+    (window as any).__timelineNow += 120000;
+    (window as any).__canvas.ui.openOverlay("timeline");
+  });
+  await expect(page.getByRole("slider")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__canvas.clock.getSnapshot().anchor),
+    )
+    .toBe(openedAt + 180000);
+});
