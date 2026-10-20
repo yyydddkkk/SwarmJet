@@ -6,6 +6,7 @@ network.
 import contextlib
 import importlib.util
 import io
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -247,6 +248,33 @@ class ArgumentTests(unittest.TestCase):
             self.assertTrue(any("/dev/deploy/install.py" in url for url in urls))
 
 
+class ReleaseImageContractTests(unittest.TestCase):
+    def test_release_tags_and_omp_match_installer_and_builds(self):
+        workflow = (HERE.parent / ".github/workflows/release.yml").read_text()
+        # Render the two GitHub expressions used in image names so changing
+        # either side of the release/install contract breaks this check.
+        owner = installer.REPOSITORY.split("/", 1)[0]
+        rendered = workflow.replace("${{ github.repository_owner }}", owner)
+        rendered = rendered.replace("${{ github.ref_name }}", "v0.1.0")
+        published = re.findall(r"^\s+(ghcr\.io/\S+)\s*$", rendered, re.MULTILINE)
+        for version in ("v0.1.0", "latest"):
+            for image in installer.image_values("ghcr", version):
+                self.assertIn(image, published)
+        omp_version = make_values()["OMP_VERSION"]
+        self.assertIn(f"OMP_VERSION={omp_version}", workflow)
+        self.assertIn(f"ARG OMP_VERSION={omp_version}\n", (HERE / "Dockerfile.agent").read_text())
+        self.assertIn(f"OMP_VERSION: ${{OMP_VERSION:-{omp_version}}}", (HERE / "compose.build.yaml").read_text())
+
+    def test_broker_and_gateway_share_the_published_agent_image(self):
+        # Each model service must use AGENT_IMAGE, which the GHCR installer
+        # fills with the published /agent tag, rather than a local-only name.
+        cells = (HERE / "compose.cells.yaml").read_text()
+        for name in ("auth-broker", "auth-gateway"):
+            service = re.search(rf"^  {name}:\n(.*?)(?=^  [a-z]|^networks:|\Z)", cells, re.MULTILINE | re.DOTALL)
+            self.assertIsNotNone(service, name)
+            self.assertIn("image: ${AGENT_IMAGE:-swarmjet-agent:local}", service.group(1))
+
+
 class ConnectTests(unittest.TestCase):
     def test_local_mcp_url_uses_installed_port_and_host(self):
         self.assertEqual(installer.local_mcp_url({"HTTP_PORT": "8190"}), "http://127.0.0.1:8190/mcp")
@@ -395,14 +423,17 @@ class InstallFlowTests(unittest.TestCase):
                 code = installer.main([
                     "install", "--dir", str(standalone), "--data-dir", str(root / "data"),
                     "--port", "18180", "--image-source", "ghcr", "--version", "v1.2.3",
-                    "--yes", "--no-cells", "--no-tunnel",
+                    "--yes", "--cells", "--no-tunnel",
                 ])
             self.assertEqual(code, 0)
             download.assert_not_called()
             parsed = installer.read_env(standalone / ".env")
             self.assertEqual(parsed["IMAGE"], "ghcr.io/yyydddkkk/swarmjet:v1.2.3")
             self.assertEqual(parsed["AGENT_IMAGE"], "ghcr.io/yyydddkkk/swarmjet/agent:v1.2.3")
-            self.assertTrue(any("pull" in call for call in calls))
+            pull_calls = [call for call in calls if "pull" in call]
+            self.assertEqual(len(pull_calls), 1)
+            self.assertIn(str(standalone / "compose.cells.yaml"), pull_calls[0])
+            self.assertEqual(parsed["SWARMJET_CELLS"], "1")
             self.assertFalse(any("build" in call for call in calls))
 
     def test_existing_postgres_volume_without_env_is_rejected(self):
