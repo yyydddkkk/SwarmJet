@@ -38,6 +38,8 @@ const (
 	MaxFiles = 500
 	// MaxTotalBytes caps the sum of all file contents in one version.
 	MaxTotalBytes = 2 << 20 // 2 MiB
+	// MaxManifestBytes caps methodology.yaml itself.
+	MaxManifestBytes = 256 << 10 // 256 KiB
 )
 
 // Change actions recorded in the append-only methodology history.
@@ -51,6 +53,9 @@ const (
 // domain.MethodologyManifest (for example defaultRole and standingOrders).
 func Parse(data []byte) (domain.MethodologyManifest, error) {
 	var zero domain.MethodologyManifest
+	if len(data) > MaxManifestBytes {
+		return zero, fmt.Errorf("methodology: %s is %d bytes, over the limit of %d", ManifestName, len(data), MaxManifestBytes)
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var raw any
 	if err := dec.Decode(&raw); err != nil {
@@ -115,6 +120,16 @@ func Validate(m domain.MethodologyManifest, files []domain.MethodologyFile) erro
 		total += len(f.Content)
 		if total > MaxTotalBytes {
 			return fmt.Errorf("methodology: file contents exceed the limit of %d bytes", MaxTotalBytes)
+		}
+	}
+
+	// A file cannot also be a directory of another file: both could not be
+	// written into the Cell.
+	for p := range paths {
+		for dir := path.Dir(p); dir != "."; dir = path.Dir(dir) {
+			if _, clash := paths[dir]; clash {
+				return fmt.Errorf("methodology: file %q is also the directory of %q", dir, p)
+			}
 		}
 	}
 
@@ -203,7 +218,7 @@ func ValidatePath(p string) error {
 		return fmt.Errorf("path %q is reserved for the manifest", p)
 	}
 	clean := path.Clean(p)
-	if clean != p {
+	if clean != p || clean == "." {
 		return fmt.Errorf("path %q is not clean; use a relative path without '.', '..' or empty segments", p)
 	}
 	if clean == ".." || strings.HasPrefix(clean, "../") {

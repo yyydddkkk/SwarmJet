@@ -106,6 +106,10 @@ func (ts *toolset) getMethodology(ctx context.Context, _ *mcpsdk.CallToolRequest
 	}
 	m, files, err := ts.backend.ActiveMethodology(ctx, in.HiveID)
 	if errors.Is(err, domain.ErrNotFound) {
+		// Only an existing Hive falls back to the builtin methodology.
+		if _, hiveErr := ts.backend.Hive(ctx, in.HiveID); hiveErr != nil {
+			return nil, getMethodologyOutput{}, hiveErr
+		}
 		manifest, builtinFiles := methodology.Builtin()
 		return nil, getMethodologyOutput{Methodology: viewMethodology(
 			domain.Methodology{HiveID: in.HiveID, Manifest: manifest}, builtinFiles, true, in.IncludeFiles)}, nil

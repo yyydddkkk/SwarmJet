@@ -423,3 +423,21 @@ func TestForAgentPropagatesReadErrorsAndTracksVersionChanges(t *testing.T) {
 		t.Fatal("next prompt did not pick up the new active version immediately")
 	}
 }
+
+func TestValidateRejectsDotAndFileDirectoryClash(t *testing.T) {
+	manifest, _ := Builtin()
+	if err := Validate(manifest, []domain.MethodologyFile{{Path: ".", Content: "x"}}); err == nil {
+		t.Fatal(`path "." was accepted`)
+	}
+	clash := []domain.MethodologyFile{{Path: "skills", Content: "x"}, {Path: "skills/a.md", Content: "y"}}
+	if err := Validate(manifest, clash); err == nil || !strings.Contains(err.Error(), "directory") {
+		t.Fatalf("file/directory clash err = %v", err)
+	}
+}
+
+func TestParseCapsManifestSize(t *testing.T) {
+	big := "defaultRole: worker\nstandingOrders:\n  - " + strings.Repeat("x", MaxManifestBytes) + "\n"
+	if _, err := Parse([]byte(big)); err == nil || !strings.Contains(err.Error(), "over the limit") {
+		t.Fatalf("err = %v", err)
+	}
+}
