@@ -237,6 +237,13 @@ func (s *Service) mergeHead(ctx context.Context, hive domain.Hive, pr int64, exp
 	}
 	result, err := client.RequestMerge(ctx, repositoryID, pr, readiness.HeadSHA, method)
 	if err != nil {
+		// REST and merge-queue errors do not reliably identify a SHA conflict.
+		// Read the head again before classifying a failed web merge as stale.
+		if expectedSHA != "" {
+			if current, readErr := client.GetPullState(ctx, repositoryID, pr); readErr == nil && current.HeadSHA != expectedSHA {
+				return Outcome{HeadSHA: current.HeadSHA, Method: method}, &HeadChangedError{HeadSHA: current.HeadSHA}
+			}
+		}
 		return Outcome{HeadSHA: readiness.HeadSHA, Method: method}, fmt.Errorf("GitHub refused the merge: %w", err)
 	}
 	outcome := Outcome{
