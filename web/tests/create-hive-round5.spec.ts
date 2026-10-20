@@ -8,7 +8,7 @@ test("Hive wizard selects repository, credential-backed Queen model and concurre
   state.modelCredentials = [
     { provider: "deepseek", configured: true, type: "api_key", masked: "sk-…test" },
   ];
-  await page.goto("/#/hives");
+  await page.goto("/#/legacy/hives");
   await page.getByRole("button", { name: "新建 Hive" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("仓库", { exact: true }).selectOption("yyydddkkk/orders-api");
@@ -28,7 +28,7 @@ test("Hive wizard selects repository, credential-backed Queen model and concurre
   await dialog.getByRole("button", { name: "下一步" }).click();
   await expect(dialog.getByLabel("并发上限", { exact: true })).toHaveValue("6");
   await dialog.getByRole("button", { name: "创建 Hive" }).click();
-  await expect(page).toHaveURL(/#\/hives\/hive-new-1$/);
+  await expect(page).toHaveURL(/#\/legacy\/hives\/hive-new-1$/);
   const creates = state.calls.filter(call => call.method === "POST" && call.path === "/api/hives");
   expect(creates).toHaveLength(1);
   expect(creates[0].body).toEqual({
@@ -41,7 +41,7 @@ test("Hive wizard selects repository, credential-backed Queen model and concurre
 
 test("Hive wizard explains missing credentials and links to models", async ({ page }, testInfo) => {
   const state = await mockHiveAPI(page);
-  await page.goto("/#/hives");
+  await page.goto("/#/legacy/hives");
   await page.getByRole("button", { name: "新建 Hive" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("仓库", { exact: true }).selectOption("yyydddkkk/orders-api");
@@ -50,7 +50,7 @@ test("Hive wizard explains missing credentials and links to models", async ({ pa
   await expect(dialog.getByRole("button", { name: "下一步" })).toBeDisabled();
   await page.screenshot({ path: testInfo.outputPath("hive-wizard-missing-credentials-1440.png"), fullPage: true });
   await dialog.getByRole("link", { name: "模型", exact: true }).click();
-  await expect(page).toHaveURL(/#\/models$/);
+  await expect(page).toHaveURL(/#\/legacy\/models$/);
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(state.calls.filter(call => call.method === "POST" && call.path === "/api/hives")).toHaveLength(0);
 });

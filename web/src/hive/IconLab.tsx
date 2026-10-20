@@ -1,4 +1,4 @@
-// #/icons — the pixel reference page. It mirrors the design spec
+// #/legacy/icons — the pixel reference page. It mirrors the design spec
 // (docs/claude/design/pixel-icons.json) exactly: the eight Forager states, the
 // Queen on and off, the six hashed body colours, the 29 icons at 16 and 32px,
 // the loader and the empty-state pair — each on a light and a dark surface.

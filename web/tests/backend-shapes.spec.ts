@@ -65,7 +65,7 @@ test("PR status: prStatusResponse renders", async ({ page }) => {
       }),
     ),
   );
-  await page.goto("/#/hives/swarmjet/foragers/forager-7f3a/merge");
+  await page.goto("/#/legacy/hives/swarmjet/foragers/forager-7f3a/merge");
 
   await expect(page.getByTestId("merge-readiness")).toHaveText("尚不可合并");
   await expect(page.getByText("required check unit is in_progress", { exact: true })).toBeVisible();
@@ -97,7 +97,7 @@ test("methodology GET: builtin methodologyResponse renders", async ({ page }) =>
   await page.route("**/api/hives/swarmjet/methodology/versions", route =>
     route.fulfill(json({ hiveId: "swarmjet", activeVersion: 0, versions: [], changes: [] })),
   );
-  await page.goto("/#/hives/swarmjet/methodology");
+  await page.goto("/#/legacy/hives/swarmjet/methodology");
 
   await expect(page.getByText("尚未选择方法论，可以在对话里请 Queen 推荐", { exact: true })).toBeVisible();
   await expect(page.getByRole("list", { name: "内置方法论目录" })).toBeVisible();
@@ -145,7 +145,7 @@ test("methodology versions: {hiveId, activeVersion, versions, changes} renders",
       }),
     ),
   );
-  await page.goto("/#/hives/swarmjet/methodology");
+  await page.goto("/#/legacy/hives/swarmjet/methodology");
 
   await expect(page.getByTestId("methodology-version")).toContainText("v1");
   await expect(page.locator(".hg-version-table tbody tr")).toHaveCount(1);
@@ -175,7 +175,7 @@ test("methodology activate: the flattened response is accepted", async ({ page }
       }),
     );
   });
-  await page.goto("/#/hives/swarmjet/methodology");
+  await page.goto("/#/legacy/hives/swarmjet/methodology");
   const row = page.locator(".hg-version-table tbody tr").filter({ hasText: "v2" });
   await row.getByRole("button", { name: "切换到此版本" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "切换到 v2" }).click();
@@ -211,7 +211,7 @@ test("usage: Hive LLMUsageSummary renders with role names joined from Agents", a
       }),
     );
   });
-  await page.goto("/#/hives/swarmjet/usage");
+  await page.goto("/#/legacy/hives/swarmjet/usage");
 
   await expect(page.getByTestId("hive-usage-total")).toHaveText("$0.50");
   const rows = page.locator(".hg-usage-ranking .hg-usage-row");
@@ -249,7 +249,7 @@ test("usage: an Agent without rows shows its own empty state", async ({ page }) 
       }),
     );
   });
-  await page.goto("/#/hives/swarmjet/foragers/forager-5c40/usage");
+  await page.goto("/#/legacy/hives/swarmjet/foragers/forager-5c40/usage");
 
   await expect(page.getByText("这只 Agent 还没有用量。", { exact: true })).toBeVisible();
   await expect(page.getByTestId("agent-usage-cost")).toHaveCount(0);
@@ -284,7 +284,7 @@ test("models GET: modelsResponse renders providers and gateway state", async ({ 
       }),
     ),
   );
-  await page.goto("/#/models");
+  await page.goto("/#/legacy/models");
 
   await expect(page.getByText("已有可用凭证", { exact: true })).toBeVisible();
   await expect(page.getByTestId("masked-deepseek")).toHaveText("sk-…9f2c");
@@ -302,7 +302,7 @@ test("models GET: an unreachable gateway is shown", async ({ page }) => {
       json({ defaultModel: "deepseek/deepseek-chat", models: [], providers: [], gatewayAvailable: false }),
     ),
   );
-  await page.goto("/#/models");
+  await page.goto("/#/legacy/models");
 
   await expect(page.getByTestId("gateway-available")).toHaveText("暂不可用");
   await expect(page.getByText("模型网关暂时没有响应", { exact: true })).toBeVisible();
@@ -318,7 +318,7 @@ test("models PUT: modelCredentialView is shown as the masked value", async ({ pa
       ? route.fulfill(json({ provider: "deepseek", type: "api_key", masked: "sk-…7777", configured: true }))
       : route.fallback(),
   );
-  await page.goto("/#/models");
+  await page.goto("/#/legacy/models");
   await page.getByLabel("API key").fill("sk-test-not-real-7777");
   await page.getByRole("button", { name: "保存凭证" }).click();
 
@@ -341,7 +341,7 @@ test("setup status: the setupModels block renders on 接入", async ({ page }) =
       },
     },
   });
-  await page.goto("/#/setup");
+  await page.goto("/#/legacy/setup");
 
   await expect(page.getByTestId("setup-models-status")).toHaveText("已有可用凭证");
   await expect(page.getByTestId("setup-default-model")).toHaveText("deepseek/deepseek-reasoner");
@@ -351,7 +351,7 @@ test("setup status: the setupModels block renders on 接入", async ({ page }) =
 test("setup status: setupModels without providers asks for a credential", async ({ page }) => {
   const errors = collectErrors(page);
   await mockHiveAPI(page);
-  await page.goto("/#/setup");
+  await page.goto("/#/legacy/setup");
 
   await expect(page.getByTestId("setup-models-status")).toHaveText("还没有可用凭证");
   await expect(page.getByTestId("setup-default-model")).toHaveText("deepseek/deepseek-chat");

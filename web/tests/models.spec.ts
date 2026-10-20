@@ -1,4 +1,4 @@
-// 模型 page (#/models): replaces the retired CLI login terminal. The API key
+// 模型 page (#/legacy/models): replaces the retired CLI login terminal. The API key
 // travels only in the PUT body; the page keeps the masked value the server
 // returns and nothing else.
 import { expect, test } from "@playwright/test";
@@ -8,7 +8,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 test("the model page shows the missing-credential state and the catalog", async ({ page }, testInfo) => {
   await mockHiveAPI(page);
-  await page.goto("/#/models");
+  await page.goto("/#/legacy/models");
 
   await expect(page.getByRole("heading", { name: "模型", level: 1 })).toBeVisible();
   await expect(page.getByText("还没有可用凭证", { exact: true })).toBeVisible();
@@ -23,7 +23,7 @@ test("the model page shows the missing-credential state and the catalog", async 
 
 test("saving a key shows only the masked value and never puts it in the URL or storage", async ({ page }, testInfo) => {
   const state = await mockHiveAPI(page);
-  await page.goto("/#/models");
+  await page.goto("/#/legacy/models");
 
   const key = "sk-test-deepseek-not-a-real-key-1234";
   const sessionBefore = await page.evaluate(() => JSON.stringify(sessionStorage));
@@ -65,7 +65,7 @@ test("removing a credential asks for confirmation", async ({ page }) => {
   state.modelCredentials = [
     { provider: "deepseek", type: "api_key", masked: "sk-…1234", configured: true },
   ];
-  await page.goto("/#/models");
+  await page.goto("/#/legacy/models");
 
   await page.getByRole("button", { name: "移除" }).click();
   const dialog = page.getByRole("dialog");

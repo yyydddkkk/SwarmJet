@@ -17,7 +17,7 @@ test("default Queen conversation includes its Hive bootstrap report without unre
     { ...report, id: "other-queen-task", to: "forager:other", body: "Queen 给其他 Forager 的任务" },
     { ...report, id: "other-hive", from: "forager:other", body: "其他 Hive 汇报" },
   );
-  await page.goto("/#/hives/swarmjet");
+  await page.goto("/#/legacy/hives/swarmjet");
   const stream = page.locator(".hg-stream");
   const bootstrap = stream.locator("li").filter({ hasText: report.body });
   await expect(bootstrap).toHaveCount(1);
@@ -44,7 +44,7 @@ test("Queen conversation shows Hive inbox errors and can retry the bootstrap rep
       await route.fallback();
     }
   });
-  await page.goto("/#/hives/swarmjet");
+  await page.goto("/#/legacy/hives/swarmjet");
   await expect(page.getByRole("alert")).toContainText("Hive inbox 暂时不可用");
   await expect(page.locator(".hg-stream")).toContainText("收到。我先把 #142");
   unavailable = false;
@@ -63,7 +63,7 @@ test("Queen status comes from its endpoint and the conversation is ordered plain
     kind: "reply", chainId: "chain-html", hop: 0, body, trust: "agent", state: "handled",
     createdAt: "2026-10-16T11:30:00Z",
   });
-  await page.goto("/#/hives/swarmjet");
+  await page.goto("/#/legacy/hives/swarmjet");
   await expect(page.getByRole("status").filter({ hasText: "Queen 状态：休眠" })).toContainText("deepseek/deepseek-chat");
   await expect(page.locator(".hg-stream > li").last()).toContainText(body);
   await expect(page.locator(".hg-stream img")).toHaveCount(0);
@@ -88,7 +88,7 @@ test("disabled Queen links to settings and enabling it restores conversation", a
     kind: "report", chainId: "system-bootstrap", hop: 1, body: "Queen 关闭前的引导报告",
     trust: "agent", state: "handled", createdAt: "2026-10-15T20:10:00Z",
   });
-  await page.goto("/#/hives/orders");
+  await page.goto("/#/legacy/hives/orders");
   await expect(page.getByText("Queen 未开启", { exact: true })).toBeVisible();
   await expect(page.getByLabel("对 Queen（蜂王）说话")).toHaveCount(0);
   await expect(page.locator(".hg-stream")).toContainText("Queen 关闭前的引导报告");
@@ -105,7 +105,7 @@ test("disabled Queen links to settings and enabling it restores conversation", a
 
 test("Queen status failures are visible and sending failures preserve the draft", async ({ page }) => {
   await mockHiveAPI(page, { failures: { queen: 503, send: 500 } });
-  await page.goto("/#/hives/swarmjet");
+  await page.goto("/#/legacy/hives/swarmjet");
   await expect(page.getByRole("alert").first()).toContainText("模拟的接口故障");
   await page.getByLabel("对 Queen（蜂王）说话").fill("保留这条草稿");
   await page.getByRole("button", { name: "发送", exact: true }).click();
@@ -115,7 +115,7 @@ test("Queen status failures are visible and sending failures preserve the draft"
 
  test("Queen without a completed turn accepts null lastTurnAt", async ({ page }) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet");
+  await page.goto("/#/legacy/hives/swarmjet");
   const status = await page.evaluate(async () => (await fetch("/api/hives/swarmjet/queen")).json());
   expect(status.lastTurnAt).toBeNull();
   await expect(page.getByLabel("对 Queen（蜂王）说话")).toBeVisible();

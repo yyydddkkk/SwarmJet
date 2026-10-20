@@ -1,4 +1,4 @@
-// 接入 (#/setup): create the GitHub App, see the webhook tunnel, and mint tokens
+// 接入 (#/legacy/setup): create the GitHub App, see the webhook tunnel, and mint tokens
 // for local agents. The backend is being built in parallel; every shape here
 // follows docs/claude/round3-prompts.md "公共契约" section 5.
 import { useId, useState } from "react";
@@ -375,12 +375,12 @@ function ModelsPanel({ status }: { status: SetupStatus }) {
       {!models.available ? (
         <Callout tone="amber" title="先写入一个模型凭证">
           <p>
-            到 <a href="#/models">模型</a> 页写入 API key（第一个要用的是 DeepSeek），Agent 才能调用模型。
+            到 <a href="#/legacy/models">模型</a> 页写入 API key（第一个要用的是 DeepSeek），Agent 才能调用模型。
           </p>
         </Callout>
       ) : (
         <p className="hg-muted">
-          要换 key 或添加提供方，去 <a href="#/models">模型</a> 页。
+          要换 key 或添加提供方，去 <a href="#/legacy/models">模型</a> 页。
         </p>
       )}
     </Panel>

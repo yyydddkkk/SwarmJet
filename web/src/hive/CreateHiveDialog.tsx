@@ -121,7 +121,7 @@ export default function CreateHiveDialog({
         {showManualOnly ? (
           <Callout tone="amber" title="GitHub App 还没配置">
             <p>
-              先去 <a href="#/setup">接入页</a> 创建 GitHub App，就能直接选择已安装的仓库。
+              先去 <a href="#/legacy/setup">接入页</a> 创建 GitHub App，就能直接选择已安装的仓库。
               现在仍可以手动输入 owner/name，但 Forager 暂时无法推送或开 PR。
             </p>
           </Callout>
@@ -195,7 +195,7 @@ export default function CreateHiveDialog({
             </Callout>
           ) : !availableModels.length ? (
             <Callout tone="amber" title="没有可用的模型凭证">
-              <p>请先去 <a href="#/models" onClick={onClose}>模型</a> 页填写模型凭证，再回来为 Queen 选择模型。</p>
+              <p>请先去 <a href="#/legacy/models" onClick={onClose}>模型</a> 页填写模型凭证，再回来为 Queen 选择模型。</p>
             </Callout>
           ) : (
             <label className="hg-field">

@@ -91,7 +91,7 @@ export default function HivesPage() {
                   <li key={hive.id}>
                     <a
                       className="hg-hive-card"
-                      href={`#/hives/${hive.id}`}
+                      href={`#/legacy/hives/${hive.id}`}
                       aria-label={`${hive.name}，${hive.repository}`}
                     >
                       <header className="hg-hive-card-head">
@@ -156,7 +156,7 @@ export default function HivesPage() {
           onClose={() => setCreateOpen(false)}
           onCreated={hiveId => {
             setCreateOpen(false);
-            location.hash = `/hives/${hiveId}`;
+            location.hash = `/legacy/hives/${hiveId}`;
           }}
         />
       ) : null}

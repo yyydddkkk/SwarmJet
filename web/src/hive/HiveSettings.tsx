@@ -39,7 +39,7 @@ export default function HiveSettings({ hive, onSaved }: { hive: Hive; onSaved: (
         ) : null}
         {models.data && availableModels.length === 0 ? (
           <Callout tone="amber" title="没有可用的 Queen 模型">
-            <p>请先去<a href="#/models">模型页</a>填写模型凭证，再回来选择 Queen 的模型。</p>
+            <p>请先去<a href="#/legacy/models">模型页</a>填写模型凭证，再回来选择 Queen 的模型。</p>
           </Callout>
         ) : null}
         <form onSubmit={event => {

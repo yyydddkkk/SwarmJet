@@ -7,7 +7,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 test("the header shows the role, parent Agent and checked-out revision", async ({ page }, testInfo) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet/foragers/forager-2b91");
+  await page.goto("/#/legacy/hives/swarmjet/foragers/forager-2b91");
 
   await expect(page.getByRole("heading", { name: /forager-2b91/ })).toBeVisible();
   await expect(page.locator(".hg-meta").filter({ hasText: "角色" }).first()).toContainText("verifier");
@@ -20,7 +20,7 @@ test("the header shows the role, parent Agent and checked-out revision", async (
 
 test("the merge tab lists attestations with author flag and superseded state", async ({ page }, testInfo) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet/foragers/forager-7f3a/merge");
+  await page.goto("/#/legacy/hives/swarmjet/foragers/forager-7f3a/merge");
 
   await expect(page.getByRole("heading", { name: "验证与合并", level: 2 })).toBeVisible();
   await expect(page.getByTestId("merge-readiness")).toHaveText("可合并");
@@ -56,7 +56,7 @@ test("a not-ready PR lists the merge policy reasons", async ({ page }) => {
     "需要一条来自非作者的 PASS 结论。",
     "integration 检查尚未通过。",
   ];
-  await page.goto("/#/hives/swarmjet/foragers/forager-7f3a/merge");
+  await page.goto("/#/legacy/hives/swarmjet/foragers/forager-7f3a/merge");
 
   await expect(page.getByTestId("merge-readiness")).toHaveText("尚不可合并");
   await expect(page.getByText("需要一条来自非作者的 PASS 结论。", { exact: true })).toBeVisible();
@@ -65,7 +65,7 @@ test("a not-ready PR lists the merge policy reasons", async ({ page }) => {
 
 test("the usage tab shows this Agent's spend and model breakdown", async ({ page }, testInfo) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet/foragers/forager-7f3a/usage");
+  await page.goto("/#/legacy/hives/swarmjet/foragers/forager-7f3a/usage");
 
   await expect(page.getByRole("heading", { name: "用量与花费", level: 2 })).toBeVisible();
   await expect(page.getByTestId("agent-usage-cost")).toHaveText("$6.82");
@@ -78,7 +78,7 @@ test("the usage tab shows this Agent's spend and model breakdown", async ({ page
 
 test("usage asks for today and an Agent without rows never borrows another's", async ({ page }) => {
   const state = await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet/foragers/forager-5c40/usage");
+  await page.goto("/#/legacy/hives/swarmjet/foragers/forager-5c40/usage");
 
   await expect(page.getByText("这只 Agent 还没有用量。", { exact: true })).toBeVisible();
   await expect(page.getByTestId("agent-usage-cost")).toHaveCount(0);
@@ -89,7 +89,7 @@ test("usage asks for today and an Agent without rows never borrows another's", a
 
 test("the Hive usage tab shows today's total and the Agent ranking", async ({ page }, testInfo) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet/usage");
+  await page.goto("/#/legacy/hives/swarmjet/usage");
 
   await expect(page.getByRole("heading", { name: "今日用量", level: 2 })).toBeVisible();
   await expect(page.getByTestId("hive-usage-total")).toHaveText("$12.47");

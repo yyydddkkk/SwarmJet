@@ -7,7 +7,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 test("the conversation shows all four provenance markers", async ({ page }, testInfo) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet");
+  await page.goto("/#/legacy/hives/swarmjet");
 
   const stream = page.locator(".hg-stream");
   await expect(stream.locator(".hg-trust-user").first()).toHaveText("用户");
@@ -40,14 +40,14 @@ test("an unknown trust value from a newer server is shown raw", async ({ page })
   const state = await mockHiveAPI(page);
   const message = state.messages.find(item => item.id === "msg-1");
   if (message) message.trust = "partner";
-  await page.goto("/#/hives/swarmjet");
+  await page.goto("/#/legacy/hives/swarmjet");
 
   await expect(page.locator(".hg-stream .hg-trust-unknown").first()).toHaveText("partner");
 });
 
 test("the Inbox marks router events as external", async ({ page }) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet/inbox");
+  await page.goto("/#/legacy/hives/swarmjet/inbox");
 
   await expect(page.locator(".hg-msg-external .hg-trust-external")).toHaveText("外部");
   await expect(page.getByText("外部内容，未经核实", { exact: true })).toBeVisible();

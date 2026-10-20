@@ -110,7 +110,7 @@ export default function ForagerPage({
           title="找不到这只 Forager。"
           hint="它可能已经休眠或完成，链接也可能不对。"
           action={
-            <a className="hg-btn" href="#/hives">
+            <a className="hg-btn" href="#/legacy/hives">
               返回 Hive 列表
             </a>
           }
@@ -185,8 +185,8 @@ function ForagerDetail({
     ...item,
     href:
       item.id === "conversation"
-        ? `#/hives/${hive.id}/foragers/${agent.id}`
-        : `#/hives/${hive.id}/foragers/${agent.id}/${item.id}`,
+        ? `#/legacy/hives/${hive.id}/foragers/${agent.id}`
+        : `#/legacy/hives/${hive.id}/foragers/${agent.id}/${item.id}`,
   }));
 
   const cancel = () => {
@@ -206,9 +206,9 @@ function ForagerDetail({
   return (
     <div className="hg-page">
       <nav className="hg-crumbs" aria-label="面包屑">
-        <a href="#/hives">Hive</a>
+        <a href="#/legacy/hives">Hive</a>
         <span aria-hidden="true">/</span>
-        <a href={`#/hives/${hive.id}/swarm`}>{hive.name}</a>
+        <a href={`#/legacy/hives/${hive.id}/swarm`}>{hive.name}</a>
         <span aria-hidden="true">/</span>
         <span>{agent.id}</span>
       </nav>

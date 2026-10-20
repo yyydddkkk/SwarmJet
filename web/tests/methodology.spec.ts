@@ -1,4 +1,4 @@
-// Hive methodology tab (#/hives/{id}/methodology): manifest, files, history,
+// Hive methodology tab (#/legacy/hives/{id}/methodology): manifest, files, history,
 // two-version diff and a confirmed version switch.
 import { expect, test } from "@playwright/test";
 import { mockHiveAPI } from "./hive-api-mock";
@@ -7,7 +7,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 test("the methodology page renders the manifest, files and version history", async ({ page }, testInfo) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet/methodology");
+  await page.goto("/#/legacy/hives/swarmjet/methodology");
 
   await expect(page.getByRole("heading", { name: "方法论", level: 2 })).toBeVisible();
   await expect(page.getByText("当前生效", { exact: true }).first()).toBeVisible();
@@ -48,7 +48,7 @@ test("the methodology page renders the manifest, files and version history", asy
 
 test("switching a version asks for confirmation before posting it", async ({ page }, testInfo) => {
   const state = await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet/methodology");
+  await page.goto("/#/legacy/hives/swarmjet/methodology");
 
   const row = page.locator(".hg-version-table tbody tr").filter({ hasText: "v2" });
   await row.getByRole("button", { name: "切换到此版本" }).click();
@@ -78,7 +78,7 @@ test("switching a version asks for confirmation before posting it", async ({ pag
 
 test("the version diff compares the manifest and every changed file", async ({ page }, testInfo) => {
   await mockHiveAPI(page);
-  await page.goto("/#/hives/swarmjet/methodology");
+  await page.goto("/#/legacy/hives/swarmjet/methodology");
 
   await expect(page.getByRole("heading", { name: "版本差异", level: 2 })).toBeVisible();
   // The default comparison is v2 -> v3.
