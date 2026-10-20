@@ -11,6 +11,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/methodology"
 )
 
 // MethodologyReader is the store method the round-4 methodology data layer
@@ -68,10 +69,21 @@ func (ts *toolset) callerRole(ctx context.Context, hiveID string) (domain.Role, 
 		return domain.Role{}, false, nil
 	}
 	m, found, err := ts.activeMethodology(ctx, hiveID)
-	if err != nil || !found {
+	if err != nil {
 		return domain.Role{}, false, err
 	}
-	role, err := resolveMethodologyRole(m.Manifest, ts.actor.agent.RoleName)
+	manifest := m.Manifest
+	if !found {
+		if ts.actor.agent.Role == domain.RoleQueen {
+			// The Queen keeps its round-2 abilities until a methodology
+			// defines a role for it: message and start workers.
+			return domain.Role{Permissions: domain.RolePermissions{Message: true, Spawn: []string{"worker"}}}, true, nil
+		}
+		// Without a published methodology the built-in one applies, the same
+		// one the Forager's Cell and prompt use.
+		manifest, _ = methodology.Builtin()
+	}
+	role, err := resolveMethodologyRole(manifest, ts.actor.agent.RoleName)
 	if err != nil {
 		return domain.Role{}, false, fmt.Errorf("permission denied: %w", err)
 	}
@@ -226,6 +238,14 @@ func (ts *toolset) createSpawnedForager(ctx context.Context, req spawnRequest) (
 	if messageChain == "" {
 		messageChain = chainID
 	}
+	hop := 0
+	if ts.actor.isAgent() {
+		// The child's task is one hop past its parent, so spawning cannot be
+		// used to restart the hop count.
+		if hop, _, err = ts.agentHop(ctx, req.HiveID); err != nil {
+			return domain.Agent{}, domain.Message{}, err
+		}
+	}
 	msg, err := ts.backend.SendMessage(ctx, domain.Message{
 		ID:      messageID,
 		HiveID:  req.HiveID,
@@ -233,6 +253,7 @@ func (ts *toolset) createSpawnedForager(ctx context.Context, req spawnRequest) (
 		To:      domain.ForagerAddress(created.ID),
 		Kind:    domain.MessageTask,
 		ChainID: messageChain,
+		Hop:     hop,
 		Body:    req.Task,
 		Trust:   ts.outboundTrust(),
 	})
@@ -289,6 +310,15 @@ func (ts *toolset) spawn(ctx context.Context, _ *mcpsdk.CallToolRequest, in spaw
 			// The built-in minimal methodology names its only role worker.
 			roleName = "worker"
 		}
+	}
+	// Any caller, user tokens included, may only start roles the active
+	// methodology defines; an undefined role would fail every later call.
+	if hasMethodology {
+		if _, ok := m.Manifest.Roles[roleName]; !ok {
+			return nil, spawnOutput{}, fmt.Errorf("role %q is not defined by the Hive's methodology", roleName)
+		}
+	} else if roleName != "worker" {
+		return nil, spawnOutput{}, fmt.Errorf("role %q is not defined: the Hive has no methodology yet, so only worker exists", roleName)
 	}
 	if err := ts.maySpawn(ctx, in.HiveID, roleName); err != nil {
 		return nil, spawnOutput{}, err

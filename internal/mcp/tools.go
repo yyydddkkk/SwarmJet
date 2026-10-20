@@ -533,6 +533,14 @@ func (ts *toolset) send(ctx context.Context, _ *mcpsdk.CallToolRequest, in sendI
 			chainID = newChainID()
 		}
 	}
+	hop := in.Hop
+	if ts.actor.isAgent() {
+		// An Agent's chain and hop are derived on the server; otherwise two
+		// Agents allowed to message each other could loop forever.
+		if hop, chainID, err = ts.agentHop(ctx, in.HiveID); err != nil {
+			return nil, sendOutput{}, err
+		}
+	}
 	messageID := ""
 	if in.RequestID != "" {
 		messageID = deriveID("msg", ts.token.ID, in.RequestID)
@@ -544,7 +552,7 @@ func (ts *toolset) send(ctx context.Context, _ *mcpsdk.CallToolRequest, in sendI
 		To:        to,
 		Kind:      kind,
 		ChainID:   chainID,
-		Hop:       in.Hop,
+		Hop:       hop,
 		Body:      in.Body,
 		Artifacts: in.Artifacts,
 		Trust:     ts.outboundTrust(),
@@ -1231,4 +1239,18 @@ func decodeCursor(s string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid cursor")
 	}
 	return t, nil
+}
+
+// agentHop returns the hop and chain for a message sent by the calling Agent:
+// its own chain, one hop past the deepest message it received there.
+func (ts *toolset) agentHop(ctx context.Context, hiveID string) (int, string, error) {
+	chainID := ts.actor.agent.ChainID
+	if chainID == "" {
+		chainID = "agent-" + ts.actor.agent.ID
+	}
+	received, err := ts.backend.MaxReceivedHop(ctx, hiveID, ts.actor.address(), chainID)
+	if err != nil {
+		return 0, "", err
+	}
+	return received + 1, chainID, nil
 }

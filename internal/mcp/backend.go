@@ -38,6 +38,10 @@ type Backend interface {
 	TransitionAgent(ctx context.Context, id string, from, to domain.AgentState) error
 
 	SendMessage(ctx context.Context, m domain.Message) (domain.Message, error)
+	// MaxReceivedHop is the largest hop among messages delivered to `to` in
+	// chainID, or 0 when there are none. The server derives an Agent's
+	// outgoing hop from it, so an Agent cannot reset the hop limit.
+	MaxReceivedHop(ctx context.Context, hiveID string, to domain.Address, chainID string) (int, error)
 	Inbox(ctx context.Context, hiveID string, to domain.Address, afterID string, limit int) ([]domain.Message, error)
 	ClaimMessage(ctx context.Context, id, owner string, ttl time.Duration) (bool, error)
 	WaitInbox(ctx context.Context, hiveID string, to domain.Address, afterID string) error

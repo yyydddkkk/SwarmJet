@@ -142,10 +142,16 @@ func TestSpawnChecksRolePermissionAndRecordsLineage(t *testing.T) {
 	}
 
 	user := env.connect(env.userToken)
-	byUser := decode[spawnOutput](t, callTool(t, user, "spawn", map[string]any{
+	undefined := callTool(t, user, "spawn", map[string]any{
 		"hiveId": hive.ID, "role": "auditor", "task": "anything goes",
+	})
+	if !undefined.IsError || !strings.Contains(toolErrorText(undefined), "not defined") {
+		t.Fatalf("undefined role: isError=%v text=%q", undefined.IsError, toolErrorText(undefined))
+	}
+	byUser := decode[spawnOutput](t, callTool(t, user, "spawn", map[string]any{
+		"hiveId": hive.ID, "role": "worker", "task": "anything goes",
 	}))
-	if byUser.Agent.RoleName != "auditor" || byUser.Agent.ParentID != "" {
+	if byUser.Agent.RoleName != "worker" || byUser.Agent.ParentID != "" {
 		t.Fatalf("user spawn = %+v", byUser.Agent)
 	}
 	if byUser.Message.Trust != string(domain.TrustUser) {
@@ -197,17 +203,63 @@ func TestSpawnAppliesMethodologyLimits(t *testing.T) {
 	})
 }
 
-func TestSpawnWithoutMethodologyIsPermissive(t *testing.T) {
+func TestSpawnWithoutMethodologyUsesBuiltin(t *testing.T) {
 	env, hive := round4Env(t)
 	worker, err := env.backend.CreateForager(context.Background(), domain.Agent{HiveID: hive.ID, State: domain.AgentActive, ChainID: "chain-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The built-in methodology's worker may not spawn other Agents.
 	session := env.connect(agentToken(t, env, worker.ID))
-	out := decode[spawnOutput](t, callTool(t, session, "spawn", map[string]any{
-		"hiveId": hive.ID, "role": "anything", "task": "no methodology yet",
-	}))
-	if out.Agent.ParentID != worker.ID || out.Agent.ChainID != "chain-1" {
-		t.Fatalf("agent = %+v", out.Agent)
+	res := callTool(t, session, "spawn", map[string]any{
+		"hiveId": hive.ID, "role": "worker", "task": "no methodology yet",
+	})
+	if !res.IsError || !strings.Contains(toolErrorText(res), "may not spawn") {
+		t.Fatalf("isError=%v text=%q", res.IsError, toolErrorText(res))
 	}
+}
+
+// Two Agents allowed to message each other cannot loop forever: the server
+// derives each message's hop from what the sender received, ignoring the
+// caller's hop and chain.
+func TestPeerPingPongStopsAtHopLimit(t *testing.T) {
+	env, hive := round4Env(t)
+	ctx := context.Background()
+	env.backend.SetActiveMethodology(domain.Methodology{
+		HiveID: hive.ID,
+		Manifest: roleManifest(map[string]domain.Role{
+			"worker": {Permissions: domain.RolePermissions{Message: true}},
+		}, domain.Limits{}),
+	})
+	a, err := env.backend.CreateForager(ctx, domain.Agent{HiveID: hive.ID, State: domain.AgentActive, RoleName: "worker", ChainID: "chain-ping"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := env.backend.CreateForager(ctx, domain.Agent{HiveID: hive.ID, State: domain.AgentActive, RoleName: "worker", ChainID: "chain-ping"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := map[string]string{a.ID: agentToken(t, env, a.ID), b.ID: agentToken(t, env, b.ID)}
+	from, to := a, b
+	for i := 0; i < 50; i++ {
+		res := callTool(t, env.connect(sessions[from.ID]), "send", map[string]any{
+			"hiveId": hive.ID, "to": "forager:" + to.ID, "body": "ping",
+			"hop": 0, "chainId": "fresh-chain",
+		})
+		if res.IsError {
+			if !strings.Contains(toolErrorText(res), "hop") {
+				t.Fatalf("send %d failed for another reason: %q", i, toolErrorText(res))
+			}
+			if i > 12 {
+				t.Fatalf("hop limit hit only after %d messages", i)
+			}
+			return
+		}
+		out := decode[sendOutput](t, res)
+		if out.Message.ChainID != "chain-ping" || out.Message.Hop != i+1 {
+			t.Fatalf("message %d chain=%q hop=%d, want chain-ping hop %d", i, out.Message.ChainID, out.Message.Hop, i+1)
+		}
+		from, to = to, from
+	}
+	t.Fatal("peer ping-pong never hit the hop limit")
 }

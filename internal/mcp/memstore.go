@@ -436,6 +436,22 @@ func (m *MemoryBackend) SendMessage(ctx context.Context, msg domain.Message) (do
 
 // Inbox returns messages addressed to to, in write order, strictly after
 // afterID when it names a stored message.
+// MaxReceivedHop implements Backend.
+func (m *MemoryBackend) MaxReceivedHop(ctx context.Context, hiveID string, to domain.Address, chainID string) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	hop := 0
+	for _, msg := range m.inboxes[inboxKey(hiveID, to)] {
+		if msg.ChainID == chainID && msg.Hop > hop {
+			hop = msg.Hop
+		}
+	}
+	return hop, nil
+}
+
 func (m *MemoryBackend) Inbox(ctx context.Context, hiveID string, to domain.Address, afterID string, limit int) ([]domain.Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

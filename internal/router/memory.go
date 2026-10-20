@@ -133,11 +133,27 @@ func (m *MemoryBackend) ForagerByIssue(ctx context.Context, hiveID string, issue
 	})
 }
 
-// ForagerByPR implements Backend: newest non-terminal Forager for the PR.
+// ForagerByPR implements Backend like the store: the PR owner is the oldest
+// non-terminal Forager for the PR without a pinned revision, so Agents spawned
+// later for the same PR never take over its events.
 func (m *MemoryBackend) ForagerByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error) {
-	return m.newestNonTerminal(func(a domain.Agent) bool {
-		return a.HiveID == hiveID && a.Role == domain.RoleForager && a.PRNumber == pr
-	})
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var owner domain.Agent
+	found := false
+	for _, id := range m.agentOrder {
+		a := m.agents[id]
+		if isTerminal(a.State) || a.HiveID != hiveID || a.Role != domain.RoleForager || a.PRNumber != pr {
+			continue
+		}
+		if !found || (owner.Revision != "" && a.Revision == "") {
+			owner, found = a, true
+		}
+	}
+	if !found {
+		return domain.Agent{}, domain.ErrNotFound
+	}
+	return owner, nil
 }
 
 // ForagerByBranch implements Backend: newest non-terminal Forager for the branch.
@@ -155,6 +171,11 @@ func (m *MemoryBackend) CreateForager(ctx context.Context, a domain.Agent) (doma
 	hive, ok := m.hives[a.HiveID]
 	if !ok {
 		return domain.Agent{}, domain.ErrNotFound
+	}
+	if a.ID != "" {
+		if _, exists := m.agents[a.ID]; exists {
+			return domain.Agent{}, domain.ErrConflict
+		}
 	}
 	cfg := resolveConfig(hive.Config)
 	active := 0

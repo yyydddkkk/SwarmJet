@@ -361,8 +361,12 @@ func (s *Store) ForagerByIssue(ctx context.Context, hiveID string, issue int64) 
 	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND issue_number=$2`+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, issue))
 }
 
+// ForagerByPR returns the PR's owner: the live Forager that works on the PR
+// branch. Agents spawned later for the same PR (a verifier pinned to a
+// revision, a triage Agent) must not take over its events, so an Agent
+// without a pinned revision wins, then the oldest.
 func (s *Store) ForagerByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error) {
-	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND pr_number=$2`+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, pr))
+	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND pr_number=$2`+liveForager+` ORDER BY (revision<>'') ASC,created_at ASC,id ASC LIMIT 1`, hiveID, pr))
 }
 
 func (s *Store) ForagerByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error) {

@@ -193,6 +193,14 @@ func (s *Store) messageSeqForID(ctx context.Context, id string) (int64, error) {
 
 // Inbox returns messages for one address in insertion order, starting after
 // afterID. The cursor is messages.seq, not the caller-supplied ID.
+// MaxReceivedHop returns the largest hop among messages to `to` in chainID,
+// or 0 when there are none.
+func (s *Store) MaxReceivedHop(ctx context.Context, hiveID string, to domain.Address, chainID string) (int, error) {
+	var hop int
+	err := s.Pool.QueryRow(ctx, `SELECT coalesce(max(hop),0) FROM messages WHERE hive_id=$1 AND to_addr=$2 AND chain_id=$3`, hiveID, string(to), chainID).Scan(&hop)
+	return hop, err
+}
+
 func (s *Store) Inbox(ctx context.Context, hiveID string, to domain.Address, afterID string, limit int) ([]domain.Message, error) {
 	if limit <= 0 {
 		limit = 100

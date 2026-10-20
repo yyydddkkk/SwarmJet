@@ -383,12 +383,6 @@ func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.
 	if issueEvent {
 		issueNumber = e.Number
 	}
-	prNumber := int64(0)
-	revision := ""
-	if rule.Event == MethodologyEventPRHead || rule.Event == MethodologyEventCheckFailed {
-		prNumber = e.Number
-		revision = e.SHA
-	}
 	agent := domain.Agent{
 		HiveID:      hive.ID,
 		Role:        domain.RoleForager,
@@ -397,17 +391,58 @@ func (r *Router) routeTrigger(ctx context.Context, hive domain.Hive, cfg domain.
 		CLI:         cfg.CLI,
 		Task:        task,
 		IssueNumber: issueNumber,
-		PRNumber:    prNumber,
 		ChainID:     chainIDFor(e),
 		RoleName:    rule.Role,
-		Revision:    revision,
+	}
+	var owner domain.Agent
+	revisionEvent := rule.Event == MethodologyEventPRHead || rule.Event == MethodologyEventCheckFailed
+	if revisionEvent {
+		// Revision events only concern work this Hive owns: a failing check on
+		// someone else's branch or PR must not spawn Agents. The new Agent
+		// joins the owner's chain, so the chain limit bounds it too, and one
+		// Agent per role and head commit is enough however many check runs or
+		// deliveries report it.
+		var found bool
+		var err error
+		owner, found, err = r.owningForager(ctx, hive.ID, e)
+		if err != nil {
+			return Decision{}, err
+		}
+		if !found || e.SHA == "" {
+			return Decision{Action: ActionIgnored, Reason: rule.Event + " rule skipped: no Forager of this Hive owns the PR or branch", Repository: e.Repository, HiveID: hive.ID}, nil
+		}
+		prNumber := e.Number
+		if prNumber == 0 {
+			prNumber = owner.PRNumber
+		}
+		agent.ID = revisionAgentID(hive.ID, rule.Role, owner.ID, e.SHA)
+		agent.PRNumber = prNumber
+		agent.Revision = e.SHA
+		agent.ParentID = owner.ID
+		if owner.ChainID != "" {
+			agent.ChainID = owner.ChainID
+		}
 	}
 	created, err := r.backend.CreateForager(ctx, agent)
 	if errors.Is(err, domain.ErrHiveLimit) || errors.Is(err, domain.ErrChainLimit) {
 		return r.toInbox(ctx, hive, e, "cannot start Forager: "+err.Error())
 	}
+	if revisionEvent && errors.Is(err, domain.ErrConflict) {
+		err = nil
+		created = domain.Agent{}
+	}
 	if err != nil {
 		return Decision{}, err
+	}
+	if revisionEvent && rule.Event == MethodologyEventCheckFailed {
+		// The owner still hears about its failing CI (ADR section 9); the rule
+		// only adds an Agent next to it.
+		if _, err := r.deliverToForager(ctx, hive, e, owner, domain.MessageEvent, ""); err != nil {
+			return Decision{}, err
+		}
+	}
+	if created.ID == "" {
+		return Decision{Action: ActionIgnored, Reason: rule.Event + " rule already started an Agent for this head commit", Repository: e.Repository, HiveID: hive.ID, ForagerID: owner.ID}, nil
 	}
 
 	message := domain.Message{
@@ -471,19 +506,20 @@ func (r *Router) eventRules(ctx context.Context, hiveID string, cfg domain.HiveC
 	return rules, nil
 }
 
-// owningForager looks up a non-terminal Forager for the event, in the order the ADR
-// gives: PR number, then branch, then Issue number. The number is interpreted
-// according to the event family so an Issue number is never compared against
-// PR numbers.
+// owningForager looks up a non-terminal Forager for the event: the owner of
+// the event branch first (it is the PR's author even when other Agents were
+// spawned for the same PR), then the PR number, then the Issue number. The
+// number is interpreted according to the event family so an Issue number is
+// never compared against PR numbers.
 func (r *Router) owningForager(ctx context.Context, hiveID string, e Event) (domain.Agent, bool, error) {
-	if pr := prReference(e); pr > 0 {
-		forager, found, err := r.foragerByPR(ctx, hiveID, pr)
+	if branch := strings.TrimSpace(e.Branch); branch != "" {
+		forager, found, err := r.foragerByBranch(ctx, hiveID, branch)
 		if err != nil || found {
 			return forager, found, err
 		}
 	}
-	if branch := strings.TrimSpace(e.Branch); branch != "" {
-		forager, found, err := r.foragerByBranch(ctx, hiveID, branch)
+	if pr := prReference(e); pr > 0 {
+		forager, found, err := r.foragerByPR(ctx, hiveID, pr)
 		if err != nil || found {
 			return forager, found, err
 		}
@@ -718,6 +754,13 @@ func messageID(e Event, target domain.Address) string {
 	}
 	sum := sha256.Sum256([]byte(key))
 	return "gh-" + hex.EncodeToString(sum[:16])
+}
+
+// revisionAgentID is the stable ID of the Agent a revision rule starts for one
+// role, owner and head commit, so repeated deliveries create it only once.
+func revisionAgentID(hiveID, role, ownerID, sha string) string {
+	sum := sha256.Sum256([]byte("revision-agent\x00" + hiveID + "\x00" + role + "\x00" + ownerID + "\x00" + sha))
+	return "forager-" + hex.EncodeToString(sum[:12])
 }
 
 // chainIDFor derives a stable chain ID for work started by one delivery.
