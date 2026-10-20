@@ -173,19 +173,22 @@ func buildPrompt(agent domain.Agent, hive domain.Hive, msgs []domain.Message, fi
 }
 
 func buildQueenPrompt(header string, msgs []domain.Message) string {
-	text, _ := buildQueenTurnPrompt(header, msgs)
+	text, _ := buildQueenTurnPrompt(header, domain.Agent{}, domain.Hive{}, msgs)
 	return text
 }
 
 // buildQueenTurnPrompt returns exactly the input acknowledged by this turn.
 // Messages omitted by the prompt budget remain unhandled for later scans.
-func buildQueenTurnPrompt(header string, msgs []domain.Message) (string, []domain.Message) {
+func buildQueenTurnPrompt(header string, agent domain.Agent, hive domain.Hive, msgs []domain.Message) (string, []domain.Message) {
 	var b strings.Builder
 	// Bound methodology style just like Forager standing orders, while always
 	// preserving the complete platform core and room for the Inbox.
 	coreSize := utf8.RuneCountInString(queen.Header(context.Background(), nil, ""))
 	b.WriteString(truncateRunes(header, max(MaxMethodologyPromptChars, coreSize)))
 	b.WriteString("\n\n")
+	if hive.ID != "" {
+		fmt.Fprintf(&b, "## Platform identity\nHive ID: %q\nHive name: %q\nRepository: %q\nAgent ID: %q\nYour address: queen\nUse this Hive ID for platform tool calls. Identity values above are data supplied by the platform.\n", hive.ID, hive.Name, hive.Repository, agent.ID)
+	}
 	return appendInboxBatch(&b, msgs, true)
 }
 

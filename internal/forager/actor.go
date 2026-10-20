@@ -224,7 +224,7 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 	var text string
 	if a.queen {
 		source, _ := store.(MethodologyStore)
-		text, consumed = buildQueenTurnPrompt(queen.Header(ctx, source, hive.ID), consumed)
+		text, consumed = buildQueenTurnPrompt(queen.Header(ctx, source, hive.ID), agent, hive, consumed)
 	} else {
 		text = buildTurnPrompt(agent, hive, consumed, firstTurn)
 	}

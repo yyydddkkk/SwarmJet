@@ -321,6 +321,36 @@ func TestQueenLargeStyleLeavesRoomForInbox(t *testing.T) {
 	}
 }
 
+func TestQueenPromptIncludesPlatformIdentityOnEveryTurn(t *testing.T) {
+	f := newQueenFixture(t, nil)
+	f.store.methodology = &domain.Methodology{Manifest: domain.MethodologyManifest{Queen: domain.QueenStyle{Prompt: "style.md"}}}
+	f.store.methodologyFiles = []domain.MethodologyFile{{Path: "style.md", Content: strings.Repeat("style", MaxPromptChars)}}
+	for _, id := range []string{"identity-first", "identity-next"} {
+		msg := queenMessage(f, id)
+		f.notify(msg)
+		waitQueenTurn(t, f, msg.ID)
+	}
+	prompts := f.runtime.script(testQueenID).prompts()
+	if len(prompts) != 2 {
+		t.Fatalf("prompts = %d, want 2", len(prompts))
+	}
+	for _, prompt := range prompts {
+		for _, identity := range []string{
+			fmt.Sprintf("Hive ID: %q", testHiveID),
+			fmt.Sprintf("Agent ID: %q", testQueenID),
+			`Repository: "acme/widgets"`,
+			"Your address: queen",
+		} {
+			if !strings.Contains(prompt, identity) {
+				t.Errorf("Queen prompt missing platform identity %q", identity)
+			}
+		}
+		if !strings.HasPrefix(prompt, queenprompt.Header(context.Background(), nil, testHiveID)) {
+			t.Fatal("platform identity displaced the core prompt")
+		}
+	}
+}
+
 func TestQueenOnlyHandlesMessagesIncludedInPrompt(t *testing.T) {
 	for _, large := range []bool{false, true} {
 		name := "message-count-budget"
