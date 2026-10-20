@@ -61,6 +61,7 @@ type server struct {
 	attempts  map[string]attempt
 	prCache   map[prCacheKey]prCacheEntry
 	prCacheMu sync.Mutex
+	events    *eventHub
 }
 
 type attempt struct {
@@ -112,6 +113,10 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 	r = withPrincipal(r, principal)
 	// The console has a single administrator account, so every authenticated
 	// session may use the Hive and Forager endpoints.
+	if r.URL.Path == "/api/events" {
+		a.eventStream(w, r)
+		return
+	}
 	if r.URL.Path == "/api/setup/status" || strings.HasPrefix(r.URL.Path, "/api/setup/github/") {
 		a.setup(w, r)
 		return

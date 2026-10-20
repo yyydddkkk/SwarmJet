@@ -60,6 +60,8 @@ type Store struct {
 	// listener guards the single shared LISTEN connection used by WaitInbox.
 	listenerMu sync.Mutex
 	listener   *inboxListener
+	eventsMu   sync.Mutex
+	events     *eventListener
 }
 
 func Open(ctx context.Context, dsn string) (*Store, error) {
@@ -80,6 +82,12 @@ func (s *Store) Close() {
 	s.listenerMu.Unlock()
 	if listener != nil {
 		listener.stop()
+	}
+	s.eventsMu.Lock()
+	events := s.events
+	s.eventsMu.Unlock()
+	if events != nil {
+		events.stop()
 	}
 	s.Pool.Close()
 }
@@ -169,6 +177,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 		}
 	}
 	if err = applySchemaUpgrade13(ctx, tx, version); err != nil {
+		return err
+	}
+	if err = applySchemaUpgrade14(ctx, tx, version); err != nil {
 		return err
 	}
 	if err = applySchemaUpgrade15(ctx, tx); err != nil {

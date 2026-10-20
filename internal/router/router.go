@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -163,7 +164,18 @@ func normalizeAppSlug(raw string) string {
 //  2. a matching trigger rule starts a Forager (or reuses the Issue's Forager);
 //  3. an event that belongs to an existing non-terminal Forager is delivered to it;
 //  4. everything else goes to the Queen Inbox when enabled, or the Hive Inbox.
-func (r *Router) Route(ctx context.Context, e Event) (Decision, error) {
+func (r *Router) Route(ctx context.Context, e Event) (decision Decision, routeErr error) {
+	defer func() {
+		if routeErr == nil && decision.HiveID != "" && prReference(e) > 0 {
+			if publisher, ok := r.backend.(interface {
+				PublishPREvent(context.Context, string, int64) error
+			}); ok {
+				if err := publisher.PublishPREvent(ctx, decision.HiveID, prReference(e)); err != nil {
+					slog.Warn("routed PR event notification failed", "hive", decision.HiveID, "pr", prReference(e), "error", err)
+				}
+			}
+		}
+	}()
 	repository := strings.TrimSpace(e.Repository)
 	if repository == "" {
 		return Decision{Action: ActionIgnored, Reason: "event has no repository"}, nil
