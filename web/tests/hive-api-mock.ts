@@ -1,8 +1,21 @@
 // Playwright mock for the Hive REST API. It is the only remaining consumer of
 // web/src/fixtures: the UI itself always talks to /api. Each call gets fresh
 // state, so tests can mutate it and watch the five-second polls pick it up.
+// Round-4 responses copy the json tags of the Go handlers exactly (see
+// web/src/fixtures/round4.ts for the struct each one mirrors).
 import type { Page, Route } from "@playwright/test";
 import { hiveAgents, hiveOverviews } from "../src/fixtures/hive-console";
+import {
+  builtinMethodology,
+  methodologyChanges,
+  methodologyResponses,
+  methodologyVersions,
+  modelCatalog,
+  ordersUsage,
+  pr88Status,
+  swarmjetUsage,
+  swarmjetUsageRows,
+} from "../src/fixtures/round4";
 import type {
   Agent,
   CreatedToken,
@@ -11,14 +24,37 @@ import type {
   HiveOverview,
   Message,
   MessageKind,
+  Methodology,
+  MethodologyChange,
+  MethodologyFile,
+  ModelCredential,
+  ModelsResponse,
   Principal,
+  PRStatusResponse,
   SetupStatus,
   TokenScope,
   TokenSummary,
+  UsageGroup,
+  UsageResponse,
+  UsageTotals,
 } from "../src/hive/types";
 
 export type MockFailure = Partial<
-  Record<"hives" | "hive" | "foragers" | "forager" | "messages" | "send" | "spawn" | "cancel", number>
+  Record<
+    | "hives"
+    | "hive"
+    | "foragers"
+    | "forager"
+    | "messages"
+    | "send"
+    | "spawn"
+    | "cancel"
+    | "models"
+    | "methodology"
+    | "usage"
+    | "pr",
+    number
+  >
 >;
 
 export type MockOptions = {
@@ -29,7 +65,7 @@ export type MockOptions = {
     github?: Partial<SetupStatus["github"]>;
     tunnel?: Partial<SetupStatus["tunnel"]>;
     cells?: Partial<SetupStatus["cells"]>;
-    cliLogin?: Partial<SetupStatus["cliLogin"]>;
+    models?: Partial<SetupStatus["models"]>;
   };
   repositories?: GithubRepository[];
   tokens?: TokenSummary[];
@@ -44,7 +80,10 @@ export type MockOptions = {
 export type MockCall = {
   method: string;
   path: string;
+  /** The query string without the leading "?". */
+  query: string;
   body?: unknown;
+  headers: Record<string, string>;
 };
 
 export type MockState = {
@@ -61,6 +100,15 @@ export type MockState = {
   manifestAction: string;
   principal: Principal;
   nextTokenID: number;
+  models: ModelsResponse;
+  modelCredentials: ModelCredential[];
+  methodologies: Record<string, Methodology[]>;
+  methodologyFiles: Record<string, Record<number, MethodologyFile[]>>;
+  methodologyChanges: Record<string, MethodologyChange[]>;
+  usage: Record<string, UsageResponse>;
+  /** Per-Agent totals and byModel rows, used for ?agent= filters. */
+  usageRows: Record<string, Record<string, { totals: UsageTotals; byModel: UsageGroup[] }>>;
+  prStatuses: Record<string, PRStatusResponse>;
 };
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -76,6 +124,7 @@ function seedMessages(): Message[] {
       chainId: "chain-142",
       hop: 0,
       body: "GitHub issues.opened：#142 Forager 列表需要按状态筛选。外部内容：Swarm 面板里 Forager 一多就找不到失败的那只。",
+      trust: "external",
       state: "pending",
       createdAt: "2026-10-16T09:02:00Z",
     },
@@ -88,6 +137,7 @@ function seedMessages(): Message[] {
       chainId: "chain-142",
       hop: 0,
       body: "把 #142 派出去，顺便让一只独立的 Forager 审一下 #88 的改动。",
+      trust: "user",
       state: "handled",
       createdAt: "2026-10-16T09:04:00Z",
     },
@@ -100,6 +150,7 @@ function seedMessages(): Message[] {
       chainId: "chain-142",
       hop: 1,
       body: "收到。我先把 #142 交给一只使用 implementation 预设的 Forager，工作分支从 main 切出；同时把 #88 的审查任务派给另一只 Forager。",
+      trust: "agent",
       state: "handled",
       createdAt: "2026-10-16T09:05:00Z",
     },
@@ -112,6 +163,7 @@ function seedMessages(): Message[] {
       chainId: "chain-142",
       hop: 0,
       body: "处理 #142：在 Swarm 面板增加按状态筛选。只改 web/src，别动旧的任务页；完成一轮后更新交接摘要。",
+      trust: "agent",
       state: "handled",
       createdAt: "2026-10-16T09:07:00Z",
     },
@@ -124,6 +176,7 @@ function seedMessages(): Message[] {
       chainId: "chain-142",
       hop: 1,
       body: "筛选接口和样式完成，单测 6 个用例通过。前端的状态筛选交互还没做，下一轮继续。",
+      trust: "agent",
       artifacts: [{ kind: "branch", ref: "swarm/swarmjet/forager-7f3a" }],
       state: "handled",
       createdAt: "2026-10-16T10:48:00Z",
@@ -137,8 +190,35 @@ function seedMessages(): Message[] {
       chainId: "chain-51",
       hop: 0,
       body: "Queen 未开启，这条事件已存入 Hive Inbox（蜂巢收件箱），等待本地 Agent 或人来处理。",
+      trust: "system",
       state: "pending",
       createdAt: "2026-10-15T20:11:00Z",
+    },
+    {
+      id: "evt-88-review",
+      hiveId: "swarmjet",
+      from: "router",
+      to: "queen",
+      kind: "event",
+      chainId: "chain-142",
+      hop: 0,
+      body: "GitHub pull_request_review 已提交：forager-2b91 批准了 a41c9de。外部内容：错误处理与测试覆盖没问题。",
+      trust: "external",
+      state: "pending",
+      createdAt: "2026-10-16T11:02:00Z",
+    },
+    {
+      id: "sys-142",
+      hiveId: "swarmjet",
+      from: "system",
+      to: "local:web-admin",
+      kind: "event",
+      chainId: "chain-142",
+      hop: 0,
+      body: "平台提醒：这条链已经运行 2 小时，仍未收到合并决定。",
+      trust: "system",
+      state: "pending",
+      createdAt: "2026-10-16T11:10:00Z",
     },
   ];
 }
@@ -160,7 +240,7 @@ const defaultSetup: SetupStatus = {
     model: "opencode/free",
     dockerAvailable: true,
   },
-  cliLogin: { available: true, loggedIn: false, cli: "opencode" },
+  models: { available: false, configured: false, defaultModel: "deepseek/deepseek-chat" },
 };
 
 const defaultRepositories: GithubRepository[] = [
@@ -186,6 +266,12 @@ function tokenSecret(n: number): string {
   return n.toString(16).padStart(64, "0");
 }
 
+/** The server only ever returns this masked form; the mock mirrors that. */
+function maskKey(key: string): string {
+  if (key.length <= 8) return `${key.slice(0, 2)}…${key.slice(-2)}`;
+  return `${key.slice(0, 3)}…${key.slice(-4)}`;
+}
+
 export function createMockState(options: MockOptions = {}): MockState {
   return {
     hives: clone(hiveOverviews),
@@ -198,7 +284,7 @@ export function createMockState(options: MockOptions = {}): MockState {
       github: { ...defaultSetup.github, ...options.setup?.github },
       tunnel: { ...defaultSetup.tunnel, ...options.setup?.tunnel },
       cells: { ...defaultSetup.cells, ...options.setup?.cells },
-      cliLogin: { ...defaultSetup.cliLogin, ...options.setup?.cliLogin },
+      models: { ...defaultSetup.models, ...options.setup?.models },
     },
     repositories: clone(options.repositories ?? defaultRepositories),
     tokens: clone(options.tokens ?? defaultTokens),
@@ -213,6 +299,64 @@ export function createMockState(options: MockOptions = {}): MockState {
       },
     ),
     nextTokenID: 2,
+    models: clone(modelCatalog),
+    modelCredentials: clone(modelCatalog.providers),
+    methodologies: { swarmjet: clone(methodologyVersions) },
+    methodologyFiles: {
+      swarmjet: Object.fromEntries(
+        methodologyVersions.map(version => [
+          version.version,
+          clone(methodologyResponses[version.version].files),
+        ]),
+      ),
+    },
+    methodologyChanges: { swarmjet: clone(methodologyChanges) },
+    usage: { swarmjet: clone(swarmjetUsage), orders: clone(ordersUsage) },
+    usageRows: {
+      swarmjet: clone(swarmjetUsageRows) as unknown as MockState["usageRows"][string],
+      orders: {
+        "forager-1a2b": {
+          totals: usageTotals(ordersUsage.byAgent[0]),
+          byModel: clone(ordersUsage.byModel),
+        },
+      },
+    },
+    prStatuses: { "swarmjet:88": clone(pr88Status) },
+  };
+}
+
+function usageTotals(row: UsageTotals): UsageTotals {
+  return {
+    requests: row.requests,
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
+    cacheReadTokens: row.cacheReadTokens,
+    cacheWriteTokens: row.cacheWriteTokens,
+    costUsd: row.costUsd,
+    unknownPriceRequests: row.unknownPriceRequests,
+  };
+}
+
+const emptyTotals: UsageTotals = {
+  requests: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  costUsd: 0,
+  unknownPriceRequests: 0,
+};
+
+/** Mirrors setupModels: available means at least one configured credential. */
+function syncSetupModels(state: MockState) {
+  const providers = [
+    ...new Set(state.modelCredentials.filter(item => item.configured).map(item => item.provider)),
+  ].sort();
+  state.setup.models = {
+    available: providers.length > 0,
+    configured: providers.length > 0,
+    defaultModel: state.models.defaultModel,
+    ...(providers.length ? { providers } : {}),
   };
 }
 
@@ -249,7 +393,9 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
     state.calls.push({
       method,
       path,
+      query: url.search.replace(/^\?/, ""),
       body: request.postData() ? request.postDataJSON() : undefined,
+      headers: request.headers(),
     });
     const fail = (status: number) => json(route, status, { error: failureMessage });
 
@@ -270,6 +416,46 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
     }
     if (path === "/api/setup/status" && method === "GET") {
       return json(route, 200, state.setup);
+    }
+    if (path === "/api/models" && method === "GET") {
+      if (failure.models) return fail(failure.models);
+      const body: ModelsResponse = {
+        defaultModel: state.models.defaultModel,
+        models: state.models.gatewayAvailable ? state.models.models : [],
+        providers: [...state.modelCredentials].sort((a, b) => a.provider.localeCompare(b.provider)),
+        gatewayAvailable: state.models.gatewayAvailable,
+      };
+      return json(route, 200, body);
+    }
+    const modelCredentialMatch = path.match(/^\/api\/models\/credentials\/([^/]+)$/);
+    if (modelCredentialMatch) {
+      const provider = decodeURIComponent(modelCredentialMatch[1]);
+      if (method === "PUT") {
+        const body = request.postDataJSON() as { apiKey?: string };
+        const apiKey = (body.apiKey ?? "").trim();
+        if (!apiKey) return json(route, 400, { error: "apiKey is required" });
+        const credential: ModelCredential = {
+          provider,
+          type: "api_key",
+          masked: maskKey(apiKey),
+          configured: true,
+        };
+        state.modelCredentials = [
+          ...state.modelCredentials.filter(item => item.provider !== provider),
+          credential,
+        ];
+        syncSetupModels(state);
+        return json(route, 200, credential);
+      }
+      if (method === "DELETE") {
+        const before = state.modelCredentials.length;
+        state.modelCredentials = state.modelCredentials.filter(item => item.provider !== provider);
+        if (state.modelCredentials.length === before) {
+          return json(route, 404, { error: "not found" });
+        }
+        syncSetupModels(state);
+        return route.fulfill({ status: 204 });
+      }
     }
     if (path === "/api/setup/github/manifest" && method === "POST") {
       return json(route, 200, {
@@ -395,6 +581,7 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
             hiveId: id,
             role: "queen",
             state: body.queenEnabled ? "active" : "disabled",
+            roleName: "queen",
             cli: "opencode",
             createdAt: now(),
             updatedAt: now(),
@@ -411,6 +598,109 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
       const overview = state.hives.find(item => item.hive.id === hiveID);
       if (!overview) return json(route, 404, { error: "not found" });
       return json(route, 200, { hive: overview.hive, localAddress: state.localAddress });
+    }
+
+    const methodologyVersionsMatch = path.match(/^\/api\/hives\/([^/]+)\/methodology\/versions$/);
+    if (methodologyVersionsMatch && method === "GET") {
+      if (failure.methodology) return fail(failure.methodology);
+      const hiveID = decodeURIComponent(methodologyVersionsMatch[1]);
+      if (!state.hives.some(item => item.hive.id === hiveID)) {
+        return json(route, 404, { error: "not found" });
+      }
+      const versions = state.methodologies[hiveID] ?? [];
+      return json(route, 200, {
+        hiveId: hiveID,
+        activeVersion: versions.find(item => item.active)?.version ?? 0,
+        versions,
+        changes: state.methodologyChanges[hiveID] ?? [],
+      });
+    }
+
+    const methodologyActivateMatch = path.match(/^\/api\/hives\/([^/]+)\/methodology\/activate$/);
+    if (methodologyActivateMatch && method === "POST") {
+      const hiveID = decodeURIComponent(methodologyActivateMatch[1]);
+      const versions = state.methodologies[hiveID];
+      if (!versions) return json(route, 404, { error: "not found" });
+      const body = request.postDataJSON() as { version?: number };
+      const target = versions.find(version => version.version === body.version);
+      if (!target) return json(route, 404, { error: "version not found" });
+      for (const version of versions) version.active = version.version === target.version;
+      const existing = state.methodologyChanges[hiveID] ?? [];
+      const change: MethodologyChange = {
+        id: Math.max(0, ...existing.map(item => item.id)) + 1,
+        hiveId: hiveID,
+        action: "activate",
+        version: target.version,
+        actor: state.localAddress,
+        createdAt: now(),
+      };
+      state.methodologyChanges[hiveID] = [...existing, change];
+      return json(route, 200, {
+        ...target,
+        files: state.methodologyFiles[hiveID]?.[target.version] ?? [],
+      });
+    }
+
+    const methodologyMatch = path.match(/^\/api\/hives\/([^/]+)\/methodology$/);
+    if (methodologyMatch && method === "GET") {
+      if (failure.methodology) return fail(failure.methodology);
+      const hiveID = decodeURIComponent(methodologyMatch[1]);
+      if (!state.hives.some(item => item.hive.id === hiveID)) {
+        return json(route, 404, { error: "not found" });
+      }
+      const versions = state.methodologies[hiveID] ?? [];
+      const requested = url.searchParams.get("version");
+      const version = requested
+        ? versions.find(item => String(item.version) === requested)
+        : versions.find(item => item.active);
+      // No active version: the server answers with the built-in methodology.
+      if (!version && !requested) return json(route, 200, builtinMethodology(hiveID));
+      if (!version) return json(route, 404, { error: "version not found" });
+      return json(route, 200, {
+        ...version,
+        files: state.methodologyFiles[hiveID]?.[version.version] ?? [],
+      });
+    }
+
+    const prMatch = path.match(/^\/api\/hives\/([^/]+)\/prs\/(\d+)$/);
+    if (prMatch && method === "GET") {
+      if (failure.pr) return fail(failure.pr);
+      const hiveID = decodeURIComponent(prMatch[1]);
+      const prNumber = Number(prMatch[2]);
+      const pr = state.prStatuses[`${hiveID}:${prNumber}`];
+      if (!pr) return json(route, 404, { error: "not found" });
+      return json(route, 200, pr);
+    }
+
+    if (path === "/api/usage" && method === "GET") {
+      if (failure.usage) return fail(failure.usage);
+      const hiveID = url.searchParams.get("hive") ?? "";
+      const agentID = url.searchParams.get("agent") ?? "";
+      const period = url.searchParams.get("period") ?? "";
+      if (period !== "" && period !== "all" && period !== "today") {
+        return json(route, 400, { error: 'period must be "all" or "today"' });
+      }
+      // Like LLMUsageSummary, an unknown filter is an empty summary, not a 404.
+      const base: UsageResponse = state.usage[hiveID] ?? {
+        period: "all",
+        totals: emptyTotals,
+        byAgent: [],
+        byModel: [],
+      };
+      const echo = {
+        ...(hiveID ? { hiveId: hiveID } : {}),
+        ...(agentID ? { agentId: agentID } : {}),
+        period: period === "today" ? "today" : "all",
+      };
+      if (!agentID) return json(route, 200, { ...base, ...echo });
+      const row = state.usageRows[hiveID]?.[agentID];
+      const summary: UsageResponse = {
+        ...echo,
+        totals: row ? row.totals : emptyTotals,
+        byAgent: row ? [{ agentId: agentID, ...row.totals }] : [],
+        byModel: row ? row.byModel : [],
+      };
+      return json(route, 200, summary);
     }
 
     const foragersMatch = path.match(/^\/api\/hives\/([^/]+)\/foragers$/);
@@ -431,6 +721,7 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
         const body = request.postDataJSON() as {
           task: string;
           preset?: string;
+          role?: string;
           cli?: string;
           branch?: string;
           issueNumber?: number;
@@ -444,6 +735,7 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
           role: "forager",
           state: "creating",
           preset: body.preset,
+          roleName: body.role ?? body.preset ?? "worker",
           cli: body.cli ?? "opencode",
           task: body.task,
           branch: body.branch ?? `swarm/${hiveID}/${id}`,

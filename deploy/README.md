@@ -113,8 +113,8 @@ ssh -N -L 8180:127.0.0.1:8180 用户名@服务器
 | `PUBLIC_ORIGIN` | 否 | 控制台地址，默认 `http://localhost:8180` |
 | `LISTEN_HOST`、`HTTP_PORT`、`SECURE_COOKIES` | 否 | 监听地址、端口、HTTPS Cookie |
 | `IMAGE`、`AGENT_IMAGE` | 否 | 平台镜像和 Cell 使用的 Agent 镜像 |
-| `SWARMJET_CELLS`、`SWARMJET_FORAGER_MODEL`、`SWARMJET_CELL_MCP_URL`、`SWARMJET_CELL_NETWORK` | 否 | Cell 运行时 |
-| `OPENCODE_AUTH_CONTENT` | 否 | 可选 OpenCode 凭证；CLI 登录终端的结果优先 |
+| `SWARMJET_CELLS`、`SWARMJET_DEFAULT_MODEL`、`SWARMJET_CELL_MCP_URL`、`SWARMJET_CELL_LLM_URL`、`SWARMJET_CELL_NETWORK` | 否 | Cell 运行时；LLM URL 为空时按 MCP URL 推导 |
+| `OMP_VERSION`、`AGENT_CLIS` | 否 | Agent 镜像里锁定的 oh-my-pi 版本和可选的额外 CLI |
 | `GITHUB_APP_ID`、`GITHUB_APP_PRIVATE_KEY_FILE`、`GITHUB_WEBHOOK_SECRET` | 否 | 第二轮手动方式；设置后优先于数据库里的 App |
 | `SWARMJET_TUNNEL_URL` | 否 | 隧道指标地址，例如 `http://tunnel:2000` |
 | `WEBHOOK_LISTEN_ADDRESS` | 否 | api 的 webhook 专用监听地址，默认 `:8081`；隧道转发到这里 |
@@ -184,6 +184,30 @@ docker compose --env-file .env -f compose.yaml up -d api
 ```
 
 已经存在的 Cell 容器不会自动删除，可按标签 `swarmjet.cell=true` 查找。
+
+### 模型凭证与 `/llm` 代理
+
+叠加文件还会启动两个不映射端口的内部服务：
+
+- `auth-broker`（`omp auth-broker serve`，端口 8765）保管提供方凭证并刷新 OAuth；
+- `auth-gateway`（`omp auth-gateway serve`，端口 8766）代为调用模型提供方。
+
+两者与 Agent 镜像使用同一个 `AGENT_IMAGE`（构建参数 `OMP_VERSION` 锁定版本），状态在 `DATA_DIR/omp`；它们只加入 `<project>_llm` 网络（只有 `api` 加入），不映射端口，Cell 所在的默认网络无法解析它们。`install.py` 在启用 Cells 时生成 `auth-broker.token` 和 `auth-gateway.token`（`0600`，目录 `0700`），重复安装或升级不会轮换已有 Token。
+
+Cell 只持有自己的 agent Token，模型请求发到 `api` 的 `/llm/`；平台用 agent Token 鉴权、换成 gateway Token 转发、按 Agent 记录 `llm_usage`，并在请求前检查当前方法论的 `maxCostPerAgentUsd` / `maxCostPerDayUsd`。超出预算时返回 `402`，说明命中的上限和当前花费，并给派活的人发一条 system 消息（每个 Agent 每个上限只发一次）。
+
+写入凭证有三种等价方式（DeepSeek 是第一个支持的提供方）：
+
+```sh
+# 控制台：模型页；或 admin Token 通过 MCP
+# 也可以直接调用接口（浏览器会话 + 同源请求头）
+curl -X PUT "http://127.0.0.1:8180/api/models/credentials/deepseek" \
+  -H 'Content-Type: application/json' \
+  -H 'X-Requested-With: swarmjet' -H "Origin: $PUBLIC_ORIGIN" \
+  --data '{"apiKey":"<DEEPSEEK_API_KEY>"}'
+```
+
+接口和日志都不会返回或记录明文：`GET /api/models` 只返回脱敏值，`GET /api/usage?hive=&agent=` 返回用量与花费汇总。Token 文件属于部署机密，不要提交 `.env` 或 `DATA_DIR/omp`。
 
 ## 隧道
 

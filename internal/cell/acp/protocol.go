@@ -89,8 +89,8 @@ type HTTPHeader struct {
 }
 
 // MCPServer attaches an MCP server to a session. A stdio server sets Command
-// and Args; an HTTP or SSE server sets Type and URL. OpenCode namespaces the
-// tools it exposes as "<server-name>_<tool-name>".
+// and Args; an HTTP or SSE server sets Type and URL. Agents namespace the tools
+// they expose as "<server-name>_<tool-name>".
 type MCPServer struct {
 	Name    string        `json:"name"`
 	Command string        `json:"command,omitempty"`
@@ -101,10 +101,10 @@ type MCPServer struct {
 	Headers []HTTPHeader  `json:"headers,omitempty"`
 }
 
-// MarshalJSON encodes exactly the fields the chosen transport needs. OpenCode's
-// ACP schema validates stdio servers strictly and rejects them unless args and
-// env are present as arrays, so a zero MCPServer would otherwise fail
-// session/new with "Invalid params"; omitempty cannot express an empty array.
+// MarshalJSON encodes exactly the fields the chosen transport needs. Some ACP
+// agents validate stdio servers strictly and reject them unless args and env
+// are present as arrays, so a zero MCPServer would otherwise fail session/new
+// with "Invalid params"; omitempty cannot express an empty array.
 func (m MCPServer) MarshalJSON() ([]byte, error) {
 	out := map[string]any{"name": m.Name}
 	switch {

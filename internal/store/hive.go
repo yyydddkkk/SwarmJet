@@ -20,7 +20,7 @@ import (
 
 const hiveColumns = `id,name,repository,queen_enabled,config,version,created_at,updated_at`
 
-const agentColumns = `id,hive_id,role,state,preset,cli,task,branch,issue_number,pr_number,node_id,chain_id,cli_session_ref,handoff,created_at,updated_at`
+const agentColumns = `id,hive_id,role,state,preset,cli,task,branch,issue_number,pr_number,node_id,chain_id,cli_session_ref,handoff,role_name,revision,parent_id,created_at,updated_at`
 
 // newOpaqueID returns 128 random bits as hex. It is used for Hive, Agent and
 // Token identifiers. Message IDs use newMessageID instead so that they sort in
@@ -203,7 +203,8 @@ func scanAgent(row pgx.Row) (domain.Agent, error) {
 	var role, state string
 	var handoff []byte
 	err := row.Scan(&a.ID, &a.HiveID, &role, &state, &a.Preset, &a.CLI, &a.Task, &a.Branch,
-		&a.IssueNumber, &a.PRNumber, &a.NodeID, &a.ChainID, &a.SessionRef, &handoff, &a.CreatedAt, &a.UpdatedAt)
+		&a.IssueNumber, &a.PRNumber, &a.NodeID, &a.ChainID, &a.SessionRef, &handoff,
+		&a.RoleName, &a.Revision, &a.ParentID, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return domain.Agent{}, domainErr(err)
 	}
@@ -221,6 +222,18 @@ func scanAgent(row pgx.Row) (domain.Agent, error) {
 // CreateForager inserts a Forager after checking the Hive's concurrency and chain
 // limits. It locks the Hive row so concurrent creators cannot overshoot.
 func (s *Store) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent, error) {
+	return s.createForager(ctx, a, domain.Limits{})
+}
+
+// CreateForagerWithLimits is CreateForager with the limits declared by the
+// active methodology. A zero field keeps the HiveConfig limit; a non-zero field
+// replaces it. The platform still requires a positive cap, so "unlimited" is
+// never possible.
+func (s *Store) CreateForagerWithLimits(ctx context.Context, a domain.Agent, limits domain.Limits) (domain.Agent, error) {
+	return s.createForager(ctx, a, limits)
+}
+
+func (s *Store) createForager(ctx context.Context, a domain.Agent, limits domain.Limits) (domain.Agent, error) {
 	now := time.Now().UTC()
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -238,11 +251,18 @@ func (s *Store) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent
 		}
 	}
 	applyHiveDefaults(&cfg)
+	maxConcurrent, maxPerChain := cfg.MaxConcurrentForagers, cfg.MaxForagersPerChain
+	if limits.MaxConcurrentAgents > 0 {
+		maxConcurrent = limits.MaxConcurrentAgents
+	}
+	if limits.MaxAgentsPerChain > 0 {
+		maxPerChain = limits.MaxAgentsPerChain
+	}
 	var active int
 	if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND role='forager' AND state IN ('creating','active','parked')`, a.HiveID).Scan(&active); err != nil {
 		return domain.Agent{}, err
 	}
-	if active >= cfg.MaxConcurrentForagers {
+	if active >= maxConcurrent {
 		return domain.Agent{}, domain.ErrHiveLimit
 	}
 	if a.ChainID != "" {
@@ -250,7 +270,7 @@ func (s *Store) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent
 		if err = tx.QueryRow(ctx, `SELECT count(*) FROM agents WHERE hive_id=$1 AND chain_id=$2`, a.HiveID, a.ChainID).Scan(&chained); err != nil {
 			return domain.Agent{}, err
 		}
-		if chained >= cfg.MaxForagersPerChain {
+		if chained >= maxPerChain {
 			return domain.Agent{}, domain.ErrChainLimit
 		}
 	}
@@ -283,9 +303,10 @@ func (s *Store) CreateForager(ctx context.Context, a domain.Agent) (domain.Agent
 			return domain.Agent{}, err
 		}
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO agents(`+agentColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+	if _, err = tx.Exec(ctx, `INSERT INTO agents(`+agentColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
 		a.ID, a.HiveID, string(a.Role), string(a.State), a.Preset, a.CLI, a.Task, a.Branch,
-		a.IssueNumber, a.PRNumber, a.NodeID, a.ChainID, a.SessionRef, handoff, a.CreatedAt, a.UpdatedAt); err != nil {
+		a.IssueNumber, a.PRNumber, a.NodeID, a.ChainID, a.SessionRef, handoff,
+		a.RoleName, a.Revision, a.ParentID, a.CreatedAt, a.UpdatedAt); err != nil {
 		return domain.Agent{}, domainErr(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -340,8 +361,12 @@ func (s *Store) ForagerByIssue(ctx context.Context, hiveID string, issue int64) 
 	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND issue_number=$2`+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, issue))
 }
 
+// ForagerByPR returns the PR's owner: the live Forager that works on the PR
+// branch. Agents spawned later for the same PR (a verifier pinned to a
+// revision, a triage Agent) must not take over its events, so an Agent
+// without a pinned revision wins, then the oldest.
 func (s *Store) ForagerByPR(ctx context.Context, hiveID string, pr int64) (domain.Agent, error) {
-	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND pr_number=$2`+liveForager+` ORDER BY created_at DESC,id DESC LIMIT 1`, hiveID, pr))
+	return scanAgent(s.Pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE hive_id=$1 AND role='forager' AND pr_number=$2`+liveForager+` ORDER BY (revision<>'') ASC,created_at ASC,id ASC LIMIT 1`, hiveID, pr))
 }
 
 func (s *Store) ForagerByBranch(ctx context.Context, hiveID, branch string) (domain.Agent, error) {

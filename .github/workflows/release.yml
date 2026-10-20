@@ -66,4 +66,5 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/swarmjet/agent:${{ github.ref_name }}
             ghcr.io/${{ github.repository_owner }}/swarmjet/agent:latest
           build-args: |
-            AGENT_CLIS=opencode,codex,claude,dst,agy
+            OMP_VERSION=18.12.2
+            AGENT_CLIS=codex,claude,dst,agy

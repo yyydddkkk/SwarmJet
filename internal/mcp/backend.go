@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/methodology"
 )
 
 // Backend is the subset of the Hive store that the MCP tools need. Every method
@@ -37,6 +38,10 @@ type Backend interface {
 	TransitionAgent(ctx context.Context, id string, from, to domain.AgentState) error
 
 	SendMessage(ctx context.Context, m domain.Message) (domain.Message, error)
+	// MaxReceivedHop is the largest hop among messages delivered to `to` in
+	// chainID, or 0 when there are none. The server derives an Agent's
+	// outgoing hop from it, so an Agent cannot reset the hop limit.
+	MaxReceivedHop(ctx context.Context, hiveID string, to domain.Address, chainID string) (int, error)
 	Inbox(ctx context.Context, hiveID string, to domain.Address, afterID string, limit int) ([]domain.Message, error)
 	ClaimMessage(ctx context.Context, id, owner string, ttl time.Duration) (bool, error)
 	WaitInbox(ctx context.Context, hiveID string, to domain.Address, afterID string) error
@@ -47,6 +52,15 @@ type Backend interface {
 	// method beyond the first-round Backend that the MCP tools need; the new
 	// round-2 methods are used by the Router and the Forager supervisor.
 	UpdateHandoff(ctx context.Context, id string, h domain.Handoff) error
+
+	// Round 4: a Hive's versioned methodology. The four methodology tools read
+	// and write through these methods.
+	ActiveMethodology(ctx context.Context, hiveID string) (domain.Methodology, []domain.MethodologyFile, error)
+	MethodologyVersion(ctx context.Context, hiveID string, version int) (domain.Methodology, []domain.MethodologyFile, error)
+	MethodologyVersions(ctx context.Context, hiveID string) ([]domain.Methodology, error)
+	MethodologyChanges(ctx context.Context, hiveID string) ([]methodology.Change, error)
+	PublishMethodology(ctx context.Context, m domain.Methodology, files []domain.MethodologyFile) (domain.Methodology, error)
+	ActivateMethodology(ctx context.Context, hiveID string, version int, actor domain.Address, note string) (domain.Methodology, error)
 }
 
 // Limits applied to update_handoff. They keep a handoff summary summary-sized
@@ -85,6 +99,12 @@ type Options struct {
 	SessionTimeout time.Duration
 	// Now is injectable for tests. Nil means time.Now.
 	Now func() time.Time
+	// Merge powers attest, pr_status and merge_pr. When nil the tools are still
+	// listed but return a clear "not configured" error.
+	Merge MergeService
+	// Credentials writes model-provider credentials into the omp auth broker.
+	// nil makes set_model_credential report that it is not configured.
+	Credentials CredentialWriter
 }
 
 // withDefaults returns a copy of o with zero fields filled in.

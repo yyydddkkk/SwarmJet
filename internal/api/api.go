@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
+	"github.com/yyydddkkk/SwarmJet/internal/llmproxy"
 	"github.com/yyydddkkk/SwarmJet/internal/onboarding"
 	"github.com/yyydddkkk/SwarmJet/internal/secretbox"
 	"github.com/yyydddkkk/SwarmJet/internal/store"
@@ -41,16 +42,15 @@ type Config struct {
 	CellsImage      string
 	CellsModel      string
 	DockerAvailable func() bool
-	// CLILoginStatus is filled by the CLI-login task. When nil the setup page
-	// reports a CLI login terminal that is not available yet.
-	CLILoginStatus func() (available, loggedIn bool)
-	// CLILogin is the in-process runtimeadmin handler mounted at
-	// /api/runtime/*. nil means the terminal is disabled (for example because
-	// the Docker socket is absent); CLILoginReason is shown to the console.
-	CLILogin       http.Handler
-	CLILoginReason string
 	// MCPURL is the endpoint embedded in generated local Agent configurations.
 	MCPURL string
+	// Merge powers GET /api/hives/{id}/prs/{number}. nil disables it.
+	Merge MergeStatus
+	// Models is the auth-broker/gateway client used by the credential and
+	// model endpoints. nil means the services are not part of this deployment.
+	Models *llmproxy.BrokerClient
+	// DefaultModel is the Hive's default provider/model selector.
+	DefaultModel string
 }
 
 type server struct {
@@ -113,8 +113,16 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 		a.setup(w, r)
 		return
 	}
+	if r.URL.Path == "/api/models" || strings.HasPrefix(r.URL.Path, "/api/models/credentials/") {
+		a.models(w, r)
+		return
+	}
+	if r.URL.Path == "/api/usage" {
+		a.usage(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/runtime/") {
-		a.runtime(w, r)
+		problem(w, http.StatusNotFound, "runtime route not found")
 		return
 	}
 	if r.URL.Path == "/api/tokens" {
@@ -123,6 +131,9 @@ func (a *server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/tokens/") {
 		a.tokenItem(w, r, strings.TrimPrefix(r.URL.Path, "/api/tokens/"))
+		return
+	}
+	if a.pullRequestStatus(w, r) {
 		return
 	}
 	if r.URL.Path == "/api/hives" || strings.HasPrefix(r.URL.Path, "/api/hives/") ||

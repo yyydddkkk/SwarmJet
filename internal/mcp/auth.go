@@ -55,24 +55,36 @@ func resolveActor(ctx context.Context, backend Backend, token domain.Token) (act
 var agentTools = map[domain.AgentRole]map[string]bool{
 	domain.RoleForager: {
 		"send":           true,
+		"spawn":          true,
 		"get_forager":    true,
 		"inbox":          true,
 		"update_handoff": true,
+		"attest":         true,
+		"pr_status":      true,
+		"merge_pr":       true,
 	},
 	domain.RoleQueen: {
 		"send":                true,
-		"spawn_forager":       true,
+		"spawn":               true,
 		"cancel_forager":      true,
 		"get_forager":         true,
 		"read_forager_detail": true,
 		"inbox":               true,
 		"claim":               true,
+		"attest":              true,
+		"pr_status":           true,
+		"merge_pr":            true,
 	},
 }
 
 // visible reports whether the tool is listed for this session. Default and admin
 // tokens see the whole catalog; agent tokens only see the tools they may call.
 func (ts *toolset) visible(tool string) bool {
+	if methodologyTools[tool] {
+		// Reads are open to every token; publish and activate enforce the
+		// effective role permission in their handlers.
+		return true
+	}
 	if ts.token.Scope != domain.TokenAgent {
 		return true
 	}
@@ -91,12 +103,18 @@ func (ts *toolset) visible(tool string) bool {
 // is deliberately independent of visibility: a tool that is reachable anyway is
 // still rejected.
 func (ts *toolset) authorize(tool string) error {
+	if methodologyTools[tool] {
+		if ts.token.Scope == domain.TokenAgent && ts.actorErr != nil {
+			return ts.actorErr
+		}
+		return nil
+	}
 	switch ts.token.Scope {
 	case domain.TokenAdmin:
 		return nil
 	case domain.TokenDefault:
 		switch tool {
-		case "create_hive", "update_hive":
+		case "create_hive", "update_hive", "set_model_credential":
 			return fmt.Errorf("permission denied: %s requires an admin-scoped token (this token is %q)", tool, ts.token.Scope)
 		default:
 			return nil

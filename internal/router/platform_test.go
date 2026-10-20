@@ -134,7 +134,6 @@ func TestRouteStillDeliversHumanAndCIEvents(t *testing.T) {
 		{"human PR opened", EventPullRequest, "testdata/pull_request_opened.json"},
 		{"human review", EventPullRequestReview, "testdata/pull_request_review_submitted.json"},
 		{"human review comment", EventPullRequestReviewComment, "testdata/pull_request_review_comment_created.json"},
-		{"CI check run", EventCheckRun, "testdata/check_run_completed.json"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -40,7 +40,7 @@ func newFixture(t *testing.T, mutate func(*Options)) *fixture {
 		Name:       "Acme",
 		Repository: "acme/widgets",
 		Config: domain.HiveConfig{
-			CLI:                     "opencode",
+			CLI:                     "omp",
 			MaxConcurrentForagers:   4,
 			MaxHops:                 10,
 			MaxForagersPerChain:     10,
@@ -55,7 +55,7 @@ func newFixture(t *testing.T, mutate func(*Options)) *fixture {
 		HiveID:  testHiveID,
 		Role:    domain.RoleForager,
 		State:   domain.AgentCreating,
-		CLI:     "opencode",
+		CLI:     "omp",
 		Task:    "Fix the widget\nAdd tests",
 		Branch:  testBranch,
 		Handoff: &domain.Handoff{Goal: "Fix the widget", Done: "Done so far"},
@@ -65,8 +65,9 @@ func newFixture(t *testing.T, mutate func(*Options)) *fixture {
 		Runtime:        newFakeRuntime(),
 		Publisher:      &fakePublisher{pr: 42},
 		Clock:          clock,
-		Model:          "opencode/big-pickle",
+		Model:          "deepseek/deepseek-chat",
 		MCPURL:         "http://mcp.internal/mcp",
+		LLMBaseURL:     "http://mcp.internal/llm",
 		ScanInterval:   time.Hour,
 		RetryBackoff:   func(int) time.Duration { return 0 },
 		TurnAbortWait:  time.Second,
@@ -124,11 +125,7 @@ func (f *fixture) wantState(agentID string, want domain.AgentState) {
 }
 
 func TestFirstMessageStartsCellRunsTurnAndParks(t *testing.T) {
-	f := newFixture(t, func(o *Options) {
-		o.CLIEnv = func(context.Context, domain.Hive) (map[string]string, error) {
-			return map[string]string{"OPENCODE_AUTH_CONTENT": "test-secret"}, nil
-		}
-	})
+	f := newFixture(t, nil)
 	f.runtime.script(testAgentID).updates = []cell.Update{
 		{Kind: cell.UpdateText, Text: "Implemented the widget fix."},
 	}
@@ -150,17 +147,28 @@ func TestFirstMessageStartsCellRunsTurnAndParks(t *testing.T) {
 	if spec.MCPURL != "http://mcp.internal/mcp" {
 		t.Errorf("MCPURL = %q", spec.MCPURL)
 	}
-	if spec.Model != "opencode/big-pickle" {
+	if spec.Model != "deepseek/deepseek-chat" {
 		t.Errorf("Model = %q", spec.Model)
 	}
 	if spec.Branch != testBranch || spec.Repository != "acme/widgets" {
 		t.Errorf("spec branch/repo = %q/%q", spec.Branch, spec.Repository)
 	}
-	if spec.CLI != "opencode" {
+	if spec.CLI != "omp" {
 		t.Errorf("CLI = %q", spec.CLI)
 	}
-	if spec.Env["OPENCODE_AUTH_CONTENT"] != "test-secret" {
-		t.Errorf("Env = %+v, want the CLIEnv value", spec.Env)
+	if spec.LLMBaseURL != "http://mcp.internal/llm" || spec.LLMToken != spec.MCPToken {
+		t.Errorf("LLM proxy = %q / %q, want the Agent token", spec.LLMBaseURL, spec.LLMToken)
+	}
+	if len(spec.Env) != 0 {
+		t.Errorf("Env = %+v, want no provider credentials", spec.Env)
+	}
+	if spec.ReadOnly {
+		t.Error("the builtin worker may publish, so ReadOnly must be false")
+	}
+	for _, key := range []string{"methodology/config.yml", "methodology/platform.yml", "methodology/models.yml"} {
+		if spec.ConfigFiles[key] == "" {
+			t.Errorf("ConfigFiles is missing %q", key)
+		}
 	}
 
 	agent := f.store.agentCopy(testAgentID)
@@ -238,9 +246,6 @@ func TestTurnLogsOutcomeWithoutBodies(t *testing.T) {
 	logs := &syncBuffer{}
 	f := newFixture(t, func(o *Options) {
 		o.Logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
-		o.CLIEnv = func(context.Context, domain.Hive) (map[string]string, error) {
-			return map[string]string{"OPENCODE_AUTH_CONTENT": "test-secret"}, nil
-		}
 	})
 	f.runtime.script(testAgentID).updates = []cell.Update{
 		{Kind: cell.UpdateText, Text: "Implemented the widget fix."},
@@ -527,7 +532,7 @@ func TestOneStuckForagerDoesNotBlockAnother(t *testing.T) {
 		HiveID:  testHiveID,
 		Role:    domain.RoleForager,
 		State:   domain.AgentCreating,
-		CLI:     "opencode",
+		CLI:     "omp",
 		Task:    "Second job",
 		Branch:  "swarm/hive-1/agent-2",
 		Handoff: &domain.Handoff{Goal: "Second job"},
@@ -602,5 +607,84 @@ func TestBuildPromptCapsLengthAndFoldsMessages(t *testing.T) {
 	}
 	if !strings.Contains(text, "more messages omitted") {
 		t.Error("prompt did not fold the omitted messages")
+	}
+}
+
+func TestRoleSelectsModelRevisionAndReadOnly(t *testing.T) {
+	f := newFixture(t, nil)
+	const revision = "0123456789abcdef0123456789abcdef01234567"
+	f.store.mu.Lock()
+	agent := f.store.agents[testAgentID]
+	agent.RoleName = "verifier"
+	agent.Revision = revision
+	f.store.agents[testAgentID] = agent
+	f.store.methodology = &domain.Methodology{Manifest: domain.MethodologyManifest{
+		DefaultRole: "worker",
+		Roles: map[string]domain.Role{
+			"worker": {Permissions: domain.RolePermissions{Publish: true, Message: true}},
+			"verifier": {
+				Model:     "openai/gpt-5",
+				Prompt:    "roles/verifier.md",
+				DenyTools: []string{"edit", "write"},
+				Permissions: domain.RolePermissions{
+					Publish: false,
+					Message: true,
+					Attest:  true,
+				},
+			},
+		},
+	}}
+	f.store.methodologyFiles = []domain.MethodologyFile{
+		{Path: "roles/verifier.md", Content: "You verify one revision."},
+	}
+	f.store.mu.Unlock()
+
+	f.runtime.script(testAgentID).updates = []cell.Update{{Kind: cell.UpdateText, Text: "verified"}}
+	f.notify(f.taskMessage("m1", "Verify the change"))
+	f.wantState(testAgentID, domain.AgentParked)
+
+	starts := f.runtime.startsFor(testAgentID)
+	if len(starts) != 1 {
+		t.Fatalf("Start calls = %d, want 1", len(starts))
+	}
+	spec := starts[0]
+	if spec.Model != "openai/gpt-5" {
+		t.Errorf("Model = %q, want the role model", spec.Model)
+	}
+	if spec.Revision != revision {
+		t.Errorf("Revision = %q, want %q", spec.Revision, revision)
+	}
+	if !spec.ReadOnly {
+		t.Error("a role without publish permission must produce a read-only Spec")
+	}
+	if got := spec.ConfigFiles["methodology/ROLE.md"]; got != "You verify one revision." {
+		t.Errorf("ROLE.md = %q", got)
+	}
+	if overlay := spec.ConfigFiles["methodology/platform.yml"]; !strings.Contains(overlay, `"edit": deny`) ||
+		!strings.Contains(overlay, `"write": deny`) {
+		t.Errorf("denyTools missing from overlay:\n%s", overlay)
+	}
+	if models := spec.ConfigFiles["methodology/models.yml"]; !strings.Contains(models, `"openai":`) ||
+		!strings.Contains(models, `"gpt-5"`) {
+		t.Errorf("models.yml did not use the role model:\n%s", models)
+	}
+}
+
+func TestUnknownMethodologyRoleFailsTheTurn(t *testing.T) {
+	f := newFixture(t, nil)
+	f.store.mu.Lock()
+	agent := f.store.agents[testAgentID]
+	agent.RoleName = "missing"
+	f.store.agents[testAgentID] = agent
+	f.store.methodology = &domain.Methodology{Manifest: domain.MethodologyManifest{
+		DefaultRole: "worker",
+		Roles:       map[string]domain.Role{"worker": {Permissions: domain.RolePermissions{Publish: true}}},
+	}}
+	f.store.mu.Unlock()
+
+	f.notify(f.taskMessage("m1", "Do work"))
+	f.wantState(testAgentID, domain.AgentFailed)
+	if starts := f.runtime.startsFor(testAgentID); len(starts) != 0 {
+		t.Fatalf("Start ran with an unknown role: %+v", starts)
 	}
 }

@@ -16,8 +16,10 @@ import (
 // checked against it so a newly added tool cannot silently bypass either.
 var allToolNames = []string{
 	"list_hives", "get_hive", "create_hive", "update_hive", "send", "wait",
-	"spawn_forager", "cancel_forager", "get_forager", "read_forager_detail",
+	"spawn", "spawn_forager", "cancel_forager", "get_forager", "read_forager_detail",
 	"update_handoff", "inbox", "claim", "offline_digest",
+	"get_methodology", "list_methodology_versions", "publish_methodology", "activate_methodology",
+	"attest", "pr_status", "merge_pr", "set_model_credential",
 }
 
 func allTools() map[string]bool {
@@ -111,6 +113,21 @@ func denied(t *testing.T, res *mcpsdk.CallToolResult, err error) bool {
 	return res != nil && res.IsError
 }
 
+func agentVisibleTools(role domain.AgentRole) map[string]bool {
+	out := map[string]bool{}
+	for name, allowed := range agentTools[role] {
+		if allowed {
+			out[name] = true
+		}
+	}
+	// Methodology tools are visible to every token; publish and activate check
+	// the effective role permission in their handlers.
+	for name := range methodologyTools {
+		out[name] = true
+	}
+	return out
+}
+
 func TestToolVisibilityFollowsScope(t *testing.T) {
 	env := newAgentScopeEnv(t)
 	cases := []struct {
@@ -120,8 +137,8 @@ func TestToolVisibilityFollowsScope(t *testing.T) {
 	}{
 		{"default", env.userToken, allTools()},
 		{"admin", env.adminToken, allTools()},
-		{"forager", env.foragerToken, agentTools[domain.RoleForager]},
-		{"queen", env.queenToken, agentTools[domain.RoleQueen]},
+		{"forager", env.foragerToken, agentVisibleTools(domain.RoleForager)},
+		{"queen", env.queenToken, agentVisibleTools(domain.RoleQueen)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -143,7 +160,7 @@ func TestAgentScopePermissionTable(t *testing.T) {
 			ts := &toolset{token: base, actor: actor{token: base, agent: &agent}}
 			for _, tool := range allToolNames {
 				err := ts.authorize(tool)
-				wantAllowed := agentTools[role][tool]
+				wantAllowed := agentTools[role][tool] || methodologyTools[tool]
 				if allowed := err == nil; allowed != wantAllowed {
 					t.Errorf("%s %s: allowed=%v, want %v (err=%v)", role, tool, allowed, wantAllowed, err)
 				}
@@ -196,12 +213,12 @@ func TestForagerScopeTools(t *testing.T) {
 		}
 	})
 
-	t.Run("forager to forager is rejected by the store", func(t *testing.T) {
-		res := callTool(t, session, "send", map[string]any{
+	t.Run("forager to forager is allowed without a methodology", func(t *testing.T) {
+		out := decode[sendOutput](t, callTool(t, session, "send", map[string]any{
 			"hiveId": env.hive.ID, "to": "forager:" + env.peer.ID, "body": "peer message",
-		})
-		if !res.IsError || !strings.Contains(toolErrorText(res), "foragers cannot message") {
-			t.Fatalf("peer message: isError=%v text=%q", res.IsError, toolErrorText(res))
+		}))
+		if out.Message.Trust != string(domain.TrustAgent) {
+			t.Fatalf("trust = %q, want agent", out.Message.Trust)
 		}
 	})
 
@@ -287,19 +304,22 @@ func TestQueenScopeTools(t *testing.T) {
 	session := env.connect(env.queenToken)
 
 	t.Run("spawn within the hive", func(t *testing.T) {
-		out := decode[spawnForagerOutput](t, callTool(t, session, "spawn_forager", map[string]any{
-			"hiveId": env.hive.ID, "task": "queen delegated work",
+		out := decode[spawnOutput](t, callTool(t, session, "spawn", map[string]any{
+			"hiveId": env.hive.ID, "task": "queen delegated work", "role": "worker",
 		}))
 		if out.Message.From != string(domain.AddressQueen) {
 			t.Fatalf("from = %q, want queen", out.Message.From)
 		}
-		if out.Forager.HiveID != env.hive.ID {
-			t.Fatalf("forager hive = %q", out.Forager.HiveID)
+		if out.Agent.HiveID != env.hive.ID {
+			t.Fatalf("agent hive = %q", out.Agent.HiveID)
+		}
+		if out.Agent.ParentID != env.queen.ID {
+			t.Fatalf("parent = %q, want %q", out.Agent.ParentID, env.queen.ID)
 		}
 	})
 
 	t.Run("spawn outside the hive is denied", func(t *testing.T) {
-		res := callTool(t, session, "spawn_forager", map[string]any{"hiveId": env.otherHive.ID, "task": "nope"})
+		res := callTool(t, session, "spawn", map[string]any{"hiveId": env.otherHive.ID, "task": "nope"})
 		if !res.IsError || !strings.Contains(toolErrorText(res), "can only access Hive") {
 			t.Fatalf("cross-hive spawn: isError=%v text=%q", res.IsError, toolErrorText(res))
 		}

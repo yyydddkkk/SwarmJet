@@ -213,11 +213,12 @@ type setupStatusJSON struct {
 		Model           string `json:"model"`
 		DockerAvailable bool   `json:"dockerAvailable"`
 	} `json:"cells"`
-	CLILogin struct {
-		Available bool   `json:"available"`
-		LoggedIn  bool   `json:"loggedIn"`
-		CLI       string `json:"cli"`
-	} `json:"cliLogin"`
+	Models struct {
+		Available    bool     `json:"available"`
+		Configured   bool     `json:"configured"`
+		DefaultModel string   `json:"defaultModel"`
+		Providers    []string `json:"providers"`
+	} `json:"models"`
 }
 
 func TestSetupManifestCallbackAndStatus(t *testing.T) {
@@ -239,8 +240,8 @@ func TestSetupManifestCallbackAndStatus(t *testing.T) {
 	if !before.Cells.Enabled || before.Cells.Image != "swarmjet-agent:test" || before.Cells.Model != "test/model" || !before.Cells.DockerAvailable {
 		t.Fatalf("cells status = %+v", before.Cells)
 	}
-	if before.CLILogin.Available || before.CLILogin.CLI != "opencode" {
-		t.Fatalf("cli login status = %+v", before.CLILogin)
+	if before.Models.Available || before.Models.Configured || before.Models.DefaultModel == "" {
+		t.Fatalf("model status = %+v", before.Models)
 	}
 
 	// Start the manifest flow.

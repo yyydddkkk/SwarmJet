@@ -1,8 +1,9 @@
 // Conversation stream: Queen prose, structured action cards and external event cards.
 import type { Agent, AgentState, ConversationEntry, Message, MessageKind } from "./types";
-import { ActionCard, EmptyState, EventCard } from "./components";
+import { ActionCard, EmptyState, EventCard, TrustBadge } from "./components";
 import { ForagerAvatar, QueenAvatar, foragerNeedsYou } from "./pixel";
 import { Icon } from "./icons";
+import { messageTrust } from "./format";
 
 const kindLabels: Record<MessageKind, string> = {
   event: "事件",
@@ -25,6 +26,8 @@ function MessageRow({
   at: string;
 }) {
   const from = message.from;
+  const trust = messageTrust(message);
+  const external = trust === "external";
   const isLocal = from.startsWith("local:");
   const isQueen = from === "queen";
   const isSystem = from === "system" || from === "hive";
@@ -32,7 +35,7 @@ function MessageRow({
   const agent = foragerId ? agents.find(candidate => candidate.id === foragerId) : undefined;
   const state: AgentState = agent?.state ?? "active";
 
-  if (isSystem) {
+  if (isSystem && !external) {
     return (
       <div className="hg-msg hg-msg-system">
         <span className="hg-msg-system-mark" aria-hidden="true">
@@ -41,6 +44,7 @@ function MessageRow({
         <div className="hg-msg-main">
           <div className="hg-msg-meta">
             <span className="hg-msg-author">系统事件</span>
+            <TrustBadge trust={trust} />
             <span className="hg-msg-kind">{kindLabels[message.kind]}</span>
             <time className="hg-time">{at}</time>
           </div>
@@ -55,6 +59,7 @@ function MessageRow({
       <div className="hg-msg hg-msg-local">
         <div className="hg-msg-meta">
           <span className="hg-msg-author">你（本地 Agent）</span>
+          <TrustBadge trust={trust} />
           <span className="hg-msg-kind">{kindLabels[message.kind]}</span>
           <time className="hg-time">{at}</time>
         </div>
@@ -63,27 +68,42 @@ function MessageRow({
     );
   }
 
-  const author = isQueen ? "Queen（蜂王）" : `Forager · ${foragerId}`;
+  const author = isQueen
+    ? "Queen（蜂王）"
+    : foragerId
+      ? `Forager · ${foragerId}`
+      : external
+        ? "GitHub 事件"
+        : from;
+  const className = external
+    ? "hg-msg hg-msg-external"
+    : `hg-msg ${isQueen ? "hg-msg-queen" : "hg-msg-forager"}`;
   return (
-    <div className={`hg-msg ${isQueen ? "hg-msg-queen" : "hg-msg-forager"}`}>
+    <div className={className}>
       {isQueen ? (
         <QueenAvatar size={32} off={state === "disabled"} />
-      ) : (
+      ) : foragerId ? (
         <ForagerAvatar
           id={foragerId}
           state={state}
           needsYou={agent ? foragerNeedsYou(agent, entries) : false}
           size={32}
         />
+      ) : (
+        <span className="hg-msg-system-mark" aria-hidden="true">
+          <Icon name={external ? "alert" : "user"} size={16} />
+        </span>
       )}
       <div className="hg-msg-main">
         <div className="hg-msg-meta">
           <span className="hg-msg-author">{author}</span>
+          <TrustBadge trust={trust} />
           <span className="hg-msg-kind">{kindLabels[message.kind]}</span>
           {message.hop > 0 ? <span className="hg-msg-hop">第 {message.hop} 跳</span> : null}
           <time className="hg-time">{at}</time>
         </div>
         <p className="hg-msg-body">{message.body}</p>
+        {external ? <p className="hg-msg-trust-note">外部内容，未经核实</p> : null}
         {message.artifacts?.length ? (
           <ul className="hg-artifacts">
             {message.artifacts.map(artifact => (

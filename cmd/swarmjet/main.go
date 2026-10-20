@@ -11,14 +11,18 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/api"
+	"github.com/yyydddkkk/SwarmJet/internal/domain"
 	"github.com/yyydddkkk/SwarmJet/internal/forager"
 	"github.com/yyydddkkk/SwarmJet/internal/githubapp"
 	"github.com/yyydddkkk/SwarmJet/internal/jobs"
+	"github.com/yyydddkkk/SwarmJet/internal/llmproxy"
 	"github.com/yyydddkkk/SwarmJet/internal/mcp"
+	"github.com/yyydddkkk/SwarmJet/internal/merge"
 	"github.com/yyydddkkk/SwarmJet/internal/observability"
 	"github.com/yyydddkkk/SwarmJet/internal/onboarding"
 	"github.com/yyydddkkk/SwarmJet/internal/router"
@@ -144,6 +148,46 @@ func runServe(ctx context.Context, s *store.Store) error {
 		return err
 	}
 
+	// Model boundary: the api is the only component that talks to the auth
+	// broker (credential writes) and the auth gateway (inference + catalog).
+	llmConfigDir := env("SWARMJET_OMP_CONFIG_DIR", filepath.Join(data, "omp"))
+	gatewayURL := strings.TrimSpace(os.Getenv("SWARMJET_LLM_GATEWAY_URL"))
+	brokerURL := strings.TrimSpace(os.Getenv("SWARMJET_AUTH_BROKER_URL"))
+	var modelClient *llmproxy.BrokerClient
+	if gatewayURL != "" || brokerURL != "" {
+		modelClient, err = llmproxy.NewBrokerClient(llmproxy.BrokerConfig{
+			BrokerURL:        brokerURL,
+			BrokerTokenFile:  filepath.Join(llmConfigDir, "auth-broker.token"),
+			GatewayURL:       gatewayURL,
+			GatewayTokenFile: filepath.Join(llmConfigDir, "auth-gateway.token"),
+		})
+		if err != nil {
+			slog.Warn("model credentials are unavailable", "error", err)
+			modelClient = nil
+		}
+	}
+	var llmHandler http.Handler
+	if gatewayURL != "" {
+		limits := llmproxy.NoLimits()
+		// Task C supplies ActiveMethodology. The runtime assertion keeps this
+		// branch standalone until that method exists, then uses it automatically.
+		if reader, ok := any(s).(llmproxy.MethodologyReader); ok {
+			limits = llmproxy.StoreLimits{Reader: reader}
+		}
+		proxy, proxyErr := llmproxy.New(llmproxy.Config{
+			GatewayURL:       gatewayURL,
+			GatewayTokenFile: filepath.Join(llmConfigDir, "auth-gateway.token"),
+			Store:            s,
+			Limits:           limits,
+			Logger:           slog.Default(),
+		})
+		if proxyErr != nil {
+			slog.Warn("model proxy is unavailable", "error", proxyErr)
+		} else {
+			llmHandler = proxy
+		}
+	}
+
 	var tunnel *onboarding.Tunnel
 	if raw := os.Getenv("SWARMJET_TUNNEL_URL"); raw != "" {
 		tunnel, err = onboarding.NewTunnel(onboarding.TunnelConfig{
@@ -193,8 +237,19 @@ func runServe(ctx context.Context, s *store.Store) error {
 		s.MessageSink = cells.Supervisor.Notify
 		cells.Start(ctx)
 		defer cells.Stop()
-		slog.Info("forager cells enabled", "model", env("SWARMJET_FORAGER_MODEL", forager.DefaultModel))
+		slog.Info("forager cells enabled", "model", env("SWARMJET_DEFAULT_MODEL", forager.DefaultModel))
 	}
+
+	// The merge service reads the Hive repository through the same dynamic App
+	// provider as the Cells, so a newly created App works without a restart.
+	mergeRepos := newGitHubRepositories(ghProvider)
+	mergeService := merge.New(merge.Options{
+		Store:        s,
+		Attestations: s,
+		Methodology:  methodologyStore{s: s},
+		GitHub:       mergeGitHubSource{repos: mergeRepos},
+	})
+	var mergeScheduler *merge.Scheduler
 
 	password := required("ADMIN_PASSWORD")
 	if len(password) < 12 {
@@ -202,9 +257,6 @@ func runServe(ctx context.Context, s *store.Store) error {
 	}
 	adminUser := required("ADMIN_USERNAME")
 	staticDir := env("STATIC_DIR", "web/dist")
-	// The CLI login terminal runs in this process and shares the Cell data
-	// directory, so a successful login is immediately available to Cells.
-	cliLogin, cliLoginReason := newCLILoginHandler(data)
 	handler := api.New(s, api.Config{
 		GitHubApp:       ghApp,
 		Box:             box,
@@ -216,12 +268,12 @@ func runServe(ctx context.Context, s *store.Store) error {
 		Setup:           setupManager,
 		CellsEnabled:    os.Getenv("SWARMJET_CELLS") == "1",
 		CellsImage:      env("AGENT_IMAGE", "swarmjet-agent:local"),
-		CellsModel:      env("SWARMJET_FORAGER_MODEL", forager.DefaultModel),
+		CellsModel:      env("SWARMJET_DEFAULT_MODEL", forager.DefaultModel),
 		DockerAvailable: onboarding.DockerAvailable,
-		CLILogin:        cliLogin,
-		CLILoginReason:  cliLoginReason,
-		CLILoginStatus:  cliLoginStatus(cliLogin, data),
 		MCPURL:          publicMCPURL(),
+		Merge:           mergeService,
+		Models:          modelClient,
+		DefaultModel:    env("SWARMJET_DEFAULT_MODEL", llmproxy.DefaultModel),
 	})
 	svc := &service.Service{Store: s, Webhooks: s, AppSlugSource: ghProvider.Slug}
 
@@ -245,11 +297,25 @@ func runServe(ctx context.Context, s *store.Store) error {
 			recordJob("message", err)
 			return err
 		},
+		MergeCheck: func(ctx context.Context, job jobs.MergeCheck) error {
+			err := mergeScheduler.Handle(ctx, job)
+			recordJob("merge", err)
+			return err
+		},
 	}, jobs.Config{})
 	if err != nil {
 		return err
 	}
 	s.Jobs = queue
+	mergeScheduler = merge.NewScheduler(s, mergeService, mergeService, mergeService, queue)
+	mergeService.SetInserter(queue)
+	svc.HiveRouter = router.NewWithOptions(s, router.Options{
+		AppSlugSource: ghProvider.Slug,
+		OnChecks:      mergeScheduler.OnChecks,
+		OnHead: func(ctx context.Context, hive domain.Hive, _ domain.Agent, pr int64, sha string) error {
+			return s.SupersedeAttestations(ctx, hive.ID, pr, sha)
+		},
+	})
 	go func() {
 		if err := queue.Start(ctx); err != nil && ctx.Err() == nil {
 			slog.Error("job queue stopped", "error", err)
@@ -261,7 +327,17 @@ func runServe(ctx context.Context, s *store.Store) error {
 	routes.Handle("/api/webhooks/github", webhook)
 	// MCP authenticates with a bearer token only; it never uses the console
 	// session (ADR section 12).
-	routes.Handle("/mcp", mcp.NewHandler(s, mcp.Options{Logger: slog.Default()}))
+	mcpOptions := mcp.Options{Logger: slog.Default(), Merge: mergeService}
+	if modelClient != nil {
+		mcpOptions.Credentials = modelClient
+	}
+	routes.Handle("/mcp", mcp.NewHandler(s, mcpOptions))
+	// The model proxy is a separate bearer-token surface (Agent tokens only);
+	// it never goes through the console session or CSRF checks.
+	if llmHandler != nil {
+		routes.Handle("/llm", llmHandler)
+		routes.Handle("/llm/", llmHandler)
+	}
 	routes.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.Pool.Ping(r.Context()); err != nil {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)

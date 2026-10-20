@@ -21,12 +21,16 @@ x-app-environment: &app-environment
   # Forager Cells. This base file never mounts the Docker socket; enabling
   # Cells requires the compose.cells.yaml overlay, which also sets this to 1.
   SWARMJET_CELLS: ${SWARMJET_CELLS:-0}
-  SWARMJET_FORAGER_MODEL: ${SWARMJET_FORAGER_MODEL:-opencode/big-pickle}
+  SWARMJET_DEFAULT_MODEL: ${SWARMJET_DEFAULT_MODEL:-deepseek/deepseek-chat}
   SWARMJET_CELL_MCP_URL: ${SWARMJET_CELL_MCP_URL:-http://swarmjet:8080/mcp}
+  # Defaults to the same host as SWARMJET_CELL_MCP_URL with /llm.
+  SWARMJET_CELL_LLM_URL: ${SWARMJET_CELL_LLM_URL:-}
   SWARMJET_CELL_NETWORK: ${SWARMJET_CELL_NETWORK:-}
-  # Optional OpenCode auth.json content; the CLI login terminal result wins
-  # when it is available. Passed only to the Cell CLI process.
-  OPENCODE_AUTH_CONTENT: ${OPENCODE_AUTH_CONTENT:-}
+  # Model boundary. compose.cells.yaml starts the auth broker/gateway and fills
+  # these in; the base stack leaves them empty (no /llm endpoint).
+  SWARMJET_LLM_GATEWAY_URL: ${SWARMJET_LLM_GATEWAY_URL:-}
+  SWARMJET_AUTH_BROKER_URL: ${SWARMJET_AUTH_BROKER_URL:-}
+  SWARMJET_OMP_CONFIG_DIR: ${SWARMJET_OMP_CONFIG_DIR:-}
 
 x-app: &app
   image: ${IMAGE:-swarmjet:local}

@@ -16,4 +16,5 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.agent
       args:
-        AGENT_CLIS: ${AGENT_CLIS:-opencode}
+        AGENT_CLIS: ${AGENT_CLIS:-}
+        OMP_VERSION: ${OMP_VERSION:-18.12.2}

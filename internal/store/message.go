@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -19,7 +20,24 @@ import (
 // waiters always re-read the messages table, so a missed payload is harmless.
 const inboxChannel = "swarmjet_inbox"
 
-const messageColumns = `id,hive_id,from_addr,to_addr,kind,chain_id,hop,body,artifacts,state,created_at`
+const messageColumns = `id,hive_id,from_addr,to_addr,kind,chain_id,hop,body,artifacts,trust,state,created_at`
+
+// defaultMessageTrust fills an omitted provenance from the sender. A local
+// token is the user; any Agent is another Agent; the system address is the
+// platform. Router-generated messages set external explicitly because their
+// text came from GitHub whatever the sender address says.
+func defaultMessageTrust(from domain.Address) domain.MessageTrust {
+	switch {
+	case strings.HasPrefix(string(from), "local:"):
+		return domain.TrustUser
+	case from == domain.AddressSystem:
+		return domain.TrustSystem
+	case from == domain.AddressQueen, isForagerAddress(from):
+		return domain.TrustAgent
+	default:
+		return domain.TrustAgent
+	}
+}
 
 var messageSeq uint64
 
@@ -36,13 +54,13 @@ func newMessageID() (string, error) {
 
 func scanMessage(row pgx.Row) (domain.Message, error) {
 	var m domain.Message
-	var from, to, kind, state string
+	var from, to, kind, trust, state string
 	var artifacts []byte
-	err := row.Scan(&m.ID, &m.HiveID, &from, &to, &kind, &m.ChainID, &m.Hop, &m.Body, &artifacts, &state, &m.CreatedAt)
+	err := row.Scan(&m.ID, &m.HiveID, &from, &to, &kind, &m.ChainID, &m.Hop, &m.Body, &artifacts, &trust, &state, &m.CreatedAt)
 	if err != nil {
 		return domain.Message{}, domainErr(err)
 	}
-	m.From, m.To, m.Kind, m.State = domain.Address(from), domain.Address(to), domain.MessageKind(kind), domain.MessageState(state)
+	m.From, m.To, m.Kind, m.Trust, m.State = domain.Address(from), domain.Address(to), domain.MessageKind(kind), domain.MessageTrust(trust), domain.MessageState(state)
 	if len(artifacts) > 0 {
 		if err = json.Unmarshal(artifacts, &m.Artifacts); err != nil {
 			return domain.Message{}, err
@@ -59,7 +77,7 @@ func isForagerAddress(address domain.Address) bool {
 // CreatedAt are excluded so a redelivery of the same content is idempotent.
 func sameMessageContent(a, b domain.Message) bool {
 	return a.HiveID == b.HiveID && a.From == b.From && a.To == b.To && a.Kind == b.Kind &&
-		a.ChainID == b.ChainID && a.Hop == b.Hop && a.Body == b.Body &&
+		a.ChainID == b.ChainID && a.Hop == b.Hop && a.Body == b.Body && a.Trust == b.Trust &&
 		reflect.DeepEqual(a.Artifacts, b.Artifacts)
 }
 
@@ -72,9 +90,6 @@ func notifyPayload(hiveID string, to domain.Address) string {
 // content returns the stored message, while the same ID with different content
 // is a conflict.
 func (s *Store) SendMessage(ctx context.Context, m domain.Message) (domain.Message, error) {
-	if isForagerAddress(m.From) && isForagerAddress(m.To) {
-		return domain.Message{}, domain.ErrPeerMessage
-	}
 	if utf8.RuneCountInString(m.Body) > domain.MaxMessageBody {
 		return domain.Message{}, domain.ErrMessageTooLarge
 	}
@@ -94,6 +109,9 @@ func (s *Store) SendMessage(ctx context.Context, m domain.Message) (domain.Messa
 	}
 	if m.State == "" {
 		m.State = domain.MessagePending
+	}
+	if m.Trust == "" {
+		m.Trust = defaultMessageTrust(m.From)
 	}
 	if m.CreatedAt.IsZero() {
 		m.CreatedAt = time.Now().UTC()
@@ -116,8 +134,8 @@ func (s *Store) SendMessage(ctx context.Context, m domain.Message) (domain.Messa
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "inbox:"+m.HiveID); err != nil {
 		return domain.Message{}, err
 	}
-	tag, err := tx.Exec(ctx, `INSERT INTO messages(`+messageColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(id) DO NOTHING`,
-		m.ID, m.HiveID, string(m.From), string(m.To), string(m.Kind), m.ChainID, m.Hop, m.Body, artifacts, string(m.State), m.CreatedAt)
+	tag, err := tx.Exec(ctx, `INSERT INTO messages(`+messageColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(id) DO NOTHING`,
+		m.ID, m.HiveID, string(m.From), string(m.To), string(m.Kind), m.ChainID, m.Hop, m.Body, artifacts, string(m.Trust), string(m.State), m.CreatedAt)
 	if err != nil {
 		return domain.Message{}, domainErr(err)
 	}
@@ -175,6 +193,14 @@ func (s *Store) messageSeqForID(ctx context.Context, id string) (int64, error) {
 
 // Inbox returns messages for one address in insertion order, starting after
 // afterID. The cursor is messages.seq, not the caller-supplied ID.
+// MaxReceivedHop returns the largest hop among messages to `to` in chainID,
+// or 0 when there are none.
+func (s *Store) MaxReceivedHop(ctx context.Context, hiveID string, to domain.Address, chainID string) (int, error) {
+	var hop int
+	err := s.Pool.QueryRow(ctx, `SELECT coalesce(max(hop),0) FROM messages WHERE hive_id=$1 AND to_addr=$2 AND chain_id=$3`, hiveID, string(to), chainID).Scan(&hop)
+	return hop, err
+}
+
 func (s *Store) Inbox(ctx context.Context, hiveID string, to domain.Address, afterID string, limit int) ([]domain.Message, error) {
 	if limit <= 0 {
 		limit = 100

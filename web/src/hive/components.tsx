@@ -8,9 +8,11 @@ import {
 } from "react";
 import type {
   AgentState,
+  AttestResult,
   Check,
   CheckStatus,
   ExternalEvent,
+  MessageTrust,
   QueenAction,
 } from "./types";
 import { GithubMark, Icon } from "./icons";
@@ -463,7 +465,7 @@ export function Callout({
   );
 }
 
-/** Definition rows used by the setup and CLI-login pages. */
+/** Definition rows used by the setup and model pages. */
 export function StatusGrid({ children }: { children: ReactNode }) {
   return <dl className="hg-status-grid">{children}</dl>;
 }
@@ -480,5 +482,60 @@ export function StatusItem({
       <dt>{label}</dt>
       <dd>{children}</dd>
     </div>
+  );
+}
+
+/** Provenance marker for a message (round-4 contract section 5). */
+export const trustLabels: Record<MessageTrust, string> = {
+  user: "用户",
+  agent: "Agent",
+  external: "外部",
+  system: "系统",
+};
+
+export function TrustBadge({ trust }: { trust: MessageTrust | string }) {
+  const known = Object.prototype.hasOwnProperty.call(trustLabels, trust);
+  // An unknown value from a newer server is shown as-is rather than dropped.
+  const label = known ? trustLabels[trust as MessageTrust] : trust;
+  return (
+    <span
+      className={`hg-trust ${known ? `hg-trust-${trust}` : "hg-trust-unknown"}`}
+      title={`来源：${label}`}
+    >
+      {trust === "external" ? <Icon name="alert" size={16} /> : null}
+      {label}
+    </span>
+  );
+}
+
+const attestLabels: Record<AttestResult, string> = {
+  pass: "PASS",
+  pass_notes: "PASS+NOTES",
+  fail: "FAIL",
+  blocked: "BLOCKED",
+};
+
+const attestTones: Record<AttestResult, Tone> = {
+  pass: "mint",
+  pass_notes: "amber",
+  fail: "coral",
+  blocked: "neutral",
+};
+
+export function AttestBadge({ result }: { result: AttestResult }) {
+  return (
+    <span className={`hg-badge hg-tone-${attestTones[result] ?? "neutral"}`}>
+      {attestLabels[result] ?? result}
+    </span>
+  );
+}
+
+/** Horizontal spend bar; the track makes small amounts readable next to big ones. */
+export function UsageBar({ value, max }: { value: number; max: number }) {
+  const width = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
+  return (
+    <span className="hg-usage-bar" aria-hidden="true">
+      <span className="hg-usage-bar-fill" style={{ width: `${width}%` }} />
+    </span>
   );
 }

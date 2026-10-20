@@ -13,11 +13,13 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
+	"github.com/riverqueue/river/rivertype"
 )
 
 const (
 	webhookQueue = "webhooks"
 	messageQueue = "messages"
+	mergeQueue   = "merge"
 )
 
 // ErrSnooze asks the queue to run the job again later without consuming an attempt.
@@ -40,6 +42,15 @@ type Message struct {
 	ID string
 }
 
+// MergeCheck asks the merge gate to evaluate one PR head. River deduplicates
+// the job by (HiveID, PR, SHA) while it is pending, so repeated CI webhooks do
+// not pile up.
+type MergeCheck struct {
+	HiveID string
+	PR     int64
+	SHA    string
+}
+
 // Inserter adds a job to an existing transaction. InsertMessage is deliberately
 // not part of this interface so existing implementations keep compiling; a
 // caller that needs it asserts for the method instead.
@@ -49,8 +60,9 @@ type Inserter interface {
 
 // Handlers run jobs. A nil handler is a permanent failure.
 type Handlers struct {
-	Webhook func(context.Context, Webhook) error
-	Message func(context.Context, Message) error
+	Webhook    func(context.Context, Webhook) error
+	Message    func(context.Context, Message) error
+	MergeCheck func(context.Context, MergeCheck) error
 }
 
 // Config tunes the worker. Zero values use River's defaults.
@@ -73,6 +85,14 @@ type messageArgs struct {
 
 func (messageArgs) Kind() string { return "message" }
 
+type mergeCheckArgs struct {
+	HiveID string `json:"hiveId" river:"unique"`
+	PR     int64  `json:"pr" river:"unique"`
+	SHA    string `json:"sha" river:"unique"`
+}
+
+func (mergeCheckArgs) Kind() string { return "merge_check" }
+
 type Client struct {
 	river *river.Client[pgx.Tx]
 }
@@ -92,11 +112,13 @@ func Open(pool *pgxpool.Pool, handlers Handlers, cfg Config) (*Client, error) {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &webhookWorker{handle: handlers.Webhook})
 	river.AddWorker(workers, &messageWorker{handle: handlers.Message})
+	river.AddWorker(workers, &mergeCheckWorker{handle: handlers.MergeCheck})
 	config := &river.Config{
 		Logger: slog.New(slog.DiscardHandler),
 		Queues: map[string]river.QueueConfig{
 			webhookQueue: {MaxWorkers: 8},
 			messageQueue: {MaxWorkers: 8},
+			mergeQueue:   {MaxWorkers: 4},
 		},
 		Workers:    workers,
 		JobTimeout: 10 * time.Minute,
@@ -134,6 +156,28 @@ func (c *Client) InsertMessage(ctx context.Context, tx pgx.Tx, job Message) erro
 	return err
 }
 
+// InsertMergeCheck enqueues one merge gate evaluation. ByArgs uniqueness makes
+// repeated events for the same (hive, PR, SHA) collapse into one pending job.
+// Completed jobs are deliberately outside the unique state set: a later
+// attestation must be able to trigger a fresh check for the same head after an
+// earlier CI-triggered check has already run.
+func (c *Client) InsertMergeCheck(ctx context.Context, job MergeCheck) error {
+	_, err := c.river.Insert(ctx, mergeCheckArgs{HiveID: job.HiveID, PR: job.PR, SHA: job.SHA}, &river.InsertOpts{
+		Queue: mergeQueue,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs: true,
+			ByState: []rivertype.JobState{
+				rivertype.JobStateAvailable,
+				rivertype.JobStatePending,
+				rivertype.JobStateRunning,
+				rivertype.JobStateRetryable,
+				rivertype.JobStateScheduled,
+			},
+		},
+	})
+	return err
+}
+
 type webhookWorker struct {
 	river.WorkerDefaults[webhookArgs]
 	handle func(context.Context, Webhook) error
@@ -156,6 +200,18 @@ func (w *messageWorker) Work(ctx context.Context, job *river.Job[messageArgs]) e
 		return river.JobCancel(errors.New("message handler is not configured"))
 	}
 	return disposition(w.handle(ctx, Message{ID: job.Args.ID}))
+}
+
+type mergeCheckWorker struct {
+	river.WorkerDefaults[mergeCheckArgs]
+	handle func(context.Context, MergeCheck) error
+}
+
+func (w *mergeCheckWorker) Work(ctx context.Context, job *river.Job[mergeCheckArgs]) error {
+	if w.handle == nil {
+		return river.JobCancel(errors.New("merge check handler is not configured"))
+	}
+	return disposition(w.handle(ctx, MergeCheck{HiveID: job.Args.HiveID, PR: job.Args.PR, SHA: job.Args.SHA}))
 }
 
 func disposition(err error) error {

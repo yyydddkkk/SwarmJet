@@ -81,6 +81,11 @@ func (w *GitWorkspace) EnsureCloned(ctx context.Context, spec cell.Spec, dir str
 			return false, err
 		}
 	}
+	if spec.Revision != "" {
+		if err := validRevision(spec.Revision); err != nil {
+			return false, err
+		}
+	}
 
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return false, nil

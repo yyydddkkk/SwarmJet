@@ -75,10 +75,19 @@ export type Agent = {
   prNumber?: number;
   nodeId?: string;
   chainId?: string;
+  /** Methodology role that governs this Agent, e.g. "worker" or "verifier". */
+  roleName?: string;
+  /** Commit checked out detached for this Agent, if any. */
+  revision?: string;
+  /** The Agent that spawned this one, if any. */
+  parentId?: string;
   handoff?: Handoff;
   createdAt: string;
   updatedAt: string;
 };
+
+/** Where a message's content came from (round-4 contract section 5). */
+export type MessageTrust = "user" | "agent" | "external" | "system";
 
 export type MessageKind =
   | "event"
@@ -99,6 +108,8 @@ export type Message = {
   chainId: string;
   hop: number;
   body: string;
+  /** Provenance; an empty value from older rows means "agent". Unknown values are shown raw. */
+  trust?: MessageTrust | string;
   artifacts?: ArtifactRef[];
   state: MessageState;
   createdAt: string;
@@ -195,17 +206,21 @@ export type CellsSetup = {
   dockerAvailable: boolean;
 };
 
-export type CliLoginSetup = {
+/** Round 4 replaced the CLI login block with the model credential summary. */
+export type ModelsSetup = {
+  /** Whether at least one provider has a usable credential. */
   available: boolean;
-  loggedIn: boolean;
-  cli: string;
+  configured: boolean;
+  defaultModel: string;
+  /** Providers with a configured credential. */
+  providers?: string[];
 };
 
 export type SetupStatus = {
   github: GithubSetup;
   tunnel: TunnelSetup;
   cells: CellsSetup;
-  cliLogin: CliLoginSetup;
+  models: ModelsSetup;
 };
 
 export type GithubRepository = {
@@ -234,4 +249,225 @@ export type CreatedToken = {
   token: TokenSummary;
   plaintext: string;
   connect: TokenConnect;
+};
+
+// ---- Round 4: model credentials, methodology, attestations and usage ----
+//
+// These shapes follow the round-4 public contract. The backend tasks land in
+// parallel; until they merge the console reads them through /api and the
+// Playwright mock supplies the fixtures.
+
+/** One catalog entry, mirroring llmproxy.Model. */
+export type ModelOption = {
+  /** provider/model, e.g. "deepseek/deepseek-chat". */
+  id: string;
+  provider: string;
+  displayName?: string;
+  contextLength?: number;
+  maxOutputTokens?: number;
+  kind?: string;
+};
+
+/** A provider credential as the server shows it (api.modelCredentialView). */
+export type ModelCredential = {
+  provider: string;
+  type?: string;
+  /** Masked by the server; the plaintext key never reaches the console. */
+  masked?: string;
+  configured: boolean;
+};
+
+/** GET /api/models (api.modelsResponse). */
+export type ModelsResponse = {
+  defaultModel: string;
+  models: ModelOption[];
+  providers: ModelCredential[];
+  /** False when the auth gateway did not answer; the catalog is then empty. */
+  gatewayAvailable: boolean;
+};
+
+/** PUT /api/models/credentials/{provider} answers with the credential view. */
+export type ModelCredentialResponse = ModelCredential;
+
+export type MethodologySource = {
+  url: string;
+  ref: string;
+  path?: string;
+  sha?: string;
+};
+
+export type MethodologyFile = {
+  path: string;
+  content: string;
+};
+
+export type RolePermissions = {
+  publish: boolean;
+  message: boolean;
+  spawn?: string[];
+  attest: boolean;
+  merge: boolean;
+  methodology: boolean;
+};
+
+export type MethodologyRole = {
+  description?: string;
+  prompt?: string;
+  model?: string;
+  lifecycle?: string;
+  permissions: RolePermissions;
+  denyTools?: string[];
+};
+
+export type EventRule = {
+  event: string;
+  label?: string;
+  commentPrefix?: string;
+  role: string;
+};
+
+export type MergePolicy = {
+  requireAttestation: boolean;
+  acceptResults?: AttestResult[];
+  requireNonAuthor: boolean;
+  requireChecks: boolean;
+  auto: boolean;
+  method?: string;
+};
+
+export type MethodologyLimits = {
+  maxConcurrentAgents?: number;
+  maxHops?: number;
+  maxAgentsPerChain?: number;
+  maxCostPerAgentUsd?: number;
+  maxCostPerDayUsd?: number;
+};
+
+export type MethodologyManifest = {
+  defaultRole: string;
+  roles: Record<string, MethodologyRole>;
+  standingOrders?: string[];
+  events?: EventRule[];
+  merge: MergePolicy;
+  limits?: MethodologyLimits;
+};
+
+export type Methodology = {
+  id: string;
+  hiveId: string;
+  version: number;
+  active: boolean;
+  source?: MethodologySource;
+  manifest: MethodologyManifest;
+  digest: string;
+  note?: string;
+  createdBy: string;
+  createdAt: string;
+};
+
+/** GET /methodology and POST /methodology/activate: the version flattened plus its files. */
+export type MethodologyResponse = Methodology & {
+  files: MethodologyFile[];
+  /** True when the Hive has no stored version and the platform default is shown. */
+  builtin?: boolean;
+};
+
+/** methodology.Change: one append-only publish or activate record. */
+export type MethodologyChange = {
+  id: number;
+  hiveId: string;
+  action: "publish" | "activate" | string;
+  version: number;
+  actor: string;
+  note?: string;
+  createdAt: string;
+};
+
+export type MethodologyVersionsResponse = {
+  hiveId: string;
+  activeVersion: number;
+  versions: Methodology[];
+  changes: MethodologyChange[];
+};
+
+export type AttestResult = "pass" | "pass_notes" | "fail" | "blocked";
+
+export type Finding = {
+  severity: "critical" | "warning" | "nit" | string;
+  location?: string;
+  finding: string;
+  evidence?: string;
+};
+
+export type Attestation = {
+  id: string;
+  hiveId: string;
+  prNumber: number;
+  headSha: string;
+  /** The Agent that gave the conclusion. */
+  attesterId: string;
+  /** The Agent that owns the PR revision. */
+  authorId: string;
+  /** Convenience copy of AttesterID == AuthorID from the server. */
+  isAuthor: boolean;
+  result: AttestResult;
+  summary: string;
+  findings?: Finding[];
+  commentUrl?: string;
+  superseded: boolean;
+  createdAt: string;
+};
+
+/** merge.Check */
+export type MergeCheck = {
+  name: string;
+  status: string;
+  conclusion: string;
+  url?: string;
+  output?: string;
+};
+
+/** GET /api/hives/{id}/prs/{number} (api.prStatusResponse). */
+export type PRStatusResponse = {
+  hiveId: string;
+  prNumber: number;
+  state?: string;
+  draft: boolean;
+  merged: boolean;
+  headSha?: string;
+  url?: string;
+  checks: MergeCheck[];
+  attestations: Attestation[];
+  ready: boolean;
+  reasons: string[];
+};
+
+/** domain.LLMUsageTotals */
+export type UsageTotals = {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+  /** Requests whose model had no price entry; their cost counts as zero. */
+  unknownPriceRequests: number;
+};
+
+/** domain.LLMUsageGroup: one row of byAgent or byModel. */
+export type UsageGroup = UsageTotals & {
+  agentId?: string;
+  model?: string;
+};
+
+export type UsagePeriod = "all" | "today";
+
+/** GET /api/usage (domain.LLMUsageSummary). */
+export type UsageResponse = {
+  hiveId?: string;
+  agentId?: string;
+  period: UsagePeriod | string;
+  totals: UsageTotals;
+  byAgent: UsageGroup[];
+  byModel: UsageGroup[];
 };

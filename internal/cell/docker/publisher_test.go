@@ -528,7 +528,7 @@ func TestPublisherRedactsCellOutput(t *testing.T) {
 			return Result{ExitCode: 1}, nil
 		}
 		if len(argv) > 1 && argv[0] == "git" && argv[1] == "add" {
-			return Result{ExitCode: 1, Stderr: []byte("leak auth-secret mcp-secret secret-token")}, nil
+			return Result{ExitCode: 1, Stderr: []byte("leak llm-secret mcp-secret secret-token")}, nil
 		}
 		return Result{}, nil
 	}}
@@ -538,7 +538,7 @@ func TestPublisherRedactsCellOutput(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	for _, secret := range []string{"auth-secret", "mcp-secret", "secret-token"} {
+	for _, secret := range []string{"llm-secret", "mcp-secret", "secret-token"} {
 		if strings.Contains(err.Error(), secret) {
 			t.Fatalf("secret %q leaked into error: %v", secret, err)
 		}

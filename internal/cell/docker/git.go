@@ -201,6 +201,7 @@ var (
 	agentIDPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 	repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	branchPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$`)
+	revisionPattern   = regexp.MustCompile(`^[0-9a-fA-F]{4,64}$`)
 	envKeyPattern     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
@@ -214,6 +215,15 @@ func validAgentID(id string) error {
 func validRepository(repository string) error {
 	if !repositoryPattern.MatchString(repository) {
 		return errors.New("cell: repository must be owner/name")
+	}
+	return nil
+}
+
+// validRevision accepts an abbreviated or full commit SHA and nothing that git
+// could interpret as an option or a revision expression.
+func validRevision(revision string) error {
+	if !revisionPattern.MatchString(revision) {
+		return fmt.Errorf("cell: invalid revision %q", revision)
 	}
 	return nil
 }

@@ -76,6 +76,9 @@ class EnvironmentTests(unittest.TestCase):
             self.assertIn(parsed["POSTGRES_PASSWORD"], parsed["DATABASE_URL"])
             self.assertEqual(parsed["SWARMJET_CELLS"], "1")
             self.assertEqual(parsed["SWARMJET_TUNNEL_URL"], "")
+            self.assertEqual(parsed["OMP_VERSION"], "18.12.2")
+            self.assertEqual(parsed["SWARMJET_DEFAULT_MODEL"], "deepseek/deepseek-chat")
+            self.assertEqual(parsed["SWARMJET_LLM_GATEWAY_URL"], "")
 
     def test_existing_values_and_comments_are_kept(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -139,6 +142,31 @@ class EnvironmentTests(unittest.TestCase):
             installer.validate_data_dir("/tmp/has space")
         with self.assertRaises(installer.InstallError):
             installer.validate_data_dir("/tmp/$weird")
+
+    def test_llm_tokens_are_generated_once_and_private(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = installer.ensure_llm_tokens(directory)
+            self.assertEqual(config, Path(directory) / "omp")
+            self.assertEqual(config.stat().st_mode & 0o777, 0o700)
+            first = {}
+            for name in installer.LLM_TOKEN_FILES:
+                path = config / name
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                value = path.read_text()
+                self.assertEqual(len(value), 64)
+                int(value, 16)
+                first[name] = value
+            self.assertNotEqual(first["auth-broker.token"], first["auth-gateway.token"])
+
+            # A reinstall preserves live tokens and tightens loose permissions.
+            config.chmod(0o755)
+            for name in installer.LLM_TOKEN_FILES:
+                (config / name).chmod(0o644)
+            installer.ensure_llm_tokens(directory)
+            self.assertEqual(config.stat().st_mode & 0o777, 0o700)
+            for name in installer.LLM_TOKEN_FILES:
+                self.assertEqual((config / name).read_text(), first[name])
+                self.assertEqual((config / name).stat().st_mode & 0o777, 0o600)
 
     def test_compose_arguments_include_cells_and_tunnel(self):
         values = {"SWARMJET_CELLS": "1", "SWARMJET_TUNNEL_URL": "http://tunnel:2000"}
