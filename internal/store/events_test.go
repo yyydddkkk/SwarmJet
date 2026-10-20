@@ -143,11 +143,12 @@ func TestEventDataNormalizesNonUTCTimestamps(t *testing.T) {
 	}
 	zoned := &Store{Pool: pool}
 	defer zoned.Close()
-	raw, err := zoned.Agent(ctx, queen.ID)
+	var raw time.Time
+	err = zoned.Pool.QueryRow(ctx, `SELECT created_at FROM agents WHERE id=$1`, queen.ID).Scan(&raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, offset := raw.CreatedAt.Zone(); offset != 8*60*60 {
+	if _, offset := raw.Zone(); offset != 8*60*60 {
 		t.Fatal("fixture did not decode non-UTC time")
 	}
 	for _, ref := range []EventRef{{Type: "hive", HiveID: hive.ID, ID: hive.ID}, {Type: "agent", HiveID: hive.ID, ID: queen.ID}} {
