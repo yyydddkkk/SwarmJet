@@ -86,6 +86,7 @@ test("methodology activation and rollback are confirmed and retain notes", async
   const state = await open(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
   await expect(page.locator(".pc-version-table tbody tr")).toHaveCount(3);
+  await page.getByText("版本历史与回滚", { exact: true }).click();
   for (const version of [2, 3]) {
     const row = page
       .locator(".pc-version-table tbody tr")
@@ -669,6 +670,7 @@ for (const failure of [false, true]) {
     await page.getByRole("button", { name: "项目", exact: true }).click();
     await page.getByLabel("查看方法论版本", { exact: true }).selectOption("2");
     await expect(page.getByTestId("methodology-version")).toContainText("v2");
+    await page.getByText("查看文件内容", { exact: true }).click();
     const oldBody = await page
       .getByTestId("methodology-file-content")
       .innerText();
@@ -710,3 +712,85 @@ for (const failure of [false, true]) {
     ).toHaveLength(0);
   });
 }
+test("methodology first view prioritizes role diagram and plain rules while advanced tools remain available", async ({
+  page,
+}, testInfo) => {
+  await open(page);
+  await page.getByRole("button", { name: "项目", exact: true }).click();
+  const panel = page.getByRole("region", { name: "项目面板" });
+  await expect(panel.getByRole("img", { name: "角色分工示意" })).toBeVisible();
+  const diagram = await panel
+    .getByRole("img", { name: "角色分工示意" })
+    .boundingBox();
+  expect(diagram!.y).toBeLessThan(450);
+  expect(
+    (await panel
+      .getByRole("heading", { name: "事件规则", exact: true })
+      .first()
+      .boundingBox())!.y,
+  ).toBeLessThan(600);
+  expect(
+    (await panel
+      .getByRole("heading", { name: "合并规则", exact: true })
+      .boundingBox())!.y,
+  ).toBeLessThan(800);
+  const versionDetails = panel
+    .locator("details")
+    .filter({ has: page.locator("summary", { hasText: "版本详情" }) })
+    .first();
+  expect(
+    await versionDetails.evaluate((node: HTMLDetailsElement) => node.open),
+  ).toBe(false);
+  await expect(page.getByTestId("methodology-file-content")).toBeHidden();
+  await page.screenshot({
+    path: testInfo.outputPath("methodology-first-view.png"),
+  });
+  await panel.getByRole("button", { name: /roles\/verifier.md/ }).click();
+  await expect(page.getByTestId("methodology-file-content")).toBeVisible();
+  await panel.getByText("版本详情", { exact: true }).click();
+  await expect(panel.getByText("摘要", { exact: true })).toBeVisible();
+  await panel.getByText("比较版本差异", { exact: true }).click();
+  await expect(page.getByTestId("methodology-diff").first()).toBeVisible();
+  await panel.getByText("角色、权限与全部规则", { exact: true }).click();
+  await expect(page.getByTestId("method-role-verifier")).toBeVisible();
+});
+test("methodology layout also renders in the real application shell with bundled fonts", async ({
+  page,
+}, testInfo) => {
+  const state = await mockHiveAPI(page);
+  await page.addInitScript(() => {
+    class QuietEvents extends EventTarget {
+      close() {}
+    }
+    Object.assign(window, { EventSource: QuietEvents });
+  });
+  await page.route("**/api/hives/*/prs?state=all", (route) =>
+    route.fulfill({ json: { prs: [] } }),
+  );
+  await page.route("**/api/hives/*/queue", (route) =>
+    route.fulfill({ json: { queue: [] } }),
+  );
+  await page.route("**/api/hives/*/signals", (route) =>
+    route.fulfill({ json: { signals: [] } }),
+  );
+  await page.route("**/api/hives/*/methodology/events?limit=*", (route) =>
+    route.fulfill({ json: { events: [] } }),
+  );
+  await page.goto("/");
+  await page
+    .getByRole("combobox", { name: "选择项目", exact: true })
+    .selectOption("swarmjet");
+  await page.getByRole("button", { name: "项目面板", exact: true }).click();
+  const panel = page.getByRole("region", { name: "项目面板" });
+  await expect(panel.getByRole("img", { name: "角色分工示意" })).toBeVisible();
+  await expect(
+    panel.getByRole("heading", { name: "合并规则", exact: true }),
+  ).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  await page.screenshot({
+    path: testInfo.outputPath("methodology-actual-shell.png"),
+  });
+  expect(
+    state.calls.some((c) => c.path === "/api/hives/swarmjet/methodology"),
+  ).toBeTruthy();
+});

@@ -132,7 +132,6 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
 
       <Panel
         title="方法论"
-        subtitle="一个版本就是一组文件；改动会生成新版本，切换版本即回滚。manifest 是平台真正执行的部分。"
         extra={
           <label className="pc-inline-field">
             查看版本
@@ -157,64 +156,81 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
           </label>
         }
       >
-        <StatusGrid>
-          <StatusItem label="版本">
-            <span
-              className="pc-version-badge"
-              data-testid="methodology-version"
-            >
-              {versionLabel}
-              {builtin ? (
-                <span className="pc-badge pc-tone-amber">平台默认</span>
-              ) : methodology.active ? (
-                <span className="pc-badge pc-tone-mint">当前生效</span>
-              ) : (
-                <span className="pc-badge pc-tone-neutral">历史版本</span>
-              )}
-            </span>
-          </StatusItem>
-          <StatusItem label="默认角色">
-            <code>{methodology.manifest.defaultRole}</code>
-          </StatusItem>
-          <StatusItem label="摘要">
-            <code title={methodology.digest}>
-              {shortSha(methodology.digest)}
-            </code>
-          </StatusItem>
-          <StatusItem label="修改人">
-            {builtin ? "平台内置" : methodology.createdBy || "—"}
-          </StatusItem>
-          <StatusItem label="时间">
-            {builtin ? "—" : formatDateTime(methodology.createdAt)}
-          </StatusItem>
-          <StatusItem label="来源">
-            {methodology.source ? (
-              <span className="pc-source">
-                {methodology.source.url}@{methodology.source.ref}
-                {methodology.source.sha
-                  ? ` · ${shortSha(methodology.source.sha)}`
-                  : ""}
-                {methodology.source.path ? ` · ${methodology.source.path}` : ""}
+        <p className="pc-method-version" data-testid="methodology-version">
+          {versionLabel}，{methodology.active ? "当前生效" : "历史版本"}
+          {methodology.source?.url.startsWith("builtin:")
+            ? `；${methodology.source.url.slice(8)} 来源版本 ${methodology.source.ref}`
+            : ""}
+        </p>
+        <RoleDiagram roles={Object.keys(methodology.manifest.roles ?? {})} />
+        <RulesSummary manifest={methodology.manifest} />
+        <details>
+          <summary>版本详情</summary>
+          <p className="pc-muted">
+            一个版本是一组文件；切换版本即可回滚。项目版本与内置目录版本独立编号。
+          </p>
+          <StatusGrid>
+            <StatusItem label="版本">
+              <span className="pc-version-badge">
+                {versionLabel}
+                {builtin ? (
+                  <span className="pc-badge pc-tone-amber">平台默认</span>
+                ) : methodology.active ? (
+                  <span className="pc-badge pc-tone-mint">当前生效</span>
+                ) : (
+                  <span className="pc-badge pc-tone-neutral">历史版本</span>
+                )}
               </span>
-            ) : builtin ? (
-              "这个项目 还没有发布过方法论，使用平台内置版本"
-            ) : (
-              "控制台或 MCP 直接发布"
-            )}
-          </StatusItem>
-        </StatusGrid>
-        {methodology.note ? (
-          <p className="pc-version-note">备注：{methodology.note}</p>
-        ) : null}
+            </StatusItem>
+            <StatusItem label="默认角色">
+              <code>{methodology.manifest.defaultRole}</code>
+            </StatusItem>
+            <StatusItem label="摘要">
+              <code title={methodology.digest}>
+                {shortSha(methodology.digest)}
+              </code>
+            </StatusItem>
+            <StatusItem label="修改人">
+              {builtin ? "平台内置" : methodology.createdBy || "—"}
+            </StatusItem>
+            <StatusItem label="时间">
+              {builtin ? "—" : formatDateTime(methodology.createdAt)}
+            </StatusItem>
+            <StatusItem label="来源">
+              {methodology.source ? (
+                <span className="pc-source">
+                  {methodology.source.url}@{methodology.source.ref}
+                  {methodology.source.sha
+                    ? ` · ${shortSha(methodology.source.sha)}`
+                    : ""}
+                  {methodology.source.path
+                    ? ` · ${methodology.source.path}`
+                    : ""}
+                </span>
+              ) : builtin ? (
+                "这个项目 还没有发布过方法论，使用平台内置版本"
+              ) : (
+                "控制台或 MCP 直接发布"
+              )}
+            </StatusItem>
+          </StatusGrid>
+          {methodology.note ? (
+            <p className="pc-version-note">备注：{methodology.note}</p>
+          ) : null}
+        </details>
       </Panel>
 
-      <RoleDiagram roles={Object.keys(methodology.manifest.roles ?? {})} />
-      <ManifestView manifest={methodology.manifest} />
+      <FilesPanel files={files} />
+      <details>
+        <summary>角色、权限与全部规则</summary>
+        <ManifestView manifest={methodology.manifest} />
+      </details>
       <details>
         <summary>从内置目录安装方法论</summary>
         <MethodologyCatalog
           hiveId={hiveId}
           onInstalled={installed}
+          hasInstalled
           installedSource={
             versionList.find((item) => item.version === activeVersion)
               ?.source ?? methodology.source
@@ -222,26 +238,30 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
         />
       </details>
 
-      <FilesPanel files={files} />
+      <details>
+        <summary>版本历史与回滚</summary>
+        <VersionHistory
+          versions={versionList}
+          changes={changes}
+          activeVersion={activeVersion}
+          viewingVersion={methodology.version}
+          onView={setViewVersion}
+          onSwitch={(version) => {
+            setSwitchError("");
+            setSwitchNote("");
+            setSwitching(version);
+          }}
+        />
+      </details>
 
-      <VersionHistory
-        versions={versionList}
-        changes={changes}
-        activeVersion={activeVersion}
-        viewingVersion={methodology.version}
-        onView={setViewVersion}
-        onSwitch={(version) => {
-          setSwitchError("");
-          setSwitchNote("");
-          setSwitching(version);
-        }}
-      />
-
-      <DiffPanel
-        hiveId={hiveId}
-        versions={versionList}
-        activeVersion={activeVersion}
-      />
+      <details>
+        <summary>比较版本差异</summary>
+        <DiffPanel
+          hiveId={hiveId}
+          versions={versionList}
+          activeVersion={activeVersion}
+        />
+      </details>
 
       {switching ? (
         <ConfirmDialog
@@ -278,10 +298,12 @@ function MethodologyCatalog({
   hiveId,
   onInstalled,
   installedSource,
+  hasInstalled = false,
 }: {
   hiveId: string;
   onInstalled: () => void;
   installedSource?: MethodologySource;
+  hasInstalled?: boolean;
 }) {
   const api = useDataAPI();
   const templates = useResource(
@@ -311,14 +333,15 @@ function MethodologyCatalog({
     <Panel
       title="选择方法论"
       subtitle={
-        installedSource
+        hasInstalled || installedSource
           ? "从目录安装会生成并启用一个项目版本。目录版本与项目版本独立编号。"
           : "尚未选择方法论，可以在对话里请主 Agent 推荐"
       }
     >
       <Callout>
-        安装前不会自动派出
-        Agent。选择适合团队的方法论后，它会作为新版本立即生效。
+        {hasInstalled
+          ? "安装后，新派出的 Agent 使用新版本；已经在运行的工作不受影响。"
+          : "安装前不会自动派出 Agent。选择适合团队的方法论后，它会作为新版本立即生效。"}
       </Callout>
       {templates.loading && !templates.data ? (
         <BeeLoader label="正在读取内置目录…" />
@@ -652,6 +675,7 @@ function LimitsView({ manifest }: { manifest: MethodologyManifest }) {
 
 function FilesPanel({ files }: { files: MethodologyFile[] }) {
   const [selectedPath, setSelectedPath] = useState("");
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     if (files.length === 0) {
       setSelectedPath("");
@@ -671,7 +695,6 @@ function FilesPanel({ files }: { files: MethodologyFile[] }) {
   return (
     <Panel
       title="文件"
-      subtitle="整组文件按相对路径原样下发到工作环境的只读配置目录。"
       extra={
         <span className="pc-badge pc-tone-neutral">{files.length} 个文件</span>
       }
@@ -691,7 +714,10 @@ function FilesPanel({ files }: { files: MethodologyFile[] }) {
                   className={
                     file.path === selected?.path ? "is-active" : undefined
                   }
-                  onClick={() => setSelectedPath(file.path)}
+                  onClick={() => {
+                    setSelectedPath(file.path);
+                    setExpanded(true);
+                  }}
                   aria-pressed={file.path === selected?.path}
                 >
                   <Icon name="diff" size={16} />
@@ -702,7 +728,12 @@ function FilesPanel({ files }: { files: MethodologyFile[] }) {
             ))}
           </ul>
           {selected ? (
-            <div className="pc-file-viewer">
+            <details
+              className="pc-file-viewer"
+              open={expanded}
+              onToggle={(event) => setExpanded(event.currentTarget.open)}
+            >
+              <summary>查看文件内容</summary>
               <div className="pc-file-viewer-head">
                 <code>{selected.path}</code>
                 <span className="pc-muted">{fileSize(selected.content)}</span>
@@ -710,7 +741,7 @@ function FilesPanel({ files }: { files: MethodologyFile[] }) {
               <pre data-testid="methodology-file-content">
                 {selected.content}
               </pre>
-            </div>
+            </details>
           ) : null}
         </div>
       )}
@@ -1154,10 +1185,61 @@ function RoleDiagram({ roles }: { roles: string[] }) {
         <g key={role}>
           <ellipse cx="160" cy="55" rx={45 + i * 18} ry={15 + i * 9} />
           <text x="12" y={15 + i * 18}>
-            {role}
+            {role === "queen" ? "主 Agent" : role}
           </text>
         </g>
       ))}
     </svg>
+  );
+}
+
+function RulesSummary({ manifest }: { manifest: MethodologyManifest }) {
+  const events = manifest.events ?? [];
+  const role = (name: string) => (name === "queen" ? "主 Agent" : name);
+  const resultNames: Record<string, string> = {
+    pass: "通过",
+    pass_notes: "通过并附建议",
+    fail: "未通过",
+    blocked: "受阻",
+  };
+  const accepted = (
+    manifest.merge.acceptResults?.length
+      ? manifest.merge.acceptResults
+      : ["pass", "pass_notes"]
+  )
+    .map((result) => resultNames[result] || result)
+    .join("或");
+  return (
+    <div className="pc-rules-summary">
+      <h3>事件规则</h3>
+      {events.length ? (
+        events.map((event, i) => (
+          <p key={i}>
+            {event.event === "issue_labeled"
+              ? `Issue 加上${event.label ? `“${event.label}”` : "指定"}标签时`
+              : event.event === "issue_comment"
+                ? `Issue 收到${event.commentPrefix ? `以“${event.commentPrefix}”开头的` : ""}评论时`
+                : event.event === "pr_head"
+                  ? "PR 有新提交时"
+                  : `收到 ${event.event} 事件时`}
+            ，交给 {role(event.role)} 处理。
+          </p>
+        ))
+      ) : (
+        <p>没有设置自动分派的事件规则。</p>
+      )}
+      <h3>合并规则</h3>
+      <p>
+        {manifest.merge.requireAttestation
+          ? `合并前需要${manifest.merge.requireNonAuthor ? "非作者" : "验证者"}给出${accepted}的结论。`
+          : "合并不要求验证结论。"}
+        {manifest.merge.requireChecks
+          ? "GitHub 必需检查必须通过。"
+          : "不要求 GitHub 检查。"}
+        {manifest.merge.auto
+          ? "满足条件后自动合并。"
+          : "满足条件后由你确认合并。"}
+      </p>
+    </div>
   );
 }

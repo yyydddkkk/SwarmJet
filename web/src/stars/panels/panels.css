@@ -329,3 +329,40 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.pc-rules-summary h3 {
+  font-size: 20px;
+  margin-top: 20px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--hair);
+}
+.pc-rules-summary p {
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--ink2);
+}
+.pc-method-version {
+  color: var(--ink2);
+  font-size: 14px;
+}
+.pc-sheet .pc-orbits {
+  display: block;
+  margin: 12px 0;
+}
+.pc-sheet .pc-file-list li {
+  margin: 4px 0;
+}
+.pc-sheet .pc-file-list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  font-size: 12px;
+}
+.pc-sheet .pc-file-list button code {
+  margin-left: auto;
+  color: var(--ink2);
+}
+.pc-sheet .pc-methodology > details {
+  margin: 0;
+}
