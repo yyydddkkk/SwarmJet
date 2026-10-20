@@ -37,34 +37,41 @@
 }
 .stars-mark {
   position: absolute;
-  top: 30px;
-  left: 34px;
+  top: 54px;
+  left: 60px;
 }
 .stars-mark b {
-  font: 28px var(--title);
-  margin-right: 25px;
+  font: italic 400 21px var(--title);
+  margin-right: 18px;
 }
 .stars-cartouche {
   position: absolute;
-  left: 34px;
-  bottom: 120px;
-  border: 1px solid var(--hair);
-  padding: 15px 24px;
+  left: 60px;
+  bottom: 58px;
 }
 .stars-cartouche h1 {
-  font: 32px var(--title);
+  font: italic 400 30px var(--title);
   margin: 0 0 8px;
 }
-.stars-cartouche select {
+.stars-cartouche > span {
   display: block;
-  background: var(--paper);
+  max-width: min(430px, 40vw);
+  font-size: 15px;
+  color: var(--ink2);
+}
+.stars-cartouche select {
+  display: inline-block;
+  max-width: 170px;
+  background: transparent;
   border: 0;
   margin-top: 12px;
+  color: var(--ink2);
+  font-size: 13px;
 }
 .stars-tools {
   position: absolute;
-  right: 30px;
-  bottom: 130px;
+  right: 60px;
+  bottom: 47px;
   max-width: 50%;
   display: flex;
   flex-wrap: wrap;
@@ -72,15 +79,16 @@
 }
 .stars-say {
   position: absolute;
-  bottom: 30px;
+  bottom: 46px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(680px, 90vw);
+  width: min(420px, 90vw);
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--ink3);
+  border-bottom: 1px solid var(--hair);
   gap: 12px;
-  padding: 7px;
+  padding: 4px 0;
+  font-style: italic;
 }
 .stars-say > span:first-child {
   font-size: 29px;
@@ -91,10 +99,13 @@
   border: 0;
   flex: 1;
   min-width: 0;
-  padding: 12px;
+  padding: 4px 0;
 }
 .stars-say input:focus {
   outline: 0;
+}
+[data-style="simple"] .stars-app * {
+  font-style: normal !important;
 }
 .stars-panel {
   position: absolute;

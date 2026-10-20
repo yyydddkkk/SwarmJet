@@ -227,6 +227,14 @@ export default function PeripherySlot(props: StarsSlotProps) {
       )
       .map((a) => ({ e, a })),
   );
+  const selected = entries.find((e) => e.id === state.hiveId);
+  const activeCount = selected
+    ? selected.s.agents.filter((a) => ["active", "creating"].includes(a.state)).length
+    : active.length;
+  const decisionCount = selected ? selected.derived.decisions.length : decisions.length;
+  const summary = !loaded
+    ? "正在读取项目状态…"
+    : `${selected ? (selected.s.queen.enabled ? "" : "主 Agent 已停用，") : `${projects.length} 个项目，`}${activeCount} 个 Agent 在工作${selected?.s.queue.length ? `，${selected.s.queue.length} 个排队中` : ""}${decisionCount ? `，${decisionCount} 件事等你决定` : ""}。`;
   const decisionRow = ({ e, d }: (typeof decisions)[number]) =>
     d.kind === "pr" ? (
       <div className="periphery-row need" key={`${e.id}:${d.id}`}>
@@ -331,8 +339,8 @@ export default function PeripherySlot(props: StarsSlotProps) {
         {current && <span> / {current.name}</span>}
       </header>
       <section className="stars-cartouche">
-        <h1>{current?.name ?? "你的项目"}</h1>
-        <span>{projects.length} 个项目</span>
+        <h1>{current?.name ?? "全部项目"}</h1>
+        <span>{summary}</span>
         <select
           aria-label="选择项目"
           value={state.hiveId ?? ""}

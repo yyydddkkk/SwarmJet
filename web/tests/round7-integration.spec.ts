@@ -153,6 +153,7 @@ test("完整mock界面的主题截图及登录简报列表无障碍证据", asyn
   await page.getByRole("button", { name: "平台设置", exact: true }).click();
   const platform = page.getByRole("dialog", { name: "平台设置", exact: true });
   await expect(platform.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
+  await expect(platform.getByRole("heading", { name: "平台设置", exact: true })).toHaveCSS("font-style", "normal");
   await page.screenshot({ path: resolve(evidence, "platform-settings.png") });
   await page.getByRole("button", { name: "关闭平台设置", exact: true }).click();
   await page.getByRole("button", { name: "列表", exact: true }).click();
