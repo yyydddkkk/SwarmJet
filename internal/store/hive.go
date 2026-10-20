@@ -376,7 +376,7 @@ func (s *Store) createForagerTx(ctx context.Context, tx pgx.Tx, a domain.Agent, 
 			return domain.Agent{}, err
 		}
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO agents(`+agentColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+	if _, err = tx.Exec(ctx, `INSERT INTO agents(`+agentColumns+`,methodology_version_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,(SELECT id FROM methodologies WHERE hive_id=$2 AND active))`,
 		a.ID, a.HiveID, string(a.Role), string(a.State), a.Preset, a.CLI, a.Task, a.Branch,
 		a.IssueNumber, a.PRNumber, a.NodeID, a.ChainID, a.SessionRef, handoff,
 		a.RoleName, a.Revision, a.ParentID, a.CreatedAt, a.UpdatedAt); err != nil {

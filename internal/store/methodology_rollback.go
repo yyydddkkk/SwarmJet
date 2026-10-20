@@ -34,8 +34,8 @@ func (s *Store) transitionMethodologyOutcome(ctx context.Context, id string, fro
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var hiveID, role string
-	if err := tx.QueryRow(ctx, `SELECT hive_id,role FROM agents WHERE id=$1`, id).Scan(&hiveID, &role); err != nil {
+	var hiveID, role, versionID string
+	if err := tx.QueryRow(ctx, `SELECT hive_id,role,COALESCE(methodology_version_id,'') FROM agents WHERE id=$1`, id).Scan(&hiveID, &role, &versionID); err != nil {
 		return domainErr(err)
 	}
 	// NO KEY UPDATE still serializes with activation while permitting the
@@ -52,16 +52,19 @@ func (s *Store) transitionMethodologyOutcome(ctx context.Context, id string, fro
 		return domain.ErrConflict
 	}
 	if role == string(domain.RoleForager) && from != to {
-		if err := s.recordMethodologyOutcome(ctx, tx, hiveID, to, queenEnabled); err != nil {
+		if err := s.recordMethodologyOutcome(ctx, tx, hiveID, versionID, to, queenEnabled); err != nil {
 			return err
 		}
 	}
 	return tx.Commit(ctx)
 }
 
-func (s *Store) recordMethodologyOutcome(ctx context.Context, tx pgx.Tx, hiveID string, outcome domain.AgentState, queenEnabled bool) error {
+func (s *Store) recordMethodologyOutcome(ctx context.Context, tx pgx.Tx, hiveID, versionID string, outcome domain.AgentState, queenEnabled bool) error {
+	if versionID == "" {
+		return nil // Historical Agents cannot be attributed reliably.
+	}
 	if outcome == domain.AgentCompleted {
-		_, err := tx.Exec(ctx, `UPDATE methodologies SET consecutive_failures=0 WHERE hive_id=$1 AND active`, hiveID)
+		_, err := tx.Exec(ctx, `UPDATE methodologies SET consecutive_failures=0 WHERE hive_id=$1 AND id=$2`, hiveID, versionID)
 		return err
 	}
 	if outcome != domain.AgentFailed {
@@ -69,13 +72,14 @@ func (s *Store) recordMethodologyOutcome(ctx context.Context, tx pgx.Tx, hiveID 
 	}
 	var failedID string
 	var failedVersion, failures int
+	var active bool
 	err := tx.QueryRow(ctx, `UPDATE methodologies SET consecutive_failures=consecutive_failures+1
-		WHERE hive_id=$1 AND active AND auto_rolled_back_at IS NULL
-		RETURNING id,version,consecutive_failures`, hiveID).Scan(&failedID, &failedVersion, &failures)
+		WHERE hive_id=$1 AND id=$2 AND auto_rolled_back_at IS NULL
+		RETURNING id,version,consecutive_failures,active`, hiveID, versionID).Scan(&failedID, &failedVersion, &failures, &active)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
-	if err != nil || failures < 3 {
+	if err != nil || failures < 3 || !active {
 		return err
 	}
 	var previousID string
