@@ -272,12 +272,25 @@ func (s *Store) CreateForagerWithLimits(ctx context.Context, a domain.Agent, lim
 }
 
 func (s *Store) createForager(ctx context.Context, a domain.Agent, limits domain.Limits) (domain.Agent, error) {
-	now := time.Now().UTC()
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return domain.Agent{}, err
 	}
 	defer tx.Rollback(ctx)
+	a, err = s.createForagerTx(ctx, tx, a, limits)
+	if err != nil {
+		return domain.Agent{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return domain.Agent{}, err
+	}
+	return a, nil
+}
+
+// createForagerTx lets queued creation and its task delivery share a transaction.
+func (s *Store) createForagerTx(ctx context.Context, tx pgx.Tx, a domain.Agent, limits domain.Limits) (domain.Agent, error) {
+	now := time.Now().UTC()
+	var err error
 	var config []byte
 	if err = tx.QueryRow(ctx, `SELECT config FROM hives WHERE id=$1 FOR UPDATE`, a.HiveID).Scan(&config); err != nil {
 		return domain.Agent{}, domainErr(err)
@@ -368,9 +381,6 @@ func (s *Store) createForager(ctx context.Context, a domain.Agent, limits domain
 		a.IssueNumber, a.PRNumber, a.NodeID, a.ChainID, a.SessionRef, handoff,
 		a.RoleName, a.Revision, a.ParentID, a.CreatedAt, a.UpdatedAt); err != nil {
 		return domain.Agent{}, domainErr(err)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return domain.Agent{}, err
 	}
 	return a, nil
 }
