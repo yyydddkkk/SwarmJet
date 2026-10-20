@@ -137,6 +137,7 @@ function apply() {
       ? '"IBM Plex Sans","Noto Sans SC",sans-serif'
       : '"Source Serif 4","Noto Serif SC",serif',
   );
+  root.style.setProperty("--mono", '"JetBrains Mono",monospace');
   listeners.forEach((fn) => fn());
 }
 export const themeStore = {
