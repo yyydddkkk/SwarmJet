@@ -167,16 +167,13 @@ func OverlayYAML(denyTools []string) (string, error) {
 	return b.String(), nil
 }
 
-// disabledExtensions turns off inputs that are not rules or skills. Every
-// capability id is exact, so the common context-file names are listed
-// explicitly. Extension modules, hooks and commands are additionally disabled
-// with --no-extensions, and project MCP servers with mcp.enableProjectConfig.
+// disabledExtensions turns off user-level context files, which a Cell does
+// not have. The repository's own AGENTS.md and CLAUDE.md stay enabled: they
+// are plain instructions shared by local and cloud Agents (ADR D13) and run no
+// code. Extension modules, hooks and commands are disabled with
+// --no-extensions, and project MCP servers with mcp.enableProjectConfig.
 func disabledExtensions() []string {
 	return []string{
-		"context-file:project:AGENTS.md",
-		"context-file:project:CLAUDE.md",
-		"context-file:project:GEMINI.md",
-		"context-file:project:copilot-instructions.md",
 		"context-file:user:AGENTS.md",
 		"context-file:user:CLAUDE.md",
 		"context-file:user:GEMINI.md",
@@ -258,15 +255,16 @@ func ProjectOverlayYAML(projectIDs []string) string {
 
 // disabledProviders removes foreign discovery sources and providers that reach
 // external accounts. native stays enabled because it reads the delivered
-// methodology's rules and skills. Slack is an account-backed integration that
+// methodology's rules and skills; agents-md and claude-md stay enabled because
+// they only read the repository's standalone AGENTS.md and CLAUDE.md. The
+// claude, cursor and similar config-directory providers stay off because they
+// also contribute hooks, tools and MCP servers. Slack is an account-backed integration that
 // omp can only supply through a provider or an extension; both are off.
 func disabledProviders() []string {
 	return []string{
 		"agent-plugins",
 		"agents",
-		"agents-md",
 		"claude",
-		"claude-md",
 		"claude-plugins",
 		"cline",
 		"codex",

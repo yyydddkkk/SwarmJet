@@ -23,8 +23,7 @@ func TestOverlayDisablesProjectInputsAndExternalCapabilities(t *testing.T) {
 		"browser:\n  enabled: false",
 		"computer:\n  enabled: false",
 		"github:\n  enabled: false",
-		"context-file:project:AGENTS.md",
-		"context-file:project:CLAUDE.md",
+		"context-file:user:AGENTS.md",
 		"  - slack\n",
 		"  - github\n",
 		"  - omp-plugins\n",
@@ -32,6 +31,13 @@ func TestOverlayDisablesProjectInputsAndExternalCapabilities(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("overlay does not contain %q:\n%s", want, out)
+		}
+	}
+	// The repository's own AGENTS.md and CLAUDE.md are instructions, not code,
+	// and stay enabled (ADR D13).
+	for _, unwanted := range []string{"context-file:project:", "  - agents-md\n", "  - claude-md\n"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("overlay disables repository instructions (%q):\n%s", unwanted, out)
 		}
 	}
 	if strings.Count(out, `"edit": deny`) != 1 {

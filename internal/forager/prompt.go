@@ -3,8 +3,10 @@ package forager
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
@@ -43,11 +45,14 @@ func currentMethodology(agent domain.Agent) methodology.AgentConfig {
 	methodologyMu.RLock()
 	source := methodologySource
 	methodologyMu.RUnlock()
-	config, err := methodology.ForAgent(context.Background(), source, agent)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	config, err := methodology.ForAgent(ctx, source, agent)
 	if err != nil {
 		// A broken active role must not fail the turn; fall back to the
-		// builtin so the Agent still receives its task.
-		config, _ = methodology.ForAgent(context.Background(), nil, agent)
+		// builtin so the Agent still receives its task, and say so.
+		slog.Warn("forager: active methodology unavailable for prompt; using builtin", "agent", agent.ID, "role", agent.RoleName, "error", err)
+		config, _ = methodology.ForAgent(ctx, nil, agent)
 	}
 	return config
 }

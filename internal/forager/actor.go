@@ -256,7 +256,13 @@ func (a *actor) runTurn(ctx context.Context, batch []domain.Message) bool {
 	}
 	title := publishTitle(latest.Task)
 	body := reportBody(latest, lastText, turn.StopReason)
-	pr, publishErr := a.sup.opts.Publisher.Publish(ctx, spec, title, body)
+	// A role without publish permission never reaches the Publisher, which
+	// would refuse its read-only Spec anyway.
+	var pr int64
+	var publishErr error
+	if !spec.ReadOnly {
+		pr, publishErr = a.sup.opts.Publisher.Publish(ctx, spec, title, body)
+	}
 	publishErrText := ""
 	if publishErr != nil {
 		publishErrText = publishErr.Error()
