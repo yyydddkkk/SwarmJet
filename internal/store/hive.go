@@ -91,6 +91,7 @@ func scanHive(row pgx.Row) (domain.Hive, error) {
 			return domain.Hive{}, err
 		}
 	}
+	h.CreatedAt, h.UpdatedAt = h.CreatedAt.UTC(), h.UpdatedAt.UTC()
 	applyHiveDefaults(&h.Config)
 	return h, nil
 }
@@ -254,6 +255,7 @@ func scanAgent(row pgx.Row) (domain.Agent, error) {
 	if err != nil {
 		return domain.Agent{}, domainErr(err)
 	}
+	a.CreatedAt, a.UpdatedAt = a.CreatedAt.UTC(), a.UpdatedAt.UTC()
 	a.Role, a.State = domain.AgentRole(role), domain.AgentState(state)
 	if len(handoff) > 0 {
 		var h domain.Handoff
