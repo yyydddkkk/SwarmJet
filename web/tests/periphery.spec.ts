@@ -129,7 +129,7 @@ test("键盘列表搜索、插话取消、Issue派活与跳转", async ({ page }
   ).toHaveCount(0);
   await list.getByRole("button", { name: /PR #87.*详情/ }).click();
   await expect(list).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "详情面板" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "对象详情" })).toBeVisible();
 });
 test("命令精确跳转、长句发queen、所有快捷键与输入隔离", async ({ page }) => {
   const { state } = await mockStarsHTTP(page);
@@ -157,7 +157,7 @@ test("命令精确跳转、长句发queen、所有快捷键与输入隔离", asy
   await say.fill("模型");
   await say.press("Enter");
   await expect(page.getByRole("heading", { name: "平台设置" })).toBeVisible();
-  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("button", { name: "关闭平台设置", exact: true }).click();
   for (const [key, name] of [
     ["b", "简报"],
     ["c", "列表"],
@@ -172,7 +172,7 @@ test("命令精确跳转、长句发queen、所有快捷键与输入隔离", asy
       .click();
   }
   await page.keyboard.press("a");
-  await expect(page.getByRole("region", { name: "详情面板" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "项目面板" })).toBeVisible();
   await page.keyboard.press("Escape");
   await page.keyboard.press(",");
   await expect(page.getByRole("heading", { name: "平台设置" })).toBeVisible();
@@ -306,7 +306,7 @@ test("首次三步真实状态、新建仓库模型过滤并打开Queen", async 
     )
     .toBeTruthy();
   await expect(create).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "详情面板" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "对象详情" })).toBeVisible();
 });
 for (const [configured, available, gateway] of [
   [false, false, true],
@@ -451,7 +451,7 @@ test("独立用量故障仍点亮接入与模型，平台关闭后重新读取�
     .getByRole("button", { name: "填写模型凭证，已完成" })
     .click();
   mock.state.setup.models.available = false;
-  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("button", { name: "关闭平台设置", exact: true }).click();
   await expect(
     onboarding.getByRole("button", { name: "填写模型凭证，待完成" }),
   ).toBeVisible();

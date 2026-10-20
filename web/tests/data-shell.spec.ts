@@ -6,7 +6,7 @@ import { APIError } from "../src/data/api";
 import { hives, hiveAgents } from "../src/fixtures/hive-console";
 import { methodologyResponses } from "../src/fixtures/round4";
 import type { ProjectSnapshot, MessagePreview } from "../src/data/types";
-import { mockHiveAPI } from "./hive-api-mock";
+import { mockStarsHTTP } from "./stars-http-mock";
 const fixture = (): ProjectSnapshot => ({
   hive: structuredClone(hives[0]),
   localAddress: "local:web-admin",
@@ -330,7 +330,7 @@ test("retry doubles to thirty seconds and stops cleanly", async ({ page }) => {
 test("theme CSS and choices survive reload and denied storage", async ({
   page,
 }) => {
-  await mockHiveAPI(page);
+  await mockStarsHTTP(page);
   await page.goto("/");
   await page.getByRole("button", { name: "显示", exact: true }).click();
   await page.getByLabel("主题", { exact: true }).selectOption("night");
@@ -359,7 +359,7 @@ test("theme CSS and choices survive reload and denied storage", async ({
 });
 
 test("corrupted theme names fall back to a usable theme", async ({ page }) => {
-  await mockHiveAPI(page);
+  await mockStarsHTTP(page);
   await page.addInitScript(() => {
     localStorage.setItem("sj-theme", "constructor");
   });
@@ -421,7 +421,7 @@ test("a ready snapshot supersedes late signal fetches and stopped stores stay un
 test("default shell handles session expiry and opens GitHub callbacks in platform setup", async ({
   page,
 }) => {
-  await mockHiveAPI(page);
+  await mockStarsHTTP(page);
   await page.goto("/#/setup?github=connected");
   await expect(page.getByRole("heading", { name: "平台设置" })).toBeVisible();
   await page.evaluate(() =>
@@ -434,7 +434,7 @@ test("default shell handles session expiry and opens GitHub callbacks in platfor
 });
 
 test("initial project loading and failures never present a false empty workspace", async ({ page }) => {
-  await mockHiveAPI(page);
+  await mockStarsHTTP(page);
   let release!: () => void;
   const waiting = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/hives", async (route) => {
@@ -600,7 +600,7 @@ test("resnapshot calibrates observed PRs without the stale list cache, including
 test("offline font files load and the default shell remains reviewable", async ({
   page,
 }) => {
-  await mockHiveAPI(page);
+  await mockStarsHTTP(page);
   const external: string[] = [];
   page.on("request", (request) => {
     if (/fonts\.(googleapis|gstatic)\.com/.test(request.url()))

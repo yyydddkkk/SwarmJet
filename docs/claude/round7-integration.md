@@ -70,3 +70,9 @@
 - 旧测试 `message-trust.spec.ts` 迁移为 `provenance.spec.ts`，三项分别验证四种来源、未知来源和外部事件全文提示，全部通过。
 - 随旧页删除专用测试：`app-shell.spec.ts`、`backend-shapes.spec.ts`、`create-hive-round5.spec.ts`、`forager-round4.spec.ts`、`hive-console.spec.ts`、`methodology-round5.spec.ts`、`methodology.spec.ts`、`models.spec.ts`、`pixel-icons.spec.ts`、`queen-round5.spec.ts`、`settings-round5.spec.ts`、`setup.spec.ts`。新数据层、画布、面板、外围测试验证新位置和共享契约；旧蜂巢像素图的实现断言随对应代码删除。
 - 删除后 `npm run build` 及迁移的三项来源测试通过；后续另跑全部新界面测试和联合验收。
+
+## 联合测试首轮
+
+首轮新界面全量 77 项中 71 项通过、6 项失败。四类差异为 D 用例仍匹配 A 的“详情面板”占位名称/通用关闭按钮、C 的实际外壳用例未关闭 D 的默认简报、焦点断言未等异步内容加载，以及新建项目被外壳重挂载重开简报。已把断言对准 C 的实际对象/项目面板和定向关闭入口，使用完整新 HTTP mock，等待焦点目标加载；没有删除这些用例或降低其行为要求。
+
+新建项目问题已实证修复：外壳只在第一次列表请求前屏蔽外围槽，后续刷新保留已挂载 UI，避免清掉新项目的主 Agent 选择。新建与首次加载两个回归、build 均通过。

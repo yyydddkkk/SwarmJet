@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockHiveAPI } from "./hive-api-mock";
+import { mockStarsHTTP } from "./stars-http-mock";
 async function open(page: Page) {
   const state = await mockHiveAPI(page);
   state.prStatuses["swarmjet:88"].headSha = "panel-observed-head";
@@ -250,6 +251,7 @@ test("platform traps keyboard focus and returns it when closed", async ({
   await expect(
     page.getByRole("button", { name: "关闭平台设置" }),
   ).toBeFocused();
+  await expect(platform.getByRole("button", { name: "管理模型凭证" })).toBeVisible();
   await page.keyboard.press("Shift+Tab");
   await expect(
     platform.getByRole("button", { name: "管理模型凭证" }),
@@ -757,26 +759,12 @@ test("methodology first view prioritizes role diagram and plain rules while adva
 test("methodology layout also renders in the real application shell with bundled fonts", async ({
   page,
 }, testInfo) => {
-  const state = await mockHiveAPI(page);
-  await page.addInitScript(() => {
-    class QuietEvents extends EventTarget {
-      close() {}
-    }
-    Object.assign(window, { EventSource: QuietEvents });
-  });
-  await page.route("**/api/hives/*/prs?state=all", (route) =>
-    route.fulfill({ json: { prs: [] } }),
-  );
-  await page.route("**/api/hives/*/queue", (route) =>
-    route.fulfill({ json: { queue: [] } }),
-  );
-  await page.route("**/api/hives/*/signals", (route) =>
-    route.fulfill({ json: { signals: [] } }),
-  );
-  await page.route("**/api/hives/*/methodology/events?limit=*", (route) =>
-    route.fulfill({ json: { events: [] } }),
-  );
+  const { state } = await mockStarsHTTP(page);
   await page.goto("/");
+  await page.getByRole("dialog", { name: "简报", exact: true })
+    .getByRole("button", { name: "进入星图", exact: true }).click();
+  await page.getByRole("dialog", { name: "图例", exact: true })
+    .getByRole("button", { name: "关闭", exact: true }).click();
   await page
     .getByRole("combobox", { name: "选择项目", exact: true })
     .selectOption("swarmjet");
