@@ -88,7 +88,7 @@ export class HiveAPIError extends Error {
   }
 }
 
-async function request<T>(
+export async function request<T>(
   path: string,
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" = "GET",
   body?: unknown,
