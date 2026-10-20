@@ -124,8 +124,12 @@ func TestSendMessageRoutesHiveToEnabledQueen(t *testing.T) {
 		t.Fatalf("hive inbox = %+v, %v", hiveInbox, err)
 	}
 	queenInbox, err := s.Inbox(ctx, h.ID, domain.AddressQueen, "", 10)
-	if err != nil || len(queenInbox) != len(sources) {
+	if err != nil || len(queenInbox) != len(sources)+1 {
 		t.Fatalf("queen inbox = %+v, %v", queenInbox, err)
+	}
+	bootstrap := queenInbox[0]
+	if bootstrap.From != domain.AddressSystem || bootstrap.Trust != domain.TrustSystem || bootstrap.Kind != domain.MessageTask || bootstrap.Body != "新 Hive，请开始首次引导" {
+		t.Fatalf("expected enable bootstrap before routed messages, got %+v", bootstrap)
 	}
 }
 
