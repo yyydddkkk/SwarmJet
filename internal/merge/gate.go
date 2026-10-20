@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
@@ -232,6 +233,13 @@ func (s *Service) Merge(ctx context.Context, hive domain.Hive, pr int64) (Outcom
 		outcome.QueueEntryID = state.QueueEntryID
 	}
 	if outcome.Merged {
+		if publisher, ok := s.store.(interface {
+			PublishPREvent(context.Context, string, int64) error
+		}); ok {
+			if err := publisher.PublishPREvent(ctx, hive.ID, pr); err != nil {
+				slog.Warn("merged PR event notification failed", "hive", hive.ID, "pr", pr, "error", err)
+			}
+		}
 		outcome.Queued = false
 		return outcome, nil
 	}
