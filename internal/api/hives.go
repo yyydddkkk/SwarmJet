@@ -58,6 +58,8 @@ func (a *server) hives(w http.ResponseWriter, r *http.Request) {
 		a.hiveQueen(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "hives" && parts[2] == "foragers":
 		a.hiveForagers(w, r, parts[1])
+	case len(parts) == 3 && parts[0] == "hives" && (parts[2] == "queue" || parts[2] == "signals"):
+		a.hiveWebList(w, r, parts[1], parts[2])
 	case len(parts) == 3 && parts[0] == "hives" && parts[2] == "messages":
 		a.hiveMessages(w, r, parts[1])
 	case len(parts) >= 3 && parts[0] == "hives" && parts[2] == "methodology":
@@ -231,18 +233,25 @@ func (a *server) listForagers(w http.ResponseWriter, r *http.Request, hiveID str
 		foragers = foragers[:maxForagerPage]
 		truncated = true
 	}
-	if foragers == nil {
-		foragers = []domain.Agent{}
-	}
-	var queen *domain.Agent
+	agents := append([]domain.Agent{}, foragers...)
 	if current, err := a.s.Queen(r.Context(), hiveID); err == nil {
-		queen = &current
+		agents = append(agents, current)
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		hiveFailure(w, err)
 		return
 	}
+	withCosts, err := a.s.AgentsWithCosts(r.Context(), agents)
+	if err != nil {
+		hiveFailure(w, err)
+		return
+	}
+	var queen *store.AgentWithCost
+	if len(withCosts) > len(foragers) {
+		queen = &withCosts[len(foragers)]
+	}
+	foragerResponses := withCosts[:len(foragers)]
 	respond(w, http.StatusOK, map[string]any{
-		"queen": queen, "foragers": foragers, "truncated": truncated,
+		"queen": queen, "foragers": foragerResponses, "truncated": truncated,
 		"localAddress": string(a.webLocalAddress(r)),
 	})
 }

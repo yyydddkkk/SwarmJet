@@ -38,6 +38,8 @@ func (a *server) methodology(w http.ResponseWriter, r *http.Request, hiveID stri
 	switch {
 	case len(rest) == 0 && r.Method == http.MethodGet:
 		a.getMethodology(w, r, hiveID)
+	case len(rest) == 1 && rest[0] == "events":
+		a.hiveWebList(w, r, hiveID, "events")
 	case len(rest) == 1 && rest[0] == "versions" && r.Method == http.MethodGet:
 		a.listMethodologyVersions(w, r, hiveID)
 	case len(rest) == 1 && rest[0] == "activate" && r.Method == http.MethodPost:
