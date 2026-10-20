@@ -316,3 +316,16 @@ func TestPermissionsUseMethodologyRoles(t *testing.T) {
 		t.Fatal("unknown role was accepted")
 	}
 }
+
+func TestMergeHeadRejectsChangedHead(t *testing.T) {
+	stub := readyStub()
+	service := newTestService(t, stub, &fakeStore{hive: testHive()}, &fakeAttestations{latest: passAttestation()}, methodologyWith(requireAllPolicy()), nil)
+	_, err := service.MergeHead(context.Background(), testHive(), 7, "old")
+	var changed *HeadChangedError
+	if !errors.As(err, &changed) || changed.HeadSHA != "head" {
+		t.Fatalf("error=%v", err)
+	}
+	if stub.mergeRequested {
+		t.Fatal("changed head was merged")
+	}
+}

@@ -44,7 +44,8 @@ type Config struct {
 	DockerAvailable func() bool
 	// MCPURL is the endpoint embedded in generated local Agent configurations.
 	MCPURL string
-	// Merge powers GET /api/hives/{id}/prs/{number}. nil disables it.
+	// Merge powers PR status and listing. Implementing MergeHead also enables
+	// administrator merges; *merge.Service supplies both surfaces. nil disables PR APIs.
 	Merge MergeStatus
 	// Models is the auth-broker/gateway client used by the credential and
 	// model endpoints. nil means the services are not part of this deployment.
@@ -54,10 +55,12 @@ type Config struct {
 }
 
 type server struct {
-	s        *store.Store
-	cfg      Config
-	mu       sync.Mutex
-	attempts map[string]attempt
+	s         *store.Store
+	cfg       Config
+	mu        sync.Mutex
+	attempts  map[string]attempt
+	prCache   map[prCacheKey]prCacheEntry
+	prCacheMu sync.Mutex
 }
 
 type attempt struct {
