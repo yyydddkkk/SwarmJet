@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -189,6 +190,7 @@ func (s *Store) Signals(ctx context.Context, hiveID string, since time.Time) ([]
 		}
 		header, _, _ := strings.Cut(body, "\n\n")
 		seen := map[string]bool{}
+		eventType := ""
 		for _, line := range strings.Split(header, "\n") {
 			key, value, ok := strings.Cut(line, ": ")
 			if !ok || (seen[key] && key != "Link") {
@@ -198,6 +200,7 @@ func (s *Store) Signals(ctx context.Context, hiveID string, since time.Time) ([]
 			switch key {
 			case "GitHub event":
 				event, _, _ := strings.Cut(value, ".")
+				eventType = event
 				switch event {
 				case "issues", "issue_comment":
 					signal.Kind = "issue"
@@ -214,6 +217,16 @@ func (s *Store) Signals(ctx context.Context, hiveID string, since time.Time) ([]
 				signal.Title = value
 			case "Link":
 				signal.URL = value
+			}
+		}
+		// GitHub sends PR conversation comments as issue_comment too. Digest's
+		// canonical comment link retains /pull/N, unlike Issue comments.
+		if eventType == "issue_comment" {
+			if link, err := url.Parse(signal.URL); err == nil {
+				parts := strings.Split(strings.Trim(link.Path, "/"), "/")
+				if len(parts) >= 4 && parts[2] == "pull" && parts[3] == strconv.FormatInt(signal.Number, 10) {
+					signal.Kind = "pull_request"
+				}
 			}
 		}
 		out = append(out, signal)
