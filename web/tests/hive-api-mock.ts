@@ -620,7 +620,7 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
       return json(route, 200, {
         enabled: hive.queenEnabled, state: queen?.state ?? "disabled",
         model: hive.config.queenModel || state.models.defaultModel,
-        agentId: queen?.id ?? "", ...(queen ? { lastTurnAt: queen.updatedAt } : {}),
+        agentId: queen?.id ?? "", lastTurnAt: null,
       });
     }
     if (path === "/api/methodology-templates" && method === "GET") {
@@ -650,7 +650,7 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
         id: state.nextID++, hiveId: hiveID, action: "publish", version: versionNumber,
         actor: state.localAddress, note: input.note, createdAt: now(),
       }];
-      return json(route, 200, { ...version, files });
+      return json(route, 201, { ...version, files });
     }
     if (hiveMatch && method === "GET") {
       if (failure.hive) return fail(failure.hive);

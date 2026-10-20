@@ -40,7 +40,7 @@ export type QueenStatus = {
   state: AgentState;
   model: string;
   agentId: string;
-  lastTurnAt?: string;
+  lastTurnAt: string | null;
 };
 
 export type MethodologyTemplate = {

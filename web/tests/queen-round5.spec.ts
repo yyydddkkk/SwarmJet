@@ -55,3 +55,11 @@ test("Queen status failures are visible and sending failures preserve the draft"
   await expect(page.locator(".hg-composer [role=alert]")).toContainText("模拟的接口故障");
   await expect(page.getByLabel("对 Queen（蜂王）说话")).toHaveValue("保留这条草稿");
 });
+
+ test("Queen without a completed turn accepts null lastTurnAt", async ({ page }) => {
+  await mockHiveAPI(page);
+  await page.goto("/#/hives/swarmjet");
+  const status = await page.evaluate(async () => (await fetch("/api/hives/swarmjet/queen")).json());
+  expect(status.lastTurnAt).toBeNull();
+  await expect(page.getByLabel("对 Queen（蜂王）说话")).toBeVisible();
+ });
