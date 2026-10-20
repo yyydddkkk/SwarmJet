@@ -3,6 +3,15 @@
 // state, so tests can mutate it and watch the five-second polls pick it up.
 import type { Page, Route } from "@playwright/test";
 import { hiveAgents, hiveOverviews } from "../src/fixtures/hive-console";
+import {
+  methodologyEvents,
+  methodologyResponses,
+  methodologyVersions,
+  modelCatalog,
+  ordersUsage,
+  pr88Status,
+  swarmjetUsage,
+} from "../src/fixtures/round4";
 import type {
   Agent,
   CreatedToken,
@@ -11,14 +20,35 @@ import type {
   HiveOverview,
   Message,
   MessageKind,
+  Methodology,
+  MethodologyEvent,
+  MethodologyFile,
+  ModelCredential,
+  ModelsResponse,
   Principal,
+  PRStatusResponse,
   SetupStatus,
   TokenScope,
   TokenSummary,
+  UsageResponse,
 } from "../src/hive/types";
 
 export type MockFailure = Partial<
-  Record<"hives" | "hive" | "foragers" | "forager" | "messages" | "send" | "spawn" | "cancel", number>
+  Record<
+    | "hives"
+    | "hive"
+    | "foragers"
+    | "forager"
+    | "messages"
+    | "send"
+    | "spawn"
+    | "cancel"
+    | "models"
+    | "methodology"
+    | "usage"
+    | "pr",
+    number
+  >
 >;
 
 export type MockOptions = {
@@ -29,7 +59,7 @@ export type MockOptions = {
     github?: Partial<SetupStatus["github"]>;
     tunnel?: Partial<SetupStatus["tunnel"]>;
     cells?: Partial<SetupStatus["cells"]>;
-    cliLogin?: Partial<SetupStatus["cliLogin"]>;
+    models?: Partial<SetupStatus["models"]>;
   };
   repositories?: GithubRepository[];
   tokens?: TokenSummary[];
@@ -61,6 +91,13 @@ export type MockState = {
   manifestAction: string;
   principal: Principal;
   nextTokenID: number;
+  models: ModelsResponse;
+  modelCredentials: ModelCredential[];
+  methodologies: Record<string, Methodology[]>;
+  methodologyFiles: Record<string, Record<number, MethodologyFile[]>>;
+  methodologyEvents: Record<string, MethodologyEvent[]>;
+  usage: Record<string, UsageResponse>;
+  prStatuses: Record<string, PRStatusResponse>;
 };
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -76,6 +113,7 @@ function seedMessages(): Message[] {
       chainId: "chain-142",
       hop: 0,
       body: "GitHub issues.opened：#142 Forager 列表需要按状态筛选。外部内容：Swarm 面板里 Forager 一多就找不到失败的那只。",
+      trust: "external",
       state: "pending",
       createdAt: "2026-10-16T09:02:00Z",
     },
@@ -88,6 +126,7 @@ function seedMessages(): Message[] {
       chainId: "chain-142",
       hop: 0,
       body: "把 #142 派出去，顺便让一只独立的 Forager 审一下 #88 的改动。",
+      trust: "user",
       state: "handled",
       createdAt: "2026-10-16T09:04:00Z",
     },
@@ -100,6 +139,7 @@ function seedMessages(): Message[] {
       chainId: "chain-142",
       hop: 1,
       body: "收到。我先把 #142 交给一只使用 implementation 预设的 Forager，工作分支从 main 切出；同时把 #88 的审查任务派给另一只 Forager。",
+      trust: "agent",
       state: "handled",
       createdAt: "2026-10-16T09:05:00Z",
     },
@@ -112,6 +152,7 @@ function seedMessages(): Message[] {
       chainId: "chain-142",
       hop: 0,
       body: "处理 #142：在 Swarm 面板增加按状态筛选。只改 web/src，别动旧的任务页；完成一轮后更新交接摘要。",
+      trust: "agent",
       state: "handled",
       createdAt: "2026-10-16T09:07:00Z",
     },
@@ -124,6 +165,7 @@ function seedMessages(): Message[] {
       chainId: "chain-142",
       hop: 1,
       body: "筛选接口和样式完成，单测 6 个用例通过。前端的状态筛选交互还没做，下一轮继续。",
+      trust: "agent",
       artifacts: [{ kind: "branch", ref: "swarm/swarmjet/forager-7f3a" }],
       state: "handled",
       createdAt: "2026-10-16T10:48:00Z",
@@ -137,8 +179,35 @@ function seedMessages(): Message[] {
       chainId: "chain-51",
       hop: 0,
       body: "Queen 未开启，这条事件已存入 Hive Inbox（蜂巢收件箱），等待本地 Agent 或人来处理。",
+      trust: "system",
       state: "pending",
       createdAt: "2026-10-15T20:11:00Z",
+    },
+    {
+      id: "evt-88-review",
+      hiveId: "swarmjet",
+      from: "router",
+      to: "queen",
+      kind: "event",
+      chainId: "chain-142",
+      hop: 0,
+      body: "GitHub pull_request_review 已提交：forager-2b91 批准了 a41c9de。外部内容：错误处理与测试覆盖没问题。",
+      trust: "external",
+      state: "pending",
+      createdAt: "2026-10-16T11:02:00Z",
+    },
+    {
+      id: "sys-142",
+      hiveId: "swarmjet",
+      from: "system",
+      to: "local:web-admin",
+      kind: "event",
+      chainId: "chain-142",
+      hop: 0,
+      body: "平台提醒：这条链已经运行 2 小时，仍未收到合并决定。",
+      trust: "system",
+      state: "pending",
+      createdAt: "2026-10-16T11:10:00Z",
     },
   ];
 }
@@ -160,7 +229,7 @@ const defaultSetup: SetupStatus = {
     model: "opencode/free",
     dockerAvailable: true,
   },
-  cliLogin: { available: true, loggedIn: false, cli: "opencode" },
+  models: { available: false, defaultModel: "deepseek/deepseek-chat" },
 };
 
 const defaultRepositories: GithubRepository[] = [
@@ -186,6 +255,12 @@ function tokenSecret(n: number): string {
   return n.toString(16).padStart(64, "0");
 }
 
+/** The server only ever returns this masked form; the mock mirrors that. */
+function maskKey(key: string): string {
+  if (key.length <= 8) return `${key.slice(0, 2)}…${key.slice(-2)}`;
+  return `${key.slice(0, 3)}…${key.slice(-4)}`;
+}
+
 export function createMockState(options: MockOptions = {}): MockState {
   return {
     hives: clone(hiveOverviews),
@@ -198,7 +273,7 @@ export function createMockState(options: MockOptions = {}): MockState {
       github: { ...defaultSetup.github, ...options.setup?.github },
       tunnel: { ...defaultSetup.tunnel, ...options.setup?.tunnel },
       cells: { ...defaultSetup.cells, ...options.setup?.cells },
-      cliLogin: { ...defaultSetup.cliLogin, ...options.setup?.cliLogin },
+      models: { ...defaultSetup.models, ...options.setup?.models },
     },
     repositories: clone(options.repositories ?? defaultRepositories),
     tokens: clone(options.tokens ?? defaultTokens),
@@ -213,6 +288,20 @@ export function createMockState(options: MockOptions = {}): MockState {
       },
     ),
     nextTokenID: 2,
+    models: clone(modelCatalog),
+    modelCredentials: clone(modelCatalog.credentials),
+    methodologies: { swarmjet: clone(methodologyVersions) },
+    methodologyFiles: {
+      swarmjet: Object.fromEntries(
+        methodologyVersions.map(version => [
+          version.version,
+          clone(methodologyResponses[version.version].files),
+        ]),
+      ),
+    },
+    methodologyEvents: { swarmjet: clone(methodologyEvents) },
+    usage: { swarmjet: clone(swarmjetUsage), orders: clone(ordersUsage) },
+    prStatuses: { "swarmjet:88": clone(pr88Status) },
   };
 }
 
@@ -270,6 +359,50 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
     }
     if (path === "/api/setup/status" && method === "GET") {
       return json(route, 200, state.setup);
+    }
+    if (path === "/api/models" && method === "GET") {
+      if (failure.models) return fail(failure.models);
+      const availableProviders = new Set(state.modelCredentials.map(item => item.provider));
+      return json(route, 200, {
+        ...state.models,
+        credentials: state.modelCredentials,
+        models: state.models.models.map(model => ({
+          ...model,
+          available: availableProviders.has(model.provider),
+        })),
+      });
+    }
+    const modelCredentialMatch = path.match(/^\/api\/models\/credentials\/([^/]+)$/);
+    if (modelCredentialMatch) {
+      const provider = decodeURIComponent(modelCredentialMatch[1]);
+      if (method === "PUT") {
+        const body = request.postDataJSON() as { apiKey?: string };
+        const apiKey = (body.apiKey ?? "").trim();
+        if (!apiKey) return json(route, 400, { error: "apiKey is required" });
+        const credential: ModelCredential = {
+          provider,
+          maskedKey: maskKey(apiKey),
+          updatedAt: now(),
+        };
+        state.modelCredentials = [
+          ...state.modelCredentials.filter(item => item.provider !== provider),
+          credential,
+        ];
+        state.setup.models = {
+          available: true,
+          defaultModel: state.models.defaultModel,
+        };
+        return json(route, 200, { credential });
+      }
+      if (method === "DELETE") {
+        const before = state.modelCredentials.length;
+        state.modelCredentials = state.modelCredentials.filter(item => item.provider !== provider);
+        if (state.modelCredentials.length === before) {
+          return json(route, 404, { error: "not found" });
+        }
+        state.setup.models.available = state.modelCredentials.length > 0;
+        return route.fulfill({ status: 204 });
+      }
     }
     if (path === "/api/setup/github/manifest" && method === "POST") {
       return json(route, 200, {
@@ -395,6 +528,7 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
             hiveId: id,
             role: "queen",
             state: body.queenEnabled ? "active" : "disabled",
+            roleName: "queen",
             cli: "opencode",
             createdAt: now(),
             updatedAt: now(),
@@ -411,6 +545,81 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
       const overview = state.hives.find(item => item.hive.id === hiveID);
       if (!overview) return json(route, 404, { error: "not found" });
       return json(route, 200, { hive: overview.hive, localAddress: state.localAddress });
+    }
+
+    const methodologyVersionsMatch = path.match(/^\/api\/hives\/([^/]+)\/methodology\/versions$/);
+    if (methodologyVersionsMatch && method === "GET") {
+      if (failure.methodology) return fail(failure.methodology);
+      const hiveID = decodeURIComponent(methodologyVersionsMatch[1]);
+      const versions = state.methodologies[hiveID];
+      if (!versions) return json(route, 404, { error: "not found" });
+      return json(route, 200, {
+        versions,
+        events: state.methodologyEvents[hiveID] ?? [],
+      });
+    }
+
+    const methodologyActivateMatch = path.match(/^\/api\/hives\/([^/]+)\/methodology\/activate$/);
+    if (methodologyActivateMatch && method === "POST") {
+      const hiveID = decodeURIComponent(methodologyActivateMatch[1]);
+      const versions = state.methodologies[hiveID];
+      if (!versions) return json(route, 404, { error: "not found" });
+      const body = request.postDataJSON() as { version?: number };
+      const target = versions.find(version => version.version === body.version);
+      if (!target) return json(route, 404, { error: "version not found" });
+      for (const version of versions) version.active = version.version === target.version;
+      const event: MethodologyEvent = {
+        id: `me-activate-${state.nextID++}`,
+        hiveId: hiveID,
+        version: target.version,
+        action: "activate",
+        actor: state.localAddress,
+        createdAt: now(),
+      };
+      state.methodologyEvents[hiveID] = [...(state.methodologyEvents[hiveID] ?? []), event];
+      return json(route, 200, {
+        methodology: target,
+        files: state.methodologyFiles[hiveID]?.[target.version] ?? [],
+      });
+    }
+
+    const methodologyMatch = path.match(/^\/api\/hives\/([^/]+)\/methodology$/);
+    if (methodologyMatch && method === "GET") {
+      if (failure.methodology) return fail(failure.methodology);
+      const hiveID = decodeURIComponent(methodologyMatch[1]);
+      const versions = state.methodologies[hiveID];
+      if (!versions) return json(route, 404, { error: "not found" });
+      const requested = url.searchParams.get("version");
+      const version = requested
+        ? versions.find(item => String(item.version) === requested)
+        : versions.find(item => item.active) ?? versions[versions.length - 1];
+      if (!version) return json(route, 404, { error: "version not found" });
+      return json(route, 200, {
+        methodology: version,
+        files: state.methodologyFiles[hiveID]?.[version.version] ?? [],
+      });
+    }
+
+    const prMatch = path.match(/^\/api\/hives\/([^/]+)\/prs\/(\d+)$/);
+    if (prMatch && method === "GET") {
+      if (failure.pr) return fail(failure.pr);
+      const hiveID = decodeURIComponent(prMatch[1]);
+      const prNumber = Number(prMatch[2]);
+      const pr = state.prStatuses[`${hiveID}:${prNumber}`];
+      if (!pr) return json(route, 404, { error: "not found" });
+      return json(route, 200, pr);
+    }
+
+    if (path === "/api/usage" && method === "GET") {
+      if (failure.usage) return fail(failure.usage);
+      const hiveID = url.searchParams.get("hive") ?? "";
+      const agentID = url.searchParams.get("agent");
+      const base = state.usage[hiveID];
+      if (!base) return json(route, 404, { error: "not found" });
+      const agents = agentID
+        ? base.agents.filter(agent => agent.agentId === agentID)
+        : base.agents;
+      return json(route, 200, { ...base, agents });
     }
 
     const foragersMatch = path.match(/^\/api\/hives\/([^/]+)\/foragers$/);
@@ -431,6 +640,7 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
         const body = request.postDataJSON() as {
           task: string;
           preset?: string;
+          role?: string;
           cli?: string;
           branch?: string;
           issueNumber?: number;
@@ -444,6 +654,7 @@ export async function mockHiveAPI(page: Page, options: MockOptions = {}): Promis
           role: "forager",
           state: "creating",
           preset: body.preset,
+          roleName: body.role ?? body.preset ?? "worker",
           cli: body.cli ?? "opencode",
           task: body.task,
           branch: body.branch ?? `swarm/${hiveID}/${id}`,

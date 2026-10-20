@@ -1,13 +1,13 @@
 // Entry point and shell for the "honey garden" console (ADR section 18).
-// After sign-in every route lives here: Hive list/pages, 接入 (#/setup), CLI 登录
-// (#/cli-login). Unknown and empty routes fall back to #/hives. The #/icons
+// After sign-in every route lives here: Hive list/pages, 接入 (#/setup) and
+// 模型 (#/models). Unknown and empty routes fall back to #/hives. The #/icons
 // reference page stays reachable directly but is not part of the navigation.
 import { useEffect, useState } from "react";
 import HivesPage from "./HivesPage";
 import HivePage from "./HivePage";
 import ForagerPage from "./ForagerPage";
 import SetupPage from "./SetupPage";
-import CliLoginPage from "./CliLoginPage";
+import ModelsPage from "./ModelsPage";
 import LoginScreen from "./LoginScreen";
 import IconLab from "./IconLab";
 import { BeeLoader, ErrorNotice } from "./components";
@@ -22,7 +22,7 @@ type Route =
   | { name: "hive"; hiveId: string; section: string }
   | { name: "forager"; hiveId: string; foragerId: string; section: string }
   | { name: "setup"; query: URLSearchParams }
-  | { name: "cli-login" }
+  | { name: "models" }
   | { name: "icons" }
   | { name: "redirect" };
 
@@ -34,7 +34,7 @@ function parseRoute(hash: string): Route {
   const query = new URLSearchParams(rawQuery);
   if (path === "/") return { name: "redirect" };
   if (parts[0] === "setup") return { name: "setup", query };
-  if (parts[0] === "cli-login") return { name: "cli-login" };
+  if (parts[0] === "models") return { name: "models" };
   if (parts[0] === "icons") return { name: "icons" };
   if (parts[0] !== "hives") return { name: "redirect" };
   if (parts.length === 1) return { name: "hives" };
@@ -162,11 +162,11 @@ export default function HiveConsoleApp() {
             接入
           </a>
           <a
-            href="#/cli-login"
-            className={route.name === "cli-login" ? "is-active" : undefined}
-            aria-current={route.name === "cli-login" ? "page" : undefined}
+            href="#/models"
+            className={route.name === "models" ? "is-active" : undefined}
+            aria-current={route.name === "models" ? "page" : undefined}
           >
-            CLI 登录
+            模型
           </a>
         </nav>
         <div className="hg-session">
@@ -206,8 +206,8 @@ export default function HiveConsoleApp() {
           />
         ) : route.name === "setup" ? (
           <SetupPage key={route.query.toString()} query={route.query} />
-        ) : route.name === "cli-login" ? (
-          <CliLoginPage />
+        ) : route.name === "models" ? (
+          <ModelsPage />
         ) : route.name === "icons" ? (
           <IconLab />
         ) : (
