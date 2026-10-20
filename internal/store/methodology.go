@@ -168,7 +168,7 @@ func (s *Store) MethodologyVersion(ctx context.Context, hiveID string, version i
 
 // ActivateMethodology switches the Hive's active version in one transaction and
 // appends a change record. Activating the already active version is a no-op
-// switch that still records the request.
+// switch that preserves activation tracking and does not append an event.
 func (s *Store) ActivateMethodology(ctx context.Context, hiveID string, version int, actor domain.Address, note string) (domain.Methodology, error) {
 	if hiveID == "" || version <= 0 {
 		return domain.Methodology{}, errors.New("store: activating a methodology requires a hive id and a positive version")
@@ -186,10 +186,14 @@ func (s *Store) ActivateMethodology(ctx context.Context, hiveID string, version 
 	if err = tx.QueryRow(ctx, `SELECT id FROM hives WHERE id=$1 FOR UPDATE`, hiveID).Scan(&lockedHive); err != nil {
 		return domain.Methodology{}, domainErr(err)
 	}
-	var id string
-	if err = tx.QueryRow(ctx, `SELECT id FROM methodologies WHERE hive_id=$1 AND version=$2`, hiveID, version).Scan(&id); err != nil {
-		return domain.Methodology{}, domainErr(err)
+	current, _, err := scanMethodology(tx.QueryRow(ctx, `SELECT `+methodologyColumns+` FROM methodologies WHERE hive_id=$1 AND version=$2`, hiveID, version))
+	if err != nil {
+		return domain.Methodology{}, err
 	}
+	if current.Active {
+		return current, nil
+	}
+	id := current.ID
 	if _, err = tx.Exec(ctx, `UPDATE methodologies SET active=false WHERE hive_id=$1 AND active`, hiveID); err != nil {
 		return domain.Methodology{}, domainErr(err)
 	}

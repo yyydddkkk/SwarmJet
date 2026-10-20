@@ -163,3 +163,33 @@ func TestMethodologyRollbackNoPreviousAndQueenExcluded(t *testing.T) {
 	methodologyOutcome(t, s, h.ID, domain.AgentFailed)
 	activeVersion(t, s, h.ID, 1)
 }
+
+func TestReactivatingCurrentMethodologyPreservesFailureStreak(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	h := newTestHive(t, s, "acme/reactivate")
+	publishTestMethodology(t, s, h.ID, "one")
+	publishTestMethodology(t, s, h.ID, "two")
+	methodologyOutcome(t, s, h.ID, domain.AgentFailed)
+	methodologyOutcome(t, s, h.ID, domain.AgentFailed)
+	var before, after string
+	if err := s.Pool.QueryRow(ctx, `SELECT activated_at::text FROM methodologies WHERE hive_id=$1 AND active`, h.ID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	changes, err := s.MethodologyChanges(ctx, h.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ActivateMethodology(ctx, h.ID, 2, domain.AddressSystem, "duplicate"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Pool.QueryRow(ctx, `SELECT activated_at::text FROM methodologies WHERE hive_id=$1 AND active`, h.ID).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := s.MethodologyChanges(ctx, h.ID)
+	if err != nil || len(latest) != len(changes) || before != after {
+		t.Fatalf("duplicate activation changed tracking: %s/%s, %v", before, after, err)
+	}
+	methodologyOutcome(t, s, h.ID, domain.AgentFailed)
+	activeVersion(t, s, h.ID, 1)
+}
