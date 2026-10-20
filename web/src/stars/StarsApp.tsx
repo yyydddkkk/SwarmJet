@@ -87,11 +87,13 @@ export function StarsWorkspace({
   const source = useDataSource();
   const ui = useMemo(() => createStarsUI(), []);
   const [projects, setProjects] = useState<HiveOverview[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [, render] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
+    setProjectsLoading(true);
     source.api
       .listHives(controller.signal)
       .then((r) => {
@@ -100,6 +102,9 @@ export function StarsWorkspace({
       })
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setProjectsLoading(false);
       });
     return () => controller.abort();
   }, [source, attempt]);
@@ -145,6 +150,16 @@ export function StarsWorkspace({
   const status = [...stores.values()]
     .find((s) => s.getSnapshot().error)
     ?.getSnapshot();
+  if (!projects.length && (projectsLoading || error)) {
+    return (
+      <main className="stars-app">
+        <div className="stars-status">
+          <p role={error ? "alert" : "status"}>{error || "正在读取项目…"}</p>
+          {error && <button onClick={() => setAttempt((v) => v + 1)}>重试</button>}
+        </div>
+      </main>
+    );
+  }
   return (
     <main className="stars-app">
       <CanvasSlot {...props} />

@@ -432,6 +432,26 @@ test("default shell handles session expiry and opens GitHub callbacks in platfor
   ).toBeVisible();
 });
 
+test("initial project loading and failures never present a false empty workspace", async ({ page }) => {
+  await mockHiveAPI(page);
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/hives", async (route) => {
+    await waiting;
+    await route.fulfill({ json: { hives: [], localAddress: "local:web-admin", truncated: false } });
+  });
+  await page.goto("/");
+  await expect(page.getByRole("status")).toHaveText("正在读取项目…");
+  await expect(page.getByRole("button", { name: "显示", exact: true })).toHaveCount(0);
+  release();
+  await expect(page.getByRole("button", { name: "显示", exact: true })).toBeVisible();
+  await page.route("**/api/hives", (route) => route.fulfill({ status: 503, json: { error: "项目服务暂时不可用" } }));
+  await page.reload();
+  await expect(page.getByRole("alert")).toHaveText("项目服务暂时不可用");
+  await expect(page.getByRole("button", { name: "显示", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "重试", exact: true })).toBeVisible();
+});
+
 test("canonical PR hydration never overwrites an observed head or ready value", async () => {
   const initial = fixture();
   let stale = { ...initial.prs[0] };
