@@ -1,0 +1,9 @@
+{
+  "testEngine": {
+    "name": "axe-core",
+    "version": "4.14.0"
+  },
+  "timestamp": "2026-10-20T10:45:37.591Z",
+  "passes": 37,
+  "violations": []
+}
