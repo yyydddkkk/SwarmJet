@@ -65,7 +65,7 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
         hiveAPI.listMessages(hiveId, { to: "queen" }, signal),
         hiveAPI.listMessages(hiveId, { to: localAddress }, signal),
       ]);
-      return messageEntries(mergeMessages(toQueen.messages, toLocal.messages));
+      return mergeMessages(toQueen.messages, toLocal.messages);
     },
     [hiveId, localAddress],
     5000,
@@ -119,8 +119,11 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
     state: queenStatus?.state ?? agentsRes.data.queen.state,
   } : undefined;
   const foragers = agentsRes.data?.foragers ?? [];
-  const entries = conversationRes.data ?? [];
   const inboxMessages = inboxRes.data?.messages ?? [];
+  const entries = messageEntries(mergeMessages(
+    conversationRes.data ?? [],
+    inboxMessages.filter(message => message.from === "queen"),
+  ));
   const inboxEntries = messageEntries(inboxMessages);
   const inboxBacklog = inboxMessages.filter(isUnhandled).length;
   const active = section || "conversation";
@@ -191,6 +194,14 @@ export default function HivePage({ hiveId, section }: { hiveId: string; section:
                   onRetry={conversationRes.reload}
                   auth={conversationRes.errorStatus === 401}
                   admin={conversationRes.errorStatus === 403}
+                />
+              ) : null}
+              {inboxRes.error ? (
+                <ErrorNotice
+                  message={inboxRes.error}
+                  onRetry={inboxRes.reload}
+                  auth={inboxRes.errorStatus === 401}
+                  admin={inboxRes.errorStatus === 403}
                 />
               ) : null}
               <ConversationStream
