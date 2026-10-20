@@ -165,20 +165,13 @@ python3 deploy/install.py upgrade --image-source ghcr --ref v0.1.0 --version v0.
 
 仓库本地构建则先更新 checkout，再运行 `python3 deploy/install.py upgrade --image-source repo`。数据库迁移由 migrate 在 api 启动前执行，升级保留数据卷。需要回退时同时恢复相应镜像、配置与数据库备份，不要假定旧镜像能读取新 schema。
 
-**从第三轮升级时，先重新运行新版 install 路径**，沿用原安装目录、项目名和 DATA_DIR：
-
-```sh
-python3 deploy/install.py install --yes --image-source ghcr --ref v0.1.0 --version v0.1.0
-# 本地构建部署用 --image-source repo，省略 --ref 和 --version
-```
-
-这条命令本身完成配置迁移和服务更新，不必再执行 upgrade。自动迁移包括：
+**从第三轮升级同样使用新版 `upgrade`**，沿用原安装目录、项目名和 DATA_DIR。升级会保留 Cell 与隧道的启用状态，自动迁移：
 
 - 从已有 `AGENT_CLIS` 列表移除 `opencode`，保留其他额外 CLI；omp 始终随 Agent 镜像安装。
 - 把旧默认值 `deepseek/deepseek-chat`、`deepseek/deepseek-reasoner` 改为 `deepseek/deepseek-v4-flash`，保留其他自定义值。
 - 保留已有数据库密码、主密钥及代理 Token，缺失的凭证服务 Token 会生成。
 
-**目前 upgrade 子命令不会执行前两项配置迁移**，所以旧部署应使用上述 install 路径。不要删除原 `.env` 后重新生成数据库密码。旧 Cell 会话来自不同 CLI，不能假定可恢复为 omp 会话；升级后检查任务与会话状态，再恢复派活。
+不要删除原 `.env` 后重新生成数据库密码。旧 Cell 会话来自不同 CLI，不能假定可恢复为 omp 会话；升级后检查任务与会话状态，再恢复派活。
 
 更早部署若还留有 Temporal、Worker、执行节点或 GitLab 配置，安装脚本只提示旧容器/卷，不会删除；旧变量不再作为当前功能入口。保留原 PostgreSQL 卷和主密钥，确认备份后再清理旧服务。
 
@@ -208,7 +201,7 @@ docker compose --env-file .env -f compose.yaml exec -T postgres pg_dumpall -U sw
 | Cell 创建失败 | 是否启用 compose.cells.yaml、Docker socket 是否可用、Agent 镜像是否存在。 |
 | 模型不可用 / 401 | 模型页凭证状态，auth-broker / auth-gateway 日志，DATA_DIR/omp Token 文件权限；确认模型 ID 有效。 |
 | 模型返回 402 | 检查当前方法论预算与用量；调整方法论或等待预算窗口恢复。 |
-| 第三轮升级后 Unknown model / 构建拒绝旧 CLI | 使用上述 install 路径执行 AGENT_CLIS 与默认模型迁移。 |
+| 第三轮升级后 Unknown model / 构建拒绝旧 CLI | 使用新版 upgrade 执行 AGENT_CLIS 与默认模型迁移。 |
 | Queen 无响应 / 找不到内置模板 | 当前分支是否已合入 v0.1.0 的 Queen、模板与网页依赖；检查 Queen 开关、模型凭证与 Cell 状态。 |
 
 部署测试与 Compose 校验可在仓库执行（示例配置只用于结构校验，不能直接部署）：

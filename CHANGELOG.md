@@ -33,5 +33,5 @@
 ### 发布与兼容性
 
 - 同步发布平台与 Agent 两个 GHCR 镜像，包含版本 tag 与 latest；Agent 固定 OMP_VERSION，凭证服务共用该镜像。首版发布平台为 linux/amd64。
-- 从第三轮部署重新运行新版 install 可移除旧 AGENT_CLIS 中的 opencode，并迁移旧 DeepSeek 默认模型；upgrade 子命令本身不执行这两项配置迁移，见[部署指南](deploy/README.md#升级与第三轮配置迁移)。
+- 从旧部署运行新版 upgrade 可移除旧 AGENT_CLIS 中的 opencode，并迁移旧 DeepSeek 默认模型，见[部署指南](deploy/README.md#升级与第三轮配置迁移)。
 - 当前仅支持 GitHub 与单机部署；模型凭证由部署者提供。
