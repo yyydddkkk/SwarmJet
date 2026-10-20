@@ -1,84 +1,114 @@
 # SwarmJet
 
-SwarmJet 是一个可自托管的云端 Agent 集群。一个 **Hive** 绑定一个 GitHub 仓库；你在本地用 Claude Code 或 Codex 通过 MCP 派活；**Forager** 在长期 Docker **Cell** 里修改代码、提交并开 PR；PR 上的评论经 **Router** 回到 Forager，继续下一轮。可选的 **Queen** 维护 Hive 的长期上下文。
+SwarmJet 是自托管的 Agent swarm：为 GitHub 仓库创建 **Hive**，让常驻的 **Queen** 协调多个 **Forager** 在 Docker **Cell** 中工作。你可以在网页对话，也可以让本地 Agent 通过 MCP 派活；工作方式由可版本化的方法论定义，代码、模型凭证和运行状态由你自己的服务器保管。
 
-## 快速开始
+> 本文面向首个公开版本 **v0.1.0**。标有“v0.1.0 起提供”的能力依赖第五轮实现合入；当前开发分支尚未全部具备，不能据此视为已完成验收。
 
-需要 Linux、Docker Engine 24+、Docker Compose 插件 2.20+、Python 3。
+## 核心概念
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/yyydddkkk/SwarmJet/main/deploy/install.py | python3 -
+| 概念 | 含义 |
+| --- | --- |
+| Hive | 一个 GitHub 仓库及其 Agent、消息、配置、方法论和记忆的边界；Hive 之间隔离。 |
+| Queen | 每个 Hive 唯一的常驻管理者。**v0.1.0 起提供**：新 Hive 默认开启，负责首次引导、管理方法论、派活、回答提问和处理未被认领的事件；可在设置中关闭。常驻指身份和会话持续，空闲时 Cell 可以停机。 |
+| Forager | 承担一件任务的 Agent，按方法论中的角色工作；可以编写代码，也可以只读验证。可写角色在每轮结束后由平台发布分支和 PR。 |
+| Cell | Agent 的 Docker 容器、持久工作区和会话文件；内部统一运行 oh-my-pi（`omp acp`），以非 root 用户执行。 |
+| 方法论 | 每个 Hive 的协作规则：角色提示词、模型、skill、权限、常驻与事件规则、合并条件和可选预算；每次发布留版本，可回滚。 |
+
+平台负责运行与恢复 Cell、持久消息和重试、事件路由、凭证代理、用量记录、并发与防循环保障，以及强制执行方法论声明的权限和合并条件。方法论决定怎么拆任务、谁验证、哪些事件要处理、什么时候合并；平台没有固定的开发流水线。
+
+**v0.1.0 起提供**：新 Hive 不预装方法论，Queen 引导你选择内置的 `pstack` 或极简版，或按你的要求编写、导入。选定前不会自动派 worker。Queen 的核心职责由平台定义，方法论只补充其风格与合并权限。新方法论生效后连续 3 个 Forager 失败会触发回滚到上一版本，并通知 Queen。
+
+`pstack` 是一个可选协作方案：worker 产出 PR，verifier 验证当前 head；合并要求非作者的 PASS 或 PASS_NOTES 与 CI 通过，默认不自动合并。它的流程可以修改，参见[方法论包](methodologies/README.md)。
+
+## 架构
+
+```mermaid
+flowchart TD
+    User[网页 / 本地 Agent MCP] --> API[api：控制台、MCP、Router、监管者]
+    GitHub[GitHub webhook] --> API
+    API <--> DB[PostgreSQL：状态、收件箱、River 队列]
+    API --> Queen[Hive：Queen Cell / omp]
+    API --> Foragers[Hive：Forager Cells / omp]
+    Queen --> Proxy[api /llm：鉴权、用量、预算]
+    Foragers --> Proxy
+    Proxy --> Gateway[auth-gateway]
+    Gateway --> Broker[auth-broker：模型凭证]
+    Gateway --> Models[模型提供方]
+    API --> Publish[平台发布与合并入口]
+    Publish --> GitHub
 ```
 
-> 正式发布前用 `SWARMJET_REF=dev`：`curl -fsSL https://raw.githubusercontent.com/yyydddkkk/SwarmJet/dev/deploy/install.py | SWARMJET_REF=dev python3 -`。`SWARMJET_REF`（或 `--ref`）决定下载 Compose 文件的 Git 分支或标签，默认 `main`；镜像版本仍由 `--version` 决定。`dev` 还没有 GHCR 发布镜像时，请在仓库内用下面的命令本地构建。
+Queue、Router 和监管者都在 `api` 进程内；凭证服务使用独立网络，Cell 通过平台代理调用模型。
 
-在仓库里也可以本地构建：
+## 快速上手
+
+准备 Linux x86_64 服务器、Docker Engine 24+、Compose 插件 2.20+ 和 Python 3。以下固定版本命令在 **v0.1.0 标签及两个 GHCR 包公开后**可用：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yyydddkkk/SwarmJet/v0.1.0/deploy/install.py \
+  | python3 - --image-source ghcr --ref v0.1.0 --version v0.1.0
+```
+
+发布前可在本仓库构建：
 
 ```sh
 python3 deploy/install.py
 ```
 
-脚本会生成配置和密钥、检查端口、构建或拉取镜像、执行迁移并等待健康检查。完成后打开：
+脚本生成配置和密钥、构建或拉取镜像、执行数据库迁移并等待服务健康。默认启用 Cells 与 webhook 临时隧道。控制台为 <http://localhost:8180>；远程部署先建立 SSH 转发：
 
-- 本机：<http://localhost:8180>
-- 服务器：先执行 `ssh -N -L 8180:127.0.0.1:8180 用户名@服务器`，再打开 <http://localhost:8180>
+```sh
+ssh -N -L 8180:127.0.0.1:8180 用户名@服务器
+```
 
-管理员用户名默认是 `admin`，密码保存在服务器的 `deploy/.env`（或安装目录的 `.env`）中的 `ADMIN_PASSWORD`。安装时加 `--show-password` 可直接显示。
+管理员默认 `admin`，密码在安装目录 `.env` 的 `ADMIN_PASSWORD` 中；安装时加 `--show-password` 可显示。
 
-首次登录后：
+1. 在网页的 **接入** 页一键创建 GitHub App，并在 GitHub 将它安装到目标仓库。
+2. 在 **模型** 页填写模型提供方凭证。没有免费默认模型；默认模型标识为 `deepseek/deepseek-v4-flash`，使用前仍需自己的有效凭证。
+3. **v0.1.0 起提供**：通过向导选仓库、创建 Hive；Queen 默认开启，可以选择它使用的模型。
+4. **v0.1.0 起提供**：打开 Hive 的 Queen 对话页，让 Queen 介绍并安装方法论，例如：“采用 pstack，先不要自动合并。”
+5. **v0.1.0 起提供**：继续在网页交代第一个任务，例如：“修复 Issue #123，完成后给我 PR 和验证结果。”也可以在 **接入** 页新建 MCP 连接，把配置复制到本地 Agent，让它向 Queen 发消息或按方法论派 Forager。
 
-1. 打开 **接入** 页，点击“一键创建 GitHub App”，在 GitHub 上确认并把 App 安装到目标仓库。
-2. 仍在 **接入** 页新建连接，复制 Claude Code 或 Codex 的 MCP 配置；也可以运行 `python3 deploy/install.py connect --client claude`。
-3. 新建 Hive，选择仓库，派第一个 Forager。它会创建分支并开 PR。
-4. 在 PR 上留下评论或 review，事件会回到同一个 Forager；也可以在本地 Agent 里用 `wait` 等汇报。
+本地 Agent 的连接配置也可在服务器生成：
 
-默认启用 Forager Cell（需要给 `api` 挂 Docker socket，等同宿主 root 权限）；不需要时安装时选“不启用 Cell”。没有公网域名时安装脚本可以启用 Cloudflare 临时隧道，并自动同步 GitHub webhook 地址。详见[部署指南](deploy/README.md)。
+```sh
+python3 deploy/install.py connect --client claude
+# 或选择 --client codex
+```
 
-## 它怎么工作
+当前开发分支可通过 MCP 的 `publish_methodology` 发布方法论、`spawn_forager` 派活、`send` 对话、`wait` 等待报告；直接派活的网页入口也已存在。完整操作与升级方式见[部署指南](deploy/README.md)。
 
-- **Hive**：一个仓库、一套配置和一个长期上下文。
-- **Queen**：可选的常驻 Agent，维护记忆、整理情境、发起工作。
-- **Forager**：被派活的一次性 Agent；在 Cell 里执行、提交、发布分支并开 PR，PR 事件会让它继续干活。
-- **Cell**：持久 Docker 容器和可写工作区；CLI 以非 root 用户运行。
-- **Router**：把 GitHub webhook 结构化地投递给正确的 Forager，忽略平台自己引起的事件。
-- **MCP**：本地 Agent 和 Forager 共用的工具接口，包括 `create_hive`、`spawn_forager`、`send`、`wait`、`get_forager`、`cancel_forager`。
+## 安全模型
 
-默认只有 `postgres`、`migrate`、`api` 三个服务；River 队列和 Cell 监管者都在 `serve` 进程里。没有 Temporal、独立 Worker、执行节点或 GitLab 接入。
+- **凭证不进 Cell**：GitHub 凭证留在平台，推送和合并由平台执行；模型凭证由 auth-broker 保管，auth-gateway 调用提供方。Cell 只拿自身作用域的 Agent Token，访问 `/mcp` 和 `/llm/`。
+- **仓库可执行输入默认不加载**：仓库扩展、hook、工具与项目 MCP 配置被禁用；规则、skill 及独立的 `AGENTS.md` / `CLAUDE.md` 仍会加载。仓库文本不是提权渠道，平台权限保存在数据库中。
+- **外部内容是数据**：GitHub Issue、评论、评审等消息保留外部来源与可信度标记，以数据边界传给 Agent；方法论和平台权限不由其中的指令覆盖。
+- **隔离与宿主权限**：Cell 不挂 Docker socket。启用 Cells 会给 `api` 挂载 socket，等同宿主 root 权限；仅在管理员可信的服务器部署。控制台默认仅监听回环地址，临时隧道只开放 webhook。
 
-## 文档
+## 限制与路线图
 
-| 主题 | 文档 |
-| --- | --- |
-| 安装、服务、环境变量、Cell 安全、隧道、升级、备份、卸载 | [部署指南](deploy/README.md) |
-| 第三轮从零验收步骤 | [第三轮 Runbook](docs/claude/runbook-round3.md) |
-| 架构决策 | [ADR](docs/claude/adr-hive-queen-forager.md) |
-| 接口契约 | [API 契约](api/contract.md) |
-| 贡献方式 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+- 首个版本只支持 GitHub、单机 Docker Compose；发布镜像仅 `linux/amd64`。控制台面向桌面端。
+- 模型调用依赖你配置的提供方凭证与服务可用性；用量与花费记录用于观测，方法论可声明预算。
+- 当前开发分支的 Hive 时间线、记忆、设置，以及 Forager Diff、时间线、终端仍是占位页；其中 Hive 设置依赖第五轮网页任务。
+- v0.1.0 发布前需要完成 Queen 运行时与入口路由、内置方法论目录及自动回滚、网页创建向导与 Queen 对话，并完成第四轮补充验收修复。具体进度以 PR 和测试结果为准。
+- 多机执行、更多代码托管平台及更广的模型接入属于后续方向，目前没有交付承诺。
 
-## 开发
+## 开发与文档
 
-需要 Go 1.27+、Node.js 24+ 和 Docker。后端检查：
+Go 版本以 [go.mod](go.mod) 为准；前端构建使用 Node.js 24（与 CI 一致）。
 
 ```sh
 go test -race ./cmd/... ./internal/...
 go vet ./cmd/... ./internal/...
-```
-
-前端：
-
-```sh
 npm ci --prefix web
 npm run build --prefix web
+(cd deploy && python3 -m unittest)
 ```
 
-部署测试不启动 Docker：
+`./scripts/test.sh` 是本地检查入口；`VALIDATE_DEPLOY=1` 增加 Compose 校验，`RUN_BROWSER_TESTS=1` 增加浏览器测试。
 
-```sh
-cd deploy && python3 -m unittest
-```
+- [部署指南](deploy/README.md)：服务、环境变量、升级、备份与排障。
+- [变更记录](CHANGELOG.md)：v0.1.0 用户可见变化与待合入能力。
+- [API 契约](api/contract.md)、[贡献指南](CONTRIBUTING.md)。
 
-完整的本地检查入口是 `./scripts/test.sh`；`VALIDATE_DEPLOY=1` 会额外校验 Compose 配置。
-
-## 许可证
-
-本项目以 [MIT 许可证](LICENSE) 发布。
+采用 [MIT 许可证](LICENSE)。
