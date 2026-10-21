@@ -101,14 +101,6 @@ export function ObjectPanel({
         <button onClick={() => ui.closeObject()}>关闭详情</button>正在读取…
       </div>
     );
-  const target =
-    selection.kind === "queen"
-      ? "主 Agent"
-      : selection.kind === "pr"
-        ? prSummary(snapshot.prs.find((p) => p.number === selection.number) ?? {number: selection.number!, headSha: "", state: "open", ready: false, merged: false}, 40)
-        : selection.kind === "signal"
-          ? weightedTruncate(snapshot.signals.find((s) => s.messageId === selection.id)?.title ?? "待处理事件", 40)
-          : agent ? oneLineSummary(agent, { prs: snapshot.prs, issues: snapshot.signals }, 40) : "Agent";
   const fullTarget = selection.kind === "queen" ? "主 Agent" : selection.kind === "pr"
     ? snapshot.prs.find((p) => p.number === selection.number)?.title || `PR #${selection.number}`
     : selection.kind === "signal" ? snapshot.signals.find((s) => s.messageId === selection.id)?.title || "待处理事件"
@@ -130,7 +122,7 @@ export function ObjectPanel({
         ×
       </button>
       <p className="pc-kicker">{selection.kind === "pr" ? `PR #${selection.number}` : selection.kind === "agent" ? agentStateLabel(agent?.state ?? "creating") : selection.kind === "queen" ? "主 Agent" : "外部事件"}，项目 {snapshot.hive.name}</p>
-      <h2 title={fullTarget} aria-label={fullTarget}>{target}</h2>
+      <h2 title={fullTarget} aria-label={fullTarget}>{fullTarget}</h2>
       {error && (
         <ErrorNotice message={error} onRetry={() => setAttempt((n) => n + 1)} />
       )}{" "}
@@ -451,13 +443,63 @@ export function PRPanel({
         </div>
       )}
       {details.loading && <p role="status">正在读取提交的检查与验证…</p>}
-      <p>
-        {live?.merged || pr?.merged
-          ? "已合并"
-          : canMerge
-            ? "等你决定"
-            : "尚未满足合并条件"}
-      </p>
+      <div className="pc-decision">
+        <p>
+          {live?.merged || pr?.merged
+            ? "已合并"
+            : canMerge
+              ? "等你决定"
+              : "尚未满足合并条件"}
+        </p>
+        <button
+          className="go"
+          disabled={busy || !canMerge}
+          onClick={() => {
+            if (lock.current || !canMerge || !observed) return;
+            // A store event may arrive before React commits the next render.
+            // Recheck synchronously and retain the exact displayed head.
+            const latest = store
+              .getSnapshot()
+              .snapshot?.prs.find((p) => p.number === number);
+            if (
+              (latest?.headSha && latest.headSha !== observed) ||
+              latest?.ready === false ||
+              latest?.merged
+            ) {
+              setError("PR 有新提交或合并条件已变化，请重新查看");
+              details.reload();
+              return;
+            }
+            lock.current = true;
+            setBusy(true);
+            setError("");
+            void store
+              .mergePR(number, observed)
+              .then((result) => {
+                setNotice(
+                  result.merged
+                    ? "已合并。"
+                    : result.queued
+                      ? "已进入合并队列，等待平台处理。"
+                      : "合并请求已提交，请重新读取确认状态。",
+                );
+                details.reload();
+              })
+              .catch((cause) => {
+                setError(cause instanceof Error ? cause.message : String(cause));
+                details.reload();
+              })
+              .finally(() => {
+                lock.current = false;
+                setBusy(false);
+              });
+          }}
+        >
+          {busy ? "正在合并…" : "确认合并"}
+        </button>
+        {error && <p role="alert">{error}</p>}
+        {notice && <p role="status">{notice}</p>}
+      </div>
       <p>
         已读取提交：
         <span data-testid="reviewed-pr-head" hidden>{observed ?? "尚未读取"}</span>
@@ -501,10 +543,13 @@ export function PRPanel({
             ：<LongText text={a.summary} label="验证结论" />
           </p>
           <p>
-            <ShortCopy value={a.attesterId} short={shortAgentId(a.attesterId)} label="验证 Agent" /> {a.isAuthor ? "作者" : "独立验证"}{" "}
-            {attestationStateLabel(a, observed)}
+            {a.isAuthor ? "作者" : "独立验证"} · {attestationStateLabel(a, observed)}
           </p>
-          <ShortCopy value={a.headSha} short={shortSha(a.headSha)} label="验证提交" />
+          <details>
+            <summary>查看验证详情</summary>
+            <p>验证 Agent <ShortCopy value={a.attesterId} short={shortAgentId(a.attesterId)} label="验证 Agent" /></p>
+            <ShortCopy value={a.headSha} short={shortSha(a.headSha)} label="验证提交" />
+          </details>
           <time dateTime={a.createdAt}>{relativeTime(a.createdAt)}</time>
           {a.findings?.map((f, i) => (
             <p key={i}>
@@ -515,54 +560,6 @@ export function PRPanel({
         </article>
       ))}
       {!pr?.attestations?.length && <p>还没有验证结论。</p>}
-      <button
-        className="go"
-        disabled={busy || !canMerge}
-        onClick={() => {
-          if (lock.current || !canMerge || !observed) return;
-          // A store event may arrive before React commits the next render.
-          // Recheck synchronously and retain the exact displayed head.
-          const latest = store
-            .getSnapshot()
-            .snapshot?.prs.find((p) => p.number === number);
-          if (
-            (latest?.headSha && latest.headSha !== observed) ||
-            latest?.ready === false ||
-            latest?.merged
-          ) {
-            setError("PR 有新提交或合并条件已变化，请重新查看");
-            details.reload();
-            return;
-          }
-          lock.current = true;
-          setBusy(true);
-          setError("");
-          void store
-            .mergePR(number, observed)
-            .then((result) => {
-              setNotice(
-                result.merged
-                  ? "已合并。"
-                  : result.queued
-                    ? "已进入合并队列，等待平台处理。"
-                    : "合并请求已提交，请重新读取确认状态。",
-              );
-              details.reload();
-            })
-            .catch((cause) => {
-              setError(cause instanceof Error ? cause.message : String(cause));
-              details.reload();
-            })
-            .finally(() => {
-              lock.current = false;
-              setBusy(false);
-            });
-        }}
-      >
-        {busy ? "正在合并…" : "确认合并"}
-      </button>
-      {error && <p role="alert">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
     </section>
   );
 }

@@ -506,3 +506,8 @@
 @media (prefers-reduced-motion: reduce) {
   .pc-left, .pc-right, .pc-platform { transition-duration: .01ms; }
 }
+.pc-right h2 { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; text-overflow: clip; }
+.pc-pr .pc-decision { margin: 6px 0 4px; }
+.pc-pr .pc-decision > p:first-child { color: var(--ink2); margin: 0 0 8px; }
+.pc-sheet code, .pc-sheet pre { font-style: normal; }
+.pc-panel-title { display: inline-flex; align-items: center; gap: 10px; }
