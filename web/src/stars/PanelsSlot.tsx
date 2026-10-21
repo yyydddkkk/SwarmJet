@@ -80,7 +80,7 @@ function ProjectPanel({
           <p>正在读取项目…</p>
         )
       ) : overview ? (
-        <AlmanacOverview snapshot={data} onMethodology={() => setMethodologyAdvanced(true)} onSettings={() => ui.openProject("settings")} onUsage={() => ui.openProject("usage")} onSaved={() => void store.refresh()} />
+        <AlmanacOverview snapshot={data} methodologyResource={state.resources.methodology} onRetryMethodology={() => void store.refresh()} onMethodology={() => setMethodologyAdvanced(true)} onSettings={() => ui.openProject("settings")} onUsage={() => ui.openProject("usage")} onSaved={() => void store.refresh()} />
       ) : tab === "methodology" ? (
         <Methodology hiveId={data.hive.id} />
       ) : tab === "settings" ? (
@@ -100,13 +100,13 @@ function ProjectPanel({
           />
           <p>7 天走势、本周花费：暂时无法获取。</p>
           <h3>方法论预算</h3>
-          <p>
+          {state.resources.methodology.status === "ready" && Number.isInteger(data.methodology.version) ? <p>
             单 Agent：
             {data.methodology.manifest.limits?.maxCostPerAgentUsd || "未设置"}
             ；每天：
             {data.methodology.manifest.limits?.maxCostPerDayUsd || "未设置"}
             （美元）
-          </p>
+          </p> : <p>{state.resources.methodology.status === "loading" ? "正在读取方法论预算…" : "方法论预算暂时无法读取。"}</p>}
         </>
       ) : (
         <p>记忆功能暂未提供。</p>
