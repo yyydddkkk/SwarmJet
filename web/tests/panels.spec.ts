@@ -765,7 +765,7 @@ test("methodology layout also renders in the real application shell with bundled
     .getByRole("button", { name: "进入星图", exact: true }).click();
   await page.getByLabel("对话与命令").fill(state.hives[0].hive.name);
   await page.getByLabel("对话与命令").press("Enter");
-  await page.getByRole("button", { name: "项目面板", exact: true }).click();
+  await page.locator(".stars-cartouche").click();
   const panel = page.getByRole("region", { name: "项目面板" });
   await expect(panel.getByRole("img", { name: "角色分工示意" })).toBeVisible();
   await expect(
