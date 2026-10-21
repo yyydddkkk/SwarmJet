@@ -33,6 +33,6 @@ TEST_DATABASE_URL='postgres://postgres:pw@127.0.0.1:55450/postgres?sslmode=disab
 TEST_DATABASE_URL='postgres://postgres:pw@127.0.0.1:55450/postgres?sslmode=disable' go test -race -p 1 ./...
 ```
 
-主代理在最终代码 `dee940d` 上真实运行以上命令，均通过。原始输出在 [性能日志](round8-pr-list/performance.log)、[全量 race 日志](round8-pr-list/go-race.log)。本次没有遇到已知 ACP 偶发失败。
+主代理在最终代码 `dee940d` 上真实运行以上命令，均通过。原始输出在 [性能日志](round8-pr-list/performance.txt)、[全量 race 日志](round8-pr-list/go-race.txt)。本次没有遇到已知 ACP 偶发失败。
 
-新增回归涵盖终态零网络、开放/关闭分页、两项目网络并发、同 PR 并发成功与失败合并、过期旧结果与变化事件、单项失败隔离、webhook 热缓存/事件水合、重复迁移、同秒 head 顺序、目标分支变化、GitHub `head_sha` 解析以及可选 CI 的既有语义。详见 [顺序回归输出](round8-pr-list/ordering.log)。
+新增回归涵盖终态零网络、开放/关闭分页、两项目网络并发、同 PR 并发成功与失败合并、过期旧结果与变化事件、单项失败隔离、webhook 热缓存/事件水合、重复迁移、同秒 head 顺序、目标分支变化、GitHub `head_sha` 解析以及可选 CI 的既有语义。详见 [顺序回归输出](round8-pr-list/ordering.txt)。
