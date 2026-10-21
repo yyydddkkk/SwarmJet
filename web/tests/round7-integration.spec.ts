@@ -22,7 +22,15 @@ async function selectProject(page: Page, name: string) {
 
 async function settle(page: Page) {
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
-  await expect.poll(async () => Number(await page.locator(".stars-canvas").getAttribute("data-frames"))).toBeGreaterThan(0);
+  const canvas = page.locator(".stars-canvas");
+  await expect.poll(async () => Number(await canvas.getAttribute("data-frames"))).toBeGreaterThan(0);
+  if (await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+    await page.waitForTimeout(100);
+    return;
+  }
+  const before = Number(await canvas.getAttribute("data-frames"));
+  await page.waitForTimeout(2400);
+  expect(Number(await canvas.getAttribute("data-frames"))).toBeGreaterThan(before);
 }
 
 test("联合桌面入口连接真实详情、项目设置和平台账号", async ({ page }) => {

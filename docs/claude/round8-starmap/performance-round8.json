@@ -1,0 +1,22 @@
+{
+  "fixture": "round8Project()",
+  "viewport": "1440x1000",
+  "dpr": 1,
+  "browser": "Chromium 153.0.8010.12",
+  "theme": "bright",
+  "style": "classic",
+  "reducedMotion": false,
+  "mode": "project",
+  "nodes": 20,
+  "history": 35,
+  "targetFps": 30,
+  "measuredFps": 30.187378125907752,
+  "idleFrames": 151,
+  "idleWindowMs": 5002.090587999992,
+  "samples": 151,
+  "p50": 0.9000000357627869,
+  "p95": 1.199999988079071,
+  "rendererCpuPercentOfOneCore": 25.98913348588085,
+  "rendererProcessCount": 1,
+  "cpuMethod": "CDP SystemInfo.getProcessInfo renderer cpuTime delta over 5s idle wall time; one worker/page; percent of one CPU core"
+}

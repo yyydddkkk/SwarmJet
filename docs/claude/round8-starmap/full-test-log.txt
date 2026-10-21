@@ -1,0 +1,129 @@
+
+
+Running 110 tests using 1 worker
+
+
+
+[1/110] tests/canvas.spec.ts:213:1 › agent SSE updates nodes; unique real messages pulse and acknowledge; ambient continues and hidden stops
+[2/110] tests/canvas.spec.ts:272:1 › three lenses, pan, double click, wheel and Issue drag route to queen
+[3/110] tests/canvas.spec.ts:332:1 › canvas labels stay out of mounted side panels and overlays during exit
+[4/110] tests/canvas.spec.ts:355:1 › reduced motion redraws once when covers or local cards change, then rests
+[5/110] tests/canvas.spec.ts:399:1 › observer manual PR and question decisions open correct detail
+[6/110] tests/canvas.spec.ts:449:1 › illustrative timeline freezes presentation and never changes real snapshots
+[7/110] tests/canvas.spec.ts:506:5 › pixels bright/classic
+[8/110] tests/canvas.spec.ts:506:5 › pixels bright/simple
+[9/110] tests/canvas.spec.ts:506:5 › pixels paper/classic
+[10/110] tests/canvas.spec.ts:506:5 › pixels paper/simple
+[11/110] tests/canvas.spec.ts:506:5 › pixels night/classic
+[12/110] tests/canvas.spec.ts:506:5 › pixels night/simple
+[13/110] tests/canvas.spec.ts:555:1 › merge transition and owner completion trail respect reduced motion
+[14/110] tests/canvas.spec.ts:581:1 › turning on reduced motion during a merge flare stops the flare and redraw loop
+[15/110] tests/canvas.spec.ts:596:1 › observer local Escape restores focus without closing project, and queue explains wait
+[16/110] tests/canvas.spec.ts:620:3 › 300 active Agent 900 history browser performance all
+tests/canvas.spec.ts:620:3 › 300 active Agent 900 history browser performance all
+CANVAS_PERFORMANCE {"agents":300,"prs":16,"history":900,"viewport":"1440x1000","dpr":1,"browser":"Chromium 153.0.8010.12","theme":"bright","style":"classic","reducedMotion":false,"mode":"all","samples":55,"p50":1.4000000357627869,"p95":2.599999964237213,"max":3.300000011920929,"idleWindowMs":5002.453459999997,"idleFrames":100,"targetFps":20,"measuredFps":19.990190973210986,"rendererCpuPercentOfOneCore":23.38852343865685,"rendererProcessCount":1,"cpuMethod":"CDP SystemInfo.getProcessInfo renderer cpuTime delta over wall time after 2.2 s settle; single worker/page; percent of one CPU core"}
+
+[17/110] tests/canvas.spec.ts:620:3 › 300 active Agent 900 history browser performance project
+tests/canvas.spec.ts:620:3 › 300 active Agent 900 history browser performance project
+CANVAS_PERFORMANCE {"agents":300,"prs":16,"history":900,"viewport":"1440x1000","dpr":1,"browser":"Chromium 153.0.8010.12","theme":"bright","style":"classic","reducedMotion":false,"mode":"project","samples":55,"p50":3.300000011920929,"p95":5.800000011920929,"max":9.300000011920929,"idleWindowMs":5001.6195149999985,"idleFrames":100,"targetFps":20,"measuredFps":19.99352403758366,"rendererCpuPercentOfOneCore":61.38011879538185,"rendererProcessCount":1,"cpuMethod":"CDP SystemInfo.getProcessInfo renderer cpuTime delta over wall time after 2.2 s settle; single worker/page; percent of one CPU core"}
+
+[18/110] tests/canvas.spec.ts:707:1 › round8 fixture keeps normal project motion near 30 fps with measured CPU
+tests/canvas.spec.ts:707:1 › round8 fixture keeps normal project motion near 30 fps with measured CPU
+ROUND8_PERFORMANCE {"fixture":"round8Project()","viewport":"1440x1000","dpr":1,"browser":"Chromium 153.0.8010.12","theme":"bright","style":"classic","reducedMotion":false,"mode":"project","nodes":20,"history":35,"targetFps":30,"measuredFps":30.187378125907752,"idleFrames":151,"idleWindowMs":5002.090587999992,"samples":151,"p50":0.9000000357627869,"p95":1.199999988079071,"rendererCpuPercentOfOneCore":25.98913348588085,"rendererProcessCount":1,"cpuMethod":"CDP SystemInfo.getProcessInfo renderer cpuTime delta over 5s idle wall time; one worker/page; percent of one CPU core"}
+
+[19/110] tests/canvas.spec.ts:742:1 › blank click requests creation; double click cancels creation; distant projects remain
+[20/110] tests/canvas.spec.ts:767:1 › live merge spirals and completed owner flies to history
+[21/110] tests/canvas.spec.ts:805:1 › cluster opens the first six items and links to the active list
+[22/110] tests/canvas.spec.ts:819:1 › note and decision cards fade with their content, then become inert
+[23/110] tests/canvas.spec.ts:883:1 › only a confirmed failed CI appears as a diamond beside its PR
+[24/110] tests/canvas.spec.ts:900:1 › failed CI backed by a real check message opens that signal
+[25/110] tests/canvas.spec.ts:917:1 › hovering a finished Agent shows summary and opens its historical card
+[26/110] tests/canvas.spec.ts:941:1 › reduced motion renders a static canvas after camera settles
+[27/110] tests/canvas.spec.ts:954:1 › font completion keeps the same data revision during ambient redraw
+[28/110] tests/canvas.spec.ts:964:1 › timeline opens live, freezes only in the past, and now restores current nodes and time
+[29/110] tests/data-shell.spec.ts:52:1 › snapshot and SSE increments preserve canonical fields and produce unique pulses
+[30/110] tests/data-shell.spec.ts:125:1 › first ready skips reload; later ready buffers increments during resync
+[31/110] tests/data-shell.spec.ts:158:1 › late canonical responses cannot overwrite a newer methodology activation
+[32/110] tests/data-shell.spec.ts:192:1 › 409 merges retain observed head and refresh with actionable text
+[33/110] tests/data-shell.spec.ts:213:1 › decisions match current administrator and nonempty reply chains
+[34/110] tests/data-shell.spec.ts:239:1 › message ordering compares RFC3339 instants when fractional seconds differ
+[35/110] tests/data-shell.spec.ts:272:1 › retry doubles to thirty seconds and stops cleanly
+[36/110] tests/data-shell.spec.ts:327:1 › theme CSS and choices survive reload and denied storage
+[37/110] tests/data-shell.spec.ts:358:1 › corrupted theme names fall back to a usable theme
+[38/110] tests/data-shell.spec.ts:373:1 › a ready snapshot supersedes late signal fetches and stopped stores stay unchanged
+[39/110] tests/data-shell.spec.ts:419:1 › default shell handles session expiry and opens GitHub callbacks in platform setup
+[40/110] tests/data-shell.spec.ts:434:1 › initial project loading and failures never present a false empty workspace
+[41/110] tests/data-shell.spec.ts:454:1 › canonical PR hydration never overwrites an observed head or ready value
+[42/110] tests/data-shell.spec.ts:485:1 › browser data source multiplexes projects and resyncs unattributable events
+[43/110] tests/data-shell.spec.ts:538:1 › resnapshot calibrates observed PRs without the stale list cache, including changes while offline
+[44/110] tests/data-shell.spec.ts:598:1 › offline font files load and the default shell remains reviewable
+[45/110] tests/panels.spec.ts:17:1 › every panel opens and closes; platform replaces both sides
+[46/110] tests/panels.spec.ts:53:1 › interjection sends the exact agent address and full messages are visible
+[47/110] tests/panels.spec.ts:71:1 › project settings PATCH includes CSRF and selected fields
+[48/110] tests/panels.spec.ts:84:1 › methodology activation and rollback are confirmed and retain notes
+[49/110] tests/panels.spec.ts:123:1 › merge submits the head actually displayed and prevents double click
+[50/110] tests/panels.spec.ts:148:1 › token plaintext is only available once and credential inputs never persist
+[51/110] tests/panels.spec.ts:187:1 › complete conversations drain pages, include bootstrap, sort instants and rehydrate SSE previews
+[52/110] tests/panels.spec.ts:231:1 › head conflict refreshes and shows the shared Chinese message
+[53/110] tests/panels.spec.ts:244:1 › platform traps keyboard focus and returns it when closed
+[54/110] tests/panels.spec.ts:262:1 › GitHub manifest creation posts a hidden manifest form then callback offers installation
+[55/110] tests/panels.spec.ts:297:1 › panels remain legible in each theme and on mobile
+[56/110] tests/panels.spec.ts:326:1 › administrator questions reply to their actual sender and chain
+[57/110] tests/panels.spec.ts:367:1 › catalog distinguishes source release from project version and confirms installation
+[58/110] tests/panels.spec.ts:393:1 › logout delegates once to the shell and exposes failures for retry
+[59/110] tests/panels.spec.ts:416:1 › each close button dismisses its own side while Escape semantics stay layered
+[60/110] tests/panels.spec.ts:451:1 › usage ranking opens agent details and pending events retain complete external content
+[61/110] tests/panels.spec.ts:497:3 › new PR head cannot merge with old validation while detail refresh delay
+[62/110] tests/panels.spec.ts:497:3 › new PR head cannot merge with old validation while detail refresh failure
+[63/110] tests/panels.spec.ts:586:1 › head changes during merge never retarget the pending request
+[64/110] tests/panels.spec.ts:621:1 › a same-head detail response that is not ready overrides ready SSE
+[65/110] tests/panels.spec.ts:639:1 › same-head not-ready SSE disables stale ready checks immediately
+[66/110] tests/panels.spec.ts:656:3 › switching projects resets methodology version and never shows previous project data (success)
+[67/110] tests/panels.spec.ts:656:3 › switching projects resets methodology version and never shows previous project data (failure)
+[68/110] tests/panels.spec.ts:717:1 › methodology first view prioritizes role diagram and plain rules while advanced tools remain available
+[69/110] tests/panels.spec.ts:759:1 › methodology layout also renders in the real application shell with bundled fonts
+[70/110] tests/periphery.spec.ts:18:1 › 真实简报四组、正常快照、SSE断线与无障碍
+[71/110] tests/periphery.spec.ts:64:1 › 键盘列表搜索、插话取消、Issue派活与跳转
+[72/110] tests/periphery.spec.ts:134:1 › 命令精确跳转、长句发queen、所有快捷键与输入隔离
+[73/110] tests/periphery.spec.ts:204:1 › 手机完成合并、问题答复kind与chainId、409提示
+[74/110] tests/periphery.spec.ts:242:1 › 登录失败原因可读且无严重无障碍问题
+[75/110] tests/periphery.spec.ts:280:1 › 首次三步真实状态、新建仓库模型过滤并打开Queen
+[76/110] tests/periphery.spec.ts:316:3 › 首次凭证可用性 false/false/true
+[77/110] tests/periphery.spec.ts:316:3 › 首次凭证可用性 true/false/true
+[78/110] tests/periphery.spec.ts:316:3 › 首次凭证可用性 true/true/false
+[79/110] tests/periphery.spec.ts:340:1 › 命令同号Issue/PR、精确平台词和长句
+[80/110] tests/periphery.spec.ts:398:1 › 搜索框Esc退出、空白创建事件清层与焦点归还
+[81/110] tests/periphery.spec.ts:431:1 › 独立用量故障仍点亮接入与模型，平台关闭后重新读取可用性
+[82/110] tests/periphery.spec.ts:459:1 › 列表显示queue且检查结果不能派成Issue
+[83/110] tests/periphery.spec.ts:482:1 › 简报偏好、首次图例自动关闭及受限存储
+[84/110] tests/periphery.spec.ts:506:1 › 已有项目按实际列表点亮第三步，GitHub无安装不假装完成
+[85/110] tests/periphery.spec.ts:526:1 › 手动打开的图例不会被已关闭的首次图例计时器收起
+[86/110] tests/periphery.spec.ts:542:3 › 消息尚在发送时保留后续输入或命令 draft
+[87/110] tests/periphery.spec.ts:542:3 › 消息尚在发送时保留后续输入或命令 command
+[88/110] tests/periphery.spec.ts:580:1 › 回答仍在同步时不会进入另一项合并确认
+[89/110] tests/provenance.spec.ts:21:1 › 新对话保留管理员、Agent、系统和外部消息来源
+[90/110] tests/provenance.spec.ts:35:1 › 较新服务端的未知来源仍如实显示
+[91/110] tests/provenance.spec.ts:41:1 › 待处理事件正文保留外部来源提示
+[92/110] tests/round7-integration.spec.ts:27:1 › 联合桌面入口连接真实详情、项目设置和平台账号
+[93/110] tests/round7-integration.spec.ts:60:1 › 手机从观测按钮进入真实PR面板完成合并并回答问题
+[94/110] tests/round7-integration.spec.ts:88:1 › 时间控件可操作，断线提示在项目面板上可见并保持至重新同步完成
+[95/110] tests/round7-integration.spec.ts:115:1 › 完整mock界面的主题截图及登录简报列表无障碍证据
+[96/110] tests/round8-data.spec.ts:12:1 › realistic fixture exercises density and text rules
+[97/110] tests/round8-data.spec.ts:38:1 › legacy animation nodes retain terminal objects while map nodes show current work
+[98/110] tests/round8-data.spec.ts:49:1 › failed CI uses definite PR gate reasons or loaded check headers only
+[99/110] tests/round8-data.spec.ts:69:1 › a 20 second PR request does not hold the other briefing sections
+tests/round8-data.spec.ts:69:1 › a 20 second PR request does not hold the other briefing sections
+20s PR delay: active Agent visible in 617ms; PR requests=1
+
+[100/110] tests/round8-data.spec.ts:93:1 › time windows, acknowledgement, star cap and PR priority use fixed inputs
+[101/110] tests/round8-data.spec.ts:121:1 › backend gate reasons and English task sentences become readable summaries
+[102/110] tests/round8-data.spec.ts:128:1 › message request count stays tied to active Agents at 40 and 400 historical Agents
+[103/110] tests/round8-data.spec.ts:164:1 › PR envelope stale and unavailable flags reach the resource state
+[104/110] tests/round8-data.spec.ts:180:1 › partial 401 remains an authentication failure
+[105/110] tests/round8-data.spec.ts:197:1 › active inboxes loaded at startup are not requested again for agent events
+[106/110] tests/round8-data.spec.ts:209:1 › an opened historical inbox preserves SSE messages arriving during pagination
+[107/110] tests/round8-data.spec.ts:228:1 › reconnect keeps resources that finish before the slower hive
+[108/110] tests/round8-data.spec.ts:259:1 › a PR event received while its slow snapshot is loading wins over that snapshot
+[109/110] tests/star-glyphs.spec.ts:3:1 › shared PR glyph covers its inner ring with paper and moon orbit is dashed
+[110/110] tests/starmap-visual.spec.ts:15:1 › same round8 fixture in current canvas and design reference
+  110 passed (4.4m)

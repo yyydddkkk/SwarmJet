@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { messagePreview, useDataAPI } from "../data";
+import { messagePreview, prSummary, useDataAPI, weightedTruncate } from "../data";
 import type { StarsSlotProps } from "./slots";
-import { StarMap } from "./star-map";
+import { StarMap, type MapHistoryHover, type MapNote } from "./star-map";
 import "./canvas.css";
 export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
   const canvas = useRef<HTMLCanvasElement>(null),
     api = useDataAPI();
   const observer = useRef<HTMLButtonElement>(null),
-    decisionPanel = useRef<HTMLElement>(null);
+    decisionPanel = useRef<HTMLElement>(null),
+    retainedNote = useRef<MapNote>(undefined);
   const [feedback, setFeedback] = useState(""),
-    [deciding, setDeciding] = useState(false);
+    [deciding, setDeciding] = useState(false),
+    [note, setNote] = useState<MapNote>(),
+    [historyHover, setHistoryHover] = useState<MapHistoryHover>();
   const idKey = projects.map((p) => p.hive.id).join("\0");
   useSyncExternalStore(
     (fn) => {
@@ -25,6 +28,8 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
       name: s.getSnapshot().snapshot?.hive.name ?? hiveId,
     })),
   );
+  if (note) retainedNote.current = note;
+  const displayedNote = note ?? retainedNote.current;
   useEffect(() => {
     const element = canvas.current!;
     const map = new StarMap(
@@ -34,6 +39,8 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
       ui,
       (id, number) => api.assignIssue(id, number),
       setFeedback,
+      setNote,
+      setHistoryHover,
     );
     Object.defineProperty(element, "starMapMetrics", {
       configurable: true,
@@ -53,8 +60,11 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
   useEffect(
     () =>
       ui.subscribe(() => {
-        if (ui.getSnapshot().overlay || ui.getSnapshot().platformPanel)
+        if (ui.getSnapshot().overlay || ui.getSnapshot().platformPanel) {
           setDeciding(false);
+          setNote(undefined);
+          setHistoryHover(undefined);
+        }
       }),
     [ui],
   );
@@ -68,6 +78,11 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
     setDeciding(false);
     observer.current?.focus();
   };
+  const historyHoverStyle = historyHover ? {
+    left: innerWidth < 720 ? 24 : historyHover.x + 364 <= innerWidth - 24 ? historyHover.x + 24 : Math.max(24, historyHover.x - 364),
+    top: innerWidth < 720 ? historyHover.y + 344 < innerHeight ? historyHover.y + 24 : Math.max(24, historyHover.y - 344)
+      : Math.max(24, Math.min(innerHeight - 320, historyHover.y - 24)),
+  } : undefined;
   return (
     <>
       <canvas
@@ -75,6 +90,12 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
         className="stars-canvas"
         aria-label="项目星图；使用列表可访问所有对象和操作"
       />
+      {historyHover && !note && <div
+        className="stars-history-hover"
+        role="tooltip"
+        style={historyHoverStyle}
+        onPointerLeave={() => setHistoryHover(undefined)}
+      ><p>{historyHover.summary}</p><small>{historyHover.result} · {historyHover.time}</small></div>}
       <button
         ref={observer}
         onKeyDown={(e) => {
@@ -95,9 +116,11 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
         aria-controls="stars-decisions"
         onClick={() => setDeciding((v) => !v)}
       >
-        ⊙{decisions.length > 0 && <small>{decisions.length}</small>}
+        <svg viewBox="-10 -10 20 20" aria-hidden="true"><circle r="7" fill="none" stroke="currentColor" strokeWidth="1"/><circle r="1.6" fill="currentColor"/></svg>
       </button>
-      {deciding && (
+      <div className={`stars-note${note ? " open" : ""}`} style={displayedNote ? { left: Math.max(40, Math.min(innerWidth - 300, displayedNote.x + 26)), top: Math.max(40, Math.min(innerHeight - 320, displayedNote.y - 24)) } : undefined} aria-live="polite" aria-hidden={!note} inert={!note}>
+        {displayedNote && <><h2>{displayedNote.title}</h2><p>{displayedNote.body}</p><div className="acts"><button onClick={() => { ui.openOverlay("list"); window.dispatchEvent(new CustomEvent("swarmjet:catalogue-open", { detail: { scope: displayedNote.scope, query: displayedNote.query } })); setNote(undefined); }}>{displayedNote.kind === "history" ? "在列表中查看" : "在列表中查看全部"}</button><button onClick={() => setNote(undefined)}>关闭</button></div></>}
+      </div>
         <section
           ref={decisionPanel}
           onKeyDown={(e) => {
@@ -108,8 +131,10 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
             }
           }}
           id="stars-decisions"
-          className="stars-decisions"
+          className={`stars-decisions${deciding ? " open" : ""}`}
           aria-label="等你决定的事"
+          aria-hidden={!deciding}
+          inert={!deciding}
         >
           <button
             className="stars-decisions-close"
@@ -146,12 +171,11 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
             >
               {d.name}：
               {d.kind === "pr"
-                ? `PR #${d.pr.number} 等你决定`
-                : `回答${d.message.from === "queen" ? "主 Agent" : " Agent"}的问题：${messagePreview(d.message).slice(0, 40)}`}
+                ? `PR #${d.pr.number} 等你决定：${prSummary(d.pr, 30)}`
+                : `回答${d.message.from === "queen" ? "主 Agent" : " Agent"}的问题：${weightedTruncate(messagePreview(d.message), 30)}`}
             </button>
           ))}
         </section>
-      )}
       {feedback && (
         <div className="stars-canvas-feedback" role="status">
           {feedback}
