@@ -18,11 +18,12 @@ const mock = createMockDataSource(
       hive: hives[0],
       localAddress: "local:web-admin",
       agents: hiveAgents.swarmjet.filter((a) => a.role !== "queen"),
+      queenAgent: hiveAgents.swarmjet.find((a) => a.role === "queen"),
       queen: {
         enabled: true,
         state: "active",
         model: "test/model",
-        agentId: "queen",
+        agentId: "queen-swarmjet",
         lastTurnAt: null,
       },
       prs: [
