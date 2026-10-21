@@ -20,7 +20,7 @@ export default defineConfig({
   }, {
     // Measure startup from the shipped bundle. Source-module harnesses keep
     // using the dev server above; on-demand Vite compilation is not page load.
-    command: `npm run build && npx vite preview --host 127.0.0.1 --port ${previewPort} --strictPort`,
+    command: `npm run build && exec node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port ${previewPort} --strictPort`,
     url: `http://127.0.0.1:${previewPort}`,
     reuseExistingServer: false,
   }],
