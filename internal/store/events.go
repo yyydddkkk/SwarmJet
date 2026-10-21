@@ -25,6 +25,7 @@ type EventRef struct {
 	Type   string `json:"type"`
 	HiveID string `json:"hiveId"`
 	ID     string `json:"id"`
+	Source string `json:"source,omitempty"`
 }
 type eventWaiter struct {
 	events chan EventRef
@@ -230,6 +231,17 @@ func (s *Store) SubscribeEvents(ctx context.Context) (*EventSubscription, error)
 // PublishPREvent is used only for PR changes that have no persisted event row.
 func (s *Store) PublishPREvent(ctx context.Context, hiveID string, pr int64) error {
 	payload, err := json.Marshal(EventRef{Type: "pr", HiveID: hiveID, ID: fmt.Sprint(pr)})
+	if err != nil {
+		return err
+	}
+	_, err = s.Pool.Exec(ctx, `SELECT pg_notify($1,$2)`, eventChannel, string(payload))
+	return err
+}
+
+// PublishPRSnapshotEvent carries a hint that hydration can use the freshly
+// persisted read view without making another GitHub request.
+func (s *Store) PublishPRSnapshotEvent(ctx context.Context, hiveID string, pr int64) error {
+	payload, err := json.Marshal(EventRef{Type: "pr", HiveID: hiveID, ID: fmt.Sprint(pr), Source: "snapshot"})
 	if err != nil {
 		return err
 	}

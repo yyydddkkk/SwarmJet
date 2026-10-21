@@ -1,0 +1,26 @@
+ok  	github.com/yyydddkkk/SwarmJet/cmd/swarmjet	4.341s
+ok  	github.com/yyydddkkk/SwarmJet/internal/api	18.483s
+?   	github.com/yyydddkkk/SwarmJet/internal/cell	[no test files]
+ok  	github.com/yyydddkkk/SwarmJet/internal/cell/acp	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/cell/docker	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/cell/omp	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/connect	(cached)
+?   	github.com/yyydddkkk/SwarmJet/internal/domain	[no test files]
+ok  	github.com/yyydddkkk/SwarmJet/internal/forager	(cached)
+?   	github.com/yyydddkkk/SwarmJet/internal/forge	[no test files]
+ok  	github.com/yyydddkkk/SwarmJet/internal/github	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/githubapp	(cached)
+?   	github.com/yyydddkkk/SwarmJet/internal/jobs	[no test files]
+ok  	github.com/yyydddkkk/SwarmJet/internal/llmproxy	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/mcp	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/merge	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/methodology	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/methodology/catalog	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/observability	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/onboarding	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/queen	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/router	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/secretbox	(cached)
+ok  	github.com/yyydddkkk/SwarmJet/internal/service	2.765s
+ok  	github.com/yyydddkkk/SwarmJet/internal/store	41.077s
+?   	github.com/yyydddkkk/SwarmJet/methodologies	[no test files]

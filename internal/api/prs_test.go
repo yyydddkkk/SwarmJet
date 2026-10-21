@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,6 +112,7 @@ func TestPullRequestStatusReportsGitHubFailure(t *testing.T) {
 
 type webPRFake struct {
 	fakePRMergeStatus
+	mu         sync.Mutex
 	statuses   map[int64]merge.Readiness
 	calls      int
 	mergeCalls int
@@ -119,6 +121,8 @@ type webPRFake struct {
 }
 
 func (f *webPRFake) Check(_ context.Context, _ domain.Hive, pr int64) (merge.Readiness, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	return f.statuses[pr], nil
 }
