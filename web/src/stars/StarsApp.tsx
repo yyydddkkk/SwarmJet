@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   DataProvider,
   useDataSource,
@@ -9,11 +9,17 @@ import {
 } from "../data";
 import CanvasSlot from "./CanvasSlot";
 import TimelineSlot from "./TimelineSlot";
-import PanelsSlot from "./PanelsSlot";
 import PeripherySlot from "./PeripherySlot";
 import LoginSlot from "./LoginSlot";
-import { createStarsUI } from "./ui";
+import { createStarsUI, useStarsUI } from "./ui";
+import type { StarsSlotProps } from "./slots";
 import "./stars.css";
+const PanelsSlot = lazy(() => import("./PanelsSlot"));
+function DeferredPanels(props: StarsSlotProps) {
+  const state = useStarsUI(props.ui);
+  if (!state.selection && !state.projectPanel && !state.platformPanel) return null;
+  return <Suspense fallback={null}><PanelsSlot {...props} /></Suspense>;
+}
 export default function StarsApp({ source }: { source?: DataSource } = {}) {
   return (
     <DataProvider source={source}>
@@ -181,7 +187,7 @@ export function StarsWorkspace({
     <main className="stars-app">
       <CanvasSlot {...props} />
       <PeripherySlot {...props} />
-      <PanelsSlot {...props} />
+      <DeferredPanels {...props} />
       <TimelineSlot {...props} />
       <div className={`stars-status${statusMessage ? " open" : ""}`} role={statusMessage ? "alert" : undefined} aria-hidden={!statusMessage} inert={!statusMessage}>
           {shownStatus}
