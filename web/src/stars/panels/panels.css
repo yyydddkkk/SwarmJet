@@ -284,6 +284,10 @@
 .pc-sheet .pc-checkbox small {
   display: block;
 }
+.pc-sheet input[type="checkbox"], .pc-sheet input[type="radio"],
+.pc-dialog input[type="checkbox"], .pc-dialog input[type="radio"] {
+  accent-color: var(--ink);
+}
 .pc-sheet .pc-diff-add {
   color: var(--ink);
 }
