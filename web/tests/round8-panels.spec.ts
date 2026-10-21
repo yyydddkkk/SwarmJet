@@ -30,6 +30,18 @@ async function objectFromList(page: Page, search: string) {
 
 test.use({viewport: {width: 1440, height: 900}});
 
+test("claimed Issue shows a short Agent identifier and copies its full value", async ({page, context}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await preview(page);
+  await objectFromList(page, "signal-0");
+  const detail = page.getByRole("region", {name: "对象详情"});
+  await expect(detail.getByRole("link", {name: "在 GitHub 查看"})).toBeVisible();
+  const copy = detail.getByRole("button", {name: /复制完整处理 Agent.*完整值 forager-00000000/});
+  await expect(copy).toHaveText("00000000");
+  await copy.click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("forager-00000000");
+});
+
 test("realistic fixture and long details stay readable", async ({page}) => {
   const fixture = round8Project();
   expect(fixture.agents.length).toBeGreaterThanOrEqual(40);

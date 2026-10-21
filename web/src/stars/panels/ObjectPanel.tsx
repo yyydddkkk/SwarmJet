@@ -161,7 +161,9 @@ export function ObjectPanel({
                   在 GitHub 查看
                 </a>
                 {signal.claimed ? (
-                  <p>已由 {signal.claimedBy} 处理</p>
+                  <p>{signal.claimedBy ? <>已由 {signal.claimedBy === "queen" ? "主 Agent" : <>
+                    Agent <ShortCopy value={signal.claimedBy} short={shortAgentId(signal.claimedBy)} label="处理 Agent" />
+                  </>} 处理</> : "已有人处理。"}</p>
                 ) : signal.kind === "issue" ? (
                   <button
                     disabled={busy}
