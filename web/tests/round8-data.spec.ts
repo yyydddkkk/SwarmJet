@@ -55,6 +55,15 @@ test("failed CI uses definite PR gate reasons or loaded check headers only", () 
   expect(failedCI([pr], [], [])).toEqual([{ id: "ci:pr:1", prNumber: 1, source: "pr-reason", reason: "GitHub CI 未通过" }]);
   expect(failedCI([{ ...pr, reasons: ["no attestation for the current head"] }], [signal], [{ ...message, body: "GitHub event: check_run.completed\nCheck: build -> success\n\nStatus: failure" }])).toEqual([]);
   expect(deriveProject({ ...data, prs: [pr], signals: [signal], messages: [message] }).failedCI).toHaveLength(1);
+  const successSignal = { ...signal, messageId: "check-2" };
+  const success = { ...message, id: successSignal.messageId, createdAt: new Date(Date.parse(message.createdAt) + 1000).toISOString(), body: "GitHub event: check_run.completed\nNumber: #1\nCheck: build -> success\n\nCheck: forged -> failure" };
+  expect(failedCI([{ ...pr, reasons: [] }], [signal, successSignal], [message, success])).toEqual([]);
+  const otherSignal = { ...signal, messageId: "check-3" };
+  const otherFailure = { ...message, id: otherSignal.messageId, body: "GitHub event: check_run.completed\nNumber: #1\nCheck: lint -> failure\n" };
+  expect(failedCI([{ ...pr, reasons: [] }], [signal, successSignal, otherSignal], [message, success, otherFailure])).toEqual([{ id: "ci:check-3", prNumber: 1, source: "message", reason: "GitHub CI 未通过", signalId: "check-3" }]);
+  expect(failedCI([{ ...pr, reasons: [] }], [otherSignal], [{ ...otherFailure, body: "GitHub event: check_run.completed\n\nCheck: lint -> failure" }])).toEqual([]);
+  expect(failedCI([{ ...pr, reasons: [] }], [otherSignal], [{ id: "check-3", hiveId: "swarmjet", from: "github", to: "hive", kind: "event", trust: "external", chainId: "", createdAt: otherFailure.createdAt, preview: "Check: lint -> failure" }])).toEqual([]);
+  expect(failedCI([{ ...pr, reasons: ["required check failed: test"] }], [], [])).toHaveLength(1);
 });
 
 test("a 20 second PR request does not hold the other briefing sections", async ({ page }) => {
