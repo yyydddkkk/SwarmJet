@@ -158,7 +158,7 @@ export function ObjectPanel({
                 </a>
                 {signal.claimed ? (
                   <p>已由 {signal.claimedBy} 处理</p>
-                ) : (
+                ) : signal.kind === "issue" ? (
                   <button
                     disabled={busy}
                     onClick={() =>
@@ -170,7 +170,7 @@ export function ObjectPanel({
                   >
                     请主 Agent 处理 Issue #{signal.number}
                   </button>
-                )}
+                ) : null}
               </section>
             ))}
         </>
