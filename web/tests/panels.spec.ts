@@ -13,6 +13,12 @@ async function open(page: Page) {
   await page.goto("/panel-test");
   return state;
 }
+async function syncMessages(page: Page) {
+  await page.evaluate(() => (window as unknown as {panelHarnessSyncMessages(): Promise<void>}).panelHarnessSyncMessages());
+}
+async function openMethodology(page: Page) {
+  await page.getByRole("button", { name: "编辑方法论与版本历史" }).click();
+}
 test.use({ viewport: { width: 1440, height: 1000 } });
 test("every panel opens and closes; platform replaces both sides", async ({
   page,
@@ -20,10 +26,13 @@ test("every panel opens and closes; platform replaces both sides", async ({
   await open(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
   const project = page.getByRole("region", { name: "项目面板" });
-  for (const name of ["方法论", "设置", "花费", "记忆"]) {
-    await project.getByRole("button", { name, exact: true }).click();
-    await expect(project).toBeVisible();
-  }
+  await expect(project.getByRole("heading", {name:"方法论"})).toBeVisible();
+  await expect(project.getByRole("heading", {name:"设置"})).toBeVisible();
+  await expect(project.getByRole("heading", {name:"花费"})).toBeVisible();
+  await expect(project.getByRole("heading", {name:"记忆"})).toBeVisible();
+  await openMethodology(page);
+  await expect(page.getByTestId("methodology-version")).toBeVisible();
+  await project.getByRole("button", {name:"返回项目面板"}).click();
   await page.getByRole("button", { name: "Agent详情", exact: true }).click();
   await expect(project).toBeVisible();
   await expect(page.getByRole("region", { name: "对象详情" })).toBeVisible();
@@ -66,6 +75,7 @@ test("interjection sends the exact agent address and full messages are visible",
     to: expect.stringMatching(/^forager:/),
     body: "请先验证兼容行为",
   });
+  await syncMessages(page);
   await expect(panel).toContainText("请先验证兼容行为");
 });
 test("project settings PATCH includes CSRF and selected fields", async ({
@@ -73,7 +83,7 @@ test("project settings PATCH includes CSRF and selected fields", async ({
 }) => {
   const state = await open(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "更多项目设置" }).click();
   await page.getByLabel("并发上限", { exact: true }).fill("7");
   await page.getByRole("button", { name: "保存设置" }).click();
   await expect(page.getByRole("status")).toContainText("项目设置已保存");
@@ -86,6 +96,7 @@ test("methodology activation and rollback are confirmed and retain notes", async
 }) => {
   const state = await open(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
+  await openMethodology(page);
   await expect(page.locator(".pc-version-table tbody tr")).toHaveCount(3);
   await page.getByText("版本历史与回滚", { exact: true }).click();
   for (const version of [2, 3]) {
@@ -141,6 +152,12 @@ test("merge submits the head actually displayed and prevents double click", asyn
     });
   });
   await page.getByRole("button", { name: "PR详情", exact: true }).click();
+  const head = page.getByRole("button", {name: /复制完整已读取提交/});
+  await expect(head).toContainText("panel-o");
+  await expect(head).not.toContainText("panel-observed-head");
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await head.click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("panel-observed-head");
   await page.getByRole("button", { name: "确认合并", exact: true }).dblclick();
   await expect.poll(() => count).toBe(1);
   expect(body).toEqual({ headSha: "panel-observed-head" });
@@ -207,6 +224,7 @@ test("complete conversations drain pages, include bootstrap, sort instants and r
     body: "半秒消息",
     createdAt: "2026-10-20T00:00:00.5Z",
   });
+  await syncMessages(page);
   await page.getByRole("button", { name: "主Agent详情", exact: true }).click();
   const panel = page.getByRole("region", { name: "对象详情" });
   await expect(panel).toContainText("完整引导 204");
@@ -299,6 +317,7 @@ test("panels remain legible in each theme and on mobile", async ({
 }, testInfo) => {
   await open(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
+  await openMethodology(page);
   await expect(page.getByTestId("methodology-version")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("project-panel.png") });
   await page.getByRole("button", { name: "平台", exact: true }).click();
@@ -340,6 +359,7 @@ test("administrator questions reply to their actual sender and chain", async ({
     state: "pending",
     createdAt: "2026-10-20T12:00:00Z",
   });
+  await syncMessages(page);
   await page.getByRole("button", { name: "主Agent详情", exact: true }).click();
   await page.getByRole("button", { name: "回复这条提问" }).click();
   await page
@@ -371,6 +391,7 @@ test("catalog distinguishes source release from project version and confirms ins
   const active = state.methodologies.swarmjet.find((v) => v.active)!;
   active.source = { url: "builtin:pstack", ref: "older-test-release" };
   await page.getByRole("button", { name: "项目", exact: true }).click();
+  await openMethodology(page);
   await page.getByText("从内置目录安装方法论", { exact: true }).click();
   await expect(
     page.getByText("当前来源版本：older-test-release。", { exact: false }),
@@ -465,8 +486,9 @@ test("usage ranking opens agent details and pending events retain complete exter
     body: "这是完整的任务原文。".repeat(30),
     createdAt: "2026-10-20T00:00:00Z",
   });
+  await syncMessages(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
-  await page.getByRole("button", { name: "花费", exact: true }).click();
+  await page.getByRole("button", { name: "查看花费详情" }).click();
   const rank = page.getByRole("list", { name: "Agent 花费排行" });
   await rank.getByRole("button").first().click();
   await expect(page.getByRole("region", { name: "对象详情" })).toBeVisible();
@@ -492,6 +514,20 @@ test("usage ranking opens agent details and pending events retain complete exter
     state.calls.find((c) => c.method === "POST" && c.path.endsWith("/messages"))
       ?.body,
   ).toMatchObject({ to: "queen", body: "请处理 Issue #42" });
+});
+test("check and pull request signals are read only; only Issues can be assigned", async ({page}) => {
+  const state = await open(page);
+  const baseline = state.calls.filter(call => call.method === "POST" && call.path.endsWith("/messages")).length;
+  for (const name of ["检查详情", "外部PR详情"]) {
+    await page.getByRole("button", {name, exact:true}).click();
+    const panel = page.getByRole("region", {name:"对象详情"});
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole("link", {name:"在 GitHub 查看"})).toBeVisible();
+    await expect(panel.getByRole("button", {name:/请主 Agent 处理 Issue/})).toHaveCount(0);
+    await page.getByRole("button", {name:"关闭对象详情"}).click();
+    await expect(panel).toHaveCount(0);
+  }
+  expect(state.calls.filter(call => call.method === "POST" && call.path.endsWith("/messages"))).toHaveLength(baseline);
 });
 for (const result of ["delay", "failure"] as const) {
   test(`new PR head cannot merge with old validation while detail refresh ${result}`, async ({
@@ -670,6 +706,7 @@ for (const failure of [false, true]) {
       1: [{ path: "methodology.yaml", content: "B项目独有文件正文" }],
     };
     await page.getByRole("button", { name: "项目", exact: true }).click();
+    await openMethodology(page);
     await page.getByLabel("查看方法论版本", { exact: true }).selectOption("2");
     await expect(page.getByTestId("methodology-version")).toContainText("v2");
     await page.getByText("查看文件内容", { exact: true }).click();
@@ -686,6 +723,7 @@ for (const failure of [false, true]) {
       );
     await page.getByRole("button", { name: "切到B项目", exact: true }).click();
     const panel = page.getByRole("region", { name: "项目面板" });
+    await openMethodology(page);
     await expect(
       panel.getByRole("heading", {
         name: state.hives.find((p) => p.hive.id === "orders")!.hive.name,
@@ -720,6 +758,8 @@ test("methodology first view prioritizes role diagram and plain rules while adva
   await open(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
   const panel = page.getByRole("region", { name: "项目面板" });
+  await expect(panel.getByRole("img", { name: "方法论角色轨道" })).toBeVisible();
+  await openMethodology(page);
   await expect(panel.getByRole("img", { name: "角色分工示意" })).toBeVisible();
   const diagram = await panel
     .getByRole("img", { name: "角色分工示意" })
@@ -770,6 +810,8 @@ test("methodology layout also renders in the real application shell with bundled
     .selectOption("swarmjet");
   await page.getByRole("button", { name: "项目面板", exact: true }).click();
   const panel = page.getByRole("region", { name: "项目面板" });
+  await expect(panel.getByRole("img", { name: "方法论角色轨道" })).toBeVisible();
+  await openMethodology(page);
   await expect(panel.getByRole("img", { name: "角色分工示意" })).toBeVisible();
   await expect(
     panel.getByRole("heading", { name: "合并规则", exact: true }),

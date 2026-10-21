@@ -40,7 +40,7 @@ test("联合桌面入口连接真实详情、项目设置和平台账号", async
   await page.getByLabel("选择项目", { exact: true }).selectOption("swarmjet");
   await page.getByRole("button", { name: "项目面板", exact: true }).click();
   const project = page.getByRole("region", { name: "项目面板", exact: true });
-  await project.getByRole("button", { name: "设置", exact: true }).click();
+  await project.getByRole("button", { name: "更多项目设置", exact: true }).click();
   await project.getByLabel("并发上限", { exact: true }).fill("5");
   await project.getByRole("button", { name: "保存设置", exact: true }).click();
   await expect.poll(() => state.calls.filter((c) => c.method === "PATCH").length).toBe(1);
@@ -99,7 +99,7 @@ test("时间控件可操作，断线提示在项目面板上可见并保持至�
   await expect(page.getByRole("button", { name: "暂停", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "关闭时间轴", exact: true }).click();
   await page.getByRole("button", { name: "项目面板", exact: true }).click();
-  await expect(page.getByTestId("methodology-version")).toBeVisible();
+  await expect(page.getByRole("region", {name:"项目面板"}).getByRole("img", {name:"方法论角色轨道"})).toBeVisible();
   await page.evaluate(() => (window as any).__starsStream.pauseReady());
   fixture.state.hives[0].hive.name = "恢复后的项目";
   await fixture.disconnect();
@@ -148,7 +148,7 @@ test("完整mock界面的主题截图及登录简报列表无障碍证据", asyn
     await page.screenshot({ path: resolve(evidence, `${theme}-${style}.png`) });
   }
   await page.getByRole("button", { name: "项目面板", exact: true }).click();
-  await expect(page.getByTestId("methodology-version")).toBeVisible();
+  await expect(page.getByRole("region", {name:"项目面板"}).getByRole("img", {name:"方法论角色轨道"})).toBeVisible();
   await page.screenshot({ path: resolve(evidence, "project-panel.png") });
   await page.getByRole("button", { name: "平台设置", exact: true }).click();
   const platform = page.getByRole("dialog", { name: "平台设置", exact: true });
