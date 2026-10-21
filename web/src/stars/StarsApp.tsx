@@ -157,6 +157,15 @@ export function StarsWorkspace({
     .find((s) => s.error || s.retryDelay !== undefined);
   const statusMessage = error || status?.error ||
     (status?.retryDelay !== undefined ? "连接已断开，正在重连" : "");
+  const [shownStatus, setShownStatus] = useState("");
+  useEffect(() => {
+    if (statusMessage) {
+      setShownStatus(statusMessage);
+      return;
+    }
+    const timer = setTimeout(() => setShownStatus(""), 300);
+    return () => clearTimeout(timer);
+  }, [statusMessage]);
   if (!projectsLoaded && (projectsLoading || error)) {
     return (
       <main className="stars-transition">
@@ -174,9 +183,8 @@ export function StarsWorkspace({
       <PeripherySlot {...props} />
       <PanelsSlot {...props} />
       <TimelineSlot {...props} />
-      {statusMessage && (
-        <div className="stars-status" role="alert">
-          {statusMessage}
+      <div className={`stars-status${statusMessage ? " open" : ""}`} role={statusMessage ? "alert" : undefined} aria-hidden={!statusMessage} inert={!statusMessage}>
+          {shownStatus}
           <button
             onClick={() => {
               setAttempt((v) => v + 1);
@@ -186,7 +194,6 @@ export function StarsWorkspace({
             重试
           </button>
         </div>
-      )}
     </main>
   );
 }

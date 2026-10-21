@@ -763,11 +763,8 @@ test("methodology layout also renders in the real application shell with bundled
   await page.goto("/");
   await page.getByRole("dialog", { name: "简报", exact: true })
     .getByRole("button", { name: "进入星图", exact: true }).click();
-  await page.getByRole("dialog", { name: "图例", exact: true })
-    .getByRole("button", { name: "关闭", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "选择项目", exact: true })
-    .selectOption("swarmjet");
+  await page.getByLabel("对话与命令").fill(state.hives[0].hive.name);
+  await page.getByLabel("对话与命令").press("Enter");
   await page.getByRole("button", { name: "项目面板", exact: true }).click();
   const panel = page.getByRole("region", { name: "项目面板" });
   await expect(panel.getByRole("img", { name: "角色分工示意" })).toBeVisible();

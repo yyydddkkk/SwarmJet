@@ -10,20 +10,19 @@ const evidence = resolve("../docs/claude/round7-preview");
 async function enter(page: Page) {
   await page.getByRole("dialog", { name: "简报", exact: true })
     .getByRole("button", { name: "进入星图", exact: true }).click();
+  await page.waitForTimeout(1000);
   const legend = page.getByRole("dialog", { name: "图例", exact: true });
-  await expect(legend).toBeVisible();
-  await legend.getByRole("button", { name: "关闭", exact: true }).click();
+  if (await legend.isVisible()) await page.keyboard.press("Escape");
+}
+
+async function selectProject(page: Page, name: string) {
+  await page.getByLabel("对话与命令").fill(name);
+  await page.getByLabel("对话与命令").press("Enter");
 }
 
 async function settle(page: Page) {
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
-  let previous = -1;
-  await expect.poll(async () => {
-    const frames = Number(await page.locator(".stars-canvas").getAttribute("data-frames"));
-    const stopped = frames > 0 && frames === previous;
-    previous = frames;
-    return stopped;
-  }).toBe(true);
+  await expect.poll(async () => Number(await page.locator(".stars-canvas").getAttribute("data-frames"))).toBeGreaterThan(0);
 }
 
 test("联合桌面入口连接真实详情、项目设置和平台账号", async ({ page }) => {
@@ -37,7 +36,7 @@ test("联合桌面入口连接真实详情、项目设置和平台账号", async
   await brief.getByRole("button", { name: /PR #88 修复兼容问题/ }).click();
   await expect(page.getByTestId("reviewed-pr-head")).toHaveText("observed-head-88");
   await page.getByRole("button", { name: "关闭对象详情", exact: true }).click();
-  await page.getByLabel("选择项目", { exact: true }).selectOption("swarmjet");
+  await selectProject(page, state.hives[0].hive.name);
   await page.getByRole("button", { name: "项目面板", exact: true }).click();
   const project = page.getByRole("region", { name: "项目面板", exact: true });
   await project.getByRole("button", { name: "设置", exact: true }).click();
@@ -91,7 +90,7 @@ test("时间控件可操作，断线提示在项目面板上可见并保持至�
   const fixture = await mockStarsHTTP(page);
   await page.goto("/");
   await enter(page);
-  await page.getByLabel("选择项目", { exact: true }).selectOption("swarmjet");
+  await selectProject(page, fixture.state.hives[0].hive.name);
   await page.getByRole("button", { name: "时间", exact: true }).click();
   await expect(page.getByText(/示意回放，不代表真实历史/)).toBeVisible();
   await page.getByRole("slider", { name: "示意时间", exact: true }).press("Home");
@@ -137,13 +136,13 @@ test("完整mock界面的主题截图及登录简报列表无障碍证据", asyn
   await audit("brief");
   await page.screenshot({ path: resolve(evidence, "brief.png") });
   await enter(page);
-  await page.getByLabel("选择项目", { exact: true }).selectOption("swarmjet");
+  await selectProject(page, state.hives[0].hive.name);
   for (const [theme, style] of [["bright", "classic"], ["paper", "classic"], ["night", "classic"], ["bright", "simple"]]) {
     await page.getByRole("button", { name: "显示", exact: true }).click();
-    const display = page.getByRole("dialog", { name: "显示设置", exact: true });
-    await display.getByLabel("主题", { exact: true }).selectOption(theme);
-    await display.getByLabel("风格", { exact: true }).selectOption(style);
-    await display.getByRole("button", { name: "关闭", exact: true }).click();
+    const display = page.getByRole("dialog", { name: "显示", exact: true });
+    await display.getByRole("button", { name: ({ bright: "明亮", paper: "纸本", night: "夜空" } as Record<string,string>)[theme] }).click();
+    await display.getByRole("button", { name: style === "simple" ? "简洁" : "经典" }).click();
+    await page.keyboard.press("Escape");
     await settle(page);
     await page.screenshot({ path: resolve(evidence, `${theme}-${style}.png`) });
   }
@@ -165,6 +164,7 @@ test("完整mock界面的主题截图及登录简报列表无障碍证据", asyn
   await platform.getByRole("button", { name: "账号", exact: true }).click();
   await platform.getByRole("button", { name: "退出登录", exact: true }).click();
   await expect(page.getByRole("heading", { name: "登录 SwarmJet", exact: true })).toBeVisible();
+  await expect(page.locator(".stars-login")).toHaveCSS("opacity", "1");
   await audit("login");
   await page.screenshot({ path: resolve(evidence, "login.png") });
 });

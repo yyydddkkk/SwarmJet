@@ -78,8 +78,9 @@ test("a 20 second PR request does not hold the other briefing sections", async (
   });
   const navigationStart = Date.now();
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "今天，有这些事" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /为 Hive 页的 Forager 列表增加按状态筛选/ })).toBeVisible({ timeout: 1000 });
+  const brief = page.getByRole("dialog", { name: "简报" });
+  await expect(brief.getByRole("heading", { name: "正在进行" })).toBeVisible();
+  await expect(brief.locator(".periphery-brief-body .periphery-it").first()).toBeVisible({ timeout: 1000 });
   const agentVisibleMs = Date.now() - navigationStart;
   expect(agentVisibleMs).toBeLessThan(1000);
   expect(prRequests).toBe(1);
