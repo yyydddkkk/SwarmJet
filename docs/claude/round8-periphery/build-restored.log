@@ -7,9 +7,11 @@ transforming...
 ✓ 67 modules transformed.
 rendering chunks...
 computing gzip size...
-dist/index.html                      0.50 kB │ gzip:  0.30 kB
-dist/assets/index-D3ldAAwO.css       0.77 kB │ gzip:  0.42 kB
-dist/assets/StarsApp-BwM7ncdE.css   20.42 kB │ gzip:  4.60 kB
-dist/assets/StarsApp-ClJfMeic.js   148.44 kB │ gzip: 47.29 kB
-dist/assets/index-DlnjfKTK.js      224.16 kB │ gzip: 70.14 kB
-✓ built in 2.20s
+dist/index.html                        0.50 kB │ gzip:  0.30 kB
+dist/assets/index-D3ldAAwO.css         0.77 kB │ gzip:  0.42 kB
+dist/assets/PanelsSlot-BhjH7zj2.css    5.29 kB │ gzip:  1.66 kB
+dist/assets/StarsApp-Be2jkucB.css     15.26 kB │ gzip:  3.40 kB
+dist/assets/PanelsSlot-B53-0Gua.js    71.48 kB │ gzip: 22.27 kB
+dist/assets/StarsApp-BzXdAUfS.js      77.69 kB │ gzip: 26.53 kB
+dist/assets/index-BVavrUp0.js        224.18 kB │ gzip: 70.15 kB
+✓ built in 1.85s

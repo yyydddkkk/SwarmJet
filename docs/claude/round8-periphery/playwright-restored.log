@@ -1,159 +1,182 @@
-[WebServer] (node:3084673) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (node:3181903) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
 [WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
 
-Running 113 tests using 2 workers
+Running 116 tests using 2 workers
 
-(node:3084748) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(node:3181949) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:3084747) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(node:3181952) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
 (Use `node --trace-warnings ...` to show where the warning was created)
-  ✓    1 tests/canvas.spec.ts:210:1 › agent SSE updates nodes; unique real messages pulse and acknowledge; idle stops (3.7s)
-  ✓    3 tests/canvas.spec.ts:326:1 › observer manual PR and question decisions open correct detail (957ms)
-  ✓    4 tests/canvas.spec.ts:376:1 › illustrative timeline freezes presentation and never changes real snapshots (1.2s)
-  ✓    2 tests/canvas.spec.ts:267:1 › three lenses, pan, double click, wheel and Issue drag route to queen (5.9s)
-  ✓    6 tests/canvas.spec.ts:433:5 › pixels bright/simple (2.3s)
-  ✓    5 tests/canvas.spec.ts:433:5 › pixels bright/classic (2.3s)
-  ✓    8 tests/canvas.spec.ts:433:5 › pixels paper/simple (2.3s)
-  ✓    7 tests/canvas.spec.ts:433:5 › pixels paper/classic (2.4s)
-  ✓   10 tests/canvas.spec.ts:433:5 › pixels night/simple (2.3s)
-  ✓    9 tests/canvas.spec.ts:433:5 › pixels night/classic (2.5s)
-  ✓   11 tests/canvas.spec.ts:482:1 › merge transition and owner completion trail respect reduced motion (694ms)
-  ✓   12 tests/canvas.spec.ts:508:1 › observer local Escape restores focus without closing project, and queue explains wait (1.4s)
-CANVAS_PERFORMANCE {"agents":300,"prs":50,"viewport":"1440x1000","dpr":1,"browser":"Chromium 153.0.8010.12","theme":"bright","style":"classic","reducedMotion":false,"mode":"all","samples":122,"p50":1.0999999642372131,"p95":2,"max":5.199999988079071,"idleWindowMs":1000,"idleFrames":0}
-  ✓   13 tests/canvas.spec.ts:532:3 › 300 Agent 50 PR browser performance all (4.5s)
-CANVAS_PERFORMANCE {"agents":300,"prs":50,"viewport":"1440x1000","dpr":1,"browser":"Chromium 153.0.8010.12","theme":"bright","style":"classic","reducedMotion":false,"mode":"project","samples":77,"p50":2.799999952316284,"p95":5.199999988079071,"max":5.899999976158142,"idleWindowMs":1000,"idleFrames":0}
-  ✓   14 tests/canvas.spec.ts:532:3 › 300 Agent 50 PR browser performance project (6.1s)
-  ✓   15 tests/canvas.spec.ts:601:1 › blank click requests creation; double click cancels creation; distant projects remain (2.7s)
+  ✓    1 tests/canvas.spec.ts:210:1 › agent SSE updates nodes; unique real messages pulse and acknowledge; idle stops (2.9s)
+  ✓    3 tests/canvas.spec.ts:326:1 › observer manual PR and question decisions open correct detail (839ms)
+  ✓    2 tests/canvas.spec.ts:267:1 › three lenses, pan, double click, wheel and Issue drag route to queen (5.1s)
+  ✓    4 tests/canvas.spec.ts:376:1 › illustrative timeline freezes presentation and never changes real snapshots (1.3s)
+  ✓    6 tests/canvas.spec.ts:433:5 › pixels bright/simple (2.6s)
+  ✓    5 tests/canvas.spec.ts:433:5 › pixels bright/classic (2.6s)
+  ✓    8 tests/canvas.spec.ts:433:5 › pixels paper/simple (2.5s)
+  ✓    7 tests/canvas.spec.ts:433:5 › pixels paper/classic (2.8s)
+  ✓    9 tests/canvas.spec.ts:433:5 › pixels night/classic (2.6s)
+  ✓   10 tests/canvas.spec.ts:433:5 › pixels night/simple (2.4s)
+  ✓   11 tests/canvas.spec.ts:482:1 › merge transition and owner completion trail respect reduced motion (891ms)
+  ✓   12 tests/canvas.spec.ts:508:1 › observer local Escape restores focus without closing project, and queue explains wait (1.5s)
+CANVAS_PERFORMANCE {"agents":300,"prs":50,"viewport":"1440x1000","dpr":1,"browser":"Chromium 153.0.8010.12","theme":"bright","style":"classic","reducedMotion":false,"mode":"all","samples":125,"p50":1.4000000357627869,"p95":2.300000011920929,"max":3.5,"idleWindowMs":1000,"idleFrames":0}
+  ✓   13 tests/canvas.spec.ts:532:3 › 300 Agent 50 PR browser performance all (4.7s)
+  ✓   15 tests/canvas.spec.ts:601:1 › blank click requests creation; double click cancels creation; distant projects remain (2.8s)
+CANVAS_PERFORMANCE {"agents":300,"prs":50,"viewport":"1440x1000","dpr":1,"browser":"Chromium 153.0.8010.12","theme":"bright","style":"classic","reducedMotion":false,"mode":"project","samples":50,"p50":5.400000035762787,"p95":6.5,"max":7.5,"idleWindowMs":1000,"idleFrames":0}
+  ✓   14 tests/canvas.spec.ts:532:3 › 300 Agent 50 PR browser performance project (7.6s)
   ✓   17 tests/canvas.spec.ts:669:1 › delayed font readiness and loading completion each redraw once without data changes (1.7s)
-  ✓   18 tests/canvas.spec.ts:713:1 › timeline opens live, freezes only in the past, and now restores current nodes and time (1.0s)
-  ✓   19 tests/data-shell.spec.ts:52:1 › snapshot and SSE increments preserve canonical fields and produce unique pulses (21ms)
-  ✓   20 tests/data-shell.spec.ts:125:1 › first ready skips reload; later ready buffers increments during resync (4ms)
-  ✓   21 tests/data-shell.spec.ts:158:1 › late canonical responses cannot overwrite a newer methodology activation (12ms)
-  ✓   22 tests/data-shell.spec.ts:192:1 › 409 merges retain observed head and refresh with actionable text (14ms)
-  ✓   23 tests/data-shell.spec.ts:213:1 › decisions match current administrator and nonempty reply chains (5ms)
-  ✓   24 tests/data-shell.spec.ts:239:1 › message ordering compares RFC3339 instants when fractional seconds differ (3ms)
   ✓   16 tests/canvas.spec.ts:626:1 › live merge spirals and completed owner fades, then both stop rendering (3.5s)
-  ✓   25 tests/data-shell.spec.ts:272:1 › retry doubles to thirty seconds and stops cleanly (508ms)
-  ✓   27 tests/data-shell.spec.ts:358:1 › corrupted theme names fall back to a usable theme (1.7s)
-  ✓   28 tests/data-shell.spec.ts:373:1 › a ready snapshot supersedes late signal fetches and stopped stores stay unchanged (11ms)
-  ✓   29 tests/data-shell.spec.ts:419:1 › default shell handles session expiry and opens GitHub callbacks in platform setup (844ms)
-  ✓   26 tests/data-shell.spec.ts:327:1 › theme CSS and choices survive reload and denied storage (3.5s)
-  ✓   31 tests/data-shell.spec.ts:454:1 › canonical PR hydration never overwrites an observed head or ready value (13ms)
-  ✓   30 tests/data-shell.spec.ts:434:1 › initial project loading and failures never present a false empty workspace (1.2s)
-  ✓   33 tests/data-shell.spec.ts:538:1 › resnapshot calibrates observed PRs without the stale list cache, including changes while offline (10ms)
-  ✓   32 tests/data-shell.spec.ts:485:1 › browser data source multiplexes projects and resyncs unattributable events (431ms)
-  ✓   34 tests/data-shell.spec.ts:598:1 › offline font files load and the default shell remains reviewable (1.9s)
-  ✓   35 tests/panels.spec.ts:17:1 › every panel opens and closes; platform replaces both sides (1.9s)
-  ✓   37 tests/panels.spec.ts:71:1 › project settings PATCH includes CSRF and selected fields (662ms)
-  ✓   36 tests/panels.spec.ts:53:1 › interjection sends the exact agent address and full messages are visible (695ms)
-  ✓   39 tests/panels.spec.ts:123:1 › merge submits the head actually displayed and prevents double click (501ms)
-  ✓   38 tests/panels.spec.ts:84:1 › methodology activation and rollback are confirmed and retain notes (1.1s)
-  ✓   40 tests/panels.spec.ts:148:1 › token plaintext is only available once and credential inputs never persist (1.1s)
-  ✓   41 tests/panels.spec.ts:187:1 › complete conversations drain pages, include bootstrap, sort instants and rehydrate SSE previews (971ms)
-  ✓   42 tests/panels.spec.ts:231:1 › head conflict refreshes and shows the shared Chinese message (486ms)
-  ✓   43 tests/panels.spec.ts:244:1 › platform traps keyboard focus and returns it when closed (621ms)
-  ✓   44 tests/panels.spec.ts:262:1 › GitHub manifest creation posts a hidden manifest form then callback offers installation (985ms)
-  ✓   46 tests/panels.spec.ts:326:1 › administrator questions reply to their actual sender and chain (734ms)
-  ✓   45 tests/panels.spec.ts:297:1 › panels remain legible in each theme and on mobile (1.5s)
-  ✓   47 tests/panels.spec.ts:367:1 › catalog distinguishes source release from project version and confirms installation (863ms)
-  ✓   48 tests/panels.spec.ts:393:1 › logout delegates once to the shell and exposes failures for retry (736ms)
-  ✓   49 tests/panels.spec.ts:416:1 › each close button dismisses its own side while Escape semantics stay layered (882ms)
-  ✓   50 tests/panels.spec.ts:451:1 › usage ranking opens agent details and pending events retain complete external content (971ms)
-  ✓   51 tests/panels.spec.ts:497:3 › new PR head cannot merge with old validation while detail refresh delay (760ms)
-  ✓   52 tests/panels.spec.ts:497:3 › new PR head cannot merge with old validation while detail refresh failure (622ms)
-  ✓   53 tests/panels.spec.ts:586:1 › head changes during merge never retarget the pending request (675ms)
-  ✓   54 tests/panels.spec.ts:621:1 › a same-head detail response that is not ready overrides ready SSE (517ms)
-  ✓   55 tests/panels.spec.ts:639:1 › same-head not-ready SSE disables stale ready checks immediately (553ms)
-  ✓   56 tests/panels.spec.ts:656:3 › switching projects resets methodology version and never shows previous project data (success) (832ms)
-  ✓   57 tests/panels.spec.ts:656:3 › switching projects resets methodology version and never shows previous project data (failure) (787ms)
-  ✓   58 tests/panels.spec.ts:717:1 › methodology first view prioritizes role diagram and plain rules while advanced tools remain available (897ms)
-  ✓   59 tests/panels.spec.ts:759:1 › methodology layout also renders in the real application shell with bundled fonts (1.8s)
-  ✓   60 tests/periphery-regression.spec.ts:25:1 › 真实简报四组、正常快照、SSE断线与无障碍 (2.4s)
-  ✓   61 tests/periphery-regression.spec.ts:71:1 › 键盘列表搜索、详情插话取消、Issue派活与跳转 (4.7s)
-  ✓   62 tests/periphery-regression.spec.ts:107:1 › 命令精确跳转、长句发queen、所有快捷键与输入隔离 (3.9s)
-  ✓   64 tests/periphery-regression.spec.ts:170:1 › 登录失败原因可读且无严重无障碍问题 (2.4s)
-  ✓   63 tests/periphery-regression.spec.ts:148:1 › 手机完成合并、详情问题答复kind与chainId、409提示 (3.4s)
-  ✓   65 tests/periphery-regression.spec.ts:209:1 › 首次三步真实状态、新建仓库模型过滤并打开Queen (1.6s)
-  ✓   66 tests/periphery-regression.spec.ts:245:3 › 首次凭证可用性 false/false/true (1.3s)
-  ✓   67 tests/periphery-regression.spec.ts:245:3 › 首次凭证可用性 true/false/true (1.2s)
-  ✓   69 tests/periphery-regression.spec.ts:269:1 › 命令同号Issue/PR、精确平台词和长句 (9ms)
-  ✓   68 tests/periphery-regression.spec.ts:245:3 › 首次凭证可用性 true/true/false (1.3s)
-  ✓   70 tests/periphery-regression.spec.ts:327:1 › 搜索框Esc退出、空白创建事件清层与焦点归还 (2.2s)
-  ✓   71 tests/periphery-regression.spec.ts:358:1 › 独立用量故障仍点亮接入与模型，平台关闭后重新读取可用性 (1.6s)
-  ✘   72 tests/periphery-regression.spec.ts:386:1 › 列表显示queue且检查结果不能派成Issue (6.6s)
-(node:3088126) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+  ✓   19 tests/data-shell.spec.ts:52:1 › snapshot and SSE increments preserve canonical fields and produce unique pulses (18ms)
+  ✓   18 tests/canvas.spec.ts:713:1 › timeline opens live, freezes only in the past, and now restores current nodes and time (1.2s)
+  ✓   20 tests/data-shell.spec.ts:125:1 › first ready skips reload; later ready buffers increments during resync (18ms)
+  ✓   21 tests/data-shell.spec.ts:192:1 › 409 merges retain observed head and refresh with actionable text (14ms)
+  ✓   22 tests/data-shell.spec.ts:158:1 › late canonical responses cannot overwrite a newer methodology activation (9ms)
+  ✓   23 tests/data-shell.spec.ts:213:1 › decisions match current administrator and nonempty reply chains (3ms)
+  ✓   24 tests/data-shell.spec.ts:239:1 › message ordering compares RFC3339 instants when fractional seconds differ (3ms)
+  ✓   25 tests/data-shell.spec.ts:272:1 › retry doubles to thirty seconds and stops cleanly (571ms)
+  ✓   27 tests/data-shell.spec.ts:358:1 › corrupted theme names fall back to a usable theme (1.6s)
+  ✓   28 tests/data-shell.spec.ts:373:1 › a ready snapshot supersedes late signal fetches and stopped stores stay unchanged (8ms)
+  ✓   29 tests/data-shell.spec.ts:419:1 › default shell handles session expiry and opens GitHub callbacks in platform setup (1.3s)
+  ✓   26 tests/data-shell.spec.ts:327:1 › theme CSS and choices survive reload and denied storage (3.8s)
+  ✓   31 tests/data-shell.spec.ts:454:1 › canonical PR hydration never overwrites an observed head or ready value (6ms)
+  ✓   32 tests/data-shell.spec.ts:485:1 › browser data source multiplexes projects and resyncs unattributable events (453ms)
+  ✓   33 tests/data-shell.spec.ts:538:1 › resnapshot calibrates observed PRs without the stale list cache, including changes while offline (27ms)
+  ✓   30 tests/data-shell.spec.ts:434:1 › initial project loading and failures never present a false empty workspace (1.3s)
+  ✓   34 tests/data-shell.spec.ts:598:1 › offline font files load and the default shell remains reviewable (2.0s)
+  ✓   35 tests/panels.spec.ts:17:1 › every panel opens and closes; platform replaces both sides (2.0s)
+  ✓   36 tests/panels.spec.ts:53:1 › interjection sends the exact agent address and full messages are visible (835ms)
+  ✓   37 tests/panels.spec.ts:71:1 › project settings PATCH includes CSRF and selected fields (816ms)
+  ✓   39 tests/panels.spec.ts:123:1 › merge submits the head actually displayed and prevents double click (565ms)
+  ✓   38 tests/panels.spec.ts:84:1 › methodology activation and rollback are confirmed and retain notes (1.2s)
+  ✓   41 tests/panels.spec.ts:187:1 › complete conversations drain pages, include bootstrap, sort instants and rehydrate SSE previews (1.1s)
+  ✓   40 tests/panels.spec.ts:148:1 › token plaintext is only available once and credential inputs never persist (1.2s)
+  ✓   42 tests/panels.spec.ts:231:1 › head conflict refreshes and shows the shared Chinese message (622ms)
+  ✓   43 tests/panels.spec.ts:244:1 › platform traps keyboard focus and returns it when closed (584ms)
+  ✓   44 tests/panels.spec.ts:262:1 › GitHub manifest creation posts a hidden manifest form then callback offers installation (1.0s)
+  ✓   45 tests/panels.spec.ts:297:1 › panels remain legible in each theme and on mobile (1.6s)
+  ✓   46 tests/panels.spec.ts:326:1 › administrator questions reply to their actual sender and chain (808ms)
+  ✓   48 tests/panels.spec.ts:393:1 › logout delegates once to the shell and exposes failures for retry (723ms)
+  ✓   47 tests/panels.spec.ts:367:1 › catalog distinguishes source release from project version and confirms installation (877ms)
+  ✓   50 tests/panels.spec.ts:451:1 › usage ranking opens agent details and pending events retain complete external content (1.0s)
+  ✓   49 tests/panels.spec.ts:416:1 › each close button dismisses its own side while Escape semantics stay layered (1.0s)
+  ✓   52 tests/panels.spec.ts:497:3 › new PR head cannot merge with old validation while detail refresh failure (724ms)
+  ✓   51 tests/panels.spec.ts:497:3 › new PR head cannot merge with old validation while detail refresh delay (750ms)
+  ✓   54 tests/panels.spec.ts:621:1 › a same-head detail response that is not ready overrides ready SSE (481ms)
+  ✓   53 tests/panels.spec.ts:586:1 › head changes during merge never retarget the pending request (735ms)
+  ✓   55 tests/panels.spec.ts:639:1 › same-head not-ready SSE disables stale ready checks immediately (650ms)
+  ✓   56 tests/panels.spec.ts:656:3 › switching projects resets methodology version and never shows previous project data (success) (875ms)
+  ✓   57 tests/panels.spec.ts:656:3 › switching projects resets methodology version and never shows previous project data (failure) (868ms)
+  ✓   58 tests/panels.spec.ts:717:1 › methodology first view prioritizes role diagram and plain rules while advanced tools remain available (1.0s)
+  ✓   59 tests/panels.spec.ts:759:1 › methodology layout also renders in the real application shell with bundled fonts (2.1s)
+  ✓   60 tests/periphery-regression.spec.ts:25:1 › 真实简报四组、正常快照、SSE断线与无障碍 (2.7s)
+  ✓   61 tests/periphery-regression.spec.ts:73:1 › 键盘列表搜索、详情插话取消、Issue派活与跳转 (5.9s)
+  ✓   62 tests/periphery-regression.spec.ts:111:1 › 命令精确跳转、长句发queen、所有快捷键与输入隔离 (5.2s)
+  ✓   64 tests/periphery-regression.spec.ts:174:1 › 登录失败原因可读且无严重无障碍问题 (1.6s)
+  ✓   65 tests/periphery-regression.spec.ts:214:1 › 首次三步真实状态、新建仓库模型过滤并打开Queen (1.9s)
+  ✓   63 tests/periphery-regression.spec.ts:152:1 › 手机完成合并、详情问题答复kind与chainId、409提示 (4.4s)
+  ✓   66 tests/periphery-regression.spec.ts:250:3 › 首次凭证可用性 false/false/true (1.3s)
+  ✓   67 tests/periphery-regression.spec.ts:250:3 › 首次凭证可用性 true/false/true (1.3s)
+  ✓   69 tests/periphery-regression.spec.ts:274:1 › 命令同号Issue/PR、精确平台词和长句 (9ms)
+  ✓   68 tests/periphery-regression.spec.ts:250:3 › 首次凭证可用性 true/true/false (1.3s)
+  ✓   70 tests/periphery-regression.spec.ts:332:1 › 搜索框Esc退出、空白创建事件清层与焦点归还 (2.0s)
+  ✓   71 tests/periphery-regression.spec.ts:363:1 › 独立用量故障仍点亮接入与模型，平台关闭后重新读取可用性 (1.8s)
+  ✘   72 tests/periphery-regression.spec.ts:391:1 › 列表显示queue且检查结果不能派成Issue (7.0s)
+(node:3186566) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
 (Use `node --trace-warnings ...` to show where the warning was created)
-  ✓   74 tests/periphery-regression.spec.ts:428:1 › 已有项目按实际列表点亮第三步，GitHub无安装不假装完成 (1.0s)
-  ✓   73 tests/periphery-regression.spec.ts:404:1 › 简报偏好、首次图例自动关闭及受限存储 (11.6s)
-  ✓   76 tests/periphery-regression.spec.ts:464:3 › 消息尚在发送时保留后续输入或命令 draft (1.6s)
-  ✓   77 tests/periphery-regression.spec.ts:464:3 › 消息尚在发送时保留后续输入或命令 command (1.6s)
-  ✓   78 tests/periphery-regression.spec.ts:502:1 › 答复延迟刷新时切到PR仍按所见head确认，409不隐式重试 (2.3s)
-  ✓   75 tests/periphery-regression.spec.ts:448:1 › 手动打开的图例不会被已关闭的首次图例计时器收起 (9.8s)
-  ✓   79 tests/periphery.spec.ts:12:1 › 简报逐段显示，决定最多三项，旧失败不再堆积 (1.3s)
-  ✓   80 tests/periphery.spec.ts:27:1 › 列表可搜索、看历史并打开详情 (1.8s)
-  ✓   81 tests/periphery.spec.ts:44:1 › 命令、快捷键和文字显示菜单 (2.5s)
-  ✓   82 tests/periphery.spec.ts:71:1 › 同号 Issue 与 PR 命令消歧；发送期间的新草稿保留 (2.2s)
-  ✓   84 tests/periphery.spec.ts:108:1 › 弹出层和断线提示保留退场节点但不可聚焦 (3.0s)
-  ✓   83 tests/periphery.spec.ts:97:1 › 无障碍没有 violations (4.6s)
-  ✓   85 tests/provenance.spec.ts:21:1 › 新对话保留管理员、Agent、系统和外部消息来源 (560ms)
-  ✓   86 tests/provenance.spec.ts:35:1 › 较新服务端的未知来源仍如实显示 (546ms)
-  ✓   87 tests/provenance.spec.ts:41:1 › 待处理事件正文保留外部来源提示 (475ms)
-  ✓   88 tests/round7-integration.spec.ts:28:1 › 联合桌面入口连接真实详情、项目设置和平台账号 (2.8s)
-  ✓   89 tests/round7-integration.spec.ts:61:1 › 手机从观测按钮进入真实PR面板完成合并并回答问题 (3.3s)
-  ✓   90 tests/round7-integration.spec.ts:89:1 › 时间控件可操作，断线提示在项目面板上可见并保持至重新同步完成 (4.4s)
-  ✓   92 tests/round8-data.spec.ts:13:1 › realistic fixture exercises density and text rules (15ms)
-  ✓   93 tests/round8-data.spec.ts:39:1 › legacy animation nodes retain terminal objects while map nodes show current work (24ms)
-  ✓   94 tests/round8-data.spec.ts:50:1 › failed CI uses definite PR gate reasons or loaded check headers only (6ms)
-  ✓   91 tests/round7-integration.spec.ts:116:1 › 完整mock界面的主题截图及登录简报列表无障碍证据 (10.5s)
-  ✓   96 tests/round8-data.spec.ts:95:1 › time windows, acknowledgement, star cap and PR priority use fixed inputs (36ms)
-  ✓   97 tests/round8-data.spec.ts:123:1 › backend gate reasons and English task sentences become readable summaries (7ms)
-  ✓   98 tests/round8-data.spec.ts:130:1 › message request count stays tied to active Agents at 40 and 400 historical Agents (43ms)
-  ✓   99 tests/round8-data.spec.ts:166:1 › PR envelope stale and unavailable flags reach the resource state (11ms)
-  ✓  100 tests/round8-data.spec.ts:182:1 › partial 401 remains an authentication failure (10ms)
-  ✓  101 tests/round8-data.spec.ts:199:1 › active inboxes loaded at startup are not requested again for agent events (77ms)
-  ✓  102 tests/round8-data.spec.ts:211:1 › an opened historical inbox preserves SSE messages arriving during pagination (94ms)
-  ✓  103 tests/round8-data.spec.ts:230:1 › reconnect keeps resources that finish before the slower hive (18ms)
-  ✓  104 tests/round8-data.spec.ts:261:1 › a PR event received while its slow snapshot is loading wins over that snapshot (17ms)
-  ✓  105 tests/round8-data.spec.ts:285:1 › acknowledgement recomputes shared visibility without a network refresh (118ms)
-  ✓  106 tests/round8-data.spec.ts:313:1 › brief and catalogue rules include fresh history without counting old failures (10ms)
-  ✓  107 tests/round8-periphery.spec.ts:13:1 › 48 Agent、19 PR、13 Issue 与 900 消息保持单行密度和历史可检索 (1.9s)
-  ✓  108 tests/round8-periphery.spec.ts:31:1 › 1440×900 简报需要项与留意项同屏，进入后推近待决定项目 (1.3s)
-  ✓  109 tests/round8-periphery.spec.ts:48:1 › 375px 和快捷键可操作 (1.7s)
-  ✓  110 tests/round8-periphery.spec.ts:65:1 › 真实 axe 对每种外围界面检查所有 violations (4.7s)
-20s PR delay: active Agent visible in 850ms; PR requests=1
-  ✓   95 tests/round8-data.spec.ts:70:1 › a 20 second PR request does not hold the other briefing sections (20.7s)
-  ✓  111 tests/round8-periphery.spec.ts:76:1 › 登录、命令和断线状态的 axe violations 为零 (4.9s)
-  ✓  113 tests/round8-periphery.spec.ts:131:1 › 登录、命令与断线提示保存明亮和夜空证据 (10.0s)
-  ✓  112 tests/round8-periphery.spec.ts:97:1 › 明亮与夜空逐界面保存 1440×900 证据 (21.7s)
+  ✓   74 tests/periphery-regression.spec.ts:435:1 › 已有项目按实际列表点亮第三步，GitHub无安装不假装完成 (1.4s)
+  ✓   73 tests/periphery-regression.spec.ts:411:1 › 简报偏好、首次图例自动关闭及受限存储 (11.5s)
+  ✓   76 tests/periphery-regression.spec.ts:471:3 › 消息尚在发送时保留后续输入或命令 draft (2.0s)
+  ✓   77 tests/periphery-regression.spec.ts:471:3 › 消息尚在发送时保留后续输入或命令 command (2.0s)
+  ✓   78 tests/periphery-regression.spec.ts:509:1 › 答复延迟刷新时切到PR仍按所见head确认，409不隐式重试 (3.4s)
+  ✓   75 tests/periphery-regression.spec.ts:455:1 › 手动打开的图例不会被已关闭的首次图例计时器收起 (10.3s)
+  ✓   79 tests/periphery.spec.ts:12:1 › 简报逐段显示，决定最多三项，旧失败不再堆积 (1.4s)
+  ✓   80 tests/periphery.spec.ts:29:1 › 列表可搜索、看历史并打开详情 (2.1s)
+  ✓   81 tests/periphery.spec.ts:46:1 › 命令、快捷键和文字显示菜单 (2.3s)
+  ✓   82 tests/periphery.spec.ts:73:1 › 同号 Issue 与 PR 命令消歧；发送期间的新草稿保留 (2.4s)
+  ✓   84 tests/periphery.spec.ts:111:1 › 弹出层和断线提示保留退场节点但不可聚焦 (2.8s)
+  ✓   83 tests/periphery.spec.ts:99:1 › 无障碍没有 violations (5.1s)
+  ✓   85 tests/periphery.spec.ts:129:1 › 品牌、题签和五项工具按设计导航 (2.6s)
+  ✓   86 tests/periphery.spec.ts:148:1 › 命令栏不显示额外按钮，Enter 仍执行命令 (1.9s)
+  ✓   88 tests/provenance.spec.ts:21:1 › 新对话保留管理员、Agent、系统和外部消息来源 (701ms)
+  ✓   89 tests/provenance.spec.ts:35:1 › 较新服务端的未知来源仍如实显示 (518ms)
+  ✓   87 tests/periphery.spec.ts:160:1 › 面板首次打开后宿主保留，关闭立即不可聚焦 (2.1s)
+  ✓   90 tests/provenance.spec.ts:41:1 › 待处理事件正文保留外部来源提示 (482ms)
+  ✓   91 tests/round7-integration.spec.ts:28:1 › 联合桌面入口连接真实详情、项目设置和平台账号 (3.2s)
+  ✓   92 tests/round7-integration.spec.ts:61:1 › 手机从观测按钮进入真实PR面板完成合并并回答问题 (3.6s)
+  ✓   93 tests/round7-integration.spec.ts:89:1 › 时间控件可操作，断线提示在项目面板上可见并保持至重新同步完成 (4.8s)
+  ✓   95 tests/round8-data.spec.ts:13:1 › realistic fixture exercises density and text rules (30ms)
+  ✓   96 tests/round8-data.spec.ts:39:1 › legacy animation nodes retain terminal objects while map nodes show current work (32ms)
+  ✓   97 tests/round8-data.spec.ts:50:1 › failed CI uses definite PR gate reasons or loaded check headers only (15ms)
+  ✘   98 tests/round8-data.spec.ts:70:1 › a 20 second PR request does not hold the other briefing sections (1.1s)
+(node:3188331) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   99 tests/round8-data.spec.ts:95:1 › time windows, acknowledgement, star cap and PR priority use fixed inputs (71ms)
+  ✓  100 tests/round8-data.spec.ts:123:1 › backend gate reasons and English task sentences become readable summaries (10ms)
+  ✓  101 tests/round8-data.spec.ts:130:1 › message request count stays tied to active Agents at 40 and 400 historical Agents (58ms)
+  ✓  102 tests/round8-data.spec.ts:166:1 › PR envelope stale and unavailable flags reach the resource state (33ms)
+  ✓  103 tests/round8-data.spec.ts:182:1 › partial 401 remains an authentication failure (11ms)
+  ✓  104 tests/round8-data.spec.ts:199:1 › active inboxes loaded at startup are not requested again for agent events (93ms)
+  ✓  105 tests/round8-data.spec.ts:211:1 › an opened historical inbox preserves SSE messages arriving during pagination (115ms)
+  ✓  106 tests/round8-data.spec.ts:230:1 › reconnect keeps resources that finish before the slower hive (28ms)
+  ✓  107 tests/round8-data.spec.ts:261:1 › a PR event received while its slow snapshot is loading wins over that snapshot (34ms)
+  ✓  108 tests/round8-data.spec.ts:285:1 › acknowledgement recomputes shared visibility without a network refresh (125ms)
+  ✓  109 tests/round8-data.spec.ts:313:1 › brief and catalogue rules include fresh history without counting old failures (14ms)
+  ✓   94 tests/round7-integration.spec.ts:116:1 › 完整mock界面的主题截图及登录简报列表无障碍证据 (8.6s)
+  ✓  110 tests/round8-periphery.spec.ts:13:1 › 48 Agent、19 PR、13 Issue 与 900 消息保持单行密度和历史可检索 (1.6s)
+  ✓  111 tests/round8-periphery.spec.ts:31:1 › 1440×900 简报需要项与留意项同屏，进入后推近待决定项目 (1.3s)
+  ✓  112 tests/round8-periphery.spec.ts:48:1 › 375px 和快捷键可操作 (1.8s)
+  ✓  114 tests/round8-periphery.spec.ts:82:1 › 登录、命令和断线状态的 axe violations 为零 (9.7s)
+  ✓  113 tests/round8-periphery.spec.ts:65:1 › 明亮和夜空稳定画面逐层执行完整 axe (10.6s)
+  ✓  116 tests/round8-periphery.spec.ts:142:1 › 登录、命令与断线提示保存明亮和夜空证据 (9.2s)
+  ✓  115 tests/round8-periphery.spec.ts:108:1 › 明亮与夜空逐界面保存 1440×900 证据 (20.4s)
 
 
-  1) tests/periphery-regression.spec.ts:386:1 › 列表显示queue且检查结果不能派成Issue ────────────────────────────
+  1) tests/periphery-regression.spec.ts:391:1 › 列表显示queue且检查结果不能派成Issue ────────────────────────────
 
     Error: expect(locator).toHaveCount(expected) failed
 
-    Locator:  getByRole('button', { name: /请主 Agent 处理 Issue #92/ })
+    Locator:  getByRole('region', { name: '对象详情' }).getByRole('button', { name: /请主 Agent 处理 Issue #92/ })
     Expected: 0
     Received: 1
     Timeout:  5000ms
 
     Call log:
-      - Expect "toHaveCount" getByRole('button', { name: /请主 Agent 处理 Issue #92/ }) with timeout 5000ms
-      - waiting for getByRole('button', { name: /请主 Agent 处理 Issue #92/ })
+      - Expect "toHaveCount" getByRole('region', { name: '对象详情' }).getByRole('button', { name: /请主 Agent 处理 Issue #92/ }) with timeout 5000ms
+      - waiting for getByRole('region', { name: '对象详情' }).getByRole('button', { name: /请主 Agent 处理 Issue #92/ })
         14 × locator resolved to 1 element
            - unexpected value "1"
 
 
-      399 |   await expect(row(list, /检查 #92 CI结果/)).toBeVisible();
-      400 |   await row(list, /检查 #92 CI结果/).click();
-    > 401 |   await expect(page.getByRole("button", { name: /请主 Agent 处理 Issue #92/ })).toHaveCount(0);
-          |                                                                             ^
-      402 | });
-      403 |
-      404 | test("简报偏好、首次图例自动关闭及受限存储", async ({ page }) => {
-        at /home/yang/mycode/swarmjet-r8-e/web/tests/periphery-regression.spec.ts:401:77
+      406 |   const detail = page.getByRole("region", { name: "对象详情" });
+      407 |   await expect(detail.getByRole("heading", { name: "CI结果" })).toBeVisible();
+    > 408 |   await expect(detail.getByRole("button", { name: /请主 Agent 处理 Issue #92/ })).toHaveCount(0);
+          |                                                                               ^
+      409 | });
+      410 |
+      411 | test("简报偏好、首次图例自动关闭及受限存储", async ({ page }) => {
+        at /home/yang/mycode/swarmjet-r8-e/web/tests/periphery-regression.spec.ts:408:79
 
     Error Context: test-results/periphery-regression-列表显示queue且检查结果不能派成Issue/error-context.md
 
-  1 failed
-    tests/periphery-regression.spec.ts:386:1 › 列表显示queue且检查结果不能派成Issue ─────────────────────────────
-  112 passed (2.2m)
+  2) tests/round8-data.spec.ts:70:1 › a 20 second PR request does not hold the other briefing sections
+
+    Error: expect(received).toBeLessThan(expected)
+
+    Expected: < 1000
+    Received:   1011
+
+      83 |   await expect(brief.locator(".periphery-brief-body .periphery-it").first()).toBeVisible({ timeout: 1000 });
+      84 |   const agentVisibleMs = Date.now() - navigationStart;
+    > 85 |   expect(agentVisibleMs).toBeLessThan(1000);
+         |                          ^
+      86 |   expect(prRequests).toBe(1);
+      87 |   for (const path of ["/api/hives/swarmjet", "/api/hives/swarmjet/foragers", "/api/hives/swarmjet/queen", "/api/hives/swarmjet/queue", "/api/hives/swarmjet/signals", "/api/hives/swarmjet/methodology", "/api/hives/swarmjet/methodology/events"]) {
+      88 |     expect(mock.state.calls.filter((call) => call.path === path && call.method === "GET"), path).toHaveLength(1);
+        at /home/yang/mycode/swarmjet-r8-e/web/tests/round8-data.spec.ts:85:26
+
+    Error Context: test-results/round8-data-a-20-second-PR-f33c9-the-other-briefing-sections/error-context.md
+
+  2 failed
+    tests/periphery-regression.spec.ts:391:1 › 列表显示queue且检查结果不能派成Issue ─────────────────────────────
+    tests/round8-data.spec.ts:70:1 › a 20 second PR request does not hold the other briefing sections
+  114 passed (2.3m)
