@@ -11,7 +11,7 @@ import { oneLineSummary, relativeTime, weightedTruncate } from "../data";
 import type { StarsUI, ObjectSelection } from "./ui";
 import { themeStore } from "./theme";
 import { timelineFor } from "./timeline-state";
-import { drawCanvasGlyph } from "./star-glyphs";
+import { drawCanvasGlyph, type CanvasGlyphOptions, type StarGlyph } from "./star-glyphs";
 type Point = { x: number; y: number };
 type Body = Point & {
   node: StarNode;
@@ -167,6 +167,9 @@ export class StarMap {
     );
     this.cleanups.push(
       ui.subscribe(() => {
+        this.hover = undefined;
+        this.hoverHistory = undefined;
+        this.onHistoryHoverChange?.();
         this.syncTimeline();
         this.updateCamera();
         this.schedule();
@@ -330,8 +333,8 @@ export class StarMap {
       )) {
         const parent = system.bodies.find((p) => p.node.id === b.node.parentId);
         if (parent) {
-          b.x = parent.x + Math.cos(b.angle) * 18;
-          b.y = parent.y + Math.sin(b.angle) * 11;
+          b.x = parent.x + Math.cos(b.angle) * 15;
+          b.y = parent.y + Math.sin(b.angle) * 9;
         }
       }
       return system;
@@ -685,6 +688,10 @@ export class StarMap {
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
     };
+    const glyph = (kind: StarGlyph, at: Point, scale = 1, angle = 0, options?: CanvasGlyphOptions) => {
+      ctx.save(); ctx.translate(at.x, at.y); ctx.rotate(angle); ctx.scale(scale, scale);
+      drawCanvasGlyph(ctx, kind, options); ctx.restore();
+    };
     const orbit = (p: Point, radius: number, a = 0, b = TAU) => {
       const q = this.screen(p);
       ctx.beginPath();
@@ -763,12 +770,7 @@ export class StarMap {
         const r = (h.result === "merged" ? 1.35 : h.result === "failed" ? .8 : .95) * z;
         ctx.fillStyle = C.ink;
         ctx.globalAlpha = (h.result === "merged" ? .85 : h.result === "failed" ? .32 : .6) * h.brightness * dim;
-        circle(q, r, true);
-        if (h.fresh && h.result !== "failed" && !simple) {
-          ctx.strokeStyle = C.ink; ctx.lineWidth = .5 * R.lw; ctx.globalAlpha *= .55;
-          line({ x: q.x - r * 3.4, y: q.y }, { x: q.x + r * 3.4, y: q.y });
-          line({ x: q.x, y: q.y - r * 3.4 }, { x: q.x, y: q.y + r * 3.4 });
-        }
+        glyph(h.fresh && h.result !== "failed" && !simple ? "hist" : "star", q, h.fresh && h.result !== "failed" && !simple ? r / 1.6 : r / 4.5);
         if (this.hoverHistory?.history.id === h.id) {
           ctx.strokeStyle = C.ink2; ctx.globalAlpha = 1; circle(q, 8);
         }
@@ -819,8 +821,7 @@ export class StarMap {
           ctx.setLineDash([]);
         }
       for (const body of system.bodies) {
-        const node = body.node,
-          merge = undefined;
+        const node = body.node;
         let opacity = 1;
         let world: Point = body;
         if (!this.reduced.matches && !this.frozen) {
@@ -869,7 +870,7 @@ export class StarMap {
         if (node.kind === "star") {
           const sr = Math.max(3.5, 9 * s) * R.sz;
           if (system.on) {
-            circle(q, sr, true);
+            glyph("star", q, sr / 4.5);
             for (const k of [1.8, 2.6, 3.6]) {
               ctx.globalAlpha = (dim * 0.55) / k;
               circle(q, sr * k);
@@ -904,8 +905,7 @@ export class StarMap {
           if (!view.hiveId) {
             circle(q, r, true);
           } else if (node.state === "failed") {
-            line({ x: q.x - r, y: q.y - r }, { x: q.x + r, y: q.y + r });
-            line({ x: q.x + r, y: q.y - r }, { x: q.x - r, y: q.y + r });
+            glyph("failed", q, r / 3.5);
             ctx.setLineDash([2, 5]);
             line(
               { x: q.x + ux * 6, y: q.y + uy * 6 },
@@ -915,14 +915,8 @@ export class StarMap {
           } else if (
             ["parked", "hibernated", "cancelled"].includes(node.state ?? "")
           ) {
-            circle(q, r);
-            ctx.setLineDash([1.5, 2.5]);
-            line(
-              { x: q.x + ux * (r + 2), y: q.y + uy * (r + 2) },
-              { x: q.x + ux * (r + 12), y: q.y + uy * (r + 12) },
-            );
+            glyph("parked", q, r / 3, Math.atan2(uy, ux));
             if (node.label.includes("仍占着名额")) circle(q, r + 5);
-            ctx.setLineDash([]);
           } else {
             const length =
               (node.state === "completed" ? 16 : 38) *
@@ -939,7 +933,7 @@ export class StarMap {
               });
             }
             ctx.globalAlpha = dim * opacity;
-            circle(q, r, true);
+            glyph("busy", q, r / 3, Math.atan2(uy, ux));
             ctx.globalAlpha = dim * opacity * 0.35;
             circle(q, r + 3.5);
           }
@@ -947,15 +941,8 @@ export class StarMap {
           const born = this.growing.get(node.id);
           const grow = born === undefined ? 1 : Math.max(.05, Math.min(1, (now - born) / 1100));
           const pr = Math.max(3, 7 * Math.min(s, 1.5)) * R.sz * grow * (body.stale ? .72 : 1);
-          ctx.beginPath();
-          ctx.ellipse(q.x, q.y, pr * 2.15, pr * 0.62, -0.38, Math.PI, TAU);
-          ctx.stroke();
-          ctx.fillStyle = merge ? C.ink : C.paper;
-          circle(q, pr, true);
-          circle(q, pr);
-          ctx.beginPath();
-          ctx.ellipse(q.x, q.y, pr * 2.15, pr * 0.62, -0.38, 0, Math.PI);
-          ctx.stroke();
+          ctx.fillStyle = C.paper;
+          glyph("pr", q, pr / 4);
           if (system.decisionIds.has(node.id)) {
             ctx.strokeStyle = C.accent;
             ctx.setLineDash([2, 3]);
@@ -965,37 +952,31 @@ export class StarMap {
         } else if (node.kind === "satellite") {
           const parent = system.bodies.find((b) => b.node.id === node.parentId);
           if (parent && view.hiveId) {
-            const pp = this.screen(parent);
+            const parentWorld = this.reduced.matches || this.frozen ? parent : ellipse(system, parent.angle + now * .000011, parent.radius);
+            const pp = this.screen(parentWorld);
             ctx.strokeStyle = C.ink3;
-            ctx.setLineDash([1, 2]);
-            ctx.beginPath();
-            ctx.ellipse(pp.x, pp.y, 18 * s, 11 * s, 0, 0, TAU);
-            ctx.stroke();
-            ctx.setLineDash([]);
+            ctx.fillStyle = C.ink;
+            glyph("moon", pp, 1, 0, { moonAngle: this.reduced.matches || this.frozen ? body.angle : now * .0018 + body.angle, moonOrbitX: 15 * s, moonOrbitY: 9 * s, moonRadius: Math.max(1.5, 2.5 * s) });
           }
-          ctx.fillStyle = C.ink;
-          circle(q, Math.max(1.5, 2.5 * s), true);
+          else glyph("star", q, Math.max(1.5, 2.5 * s) / 4.5);
         } else if (body.cluster) {
-          ctx.save(); ctx.translate(q.x, q.y); ctx.scale(Math.max(.5, s), Math.max(.5, s));
-          drawCanvasGlyph(ctx, "cluster"); ctx.restore();
+          glyph("cluster", q, Math.max(.5, s));
           ctx.setLineDash([1, 3]); circle(q, Math.max(7, s * 9)); ctx.setLineDash([]);
         } else if (node.kind === "signal") {
           const signal = body.signal,
             k = Math.max(2.8, 5 * Math.min(s, 1.4));
           ctx.strokeStyle = signal?.claimed ? C.ink2 : C.ink;
           if (body.ci) {
-            ctx.save(); ctx.translate(q.x, q.y); ctx.scale(k / 5, k / 5);
-            drawCanvasGlyph(ctx, "ci"); ctx.restore();
+            glyph("ci", q, k / 5);
           } else {
-            line({ x: q.x - k, y: q.y }, { x: q.x + k, y: q.y });
-            line({ x: q.x, y: q.y - k }, { x: q.x, y: q.y + k });
+            glyph("signal", q, k / 5);
             if (!signal?.claimed) {
               ctx.globalAlpha = 0.45;
               circle(q, k + 6);
             }
           }
         } else if (node.kind === "queue") {
-          ctx.save(); ctx.translate(q.x, q.y); ctx.scale(Math.max(.6, s), Math.max(.6, s)); drawCanvasGlyph(ctx, "queue"); ctx.restore();
+          glyph("queue", q, Math.max(.6, s));
         }
         if (view.hiveId && node.kind !== "star") {
           ctx.globalAlpha = dim * opacity;
@@ -1168,6 +1149,7 @@ export class StarMap {
     this.canvas.dataset.completing = String(this.completing.size);
     this.canvas.dataset.flares = String(this.flares.length);
     this.canvas.dataset.mode = this.metrics.mode;
+    this.canvas.dataset.hover = this.hover?.node.id ?? this.hoverHistory?.history.id ?? "";
     if (
       moving || (!this.reduced.matches && !this.frozen) ||
       (!this.reduced.matches && !this.frozen &&

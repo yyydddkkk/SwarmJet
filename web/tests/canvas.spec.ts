@@ -281,6 +281,7 @@ test("three lenses, pan, double click, wheel and Issue drag route to queen", asy
     "data-mode",
     "project",
   );
+  await expect(page.locator(".stars-canvas")).toHaveAttribute("data-hover", "");
   await settle(page);
   let issue = await point(page, "issue");
   q = await point(page, qid);
