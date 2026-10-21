@@ -25,7 +25,23 @@ function DeferredPanels(props: StarsSlotProps) {
     <Suspense fallback={null}><PanelsSlot {...props} /></Suspense>
   </div>;
 }
+/** Records whether the last interaction was a pointer, so scripted focus after a click shows no ring. */
+function useInputModality() {
+  useEffect(() => {
+    const root = document.documentElement;
+    const pointer = () => { root.dataset.input = "pointer"; };
+    const keyboard = (e: KeyboardEvent) => { if (!e.ctrlKey && !e.metaKey && !e.altKey) delete root.dataset.input; };
+    window.addEventListener("pointerdown", pointer, true);
+    window.addEventListener("keydown", keyboard, true);
+    return () => {
+      window.removeEventListener("pointerdown", pointer, true);
+      window.removeEventListener("keydown", keyboard, true);
+      delete root.dataset.input;
+    };
+  }, []);
+}
 export default function StarsApp({ source }: { source?: DataSource } = {}) {
+  useInputModality();
   return (
     <DataProvider source={source}>
       <StarsSession />

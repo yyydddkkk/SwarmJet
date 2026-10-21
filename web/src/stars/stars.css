@@ -29,6 +29,11 @@
   outline: 1px solid var(--ink2);
   outline-offset: 5px;
 }
+/* Scripted focus after a mouse click shows no ring; keyboard focus keeps it. */
+:root[data-input="pointer"] .stars-app button:focus-visible,
+:root[data-input="pointer"] .stars-app [tabindex]:focus-visible {
+  outline: 0;
+}
 .stars-canvas {
   position: absolute;
   inset: 0;
