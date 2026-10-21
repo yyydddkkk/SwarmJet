@@ -711,6 +711,8 @@ test("cluster opens the first six items and links to the active list", async ({ 
 
 test("only a confirmed failed CI appears as a diamond beside its PR", async ({ page }) => {
   await mount(page);
+  await page.evaluate(() => { const x = (window as any).__canvas; x.ui.selectProject(x.hive.id); });
+  await settle(page);
   const prId = await page.evaluate(() => `${(window as any).__canvas.hive.id}:pr:8`);
   expect(await point(page, "ci:ci")).toBeUndefined();
   await page.evaluate(() => {
@@ -720,6 +722,25 @@ test("only a confirmed failed CI appears as a diamond beside its PR", async ({ p
   await expect.poll(() => point(page, "ci:pr:8")).toBeTruthy();
   const ci = await point(page, "ci:pr:8"), pr = await point(page, prId);
   expect(Math.hypot(ci.x - pr.x, ci.y - pr.y)).toBeLessThan(50);
+  await page.mouse.click(ci.x, ci.y);
+  expect(await page.evaluate(() => (window as any).__canvas.ui.getSnapshot().selection)).toMatchObject({ kind: "pr", id: prId, number: 8 });
+});
+
+test("failed CI backed by a real check message opens that signal", async ({ page }) => {
+  await mount(page);
+  await page.evaluate(() => {
+    const x = (window as any).__canvas;
+    x.ui.selectProject(x.hive.id);
+    x.mock.push(x.hive.id, { type: "message", data: {
+      id: "ci", hiveId: x.hive.id, from: "github", to: "queen", kind: "external", chainId: "", hop: 0,
+      body: "GitHub event: check\nCheck: lint -> failed\n\nLint failed", trust: "external", state: "handled", createdAt: new Date().toISOString(),
+    } });
+  });
+  await settle(page);
+  await expect.poll(() => point(page, "ci:ci")).toBeTruthy();
+  const ci = await point(page, "ci:ci");
+  await page.mouse.click(ci.x, ci.y);
+  expect(await page.evaluate(() => (window as any).__canvas.ui.getSnapshot().selection)).toMatchObject({ kind: "signal", id: "ci", number: 8 });
 });
 
 test("hovering a finished Agent shows summary and opens its historical card", async ({ page }) => {

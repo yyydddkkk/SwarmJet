@@ -20,7 +20,7 @@ type Body = Point & {
   annotation: string;
   signal?: { kind: string; claimed: boolean };
   cluster?: { kind: "pr" | "issue"; items: { id: string; label: string }[] };
-  ci?: boolean;
+  ci?: { source: "message" | "pr-reason"; signalId?: string };
   stale?: boolean;
 };
 type System = Point & {
@@ -311,7 +311,7 @@ export class StarMap {
       for (const ci of state.derived?.failedCI ?? []) {
         const parent = system.bodies.find((b) => b.node.prNumber === ci.prNumber && b.node.kind === "planet");
         if (!parent) continue;
-        system.bodies.push({ ...ellipse(parent, 0.65, 27), node: { id: ci.id, kind: "signal", hiveId: system.id, prNumber: ci.prNumber, label: ci.reason }, angle: .65, radius: 27, annotation: "CI 未通过", ci: true });
+        system.bodies.push({ ...ellipse(parent, 0.65, 27), node: { id: ci.id, kind: "signal", hiveId: system.id, prNumber: ci.prNumber, label: ci.reason }, angle: .65, radius: 27, annotation: "CI 未通过", ci: { source: ci.source, signalId: ci.signalId } });
       }
       const addCluster = (kind: "pr" | "issue", label: string | undefined, items: { id: string; label: string }[], angle: number, radius: number) => {
         if (!label) return;
@@ -459,6 +459,11 @@ export class StarMap {
   private selection(body: Body): ObjectSelection | undefined {
     const n = body.node;
     if (n.kind === "queue") return;
+    if (body.ci) {
+      if (body.ci.source === "message" && body.ci.signalId)
+        return { hiveId: n.hiveId, kind: "signal", id: body.ci.signalId, number: n.prNumber };
+      return { hiveId: n.hiveId, kind: "pr", id: `${n.hiveId}:pr:${n.prNumber}`, number: n.prNumber };
+    }
     return {
       hiveId: n.hiveId,
       id: n.id,
