@@ -38,7 +38,7 @@ import type {
   UsageGroup,
   UsageResponse,
   UsageTotals,
-} from "../src/hive/types";
+} from "../src/data/types";
 
 export type MockFailure = Partial<
   Record<
