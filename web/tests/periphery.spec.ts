@@ -130,14 +130,17 @@ test("品牌、题签和五项工具按设计导航", async ({ page }) => {
   await page.getByRole("button", { name: "进入星图" }).click();
   const tools = page.getByRole("navigation", { name: "工具" });
   await expect(tools.getByRole("button")).toHaveCount(5);
-  await page.getByRole("button", { name: "平台设置", exact: true }).click();
+  await expect(page.locator(".stars-brand")).toHaveAttribute("aria-label", "SwarmJet 平台设置");
+  await page.locator(".stars-brand").click();
   await expect(page.getByRole("dialog", { name: "平台设置" })).toBeVisible();
   await page.getByRole("button", { name: "关闭平台设置" }).click();
-  await page.getByRole("button", { name: "项目面板", exact: true }).click();
+  await expect(page.locator(".stars-cartouche")).toHaveAccessibleName(/SwarmJet 平台.*项目面板/);
+  await page.locator(".stars-cartouche").click();
   await expect(page.getByRole("region", { name: "项目面板" })).toBeVisible();
   await page.getByRole("button", { name: "关闭项目面板" }).click();
   await page.getByRole("navigation", { name: "位置" }).getByRole("button", { name: "全部项目" }).click();
-  await page.getByRole("button", { name: "浏览所有项目" }).click();
+  await expect(page.locator(".stars-cartouche")).toHaveAccessibleName(/全部项目.*浏览所有项目/);
+  await page.locator(".stars-cartouche").click();
   await expect(page.getByRole("dialog", { name: "列表" })).toBeVisible();
 });
 

@@ -9,6 +9,7 @@
 .stars-tools{right:60px;bottom:47px;display:flex;gap:24px;z-index:4}
 .stars-tools button{font-size:16px;color:var(--ink2);padding:2px 0!important;border-bottom:1px solid transparent!important;white-space:nowrap}.stars-tools button:hover,.stars-tools button.on{color:var(--ink);border-color:var(--ink3)!important}
 .stars-mark.covered,.stars-cartouche.covered,.stars-tools.covered{visibility:hidden;pointer-events:none}
+.periphery-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .stars-say{left:50%;bottom:46px;transform:translateX(-50%);width:300px;text-align:center;font:italic 16px var(--body);border-bottom:1px solid var(--hair);transition:width .5s cubic-bezier(.2,.8,.2,1),border-color .3s,opacity .3s}
 .stars-say:focus-within{width:460px;border-color:var(--ink3)}.stars-say input{width:100%;padding:4px 0!important;border:0!important;background:none!important;text-align:center;font:inherit;color:var(--ink)}.stars-say input:focus-visible{outline:1px solid var(--ink2);outline-offset:5px}.stars-say input::placeholder{color:var(--ink3)}
 .stars-say-submit{position:absolute;width:1px;height:1px;padding:0!important;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0!important}
