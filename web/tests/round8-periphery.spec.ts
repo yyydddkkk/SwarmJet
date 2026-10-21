@@ -62,6 +62,30 @@ test("375px 和快捷键可操作", async ({ page }) => {
   await expect(page.getByLabel("对话与命令")).toBeFocused();
 });
 
+test("列表图标与状态列保持设计宽度，摘要占剩余空间且手机可打开详情", async ({ browser }) => {
+  for (const width of [1440, 375]) {
+    const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
+    const page = await context.newPage();
+    await preview(page);
+    await page.getByRole("button", { name: "进入星图" }).click();
+    await page.getByRole("button", { name: "列表", exact: true }).click();
+    const list = page.getByRole("dialog", { name: "列表" });
+    await expect(list).toBeVisible();
+    const sizes = await list.locator("tr.item").first().locator("td").evaluateAll((cells) => cells.map((cell) => Math.round(cell.getBoundingClientRect().width)));
+    console.log(`catalogue ${width}px columns: ${sizes.join(" / ")}`);
+    expect(sizes, `${width}px column widths`).toHaveLength(4);
+    expect(sizes[0], `${width}px glyph`).toBeLessThanOrEqual(48);
+    expect(sizes[2], `${width}px status`).toBeLessThanOrEqual(width === 1440 ? 158 : 96);
+    expect(sizes[3], `${width}px cost`).toBeLessThanOrEqual(width === 1440 ? 98 : 66);
+    expect(sizes[1], `${width}px summary`).toBeGreaterThan(width === 1440 ? 400 : 100);
+    expect(await list.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(width);
+    await list.getByLabel("查找项目、Agent 或 PR").fill("PR #1");
+    await list.locator("tr.item").first().click();
+    await expect(page.getByRole("region", { name: "对象详情" })).toBeVisible();
+    await context.close();
+  }
+});
+
 test("明亮和夜空稳定画面逐层执行完整 axe", async ({ browser }) => {
   for (const theme of ["bright", "night"] as const) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
