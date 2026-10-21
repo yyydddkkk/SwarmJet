@@ -61,3 +61,7 @@ shell 在 `StarsApp.tsx` 为每个项目创建且持有一个 `ProjectStore`，�
 `StarsUI`：`getSnapshot/subscribe`、`selectProject(hiveId?)`、`selectObject({hiveId,kind,id,number?})`、`openProject(tab)`、`openPlatform(tab,setupQuery?)`、`openOverlay(overlay)`、`close()`，React 用 `useStarsUI(ui)`。platform 单独出现并清左右；list/brief 清左右；项目面板可和右详情共存；close 按 overlay → platform → selection → project → 全项目逐层退出。只有 E 注册全局快捷键/Esc；D 负责焦点 trap/归还，避免重复 close。`#/setup?...` GitHub 回调打开 platform setup，原 query 在 setupQuery（保留 connected/error）；C 应显示对应通知。
 
 主题：`THEMES` 是 bright/paper/night 可扩展表，含 colors/render；`themeStore.getSnapshot/subscribe/setTheme/setStyle/setGrid`，React `useTheme`。choice 为 system/主题id，style 为 classic/simple。colors 写 `--paper/ink/ink2/ink3/hair/accent/veil`，字体写 `--title/body`；画布订阅主题对象 render 参数。仅偏好写 localStorage（全部try/catch且校验合法主题）。
+
+### 简报与列表规则
+
+`activeAgents(agents)`、`attentionAgents(snapshot, now?, acknowledged?)`、`completedLastNight(agents, now?)` 提供简报的工作中对象、最近 24 小时且未确认的失败/长期空闲项、昨晚完成数（仍按 updatedAt 近似）。`catalogueRows(snapshot, scope?, query?, now?, acknowledged?)` 返回纯数据行：id、glyph、summary、status、cost、scopes、search、selection。界面只负责把 selection 交给 UI 导航。今天按本地自然日；历史包含今天完成的对象，三个筛选可重叠，确保每颗历史星都能在历史里找到。`agentStateLabel`、`addressLabel`、`messageTrustLabel` 统一状态与来源标签。

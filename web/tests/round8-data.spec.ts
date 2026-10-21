@@ -6,6 +6,7 @@ import { createMockDataSource } from "../src/data/mock";
 import { createProjectStore } from "../src/data/store";
 import { APIError } from "../src/data/api";
 import { loadProjectResources } from "../src/data/api";
+import { activeAgents, attentionAgents, catalogueRows, completedLastNight } from "../src/data/views";
 import type { MessagePage } from "../src/data/http";
 import { deriveProject } from "../src/data/derive";
 
@@ -307,4 +308,26 @@ test("acknowledgement recomputes shared visibility without a network refresh", a
     if (original) Object.defineProperty(globalThis, "localStorage", original);
     else Reflect.deleteProperty(globalThis, "localStorage");
   }
+});
+test("brief and catalogue rules include fresh history without counting old failures", () => {
+  const now = new Date(2026, 9, 20, 12).getTime();
+  const fixture = round8Project(now);
+  const base = fixture.agents[1];
+  const at = (hours: number) => new Date(now - hours * 3600000).toISOString();
+  fixture.agents = [
+    { ...base, id: "live", state: "active", updatedAt: at(1) },
+    { ...base, id: "done-today", state: "completed", updatedAt: at(1) },
+    { ...base, id: "failed-now", state: "failed", updatedAt: at(2) },
+    { ...base, id: "failed-old", state: "failed", updatedAt: at(25) },
+    { ...base, id: "night", state: "completed", updatedAt: at(13) },
+  ];
+  expect(activeAgents(fixture.agents).map((agent) => agent.id)).toEqual(["live"]);
+  expect(attentionAgents(fixture, now, () => false).map((agent) => agent.id)).toEqual(["failed-now"]);
+  expect(attentionAgents(fixture, now, () => true)).toEqual([]);
+  expect(catalogueRows(fixture, "history", "done-today", now, () => false).map((row) => row.id)).toEqual(["done-today"]);
+  expect(catalogueRows(fixture, "today", "done-today", now).map((row) => row.id)).toEqual(["done-today"]);
+  expect(catalogueRows(fixture, "active", "failed-now", now, () => false)).toHaveLength(1);
+  expect(catalogueRows(fixture, "active", "failed-now", now, () => true)).toHaveLength(0);
+  expect(catalogueRows(fixture, "history", "done-today", now)[0].status).toBe("已完成");
+  expect(completedLastNight(fixture.agents, now)).toBe(1);
 });
