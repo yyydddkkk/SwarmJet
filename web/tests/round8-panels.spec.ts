@@ -78,6 +78,7 @@ test("realistic fixture and long details stay readable", async ({page}) => {
   await expect(panel).toContainText("独立验证");
   await expect(panel).toContainText("当前提交还没有验证结论");
   await expect(panel.locator(".pc-attestation .pc-clamped")).toBeVisible();
+  await expect(panel.locator(".pc-attestation")).toContainText("其他提交");
   await expect(panel.getByRole("button", {name: "确认合并"})).toHaveCSS("color", "rgb(138, 103, 22)");
 });
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   useDataAPI,
   useProjectState,
-  oneLineSummary, prSummary, weightedTruncate, uniqueLongTexts, shortAgentId, shortSha, relativeTime, localizedReason, agentStateLabel, addressLabel, messageTrustLabel,
+  oneLineSummary, prSummary, weightedTruncate, uniqueLongTexts, shortAgentId, shortSha, relativeTime, localizedReason, agentStateLabel, addressLabel, messageTrustLabel, attestationStateLabel,
   type Agent,
   type HiveOverview,
   type Message,
@@ -502,7 +502,7 @@ export function PRPanel({
           </p>
           <p>
             <ShortCopy value={a.attesterId} short={shortAgentId(a.attesterId)} label="验证 Agent" /> {a.isAuthor ? "作者" : "独立验证"}{" "}
-            {a.superseded ? "已作废" : "有效"}
+            {attestationStateLabel(a, observed)}
           </p>
           <ShortCopy value={a.headSha} short={shortSha(a.headSha)} label="验证提交" />
           <time dateTime={a.createdAt}>{relativeTime(a.createdAt)}</time>

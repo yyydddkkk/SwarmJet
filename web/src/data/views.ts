@@ -1,4 +1,4 @@
-import type { Agent, AgentState, ProjectSnapshot } from "./types";
+import type { Agent, AgentState, Attestation, ProjectSnapshot } from "./types";
 import { agentSummary, agentVisibility, issueVisible, prSummary, prVisible, readAcknowledged, shortAgentId, weightedTruncate } from "./rules";
 
 export const agentStateLabel = (state: AgentState) => ({
@@ -9,6 +9,11 @@ export const addressLabel = (address: string) => address === "queen" ? "主 Agen
   address === "hive" || address === "system" ? "系统" : address.startsWith("local:") ? "你" :
   address.startsWith("forager:") ? `Agent ${shortAgentId(address.slice(8))}` : address;
 export const messageTrustLabel = (trust: string) => ({ user: "来自管理员", agent: "来自 Agent", external: "外部内容，未经核实", system: "来自系统" } as Record<string, string>)[trust] || trust;
+export function attestationStateLabel(attestation: Pick<Attestation, "superseded" | "headSha">, observedHead?: string): string {
+  if (attestation.superseded) return "已作废";
+  if (!observedHead) return "尚未核对提交";
+  return attestation.headSha === observedHead ? "对应已读取提交" : "其他提交";
+}
 export const activeAgents = (agents: Agent[]) => agents.filter((agent) => agent.state === "active" || agent.state === "creating");
 export function completedLastNight(agents: Agent[], now = Date.now()): number {
   const start = new Date(now), end = new Date(now);

@@ -6,7 +6,7 @@ import { createMockDataSource } from "../src/data/mock";
 import { createProjectStore } from "../src/data/store";
 import { APIError } from "../src/data/api";
 import { loadProjectResources } from "../src/data/api";
-import { methodologyDescription, activeAgents, attentionAgents, catalogueRows, completedLastNight } from "../src/data/views";
+import { methodologyDescription, activeAgents, attentionAgents, catalogueRows, completedLastNight, attestationStateLabel } from "../src/data/views";
 import type { MessagePage } from "../src/data/http";
 import { deriveProject } from "../src/data/derive";
 import { nodeSummary } from "../src/data/rules";
@@ -27,6 +27,13 @@ test("the star label budget includes its object identifier", () => {
     expect(width, label).toBeLessThanOrEqual(14.01);
   }
   expect(nodeSummary("pr", { ...data.prs[0], title: "修复" })).toBe("#1 修复");
+});
+
+test("attestation labels describe their relation to the reviewed commit", () => {
+  expect(attestationStateLabel({superseded: false, headSha: "old"}, "new")).toBe("其他提交");
+  expect(attestationStateLabel({superseded: false, headSha: "new"}, "new")).toBe("对应已读取提交");
+  expect(attestationStateLabel({superseded: true, headSha: "new"}, "new")).toBe("已作废");
+  expect(attestationStateLabel({superseded: false, headSha: "new"})).toBe("尚未核对提交");
 });
 
 test("realistic fixture exercises density and text rules", () => {

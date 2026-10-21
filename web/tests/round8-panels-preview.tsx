@@ -11,7 +11,7 @@ snapshot.hive.repository = "yyydddkkk/test-for-myself";
 snapshot.messages[0] = { ...snapshot.messages[0], from: `forager:${snapshot.agents[0].id}`, to: `forager:${snapshot.agents[0].id}` };
 snapshot.prs[1].attestations = [{
   id: "mock-verification", hiveId: "swarmjet", prNumber: 2,
-  headSha: snapshot.prs[1].headSha, attesterId: snapshot.agents[9].id,
+  headSha: "b".repeat(40), attesterId: snapshot.agents[9].id,
   authorId: snapshot.agents[1].id, isAuthor: false, result: "pass_notes",
   summary: "独立验证已覆盖旧数据与失败路径。".repeat(25),
   superseded: false, createdAt: new Date(Date.now() - 3600000).toISOString(),
