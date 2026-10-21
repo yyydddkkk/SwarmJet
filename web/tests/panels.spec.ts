@@ -150,6 +150,20 @@ test("project view changes start at the top after scrolling the overview", async
   await expect(panel.getByRole("combobox", {name:"查看方法论版本"})).toHaveValue("2");
   await expect(panel.getByRole("combobox", {name:"查看方法论版本"})).toBeInViewport();
 });
+test("saving project settings keeps the current scroll position", async ({page}) => {
+  await open(page);
+  await page.getByRole("button", {name:"项目", exact:true}).click();
+  const panel = page.getByRole("region", {name:"项目面板"});
+  await panel.getByRole("button", {name:"更多项目设置"}).click();
+  await panel.getByLabel("并发上限", {exact:true}).fill("7");
+  await panel.evaluate(el => el.scrollTop = el.scrollHeight);
+  const before = await panel.evaluate(el => el.scrollTop);
+  expect(before).toBeGreaterThan(100);
+  await panel.getByRole("button", {name:"保存设置"}).dispatchEvent("click");
+  await expect(panel.getByRole("status")).toContainText("项目设置已保存");
+  const after = await panel.evaluate(el => el.scrollTop);
+  expect(after).toBeGreaterThan(100);
+});
 test("merge submits the head actually displayed and prevents double click", async ({
   page,
 }) => {
