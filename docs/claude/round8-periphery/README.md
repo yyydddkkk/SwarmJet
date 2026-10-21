@@ -4,7 +4,7 @@
 
 | 界面 | 明亮 | 夜空 | 对照差异 |
 |---|---|---|---|
-| 简报 | [并排图](compare-bright-brief.png) | [并排图](compare-night-brief.png) | 设计稿展示三个项目及固定示例；实现使用一个高密度项目和真实派生数据，因而决定数、文案与星图不同。结构、字号、左上位置、行间距、细线和进出位移沿用设计稿。实现增加“还有 N 个”与最近 24 小时失败项的“知道了”；右侧状态保持一行。 |
+| 简报 | [并排图](compare-bright-brief.png) | [并排图](compare-night-brief.png) | 设计稿展示三个项目及固定示例；实现使用一个高密度项目和真实派生数据，因而决定数、文案与星图不同。结构、字号、左上位置、行间距、细线和进出位移沿用设计稿。实现增加“还有 N 个”与最近 24 小时失败项的“知道了”；右侧状态保持一行。1440×900 下“需要你”与“需要留意”同屏。点击“进入星图”后按设计推近待决定的项目。 |
 | 列表 | [并排图](compare-bright-list.png) | [并排图](compare-night-list.png) | 设计稿按项目列出当前对象；实现添加任务要求的“活跃 / 今天 / 历史”三项筛选，历史对象可搜索。数据内容不同。列表背景改为不透底的既有 `--paper`，避免下层文字透出；搜索焦点仍用设计稿的细线。 |
 | 图例 | [并排图](compare-bright-legend.png) | [并排图](compare-night-legend.png) | 位置、尺寸、行距、图形定义照设计稿；实现按本轮需求增加 CI，故多一行。原稿的 h4 调整为视觉相同的 h2，让 axe 标题顺序通过。星图由另一任务实现，图形与其共享 `star-glyphs.ts`。 |
 | 显示 | [并排图](compare-bright-display.png) | [并排图](compare-night-display.png) | 三行文字切换及位置尺寸与设计稿一致，主题项依次为明亮、纸本、夜空、跟随系统；没有原生选择框或复选框。背后星图和项目数因 mock 不同。 |
@@ -14,4 +14,4 @@
 
 本轮列表中的“今天”按对象更新时间筛选，“历史”包括所有已结束对象，包含今天结束的对象；画布的历史星结束时间按 Agent `updatedAt` 近似。费用只显示 API 已提供的 Agent `costUsd`，未填的对象留空。
 
-验证：`cd web && npm ci && npm run build`，[构建日志](build.log)；`PLAYWRIGHT_PORT=5278 npx playwright test`，[完整日志](playwright.log)，93/93 通过。专项测试含 375px、快捷键、确认后共享 store 即时重算、同号 Issue/PR 命令消歧、发送期间保留新草稿，以及各外围界面完整 axe violations 检查。
+验证：`cd web && npm ci && npm run build`；第七轮原用例恢复后详见 [覆盖映射](regression-coverage.md) 与 [恢复后构建日志](build-restored.log)。先前的 [93/93 日志](playwright.log) 在覆盖复核中被退回，**不作为最终全量结果**。恢复后的完整命令 `cd web && PLAYWRIGHT_PORT=5278 npx playwright test` 见 [playwright-restored.log](playwright-restored.log)：112/113 通过；E 单支唯一红项为 check 详情误显示 Issue 派活按钮，依赖 D 的 Issue-only 守卫提交 `4d3d204`，待 D→E 集成后联合验证。专项测试仍覆盖 375px、1440×900 简报需要项和留意项同屏、快捷键、确认后共享 store 即时重算、同号 Issue/PR 命令消歧、发送期间保留新草稿，以及各外围界面完整 axe violations 检查。

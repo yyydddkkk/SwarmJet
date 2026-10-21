@@ -28,6 +28,23 @@ test("48 Agent、19 PR、13 Issue 与 900 消息保持单行密度和历史可�
   await expect(list.locator("tr.item form")).toHaveCount(0);
 });
 
+test("1440×900 简报需要项与留意项同屏，进入后推近待决定项目", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await preview(page);
+  const brief = page.getByRole("dialog", { name: "简报" });
+  const need = brief.getByRole("heading", { name: "需要你", exact: true });
+  const attention = brief.getByRole("button", { name: "知道了" });
+  await expect(need).toBeVisible();
+  await expect(attention).toBeVisible();
+  const end = await attention.boundingBox();
+  expect(end).not.toBeNull();
+  expect(end!.y + end!.height).toBeLessThanOrEqual(900);
+  expect(await brief.evaluate((element) => element.scrollTop)).toBe(0);
+  await brief.getByRole("button", { name: "进入星图" }).click();
+  await expect(page.getByRole("navigation", { name: "位置" })).toContainText("test-for-myself");
+  await expect(page.locator(".stars-canvas")).toHaveAttribute("data-mode", "project");
+});
+
 test("375px 和快捷键可操作", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await preview(page);
