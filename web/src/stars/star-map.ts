@@ -55,6 +55,7 @@ const ellipse = (p: Point, angle: number, radius: number): Point => {
   };
 };
 const signalIsClaimed = (body: Body) => !!body.signal?.claimed;
+const TEXT_COVER_SELECTOR = ".pc-left, .pc-right, .pc-platform, .periphery-surface, .periphery-list, .periphery-pop, .periphery-onboarding, .periphery-create, .stars-note, .stars-decisions, .stars-history-hover";
 const backgroundStars = (() => {
   let seed = 7;
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -76,6 +77,8 @@ export type MapMetrics = {
   completing: number;
   flares: number;
   targetFps: number;
+  labelsDrawn: number;
+  labelsCovered: number;
 };
 export class StarMap {
   readonly metrics: MapMetrics = {
@@ -92,6 +95,8 @@ export class StarMap {
     completing: 0,
     flares: 0,
     targetFps: 30,
+    labelsDrawn: 0,
+    labelsCovered: 0,
   };
   private ctx: CanvasRenderingContext2D;
   private width = 1;
@@ -682,6 +687,17 @@ export class StarMap {
       this.camera.scale = Math.exp(Math.log(this.camera.scale) + (Math.log(this.target.scale) - Math.log(this.camera.scale)) * .06);
     } else this.camera = { ...this.target };
     const s = this.camera.scale;
+    const canvasRect = this.canvas.getBoundingClientRect();
+    const coveredText = [...document.querySelectorAll<HTMLElement>(TEXT_COVER_SELECTOR)].flatMap((element) => {
+      const style = getComputedStyle(element);
+      const opening = element.classList.contains("open");
+      if (style.display === "none" || (style.visibility === "hidden" && !opening) || (Number(style.opacity) <= 0 && !opening)) return [];
+      const rect = element.getBoundingClientRect();
+      return rect.width && rect.height ? [[rect.left - canvasRect.left, rect.top - canvasRect.top, rect.right - canvasRect.left, rect.bottom - canvasRect.top] as [number, number, number, number]] : [];
+    });
+    const textCovered = (box: [number, number, number, number]) => coveredText.some((rect) => box[0] < rect[2] && box[2] > rect[0] && box[1] < rect[3] && box[3] > rect[1]);
+    this.metrics.labelsDrawn = 0;
+    this.metrics.labelsCovered = 0;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.fillStyle = C.paper;
@@ -722,11 +738,18 @@ export class StarMap {
       italic = true,
       color = C.ink2,
       align: CanvasTextAlign = "center",
+      alreadyChecked = false,
     ) => {
       ctx.fillStyle = color;
       ctx.font = `${italic && !simple ? "italic " : ""}${size}px ${simple ? '"IBM Plex Sans","Noto Sans SC",sans-serif' : '"Source Serif 4","Noto Serif SC",serif'}`;
       ctx.textAlign = align;
+      if (!alreadyChecked) {
+        const width = ctx.measureText(text).width;
+        const left = align === "right" ? p.x - width : align === "center" ? p.x - width / 2 : p.x;
+        if (textCovered([left - 4, p.y - size - 1, left + width + 4, p.y + 5])) { this.metrics.labelsCovered++; return; }
+      }
       ctx.fillText(text, p.x, p.y);
+      this.metrics.labelsDrawn++;
     };
     ctx.fillStyle = C.ink;
     ctx.strokeStyle = C.ink;
@@ -1012,7 +1035,10 @@ export class StarMap {
         ctx.fillStyle = C.ink;
         ctx.font = `${simple ? "" : "italic "}19px ${simple ? '"IBM Plex Sans","Noto Sans SC",sans-serif' : '"IM Fell English","Noto Serif SC",serif'}`;
         ctx.textAlign = "center";
-        ctx.fillText(system.name, p.x, p.y + 300 * AS * s + 30);
+        const titleY = p.y + 300 * AS * s + 30;
+        const titleWidth = ctx.measureText(system.name).width;
+        if (textCovered([p.x - titleWidth / 2 - 4, titleY - 20, p.x + titleWidth / 2 + 4, titleY + 5])) this.metrics.labelsCovered++;
+        else { ctx.fillText(system.name, p.x, titleY); this.metrics.labelsDrawn++; }
         if (system.decisionIds.size) label(`${system.decisionIds.size} 件事等你`, { x: p.x, y: p.y + 300 * AS * s + 49 }, 13, true, C.accent);
       }
     }
@@ -1027,10 +1053,11 @@ export class StarMap {
         const w = ctx.measureText(item.text).width;
         const left = item.align === "center" ? item.p.x - w / 2 : item.align === "right" ? item.p.x - w : item.p.x;
         const box: [number, number, number, number] = [left - 4, item.p.y - item.size - 1, left + w + 4, item.p.y + 5];
+        if (textCovered(box)) { this.metrics.labelsCovered++; continue; }
         if (occupied.some((other) => box[0] < other[2] && box[2] > other[0] && box[1] < other[3] && box[3] > other[1])) continue;
         occupied.push(box);
         ctx.globalAlpha = item.alpha;
-        label(item.text, item.p, item.size, item.italic, item.color, item.align);
+        label(item.text, item.p, item.size, item.italic, item.color, item.align, true);
       }
     }
     if (this.hover && view.hiveId === this.hover.node.hiveId) {
@@ -1157,6 +1184,8 @@ export class StarMap {
     this.canvas.dataset.flares = String(this.flares.length);
     this.canvas.dataset.mode = this.metrics.mode;
     this.canvas.dataset.hover = this.hover?.node.id ?? this.hoverHistory?.history.id ?? "";
+    this.canvas.dataset.labelsDrawn = String(this.metrics.labelsDrawn);
+    this.canvas.dataset.labelsCovered = String(this.metrics.labelsCovered);
     if (
       moving || (!this.reduced.matches && !this.frozen) ||
       (!this.reduced.matches && !this.frozen &&

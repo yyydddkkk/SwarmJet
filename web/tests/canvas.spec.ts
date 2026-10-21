@@ -1,14 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { writeFileSync } from "node:fs";
-async function mount(page: Page, large = false, multiple = false) {
+async function mount(page: Page, large = false, multiple = false, realisticFixture = false) {
   page.on("pageerror", (e) => console.log("CANVAS_ERROR", e.message));
   await page.route("**/api/**", (r) =>
     r.fulfill({ status: 401, json: { error: "test session" } }),
   );
   await page.goto("/");
   await page.evaluate(
-    async ({ large, multiple }) => {
+    async ({ large, multiple, realisticFixture }) => {
       const load = (p: string) => import(/* @vite-ignore */ p);
       const [R, DOM, data, UI, Canvas, Timeline, f, m, round8] = await Promise.all([
         load("/node_modules/.vite/deps/react.js"),
@@ -33,7 +33,7 @@ async function mount(page: Page, large = false, multiple = false) {
           state: "active",
         };
       const realistic = round8.round8Project();
-      const snapshot = {
+      const snapshot = realisticFixture ? realistic : {
         hive,
         localAddress: "local:web-admin",
         agents: large
@@ -188,7 +188,7 @@ async function mount(page: Page, large = false, multiple = false) {
         load,
       };
     },
-    { large, multiple },
+    { large, multiple, realisticFixture },
   );
   await expect(page.locator(".stars-canvas")).toHaveAttribute(
     "data-mode",
@@ -328,6 +328,29 @@ test("three lenses, pan, double click, wheel and Issue drag route to queen", asy
     "data-mode",
     "all",
   );
+});
+test("canvas labels stay out of mounted side panels and overlays during exit", async ({ page }) => {
+  await mount(page);
+  await page.evaluate(() => { const x = (window as any).__canvas; x.ui.selectProject(x.hive.id); });
+  await settle(page);
+  const canvas = page.locator(".stars-canvas");
+  expect(Number(await canvas.getAttribute("data-labels-drawn"))).toBeGreaterThan(0);
+  for (const className of ["pc-right", "pc-left", "pc-platform", "periphery-list", "periphery-pop"]) {
+    await page.evaluate((className) => {
+      const cover = document.createElement("section"); cover.className = className; cover.id = "test-cover";
+      Object.assign(cover.style, { position: "fixed", inset: "0", width: "100vw", height: "100vh", maxHeight: "none", opacity: ".5", visibility: "visible", pointerEvents: "none" });
+      document.body.append(cover);
+    }, className);
+    await expect.poll(async () => Number(await canvas.getAttribute("data-labels-covered"))).toBeGreaterThan(0);
+    await expect(canvas).toHaveAttribute("data-labels-drawn", "0");
+    expect(await point(page, "worker-1")).toBeTruthy();
+    await page.locator("#test-cover").evaluate((el) => { (el as HTMLElement).style.opacity = "0"; });
+    await expect.poll(async () => Number(await canvas.getAttribute("data-labels-drawn"))).toBeGreaterThan(0);
+    await page.locator("#test-cover").evaluate((el) => el.classList.add("open"));
+    await expect.poll(async () => Number(await canvas.getAttribute("data-labels-covered"))).toBeGreaterThan(0);
+    await page.locator("#test-cover").evaluate((el) => el.remove());
+  }
+  await expect.poll(async () => Number(await canvas.getAttribute("data-labels-drawn"))).toBeGreaterThan(0);
 });
 test("observer manual PR and question decisions open correct detail", async ({
   page,
@@ -637,6 +660,41 @@ for (const mode of ["all", "project"])
     expect(result.p95).toBeLessThan(60);
   });
 
+test("round8 fixture keeps normal project motion near 30 fps with measured CPU", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await mount(page, false, false, true);
+  await page.evaluate(() => { const x = (window as any).__canvas; x.ui.selectProject(x.hive.id); });
+  await page.waitForTimeout(2200);
+  const canvas = page.locator(".stars-canvas");
+  await canvas.evaluate((el: any) => { el.starMapMetrics.durations.length = 0; });
+  const framesBefore = Number(await canvas.getAttribute("data-frames"));
+  const cdp = await page.context().browser()!.newBrowserCDPSession();
+  const before = await cdp.send("SystemInfo.getProcessInfo");
+  const wallBefore = performance.now();
+  await page.waitForTimeout(5000);
+  const wallMs = performance.now() - wallBefore;
+  const after = await cdp.send("SystemInfo.getProcessInfo");
+  const beforeRenderers = new Map((before.processInfo as any[]).filter((p) => p.type === "renderer").map((p) => [p.id, p.cpuTime]));
+  const stableRenderers = (after.processInfo as any[]).filter((p) => p.type === "renderer" && beforeRenderers.has(p.id));
+  const cpuDelta = stableRenderers.reduce((sum, p) => sum + p.cpuTime - (beforeRenderers.get(p.id) ?? p.cpuTime), 0);
+  const metrics = await canvas.evaluate((el: any) => structuredClone(el.starMapMetrics));
+  const durations = metrics.durations.sort((a: number, b: number) => a - b);
+  const frames = Number(await canvas.getAttribute("data-frames")) - framesBefore;
+  const result = {
+    fixture: "round8Project()", viewport: "1440x1000", dpr: await page.evaluate(() => devicePixelRatio),
+    browser: `Chromium ${page.context().browser()?.version()}`, theme: "bright", style: "classic", reducedMotion: false,
+    mode: "project", nodes: metrics.nodes, history: metrics.history, targetFps: metrics.targetFps,
+    measuredFps: frames * 1000 / wallMs, idleFrames: frames, idleWindowMs: wallMs,
+    samples: durations.length, p50: durations[Math.floor(durations.length * .5)], p95: durations[Math.floor(durations.length * .95)],
+    rendererCpuPercentOfOneCore: cpuDelta / (wallMs / 1000) * 100, rendererProcessCount: stableRenderers.length,
+    cpuMethod: "CDP SystemInfo.getProcessInfo renderer cpuTime delta over 5s idle wall time; one worker/page; percent of one CPU core",
+  };
+  writeFileSync(info.outputPath("round8-performance.json"), JSON.stringify(result, null, 2));
+  console.log("ROUND8_PERFORMANCE", JSON.stringify(result));
+  expect(result.targetFps).toBe(30);
+  expect(result.measuredFps).toBeGreaterThan(25);
+});
+
 test("blank click requests creation; double click cancels creation; distant projects remain", async ({
   page,
 }) => {
@@ -729,7 +787,7 @@ test("note and decision cards fade with their content, then become inert", async
   expect(entering).toBeLessThan(1);
   await expect(note).toHaveCSS("opacity", "1");
   const noteAxe = await new AxeBuilder({ page }).analyze();
-  expect(noteAxe.violations.filter((v) => v.id === "heading-order" || ["serious", "critical"].includes(v.impact ?? ""))).toEqual([]);
+  expect(noteAxe.violations).toEqual([]);
   await note.getByRole("button", { name: "关闭" }).click();
   await expect(note).toHaveAttribute("aria-hidden", "true");
   await expect(note).toHaveAttribute("inert", "");
@@ -750,7 +808,7 @@ test("note and decision cards fade with their content, then become inert", async
   expect(opening).toBeLessThan(1);
   await expect(decisions).toHaveCSS("opacity", "1");
   const decisionAxe = await new AxeBuilder({ page }).analyze();
-  expect(decisionAxe.violations.filter((v) => v.id === "heading-order" || ["serious", "critical"].includes(v.impact ?? ""))).toEqual([]);
+  expect(decisionAxe.violations).toEqual([]);
   await decisions.getByRole("button", { name: "关闭等你决定的事" }).click();
   await expect(decisions).toHaveAttribute("aria-hidden", "true");
   await expect(decisions).toHaveAttribute("inert", "");
@@ -763,6 +821,19 @@ test("note and decision cards fade with their content, then become inert", async
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(note).toHaveCSS("transition-duration", "0s");
   await expect(decisions).toHaveCSS("transition-duration", "0s");
+  await page.evaluate(async () => {
+    const x = (window as any).__canvas;
+    const { themeStore } = await x.load("/src/stars/theme.ts");
+    themeStore.setTheme("night");
+  });
+  const nightCluster = await point(page, id);
+  await page.mouse.click(nightCluster.x, nightCluster.y);
+  await expect(note).toHaveCSS("opacity", "1");
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await note.getByRole("button", { name: "关闭" }).click();
+  await page.locator(".stars-observer").click();
+  await expect(decisions).toHaveCSS("opacity", "1");
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
 test("only a confirmed failed CI appears as a diamond beside its PR", async ({ page }) => {
@@ -818,7 +889,9 @@ test("hovering a finished Agent shows summary and opens its historical card", as
   await expect(page.locator(".stars-note.open")).toContainText("结束时间按 Agent 最近更新时间估算");
   await page.evaluate(() => { const h1 = document.createElement("h1"); h1.textContent = "星图"; document.querySelector("main.stars-app")!.prepend(h1); });
   const historyAxe = await new AxeBuilder({ page }).analyze();
-  expect(historyAxe.violations.filter((v) => v.id === "heading-order" || ["serious", "critical"].includes(v.impact ?? ""))).toEqual([]);
+  expect(historyAxe.violations).toEqual([]);
+  await page.evaluate(async () => { const x = (window as any).__canvas; const { themeStore } = await x.load("/src/stars/theme.ts"); themeStore.setTheme("night"); });
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
 test("reduced motion renders a static canvas after camera settles", async ({ page }) => {
