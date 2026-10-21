@@ -67,7 +67,7 @@ test("failed CI uses definite PR gate reasons or loaded check headers only", () 
   expect(failedCI([{ ...pr, reasons: ["required check failed: test"] }], [], [])).toHaveLength(1);
 });
 
-test("a 20 second PR request does not hold the other briefing sections", async ({ page }) => {
+test("a 20 second PR request does not hold the other briefing sections", async ({ page, baseURL }) => {
   test.setTimeout(35000);
   const mock = await mockStarsHTTP(page);
   let prRequests = 0;
@@ -76,8 +76,10 @@ test("a 20 second PR request does not hold the other briefing sections", async (
     await new Promise((resolve) => setTimeout(resolve, 20000));
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ prs: mock.prs }) });
   });
+  const productionURL = new URL(baseURL!);
+  productionURL.port = String(Number(productionURL.port) + 100);
   const navigationStart = Date.now();
-  await page.goto("/");
+  await page.goto(productionURL.href);
   await expect(page.getByRole("heading", { name: "今天，有这些事" })).toBeVisible();
   await expect(page.getByRole("button", { name: /为 Hive 页的 Forager 列表增加按状态筛选/ })).toBeVisible({ timeout: 1000 });
   const agentVisibleMs = Date.now() - navigationStart;
@@ -88,7 +90,7 @@ test("a 20 second PR request does not hold the other briefing sections", async (
   }
   await expect(page.getByRole("button", { name: /PR #88 修复兼容问题/ })).toBeVisible({ timeout: 25000 });
   expect(prRequests).toBe(1);
-  console.log(`20s PR delay: active Agent visible in ${agentVisibleMs}ms; PR requests=${prRequests}`);
+  console.log(`Production build, 20s PR delay: active Agent visible in ${agentVisibleMs}ms; PR requests=${prRequests}`);
 });
 
 test("time windows, acknowledgement, star cap and PR priority use fixed inputs", () => {
