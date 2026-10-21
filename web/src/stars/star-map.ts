@@ -188,13 +188,7 @@ export class StarMap {
     document.addEventListener("visibilitychange", visibility);
     this.cleanups.push(() => document.removeEventListener("visibilitychange", visibility));
     const motion = () => {
-      if (this.reduced.matches) {
-        this.pulses = [];
-        this.merging.clear();
-        this.completing.clear();
-        this.growing.clear();
-        this.flares = [];
-      }
+      if (this.reduced.matches) this.clearMotion();
       this.camera = { ...this.target };
       this.schedule();
     };
@@ -260,6 +254,15 @@ export class StarMap {
     clearTimeout(this.createTimer);
     if (this.frame !== undefined) cancelAnimationFrame(this.frame);
     this.cleanups.forEach((fn) => fn());
+  }
+  private clearMotion() {
+    this.pulses = [];
+    this.merging.clear();
+    this.completing.clear();
+    this.growing.clear();
+    this.flares = [];
+    this.metrics.flares = 0;
+    this.canvas.dataset.flares = "0";
   }
   private sync() {
     const now = performance.now();
@@ -657,6 +660,7 @@ export class StarMap {
   private draw = (now: number) => {
     this.frame = undefined;
     if (document.hidden) return;
+    if (this.reduced.matches && (this.flares.length || this.merging.size || this.completing.size || this.growing.size || this.pulses.length)) this.clearMotion();
     // Very dense projects keep ambient motion while limiting raster work.
     const frameInterval = this.metrics.nodes + this.metrics.history > 600 ? 48 : 32;
     this.metrics.targetFps = frameInterval === 48 ? 20 : 30;
@@ -926,7 +930,7 @@ export class StarMap {
             const length =
               (node.state === "completed" ? 16 : 38) *
               Math.min(Math.max(s, 0.5), 1.8);
-            const rays = this.metrics.nodes > 200 ? [] : [-3, -2, -1, 0, 1, 2, 3];
+            const rays = [-3, -2, -1, 0, 1, 2, 3];
             for (const offset of rays) {
               const a = offset * 0.055,
                 vx = ux * Math.cos(a) - uy * Math.sin(a),
@@ -1142,8 +1146,6 @@ export class StarMap {
     ctx.globalAlpha = 1;
     this.metrics.flares = this.flares.length;
     this.metrics.frames++;
-    this.metrics.durations.push(performance.now() - started);
-    if (this.metrics.durations.length > 2000) this.metrics.durations.shift();
     this.canvas.dataset.frames = String(this.metrics.frames);
     this.canvas.dataset.nodes = String(this.metrics.nodes);
     this.canvas.dataset.pulses = String(this.metrics.pulses);
@@ -1161,5 +1163,7 @@ export class StarMap {
         (this.pulses.length || this.merging.size || this.completing.size || this.growing.size || this.flares.length))
     )
       this.schedule();
+    this.metrics.durations.push(performance.now() - started);
+    if (this.metrics.durations.length > 2000) this.metrics.durations.shift();
   };
 }
