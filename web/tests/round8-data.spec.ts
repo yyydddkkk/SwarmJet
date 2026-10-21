@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { round8Project } from "../src/fixtures/round8";
-import { aggregateIssues, aggregatePRs, agentSummary, historyStars, localizedReason, shortAgentId, shortSha, shouldCollapseLongText, uniqueLongTexts, weightedTruncate } from "../src/data/rules";
+import { aggregateIssues, aggregatePRs, agentSummary, agentVisibility, firstSentence, historyPosition, historyStars, localizedReason, relativeTime, shortAgentId, shortSha, shouldCollapseLongText, uniqueLongTexts, weightedTruncate } from "../src/data/rules";
 import { mockStarsHTTP } from "./stars-http-mock";
 import { createMockDataSource } from "../src/data/mock";
 import { createProjectStore } from "../src/data/store";
 import { APIError } from "../src/data/api";
+import { loadProjectResources } from "../src/data/api";
 import type { MessagePage } from "../src/data/http";
 
 test("realistic fixture exercises density and text rules", () => {
@@ -42,15 +43,87 @@ test("a 20 second PR request does not hold the other briefing sections", async (
     await new Promise((resolve) => setTimeout(resolve, 20000));
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ prs: mock.prs }) });
   });
+  const navigationStart = Date.now();
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "今天，有这些事" })).toBeVisible();
-  const began = Date.now();
-  await expect(page.getByRole("heading", { name: "正在进行" })).toBeVisible({ timeout: 1000 });
-  await expect(page.getByText("当前没有工作中的 Agent。", { exact: true })).toHaveCount(0, { timeout: 1000 });
-  expect(Date.now() - began).toBeLessThan(1000);
+  await expect(page.getByRole("button", { name: /为 Hive 页的 Forager 列表增加按状态筛选/ })).toBeVisible({ timeout: 1000 });
+  const agentVisibleMs = Date.now() - navigationStart;
+  expect(agentVisibleMs).toBeLessThan(1000);
   expect(prRequests).toBe(1);
+  for (const path of ["/api/hives/swarmjet", "/api/hives/swarmjet/foragers", "/api/hives/swarmjet/queen", "/api/hives/swarmjet/queue", "/api/hives/swarmjet/signals", "/api/hives/swarmjet/methodology", "/api/hives/swarmjet/methodology/events"]) {
+    expect(mock.state.calls.filter((call) => call.path === path && call.method === "GET"), path).toHaveLength(1);
+  }
   await expect(page.getByRole("button", { name: /PR #88 修复兼容问题/ })).toBeVisible({ timeout: 25000 });
   expect(prRequests).toBe(1);
+  console.log(`20s PR delay: active Agent visible in ${agentVisibleMs}ms; PR requests=${prRequests}`);
+});
+
+test("time windows, acknowledgement, star cap and PR priority use fixed inputs", () => {
+  const now = Date.parse("2026-10-20T12:00:00Z");
+  const base = round8Project(now).agents[7];
+  const failure = { ...base, state: "failed" as const, updatedAt: "2026-10-19T13:00:00Z" };
+  expect(agentVisibility(failure, now)).toBe("orbit");
+  expect(agentVisibility(failure, now, true)).toBe("history");
+  expect(agentVisibility({ ...failure, updatedAt: "2026-10-19T11:00:00Z" }, now)).toBe("history");
+  expect(relativeTime("2026-10-20T11:57:00Z", now)).toBe("3 分钟前");
+  expect(relativeTime("2026-10-20T07:00:00Z", now)).toBe("5 小时前");
+  expect(relativeTime("2026-10-18T12:00:00Z", now)).not.toContain("T12:00:00Z");
+  expect(shouldCollapseLongText("one\ntwo\nthree\nfour")).toBe(false);
+  expect(shouldCollapseLongText("one\ntwo\nthree\nfour\nfive")).toBe(true);
+  expect(historyPosition("stable-id")).toEqual(historyPosition("stable-id"));
+  const agents = Array.from({ length: 501 }, (_, i) => ({ ...base, id: `done-${i}`, roleName: "worker", state: "completed" as const, updatedAt: "2026-10-10T12:00:00Z" }));
+  const stars = historyStars(agents, [], now);
+  expect(stars.filter((star) => star.dust)).toHaveLength(1);
+  expect(stars[0].brightness).toBeCloseTo(.2);
+  const prs = [
+    { number: 1, state: "open", merged: false, ready: false, headSha: "a", updatedAt: "2026-10-01T00:00:00Z" },
+    { number: 2, state: "open", merged: false, ready: false, headSha: "b", updatedAt: "2026-10-20T00:00:00Z" },
+    { number: 3, state: "open", merged: false, ready: true, headSha: "c", updatedAt: "2026-10-01T00:00:00Z" },
+  ];
+  expect(aggregatePRs(prs, [], now).visible.map((pr) => pr.number)).toEqual([3, 2, 1]);
+});
+
+test("backend gate reasons and English task sentences become readable summaries", () => {
+  expect(localizedReason("check build failed (failure)").text).toBe("GitHub CI 未通过");
+  expect(localizedReason("latest attestation is for abc1234, pull request head is def5678").text).toBe("PR 有新提交，请重新查看");
+  expect(localizedReason("latest attestation is fail").text).toBe("验证未通过");
+  expect(firstSentence("Goal: Add csv_records.py and tests. Verify with pytest.")).toBe("Goal: Add csv_records.py and tests");
+});
+
+test("message request count stays tied to active Agents at 40 and 400 historical Agents", async () => {
+  const fixture = round8Project();
+  const originalFetch = globalThis.fetch;
+  const counts: number[] = [];
+  try {
+    for (const historicalCount of [40, 400]) {
+      const history = fixture.agents.filter((agent) => ["completed", "cancelled", "failed"].includes(agent.state));
+      const agents = [...fixture.agents.slice(0, 4), ...Array.from({ length: historicalCount }, (_, i) => ({ ...history[i % history.length], id: `history-${i}`, updatedAt: "2026-10-01T00:00:00Z" }))];
+      const paths: string[] = [];
+      globalThis.fetch = async (input) => {
+        const url = new URL(String(input), "http://localhost");
+        paths.push(url.pathname + url.search);
+        let body: unknown = {};
+        if (url.pathname.endsWith("/foragers")) body = { foragers: agents, localAddress: fixture.localAddress };
+        else if (url.pathname.endsWith("/queen")) body = fixture.queen;
+        else if (url.pathname.endsWith("/prs")) body = { prs: fixture.prs };
+        else if (url.pathname.endsWith("/queue")) body = { queue: [] };
+        else if (url.pathname.endsWith("/signals")) body = { signals: fixture.signals };
+        else if (url.pathname.endsWith("/methodology/events")) body = { events: [] };
+        else if (url.pathname.endsWith("/methodology")) body = fixture.methodology;
+        else if (url.pathname.endsWith("/messages")) body = { messages: [], truncated: false, to: url.searchParams.get("to") };
+        else body = { hive: fixture.hive, localAddress: fixture.localAddress };
+        return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+      };
+      await loadProjectResources("swarmjet", () => {});
+      const messagePaths = paths.filter((path) => path.includes("/messages?"));
+      counts.push(messagePaths.length);
+      expect(new Set(messagePaths.map((path) => new URL(path, "http://localhost").searchParams.get("to"))).size).toBe(7);
+      for (const path of ["/api/hives/swarmjet", "/api/hives/swarmjet/foragers", "/api/hives/swarmjet/queen", "/api/hives/swarmjet/prs?state=all", "/api/hives/swarmjet/queue", "/api/hives/swarmjet/signals", "/api/hives/swarmjet/methodology", "/api/hives/swarmjet/methodology/events?limit=50"]) {
+        expect(paths.filter((actual) => actual === path), path).toHaveLength(1);
+      }
+    }
+  } finally { globalThis.fetch = originalFetch; }
+  expect(counts).toEqual([7, 7]);
 });
 
 test("PR envelope stale and unavailable flags reach the resource state", async () => {

@@ -18,7 +18,7 @@ export function weightedTruncate(value: string, limit: number): string {
 }
 
 export function firstSentence(task = ""): string {
-  return task.trim().split(/[\n。！？!?]/u, 1)[0].trim();
+  return task.trim().split(/\n|[。！？!?]|\.(?=\s|$)/u, 1)[0].trim();
 }
 
 export function oneLineSummary(
@@ -67,10 +67,17 @@ export function relativeTime(value: string, now = Date.now(), locale = "zh-CN"):
 
 const reasonRules: [RegExp, string][] = [
   [/no attestation for the current head/i, "当前提交还没有验证结论"],
+  [/no non-author attestation for the current head/i, "当前提交还没有独立验证结论"],
   [/verifier cancelled by control/i, "验证 Agent 已被取消"],
-  [/check(s| runs?)? (failed|not passing|did not pass)|ci (failed|not passing)|required check/i, "GitHub CI 未通过"],
-  [/head (has )?changed|new commit|new head|stale head|outdated head/i, "PR 有新提交，请重新查看"],
-  [/attestation.*(failed|blocked)/i, "验证未通过"],
+  [/check\s+.+\s+failed\s*\(|check(s| runs?)? (failed|not passing|did not pass)|ci (failed|not passing)|required check/i, "GitHub CI 未通过"],
+  [/latest attestation is for .+, pull request head is .+|head (has )?changed|new commit|new head|stale head|outdated head/i, "PR 有新提交，请重新查看"],
+  [/latest attestation is (fail|blocked)|attestation.*(failed|blocked)/i, "验证未通过"],
+  [/latest attestation is from the pull request author/i, "需要其他 Agent 独立验证"],
+  [/pull request is already merged/i, "PR 已合并"],
+  [/pull request is not open/i, "PR 已关闭"],
+  [/pull request has no head commit/i, "PR 还没有提交"],
+  [/pull request targets .+, not the Hive repository/i, "PR 指向其他仓库"],
+  [/pull request has a conflict/i, "PR 有合并冲突"],
   [/draft/i, "PR 仍是草稿"],
 ];
 export function localizedReason(raw: string): { text: string; detail?: string } {
