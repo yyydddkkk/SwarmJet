@@ -124,3 +124,31 @@ test("弹出层和断线提示保留退场节点但不可聚焦", async ({ page 
   await expect(banner).toHaveAttribute("inert", "");
   await expect(banner).toHaveCSS("opacity", "0");
 });
+
+test("品牌、题签和五项工具按设计导航", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "进入星图" }).click();
+  const tools = page.getByRole("navigation", { name: "工具" });
+  await expect(tools.getByRole("button")).toHaveCount(5);
+  await page.getByRole("button", { name: "平台设置", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "平台设置" })).toBeVisible();
+  await page.getByRole("button", { name: "关闭平台设置" }).click();
+  await page.getByRole("button", { name: "项目面板", exact: true }).click();
+  await expect(page.getByRole("region", { name: "项目面板" })).toBeVisible();
+  await page.getByRole("button", { name: "关闭项目面板" }).click();
+  await page.getByRole("navigation", { name: "位置" }).getByRole("button", { name: "全部项目" }).click();
+  await page.getByRole("button", { name: "浏览所有项目" }).click();
+  await expect(page.getByRole("dialog", { name: "列表" })).toBeVisible();
+});
+
+test("命令栏不显示额外按钮，Enter 仍执行命令", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "进入星图" }).click();
+  const say = page.getByLabel("对话与命令");
+  await say.fill("模型");
+  const submit = page.locator(".stars-say-submit");
+  await expect(submit).toBeEnabled();
+  expect((await submit.boundingBox())?.width).toBeLessThanOrEqual(1);
+  await say.press("Enter");
+  await expect(page.getByRole("dialog", { name: "平台设置" })).toBeVisible();
+});

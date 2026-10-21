@@ -158,9 +158,10 @@ export default function PeripherySlot(props: StarsSlotProps) {
   const onSay = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!text.trim()) return;
-    if (route) { route.run(); setText(""); return; }
+    if (route) { route.run(); setText(""); input.current?.blur(); return; }
     if (!current) { setError("先选择一个项目，再对主 Agent 说话。"); return; }
     const sent = text;
+    input.current?.blur();
     setBusy(true); setError("");
     try { await api.talkToQueen(current.id, sent); setText((draft) => draft === sent ? "" : draft); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }

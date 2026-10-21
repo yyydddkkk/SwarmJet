@@ -8,7 +8,7 @@
 | 列表 | [并排图](compare-bright-list.png) | [并排图](compare-night-list.png) | 设计稿按项目列出当前对象；实现添加任务要求的“活跃 / 今天 / 历史”三项筛选，历史对象可搜索。数据内容不同。列表背景改为不透底的既有 `--paper`，避免下层文字透出；搜索焦点仍用设计稿的细线。项目行 15px 状态注记原 `--ink3` 在明亮主题被 axe 测得 2.91:1，按用户批准的局部例外只改为既有 `--ink2`。 |
 | 图例 | [并排图](compare-bright-legend.png) | [并排图](compare-night-legend.png) | 位置、尺寸、行距、图形定义照设计稿；实现按本轮需求增加 CI，故多一行。原稿的 h4 调整为视觉相同的 h2，让 axe 标题顺序通过。星图由另一任务实现，图形与其共享 `star-glyphs.ts`。 |
 | 显示 | [并排图](compare-bright-display.png) | [并排图](compare-night-display.png) | 三行文字切换及位置尺寸与设计稿一致，主题项依次为明亮、纸本、夜空、跟随系统；没有原生选择框或复选框。背后星图和项目数因 mock 不同。 |
-| 命令 | [并排图](compare-bright-command.png) | [并排图](compare-night-command.png) | 输入框、聚焦宽度、细线和底部提示沿用设计稿；实现额外显示可操作的“前往/发送”按钮。设计稿此处没有实际发送能力，实现保留后端发送与后续输入草稿。 |
+| 命令 | [并排图](compare-bright-command.png) | [并排图](compare-night-command.png) | 输入框、聚焦宽度、细线和底部提示沿用设计稿；Enter 执行命令或发送消息，提交按钮仅供读屏访问、不占视觉宽度。实现用真实 API 发送并在发送期间保留后续输入草稿。 |
 
 设计稿没有登录与断线界面。实现分别从平台附录面板的细线框、斜体标题和字段，以及既有通知文本推导；单独证据：[明亮登录](app-bright-login.png)、[夜空登录](app-night-login.png)、[明亮断线](app-bright-disconnect.png)、[夜空断线](app-night-disconnect.png)。首次使用向导与创建项目同样采用附录面板的细线、斜体与既有颜色变量，设计稿没有可并排的对应画面。登录小标题最初沿用 `--ink3`，axe 实测明亮主题对比度仅 2.91:1；按用户批准的局部例外，仅把这段 15px 可读文字改用既有 `--ink2`，不改色表或几何样式。
 
