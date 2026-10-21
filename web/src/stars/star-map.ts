@@ -11,7 +11,7 @@ import { oneLineSummary, relativeTime, weightedTruncate } from "../data";
 import type { StarsUI, ObjectSelection } from "./ui";
 import { themeStore } from "./theme";
 import { timelineFor } from "./timeline-state";
-import { drawCanvasGlyph, type CanvasGlyphOptions, type StarGlyph } from "./star-glyphs";
+import { drawCanvasAgent, drawCanvasGlyph, drawCanvasStar, type CanvasGlyphOptions, type StarGlyph } from "./star-glyphs";
 type Point = { x: number; y: number };
 type Body = Point & {
   node: StarNode;
@@ -75,6 +75,7 @@ export type MapMetrics = {
   clusters: number;
   completing: number;
   flares: number;
+  targetFps: number;
 };
 export class StarMap {
   readonly metrics: MapMetrics = {
@@ -90,6 +91,7 @@ export class StarMap {
     clusters: 0,
     completing: 0,
     flares: 0,
+    targetFps: 30,
   };
   private ctx: CanvasRenderingContext2D;
   private width = 1;
@@ -655,7 +657,10 @@ export class StarMap {
   private draw = (now: number) => {
     this.frame = undefined;
     if (document.hidden) return;
-    if (!this.reduced.matches && now - this.lastFrame < 32) { this.schedule(); return; }
+    // Very dense projects keep ambient motion while limiting raster work.
+    const frameInterval = this.metrics.nodes + this.metrics.history > 600 ? 48 : 32;
+    this.metrics.targetFps = frameInterval === 48 ? 20 : 30;
+    if (!this.reduced.matches && now - this.lastFrame < frameInterval) { this.schedule(); return; }
     this.lastFrame = now;
     const started = performance.now(),
       ctx = this.ctx,
@@ -770,7 +775,7 @@ export class StarMap {
         const r = (h.result === "merged" ? 1.35 : h.result === "failed" ? .8 : .95) * z;
         ctx.fillStyle = C.ink;
         ctx.globalAlpha = (h.result === "merged" ? .85 : h.result === "failed" ? .32 : .6) * h.brightness * dim;
-        glyph(h.fresh && h.result !== "failed" && !simple ? "hist" : "star", q, h.fresh && h.result !== "failed" && !simple ? r / 1.6 : r / 4.5);
+        drawCanvasStar(ctx, q.x, q.y, r, h.fresh && h.result !== "failed" && !simple);
         if (this.hoverHistory?.history.id === h.id) {
           ctx.strokeStyle = C.ink2; ctx.globalAlpha = 1; circle(q, 8);
         }
@@ -864,13 +869,13 @@ export class StarMap {
         ctx.lineWidth = R.lw;
         const r = Math.max(2.2, Math.min(s, 1.6) * 4) * R.sz;
         if (far) {
-          circle(q, 1.2, true);
+          drawCanvasStar(ctx, q.x, q.y, 1.2);
           continue;
         }
         if (node.kind === "star") {
           const sr = Math.max(3.5, 9 * s) * R.sz;
           if (system.on) {
-            glyph("star", q, sr / 4.5);
+            drawCanvasStar(ctx, q.x, q.y, sr);
             for (const k of [1.8, 2.6, 3.6]) {
               ctx.globalAlpha = (dim * 0.55) / k;
               circle(q, sr * k);
@@ -903,9 +908,9 @@ export class StarMap {
             ux = dx / len,
             uy = dy / len;
           if (!view.hiveId) {
-            circle(q, r, true);
+            drawCanvasStar(ctx, q.x, q.y, r);
           } else if (node.state === "failed") {
-            glyph("failed", q, r / 3.5);
+            drawCanvasAgent(ctx, "failed", q.x, q.y, r * 3 / 3.5);
             ctx.setLineDash([2, 5]);
             line(
               { x: q.x + ux * 6, y: q.y + uy * 6 },
@@ -915,13 +920,13 @@ export class StarMap {
           } else if (
             ["parked", "hibernated", "cancelled"].includes(node.state ?? "")
           ) {
-            glyph("parked", q, r / 3, Math.atan2(uy, ux));
+            drawCanvasAgent(ctx, "parked", q.x, q.y, r, Math.atan2(uy, ux));
             if (node.label.includes("仍占着名额")) circle(q, r + 5);
           } else {
             const length =
               (node.state === "completed" ? 16 : 38) *
               Math.min(Math.max(s, 0.5), 1.8);
-            const rays = this.metrics.nodes > 200 ? [-3, 0, 3] : [-3, -2, -1, 0, 1, 2, 3];
+            const rays = this.metrics.nodes > 200 ? [] : [-3, -2, -1, 0, 1, 2, 3];
             for (const offset of rays) {
               const a = offset * 0.055,
                 vx = ux * Math.cos(a) - uy * Math.sin(a),
@@ -933,7 +938,7 @@ export class StarMap {
               });
             }
             ctx.globalAlpha = dim * opacity;
-            glyph("busy", q, r / 3, Math.atan2(uy, ux));
+            drawCanvasAgent(ctx, "busy", q.x, q.y, r, Math.atan2(uy, ux));
             ctx.globalAlpha = dim * opacity * 0.35;
             circle(q, r + 3.5);
           }

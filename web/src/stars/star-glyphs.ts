@@ -22,6 +22,34 @@ export const LGLY = {
 export type StarGlyph = keyof typeof LGLY;
 export type CanvasGlyphOptions = { moonAngle?: number; moonOrbitX?: number; moonOrbitY?: number; moonRadius?: number; accent?: string };
 
+/** The common circle/cross geometry used by the legend and dense history field. */
+export function drawCanvasStar(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, cross = false) {
+  ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+  if (cross) {
+    const arm = radius * (5 / 1.6);
+    ctx.beginPath(); ctx.moveTo(x - arm, y); ctx.lineTo(x + arm, y);
+    ctx.moveTo(x, y - arm); ctx.lineTo(x, y + arm); ctx.stroke();
+  }
+}
+
+/** Agent silhouettes share the GLY coordinates, with radius and direction for the live map. */
+export function drawCanvasAgent(ctx: CanvasRenderingContext2D, kind: "busy" | "parked" | "failed", x: number, y: number, radius: number, angle = 0) {
+  const scale = radius / 3, cosine = Math.cos(angle), sine = Math.sin(angle);
+  const p = (px: number, py: number) => ({ x: x + (px * cosine - py * sine) * scale, y: y + (px * sine + py * cosine) * scale });
+  const segment = (ax: number, ay: number, bx: number, by: number) => {
+    const a = p(ax, ay), b = p(bx, by); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+  };
+  if (kind === "busy") {
+    drawCanvasStar(ctx, x, y, radius);
+    ctx.beginPath(); segment(3, -1.5, 10, -4.5); segment(3, 0, 11, -1.5); segment(3, 1.5, 10, 1.5); ctx.stroke();
+  } else if (kind === "parked") {
+    ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.stroke();
+    ctx.save(); ctx.setLineDash([1.5, 1.5]); ctx.beginPath(); segment(4.5, -1.5, 9.5, -3.5); ctx.stroke(); ctx.restore();
+  } else {
+    ctx.beginPath(); segment(-3.5, -3.5, 3.5, 3.5); segment(3.5, -3.5, -3.5, 3.5); ctx.stroke();
+  }
+}
+
 /** Draw the small canonical silhouette at the current canvas origin. */
 export function drawCanvasGlyph(ctx: CanvasRenderingContext2D, kind: StarGlyph, options: CanvasGlyphOptions = {}) {
   const circle = (x: number, y: number, r: number, fill = false) => {
@@ -33,14 +61,14 @@ export function drawCanvasGlyph(ctx: CanvasRenderingContext2D, kind: StarGlyph, 
     ctx.stroke();
   };
   switch (kind) {
-    case "star": circle(0, 0, 4.5, true); break;
-    case "busy": circle(0, 0, 3, true); path(3, -1.5, 10, -4.5); path(3, 0, 11, -1.5); path(3, 1.5, 10, 1.5); break;
-    case "parked": circle(0, 0, 3); ctx.save(); ctx.setLineDash([1.5, 1.5]); path(4.5, -1.5, 9.5, -3.5); ctx.restore(); break;
-    case "failed": path(-3.5, -3.5, 3.5, 3.5); path(3.5, -3.5, -3.5, 3.5); break;
+    case "star": drawCanvasStar(ctx, 0, 0, 4.5); break;
+    case "busy": drawCanvasAgent(ctx, "busy", 0, 0, 3); break;
+    case "parked": drawCanvasAgent(ctx, "parked", 0, 0, 3); break;
+    case "failed": drawCanvasAgent(ctx, "failed", 0, 0, 3); break;
     case "signal": path(-5, 0, 5, 0); path(0, -5, 0, 5); break;
     case "ci": path(0, -5, 5, 0, 0, 5, -5, 0, 0, -5); break;
     case "queue": circle(0, 0, 3); break;
-    case "hist": circle(0, 0, 1.6, true); path(-5, 0, 5, 0); path(0, -5, 0, 5); break;
+    case "hist": drawCanvasStar(ctx, 0, 0, 1.6, true); break;
     case "cluster": circle(-3.5, 0, 2.6); circle(3, -1.5, 2.6); circle(0, 3, 2.6); break;
     case "you": circle(0, 0, 7); circle(0, 0, 1.6, true); break;
     case "moon":

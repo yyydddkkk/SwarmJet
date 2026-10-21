@@ -618,6 +618,8 @@ for (const mode of ["all", "project"])
       max: a.at(-1),
       idleWindowMs: wallMs,
       idleFrames: end - framesBefore,
+      targetFps: m.targetFps,
+      measuredFps: ((end - framesBefore) * 1000) / wallMs,
       rendererCpuPercentOfOneCore: (cpuDelta / (wallMs / 1000)) * 100,
       rendererProcessCount: stableRenderers.length,
       cpuMethod: "CDP SystemInfo.getProcessInfo renderer cpuTime delta over wall time after 2.2 s settle; single worker/page; percent of one CPU core",
