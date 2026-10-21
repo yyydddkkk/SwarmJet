@@ -86,6 +86,41 @@ test("列表图标与状态列保持设计宽度，摘要占剩余空间且手�
   }
 });
 
+test("真实应用壳按设计计算外围字号并保持简报可见密度", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const page = await context.newPage();
+  await preview(page);
+  const brief = page.getByRole("dialog", { name: "简报" });
+  const briefMetrics = await brief.evaluate((element) => {
+    const need = element.querySelector<HTMLElement>(".periphery-it.need")!;
+    const attention = element.querySelector<HTMLElement>(".periphery-attention")!;
+    return { itemFont: getComputedStyle(need).fontSize, briefBottom: element.getBoundingClientRect().bottom, attentionBottom: attention.getBoundingClientRect().bottom, scrollTop: element.scrollTop };
+  });
+  console.log("brief typography and bounds", briefMetrics);
+  expect(briefMetrics.itemFont).toBe("17px");
+  expect(briefMetrics.scrollTop).toBe(0);
+  expect(briefMetrics.attentionBottom).toBeLessThanOrEqual(briefMetrics.briefBottom);
+  await brief.getByRole("button", { name: "进入星图" }).click();
+  const toolbarFont = await page.getByRole("navigation", { name: "工具" }).getByRole("button", { name: "列表" }).evaluate((element) => getComputedStyle(element).fontSize);
+  expect(toolbarFont).toBe("16px");
+  await page.getByRole("button", { name: "列表", exact: true }).click();
+  const search = page.getByLabel("查找项目、Agent 或 PR");
+  const searchStyle = await search.evaluate((element) => ({ size: getComputedStyle(element).fontSize, style: getComputedStyle(element).fontStyle }));
+  console.log("catalogue search typography", searchStyle);
+  expect(searchStyle).toEqual({ size: "20px", style: "italic" });
+  await context.close();
+
+  const mobile = await browser.newContext({ viewport: { width: 375, height: 812 }, reducedMotion: "reduce" });
+  const small = await mobile.newPage();
+  await preview(small);
+  await small.getByRole("button", { name: "进入星图" }).click();
+  const mobileToolFont = await small.getByRole("navigation", { name: "工具" }).getByRole("button", { name: "列表" }).evaluate((element) => getComputedStyle(element).fontSize);
+  expect(mobileToolFont).toBe("14px");
+  await small.getByRole("button", { name: "列表", exact: true }).click();
+  expect(await small.getByRole("dialog", { name: "列表" }).evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(375);
+  await mobile.close();
+});
+
 test("明亮和夜空稳定画面逐层执行完整 axe", async ({ browser }) => {
   for (const theme of ["bright", "night"] as const) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });

@@ -10,9 +10,9 @@
 .stars-app * {
   box-sizing: border-box;
 }
-.stars-app button,
-.stars-app input,
-.stars-app select {
+:where(.stars-app) button,
+:where(.stars-app) input,
+:where(.stars-app) select {
   font: inherit;
   color: inherit;
 }
