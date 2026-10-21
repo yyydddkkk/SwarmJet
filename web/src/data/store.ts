@@ -489,6 +489,8 @@ export class ProjectStore {
       throw error;
     }
   };
+  /** Recompute local visibility after acknowledgement without fetching resources. */
+  rederive = () => this.publish({});
   acknowledgePulses = () => this.publish({ pulses: [] });
   /** Opened historical Agents are fetched once, on demand. */
   loadAgentMessages = async (agentId: string) => {

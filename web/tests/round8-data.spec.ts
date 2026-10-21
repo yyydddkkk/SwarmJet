@@ -278,3 +278,33 @@ test("a PR event received while its slow snapshot is loading wins over that snap
   expect(store.getSnapshot().snapshot?.prs.find((pr) => pr.number === 1)).toMatchObject({ headSha: "new-head", ready: true });
   store.stop();
 });
+
+
+test("acknowledgement recomputes shared visibility without a network refresh", async () => {
+  const fixture = round8Project();
+  const failed = { ...fixture.agents[1], state: "failed" as const, updatedAt: new Date().toISOString() };
+  fixture.agents = [failed];
+  const storage = new Map<string, string>();
+  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+  } });
+  const mock = createMockDataSource({ swarmjet: fixture });
+  const store = createProjectStore("swarmjet", mock.source);
+  try {
+    store.start();
+    await expect.poll(() => !!store.getSnapshot().derived).toBe(true);
+    expect(store.getSnapshot().derived?.mapNodes.some((node) => node.id === failed.id)).toBe(true);
+    const before = structuredClone(mock.calls);
+    storage.set(`sj-known:swarmjet:${failed.id}`, "1");
+    store.rederive();
+    expect(store.getSnapshot().derived?.mapNodes.some((node) => node.id === failed.id)).toBe(false);
+    expect(store.getSnapshot().derived?.history.some((star) => star.id === failed.id)).toBe(true);
+    expect(mock.calls).toEqual(before);
+  } finally {
+    store.stop();
+    if (original) Object.defineProperty(globalThis, "localStorage", original);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
