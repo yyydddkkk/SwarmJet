@@ -69,11 +69,16 @@ test("lazy panels retain their contents throughout exit while closing keyboard a
   await page.locator(".stars-cartouche").click();
   const panel = page.locator(".pc-left");
   await expect(panel).toHaveClass(/pc-open/);
-  await expect(panel).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+  await expect(panel).toHaveCSS("transform", "none");
   await page.getByRole("button", { name: "关闭项目面板", exact: true }).click();
   await expect(panel).toHaveCount(1);
   await expect(panel).toHaveAttribute("inert", "");
   await expect(panel.locator("h2")).toHaveText("test-for-myself");
+  await page.waitForTimeout(100);
+  const exiting = await panel.boundingBox();
+  expect(exiting).not.toBeNull();
+  expect(exiting!.x).toBeLessThan(0);
+  expect(exiting!.x).toBeGreaterThan(-exiting!.width);
   await expect(panel).toHaveCount(0, { timeout: 1600 });
 });
 
