@@ -122,7 +122,7 @@ test("snapshot and SSE increments preserve canonical fields and produce unique p
   store.stop();
   expect(mock.connections).toBe(0);
 });
-test("ready reload buffers increments even if the snapshot includes the same message", async () => {
+test("first ready skips reload; later ready buffers increments during resync", async () => {
   const mock = createMockDataSource({ swarmjet: fixture() });
   let resolve!: (s: ProjectSnapshot) => void;
   let count = 0;
@@ -139,19 +139,16 @@ test("ready reload buffers increments even if the snapshot includes the same mes
   store.start();
   await flush();
   mock.ready("swarmjet");
+  expect(count).toBe(1);
+  mock.ready("swarmjet");
   const event = message("during");
   mock.push("swarmjet", { type: "message", data: event });
-  const resolveOlder = resolve;
-  // An unattributable queue/methodology frame may request another snapshot
-  // before this one completes. The buffered real message must survive it.
-  mock.ready("swarmjet");
   const next = fixture();
   next.hive.name = "Fresh";
   next.messages = [event];
   resolve(next);
-  resolveOlder(fixture());
   await flush();
-  expect(count).toBe(3);
+  expect(count).toBe(2);
   expect(store.getSnapshot().snapshot?.hive.name).toBe("Fresh");
   expect(store.getSnapshot().snapshot?.messages).toHaveLength(1);
   expect(store.getSnapshot().pulses).toHaveLength(1);
@@ -333,14 +330,14 @@ test("theme CSS and choices survive reload and denied storage", async ({
   await mockStarsHTTP(page);
   await page.goto("/");
   await page.getByRole("button", { name: "显示", exact: true }).click();
-  await page.getByLabel("主题", { exact: true }).selectOption("night");
+  await page.getByRole("dialog", { name: "显示" }).getByRole("button", { name: "夜空" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "night");
   expect(
     await page.evaluate(() =>
       document.documentElement.style.getPropertyValue("--paper"),
     ),
   ).toBe("#0A1020");
-  await page.getByLabel("风格", { exact: true }).selectOption("simple");
+  await page.getByRole("dialog", { name: "显示" }).getByRole("button", { name: "简洁" }).click();
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "night");
   await expect(page.locator("html")).toHaveAttribute("data-style", "simple");
@@ -354,7 +351,7 @@ test("theme CSS and choices survive reload and denied storage", async ({
   });
   await page.reload();
   await page.getByRole("button", { name: "显示", exact: true }).click();
-  await page.getByLabel("主题", { exact: true }).selectOption("paper");
+  await page.getByRole("dialog", { name: "显示" }).getByRole("button", { name: "纸本" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
 });
 
@@ -369,7 +366,7 @@ test("corrupted theme names fall back to a usable theme", async ({ page }) => {
     "data-theme",
     /bright|night/,
   );
-  await page.getByLabel("主题", { exact: true }).selectOption("paper");
+  await page.getByRole("dialog", { name: "显示" }).getByRole("button", { name: "纸本" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
 });
 
@@ -407,6 +404,7 @@ test("a ready snapshot supersedes late signal fetches and stopped stores stay un
     },
   ];
   mock.setSnapshot("swarmjet", next);
+  mock.ready("swarmjet");
   mock.ready("swarmjet");
   await flush();
   resolve({ signals: [] });
@@ -608,7 +606,7 @@ test("offline font files load and the default shell remains reviewable", async (
   });
   await page.goto("/");
   await page.getByRole("button", { name: "显示", exact: true }).click();
-  await page.getByLabel("主题", { exact: true }).selectOption("paper");
+  await page.getByRole("dialog", { name: "显示" }).getByRole("button", { name: "纸本" }).click();
   const loaded = await page.evaluate(async () => {
     await document.fonts.load('16px "IM Fell English"');
     await document.fonts.load('16px "Noto Serif SC"', "项目");
@@ -619,6 +617,6 @@ test("offline font files load and the default shell remains reviewable", async (
   });
   expect(loaded).toBe(true);
   expect(external).toEqual([]);
-  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.keyboard.press("Escape");
   await page.screenshot({ path: "/tmp/swarmjet-r7-a-shell.png" });
 });

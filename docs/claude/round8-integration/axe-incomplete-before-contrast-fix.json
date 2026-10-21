@@ -1,0 +1,1645 @@
+{
+  "note": "稳定态Canvas背景使axe对部分文字对比度无法自动判断；0 violations不代表contrast passes。辅助文字改ink2，并用contrast-bounds.json补数值边界核验。",
+  "layers": [
+    {
+      "theme": "bright",
+      "layer": "brief",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-brand"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(4)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(5)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-brief > h2"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".sub"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".go"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h3:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(2) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(2) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(3) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(3) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(4) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(4) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(5) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(5) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h3:nth-child(6)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(7) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(7) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(8) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(8) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(9) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(9) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h3:nth-child(10)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-attention > .periphery-it > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-attention > .periphery-it > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".ack"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h3:nth-child(12)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-muted:nth-child(13)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-muted:nth-child(14)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theme": "bright",
+      "layer": "list",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "aria-prohibited-attr",
+          "nodes": [
+            {
+              "target": [
+                ".periphery-scope"
+              ],
+              "reason": "Fix all of the following:\n  aria-label attribute is not well supported on \"div\" elements with no valid role attribute."
+            }
+          ]
+        },
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+            },
+            {
+              "target": [
+                ".periphery-sheet-x"
+              ],
+              "reason": "Fix any of the following:\n  Element content is too short to determine if it is actual text content"
+            },
+            {
+              "target": [
+                "input[aria-label=\"对话与命令\"]"
+              ],
+              "reason": "Fix any of the following:\n  Element has no value; test color contrast with a value entered"
+            }
+          ]
+        },
+        {
+          "id": "label-content-name-mismatch",
+          "nodes": [
+            {
+              "target": [
+                ".periphery-sheet-x"
+              ],
+              "reason": "Fix any of the following:\n  Unable to determine if the visible text is part of the accessible name"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theme": "bright",
+      "layer": "legend",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-brand"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h1"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-cartouche > p"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(5)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-legend > h2"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(2) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(3) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(4) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(5) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(6) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(7) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(8) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(9) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(10) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(11) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(12) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(13) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(14) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element content is too short to determine if it is actual text content"
+            },
+            {
+              "target": [
+                "input[aria-label=\"对话与命令\"]"
+              ],
+              "reason": "Fix any of the following:\n  Element has no value; test color contrast with a value entered"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theme": "bright",
+      "layer": "display",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-brand"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h1"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-cartouche > p"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(4)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(1) > span > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(1) > span > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(2) > span > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(2) > span > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "span > button:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "span > button:nth-child(4)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(3) > span > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(3) > span > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "input[aria-label=\"对话与命令\"]"
+              ],
+              "reason": "Fix any of the following:\n  Element has no value; test color contrast with a value entered"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theme": "bright",
+      "layer": "command",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-brand"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h1"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-cartouche > p"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(4)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(5)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "input[aria-label=\"对话与命令\"]"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "#periphery-say-hint"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theme": "bright",
+      "layer": "login",
+      "violations": [],
+      "incomplete": []
+    },
+    {
+      "theme": "bright",
+      "layer": "disconnect",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element content is too short to determine if it is actual text content"
+            },
+            {
+              "target": [
+                ".stars-brand"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h1"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-cartouche > p"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(4)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(5)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "input[aria-label=\"对话与命令\"]"
+              ],
+              "reason": "Fix any of the following:\n  Element has no value; test color contrast with a value entered"
+            },
+            {
+              "target": [
+                ".stars-status"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-status > button"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theme": "night",
+      "layer": "brief",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-brand"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(4)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(5)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-brief > h2"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".sub"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".go"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h3:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(2) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(2) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(3) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(3) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(4) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".need.periphery-it:nth-child(4) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(5) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(5) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h3:nth-child(6)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(7) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(7) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(8) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(8) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(9) > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-it:nth-child(9) > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h3:nth-child(10)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-attention > .periphery-it > .periphery-it-label"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-attention > .periphery-it > .periphery-it-state"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".ack"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h3:nth-child(12)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-muted:nth-child(13)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-muted:nth-child(14)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theme": "night",
+      "layer": "list",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "aria-prohibited-attr",
+          "nodes": [
+            {
+              "target": [
+                ".periphery-scope"
+              ],
+              "reason": "Fix all of the following:\n  aria-label attribute is not well supported on \"div\" elements with no valid role attribute."
+            }
+          ]
+        },
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
+            },
+            {
+              "target": [
+                ".periphery-sheet-x"
+              ],
+              "reason": "Fix any of the following:\n  Element content is too short to determine if it is actual text content"
+            },
+            {
+              "target": [
+                "input[aria-label=\"对话与命令\"]"
+              ],
+              "reason": "Fix any of the following:\n  Element has no value; test color contrast with a value entered"
+            }
+          ]
+        },
+        {
+          "id": "label-content-name-mismatch",
+          "nodes": [
+            {
+              "target": [
+                ".periphery-sheet-x"
+              ],
+              "reason": "Fix any of the following:\n  Unable to determine if the visible text is part of the accessible name"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theme": "night",
+      "layer": "legend",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-brand"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h1"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-cartouche > p"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(5)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".periphery-legend > h2"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(2) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(3) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(4) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(5) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(6) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(7) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(8) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(9) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(10) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(11) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(12) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(13) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".k:nth-child(14) > span"
+              ],
+              "reason": "Fix any of the following:\n  Element content is too short to determine if it is actual text content"
+            },
+            {
+              "target": [
+                "input[aria-label=\"对话与命令\"]"
+              ],
+              "reason": "Fix any of the following:\n  Element has no value; test color contrast with a value entered"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theme": "night",
+      "layer": "display",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-brand"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h1"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-cartouche > p"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(4)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(1) > span > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(1) > span > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(2) > span > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(2) > span > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(2) > span > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "span > button:nth-child(4)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(3) > span > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".opt:nth-child(3) > span > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "input[aria-label=\"对话与命令\"]"
+              ],
+              "reason": "Fix any of the following:\n  Element has no value; test color contrast with a value entered"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theme": "night",
+      "layer": "command",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-brand"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h1"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-cartouche > p"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(4)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(5)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "input[aria-label=\"对话与命令\"]"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "#periphery-say-hint"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theme": "night",
+      "layer": "login",
+      "violations": [],
+      "incomplete": []
+    },
+    {
+      "theme": "night",
+      "layer": "disconnect",
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "nodes": [
+            {
+              "target": [
+                ".stars-observer"
+              ],
+              "reason": "Fix any of the following:\n  Element content contains only non-text characters"
+            },
+            {
+              "target": [
+                ".stars-observer > small"
+              ],
+              "reason": "Fix any of the following:\n  Element content is too short to determine if it is actual text content"
+            },
+            {
+              "target": [
+                ".stars-brand"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-crumbs > .on"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "h1"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-cartouche > p"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(1)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(2)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(3)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(4)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-tools > button:nth-child(5)"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                "input[aria-label=\"对话与命令\"]"
+              ],
+              "reason": "Fix any of the following:\n  Element has no value; test color contrast with a value entered"
+            },
+            {
+              "target": [
+                ".stars-status"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            },
+            {
+              "target": [
+                ".stars-status > button"
+              ],
+              "reason": "Fix any of the following:\n  Element's background color could not be determined because element contains an image node"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

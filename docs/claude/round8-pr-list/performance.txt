@@ -1,0 +1,5 @@
+=== RUN   TestPRListColdAndWarmWithDelayedGitHub
+    prs_performance_test.go:113: cold=2.017745946s requests=17; warm=1.62588ms additionalRequests=0; history=15 open=3 delay=1s/request
+--- PASS: TestPRListColdAndWarmWithDelayedGitHub (2.44s)
+PASS
+ok  	github.com/yyydddkkk/SwarmJet/internal/api	2.449s

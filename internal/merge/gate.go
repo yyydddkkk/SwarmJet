@@ -6,15 +6,128 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
+	"github.com/yyydddkkk/SwarmJet/internal/github"
 )
+
+// ListPullStates is a read-only bulk view for the console. The merge gate
+// still performs its own live GetPullState when a merge is requested.
+func (s *Service) ListPullStates(ctx context.Context, hive domain.Hive, state string) ([]github.PullState, error) {
+	client, repositoryID, err := s.github.GitHub(ctx, hive.Repository)
+	if err != nil {
+		return nil, err
+	}
+	if setter, ok := client.(interface{ SetRepositoryName(int64, string) }); ok {
+		setter.SetRepositoryName(repositoryID, hive.Repository)
+	}
+	lister, ok := client.(interface {
+		ListPullStates(context.Context, int64, string) ([]github.PullState, error)
+	})
+	if !ok {
+		return nil, errors.New("GitHub pull request listing is unavailable")
+	}
+	return lister.ListPullStates(ctx, repositoryID, state)
+}
 
 // Check evaluates the active methodology's merge conditions for one PR. A
 // non-ready result always carries at least one concrete reason. GitHub failures
 // are returned as errors so callers can distinguish "not allowed" from "could
 // not determine".
 func (s *Service) Check(ctx context.Context, hive domain.Hive, pr int64) (Readiness, error) {
+	return s.checkWithPull(ctx, hive, pr, nil, nil)
+}
+
+// CheckListed evaluates a bulk-listed open PR for display. It reads the live
+// pull state and CI inputs concurrently, then applies the same gate rules.
+func (s *Service) CheckListed(ctx context.Context, hive domain.Hive, pr int64, listed github.PullState) (Readiness, error) {
+	client, repositoryID, err := s.github.GitHub(ctx, hive.Repository)
+	if err != nil {
+		return Readiness{}, err
+	}
+	if setter, ok := client.(interface{ SetRepositoryName(int64, string) }); ok {
+		setter.SetRepositoryName(repositoryID, hive.Repository)
+	}
+	fast, ok := client.(interface {
+		ReadListedChecks(context.Context, int64, string, string) (github.CheckResult, []github.CheckRun, error)
+	})
+	if !ok {
+		return s.checkWithPull(ctx, hive, pr, nil, nil)
+	}
+	var pull github.PullState
+	var ci listedCI
+	var pullErr, ciErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); pull, pullErr = client.GetPullState(ctx, repositoryID, pr) }()
+	go func() {
+		defer wg.Done()
+		ci.required, ci.runs, ciErr = fast.ReadListedChecks(ctx, repositoryID, listed.BaseRef, listed.HeadSHA)
+	}()
+	wg.Wait()
+	if pullErr != nil {
+		return Readiness{}, pullErr
+	}
+	if ciErr != nil {
+		return s.checkWithPull(ctx, hive, pr, &pull, nil)
+	}
+	if pull.HeadSHA != listed.HeadSHA || pull.BaseRef != listed.BaseRef {
+		return s.checkWithPull(ctx, hive, pr, &pull, nil)
+	}
+	return s.checkWithPull(ctx, hive, pr, &pull, &ci)
+}
+
+// CheckListedBlocker answers only blockers that local state and the bulk list
+// can establish. Other PRs still receive the complete GitHub readiness check.
+func (s *Service) CheckListedBlocker(ctx context.Context, hive domain.Hive, pr int64, pull github.PullState) (Readiness, bool, error) {
+	readiness := Readiness{HeadSHA: pull.HeadSHA, Pull: Pull{Number: pr, Title: pull.Title, URL: pull.URL, HeadSHA: pull.HeadSHA, State: pull.State, Draft: pull.Draft, UpdatedAt: pull.UpdatedAt}, Reasons: []string{}, Checks: []Check{}}
+	if pull.Draft {
+		readiness.Reasons = []string{"pull request is a draft"}
+		return readiness, true, nil
+	}
+	policy, err := s.Policy(ctx, hive.ID)
+	if err != nil {
+		return readiness, false, err
+	}
+	if !policy.RequireAttestation && !policy.RequireNonAuthor {
+		return readiness, false, nil
+	}
+	att, err := s.attestations.LatestAttestation(ctx, hive.ID, pr)
+	if errors.Is(err, domain.ErrNotFound) {
+		if policy.RequireAttestation {
+			readiness.Reasons = []string{"no attestation for the current head"}
+		} else {
+			readiness.Reasons = []string{"no non-author attestation for the current head"}
+		}
+		return readiness, true, nil
+	}
+	if err != nil {
+		return readiness, false, err
+	}
+	readiness.AttestationFound = true
+	readiness.Attestation = att
+	if att.HeadSHA != pull.HeadSHA {
+		readiness.Reasons = []string{fmt.Sprintf("latest attestation is for %s, pull request head is %s", shortSHA(att.HeadSHA), shortSHA(pull.HeadSHA))}
+		return readiness, true, nil
+	}
+	if !policyAccepts(policy, att.Result) {
+		readiness.Reasons = []string{fmt.Sprintf("latest attestation is %s", att.Result)}
+		return readiness, true, nil
+	}
+	if policy.RequireNonAuthor && (att.IsAuthor || att.AuthorID != "" && att.AuthorID == att.AttesterID) {
+		readiness.Reasons = []string{"latest attestation is from the pull request author"}
+		return readiness, true, nil
+	}
+	return readiness, false, nil
+}
+
+type listedCI struct {
+	required github.CheckResult
+	runs     []github.CheckRun
+}
+
+func (s *Service) checkWithPull(ctx context.Context, hive domain.Hive, pr int64, listed *github.PullState, ci *listedCI) (Readiness, error) {
 	var readiness Readiness
 	if pr <= 0 {
 		return readiness, fmt.Errorf("invalid pull request number %d", pr)
@@ -33,9 +146,14 @@ func (s *Service) Check(ctx context.Context, hive domain.Hive, pr int64) (Readin
 	if err != nil {
 		return readiness, fmt.Errorf("resolve GitHub client: %w", err)
 	}
-	pull, err := client.GetPullState(ctx, repositoryID, pr)
-	if err != nil {
-		return readiness, fmt.Errorf("read pull request: %w", err)
+	var pull github.PullState
+	if listed != nil {
+		pull = *listed
+	} else {
+		pull, err = client.GetPullState(ctx, repositoryID, pr)
+		if err != nil {
+			return readiness, fmt.Errorf("read pull request: %w", err)
+		}
 	}
 	if pull.Number == 0 {
 		pull.Number = pr
@@ -113,7 +231,16 @@ func (s *Service) Check(ctx context.Context, hive domain.Hive, pr int64) (Readin
 	}
 
 	if pull.HeadSHA != "" {
-		checks, reasons, checkErr := s.checkCI(ctx, client, repositoryID, pr, pull.HeadSHA)
+		var checks []Check
+		var reasons []string
+		var checkErr error
+		if ci != nil {
+			checks, reasons, checkErr = evaluateCI(ci.required, ci.runs, pull.HeadSHA)
+		} else if listed != nil {
+			checks, reasons, checkErr = s.checkCIListed(ctx, client, repositoryID, pr, pull.HeadSHA)
+		} else {
+			checks, reasons, checkErr = s.checkCI(ctx, client, repositoryID, pr, pull.HeadSHA)
+		}
 		if checkErr != nil {
 			// CI isn't a merge condition for this methodology, so an unreadable
 			// CI endpoint must not block the merge entry. pr_status simply shows
@@ -149,6 +276,28 @@ func (s *Service) checkCI(ctx context.Context, client GitHub, repositoryID, pr i
 	if err != nil {
 		return nil, nil, fmt.Errorf("read check runs: %w", err)
 	}
+	return evaluateCI(required, runs, sha)
+}
+
+func (s *Service) checkCIListed(ctx context.Context, client GitHub, repositoryID, pr int64, sha string) ([]Check, []string, error) {
+	var required github.CheckResult
+	var runs []github.CheckRun
+	var requiredErr, runsErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); required, requiredErr = client.RequiredChecks(ctx, repositoryID, pr, sha) }()
+	go func() { defer wg.Done(); runs, runsErr = client.CheckRuns(ctx, repositoryID, sha) }()
+	wg.Wait()
+	if requiredErr != nil {
+		return nil, nil, fmt.Errorf("read required checks: %w", requiredErr)
+	}
+	if runsErr != nil {
+		return nil, nil, fmt.Errorf("read check runs: %w", runsErr)
+	}
+	return evaluateCI(required, runs, sha)
+}
+
+func evaluateCI(required github.CheckResult, runs []github.CheckRun, sha string) ([]Check, []string, error) {
 	checks := make([]Check, 0, len(runs))
 	for _, run := range runs {
 		checks = append(checks, Check{

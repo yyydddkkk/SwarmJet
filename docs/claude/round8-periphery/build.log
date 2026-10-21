@@ -1,0 +1,15 @@
+
+> swarmjet-console@1.0.0 build
+> tsc --noEmit && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 67 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                      0.50 kB │ gzip:  0.30 kB
+dist/assets/index-D3ldAAwO.css       0.77 kB │ gzip:  0.42 kB
+dist/assets/StarsApp-BwM7ncdE.css   20.42 kB │ gzip:  4.60 kB
+dist/assets/StarsApp-DUv2zdAb.js   148.18 kB │ gzip: 47.20 kB
+dist/assets/index-DlWtnWJJ.js      224.16 kB │ gzip: 70.14 kB
+✓ built in 1.05s

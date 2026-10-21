@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   DataProvider,
   useDataSource,
@@ -9,11 +9,22 @@ import {
 } from "../data";
 import CanvasSlot from "./CanvasSlot";
 import TimelineSlot from "./TimelineSlot";
-import PanelsSlot from "./PanelsSlot";
 import PeripherySlot from "./PeripherySlot";
 import LoginSlot from "./LoginSlot";
-import { createStarsUI } from "./ui";
+import { createStarsUI, useStarsUI } from "./ui";
+import type { StarsSlotProps } from "./slots";
 import "./stars.css";
+const PanelsSlot = lazy(() => import("./PanelsSlot"));
+function DeferredPanels(props: StarsSlotProps) {
+  const state = useStarsUI(props.ui);
+  const active = !!(state.selection || state.projectPanel || state.platformPanel);
+  const [opened, setOpened] = useState(false);
+  useEffect(() => { if (active) setOpened(true); }, [active]);
+  if (!active && !opened) return null;
+  return <div className="stars-panels-host" aria-hidden={!active} inert={!active}>
+    <Suspense fallback={null}><PanelsSlot {...props} /></Suspense>
+  </div>;
+}
 export default function StarsApp({ source }: { source?: DataSource } = {}) {
   return (
     <DataProvider source={source}>
@@ -64,12 +75,11 @@ function StarsSession() {
     return <LoginSlot notice={sessionNotice} onLogin={() => setAttempt((v) => v + 1)} />;
   if (!principal)
     return (
-      <main className="stars-app">
+      <main className="stars-transition"><div className="stars-transition-inner">
+        <h1>SwarmJet</h1>
         <p role={error ? "alert" : "status"}>{error || "正在连接项目…"}</p>
-        {error && (
-          <button onClick={() => setAttempt((v) => v + 1)}>重试</button>
-        )}
-      </main>
+        {error && <button onClick={() => setAttempt((v) => v + 1)}>重试</button>}
+      </div></main>
     );
   return (
     <StarsWorkspace
@@ -158,10 +168,20 @@ export function StarsWorkspace({
     .find((s) => s.error || s.retryDelay !== undefined);
   const statusMessage = error || status?.error ||
     (status?.retryDelay !== undefined ? "连接已断开，正在重连" : "");
+  const [shownStatus, setShownStatus] = useState("");
+  useEffect(() => {
+    if (statusMessage) {
+      setShownStatus(statusMessage);
+      return;
+    }
+    const timer = setTimeout(() => setShownStatus(""), 300);
+    return () => clearTimeout(timer);
+  }, [statusMessage]);
   if (!projectsLoaded && (projectsLoading || error)) {
     return (
-      <main className="stars-app">
-        <div className="stars-status">
+      <main className="stars-transition">
+        <div className="stars-transition-inner">
+          <h1>SwarmJet</h1>
           <p role={error ? "alert" : "status"}>{error || "正在读取项目…"}</p>
           {error && <button onClick={() => setAttempt((v) => v + 1)}>重试</button>}
         </div>
@@ -172,11 +192,10 @@ export function StarsWorkspace({
     <main className="stars-app">
       <CanvasSlot {...props} />
       <PeripherySlot {...props} />
-      <PanelsSlot {...props} />
+      <DeferredPanels {...props} />
       <TimelineSlot {...props} />
-      {statusMessage && (
-        <div className="stars-status" role="alert">
-          {statusMessage}
+      <div className={`stars-status${statusMessage ? " open" : ""}`} role={statusMessage ? "alert" : undefined} aria-hidden={!statusMessage} inert={!statusMessage}>
+          {shownStatus}
           <button
             onClick={() => {
               setAttempt((v) => v + 1);
@@ -186,7 +205,6 @@ export function StarsWorkspace({
             重试
           </button>
         </div>
-      )}
     </main>
   );
 }

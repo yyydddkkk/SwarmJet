@@ -1,4 +1,4 @@
-import { api, APIError, fetchProjectSnapshot, type DataAPI } from "./api";
+import { api, APIError, fetchProjectSnapshot, loadProjectResources, isActiveAgent, type DataAPI, type ResourceName, type ResourceUpdate } from "./api";
 import { deriveProject, messageEndpoint, type LightPulse } from "./derive";
 import type { ProjectSnapshot, ProjectEvent } from "./types";
 export type ConnectionState =
@@ -7,6 +7,7 @@ export type EventConnection = { close(): void };
 export type DataSource = {
   api: DataAPI;
   snapshot(id: string, signal?: AbortSignal): Promise<ProjectSnapshot>;
+  load?: (id: string, update: ResourceUpdate, signal?: AbortSignal) => Promise<void>;
   connect(
     id: string,
     onReady: () => void,
@@ -74,6 +75,7 @@ function openBrowserStream() {
 export const browserDataSource: DataSource = {
   api,
   snapshot: fetchProjectSnapshot,
+  load: loadProjectResources,
   connect(id, ready, event, error) {
     const client = { id, ready, event, error };
     browserSubscribers.add(client);
@@ -104,7 +106,16 @@ export type ProjectState = {
   revision: number;
   retryDelay?: number;
   errorStatus?: number;
+  resources: Record<ResourceName, { status: "loading" | "ready" | "error"; error?: string; stale?: boolean; unavailable?: boolean }>;
 };
+const resourceNames: ResourceName[] = ["hive", "agents", "queen", "prs", "queue", "signals", "methodology", "methodologyEvents", "messages"];
+const loadingResources = () => Object.fromEntries(resourceNames.map((name) => [name, { status: "loading" }])) as ProjectState["resources"];
+const emptySnapshot = (patch: Partial<ProjectSnapshot>): ProjectSnapshot => ({
+  hive: patch.hive!, localAddress: patch.localAddress || "", agents: [],
+  queen: { enabled: false, state: "disabled", model: "", agentId: "", lastTurnAt: null },
+  prs: [], queue: [], signals: [], methodology: { manifest: { merge: { auto: false } } } as ProjectSnapshot["methodology"],
+  methodologyEvents: [], messages: [], ...patch,
+});
 const upsert = <T>(items: T[], item: T, key: (item: T) => unknown): T[] => {
   const index = items.findIndex((i) => key(i) === key(item));
   return index < 0
@@ -112,7 +123,7 @@ const upsert = <T>(items: T[], item: T, key: (item: T) => unknown): T[] => {
     : items.map((old, i) => (i === index ? { ...old, ...item } : old));
 };
 export class ProjectStore {
-  private state: ProjectState = { connection: "idle", pulses: [], revision: 0 };
+  private state: ProjectState = { connection: "idle", pulses: [], revision: 0, resources: loadingResources() };
   private listeners = new Set<() => void>();
   private stream?: EventConnection;
   private timer?: ReturnType<typeof setTimeout>;
@@ -126,6 +137,9 @@ export class ProjectStore {
   private prSequence = 0;
   private clock?: ReturnType<typeof setInterval>;
   private pulsed = new Set<string>();
+  private loadedMessageInboxes = new Set<string>();
+  private messageHydrations = new Map<string, Promise<void>>();
+  private firstReady = true;
   private observedPRs = new Map<
     number,
     import("./types").EventPayloads["pr"]
@@ -170,7 +184,10 @@ export class ProjectStore {
     this.stream = this.source.connect(
       this.hiveId,
       () => {
-        void this.refresh(true);
+        if (this.firstReady) {
+          this.firstReady = false;
+          this.publish({ connection: "connected", retryDelay: undefined });
+        } else void this.refresh(true);
       },
       (event) => this.receive(event),
       () => this.disconnected(),
@@ -184,6 +201,7 @@ export class ProjectStore {
     ++this.generation;
     this.abort?.abort();
     this.pending = undefined;
+    this.firstReady = false;
     const delay = Math.min(1000 * 2 ** this.retries++, 30000);
     this.publish({
       connection: "reconnecting",
@@ -196,14 +214,42 @@ export class ProjectStore {
     const generation = ++this.generation;
     this.abort?.abort();
     this.abort = new AbortController();
+    this.loadedMessageInboxes.clear();
     this.pending ??= [];
     const observedNumbers = [...this.observedPRs.keys()];
-    this.publish({ connection: ready ? "syncing" : this.state.connection });
+    this.publish({ connection: ready ? "syncing" : this.state.connection, resources: loadingResources() });
     try {
-      const snapshot = await this.source.snapshot(
-        this.hiveId,
-        this.abort.signal,
-      );
+      let snapshot: ProjectSnapshot;
+      if (this.source.load) {
+        let partial: Partial<ProjectSnapshot> = {};
+        let authError: APIError | undefined;
+        await this.source.load(this.hiveId, (name, patch, error, meta) => {
+          if (generation !== this.generation || this.stopped) return;
+          if (error instanceof APIError && error.status === 401) authError = error;
+          const status = error ? { status: "error" as const, error: error instanceof Error ? error.message : String(error), unavailable: name === "prs" } : { status: "ready" as const, ...(name === "prs" ? { stale: meta?.stale || patch?.prs?.some((pr) => pr.stale), unavailable: meta?.unavailable || patch?.prs?.some((pr) => pr.unavailable) } : {}) };
+          const resources = { ...this.state.resources, [name]: status };
+          if (patch) partial = { ...partial, ...patch };
+          if (name === "messages" && patch) {
+            ["queen", "hive", partial.localAddress, ...(partial.agents || []).filter(isActiveAgent).map((agent) => `forager:${agent.id}`)]
+              .filter(Boolean).forEach((address) => this.loadedMessageInboxes.add(address!));
+          }
+          if (partial.hive) {
+            const current = this.state.snapshot;
+            // A fast resource may settle before the hive on a reconnect.
+            // Merge every result from this generation when the hive arrives.
+            const next = current ? { ...current, ...partial } : emptySnapshot(partial);
+            this.publish({ snapshot: next, resources });
+          } else this.publish({ resources });
+        }, this.abort.signal);
+        if (authError) throw authError;
+        if (!partial.hive) throw new Error(this.state.resources.hive.error || "无法读取项目");
+        snapshot = this.state.snapshot || emptySnapshot(partial);
+      } else {
+        snapshot = await this.source.snapshot(this.hiveId, this.abort.signal);
+        ["queen", "hive", snapshot.localAddress, ...snapshot.agents.filter(isActiveAgent).map((agent) => `forager:${agent.id}`)]
+          .filter(Boolean).forEach((address) => this.loadedMessageInboxes.add(address));
+        this.publish({ resources: Object.fromEntries(resourceNames.map((name) => [name, { status: "ready" }])) as ProjectState["resources"] });
+      }
       // List readiness is cached server-side for 30 seconds. Before discarding
       // stream observations, calibrate those PRs against the uncached status
       // endpoint, so a queue/methodology resync cannot revert a newly ready PR.
@@ -313,7 +359,11 @@ export class ProjectStore {
             state: event.data.state,
             agentId: event.data.id,
           };
-        } else next.agents = upsert(snapshot.agents, event.data, (a) => a.id);
+        } else {
+          next.agents = upsert(snapshot.agents, event.data, (a) => a.id);
+          if (["creating", "active", "parked", "hibernated"].includes(event.data.state))
+            void this.loadAgentMessages(event.data.id).catch((error) => this.reportError(error));
+        }
         void this.refreshSignals();
         break;
       case "pr":
@@ -440,7 +490,53 @@ export class ProjectStore {
       throw error;
     }
   };
+  /** Recompute local visibility after acknowledgement without fetching resources. */
+  rederive = () => this.publish({});
   acknowledgePulses = () => this.publish({ pulses: [] });
+  /** Opened historical Agents are fetched once, on demand. */
+  loadAgentMessages = async (agentId: string) => {
+    const address = `forager:${agentId}`;
+    if (!this.state.snapshot || this.loadedMessageInboxes.has(address)) return;
+    this.loadedMessageInboxes.add(address);
+    try { await this.hydrateInbox(address); }
+    catch (error) { this.loadedMessageInboxes.delete(address); throw error; }
+  };
+  /** Hydrate only previews visible in the currently opened conversation. */
+  hydrateMessages = async (messageIds: string[]) => {
+    const wanted = new Set(messageIds);
+    const previews = this.state.snapshot?.messages.filter((message) => wanted.has(message.id) && "preview" in message) ?? [];
+    const addresses = [...new Set(previews.map((message) => message.to))];
+    await Promise.all(addresses.map(async (address) => {
+      await this.hydrateInbox(address);
+      // A preview may arrive after an already-running page read took its snapshot.
+      const missing = this.state.snapshot?.messages.some((message) => wanted.has(message.id) && message.to === address && "preview" in message);
+      if (missing && !this.stopped) await this.hydrateInbox(address);
+    }));
+  };
+  private hydrateInbox = (address: string): Promise<void> => {
+    const pending = this.messageHydrations.get(address);
+    if (pending) return pending;
+    const request = this.readInbox(address).finally(() => this.messageHydrations.delete(address));
+    this.messageHydrations.set(address, request);
+    return request;
+  };
+  private readInbox = async (address: string) => {
+    const messages: import("./types").Message[] = [];
+    let after: string | undefined;
+    do {
+      const page = await this.source.api.listMessages(this.hiveId, { to: address, after, limit: 200 });
+      messages.push(...page.messages);
+      if (!page.truncated || !page.cursor || page.cursor === after) break;
+      after = page.cursor;
+    } while (!this.stopped);
+    if (this.stopped || !this.state.snapshot) return;
+    const merged = new Map(this.state.snapshot.messages.map((message) => [message.id, message]));
+    for (const message of messages) {
+      const current = merged.get(message.id);
+      if (!current || "preview" in current) merged.set(message.id, message);
+    }
+    this.publish({ snapshot: { ...this.state.snapshot, messages: [...merged.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)) } });
+  };
 }
 export const createProjectStore = (id: string, source?: DataSource) =>
   new ProjectStore(id, source);

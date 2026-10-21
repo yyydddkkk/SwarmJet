@@ -281,9 +281,9 @@ const TILT=-.24,AS=.55,R_PR=212,R_HELIO=300,R_SIG=352;
 function ell(sx,sy,a,r){const c=Math.cos(a)*r,d=Math.sin(a)*r*AS;return{x:sx+c*Math.cos(TILT)-d*Math.sin(TILT),y:sy+c*Math.sin(TILT)+d*Math.cos(TILT)}}
 
 const SYS=[
-  {id:'docs',name:'docs-site',x:-940,y:170,on:false,method:'minimal'},
+  {id:'docs',name:'docs-site',x:-1300,y:220,on:false,method:'minimal'},
   {id:'tfm',name:'test-for-myself',x:0,y:0,on:true,method:'pstack'},
-  {id:'api',name:'api-server',x:960,y:-180,on:true,method:'pstack'}];
+  {id:'api',name:'api-server',x:1340,y:-210,on:true,method:'pstack'}];
 const S=Object.fromEntries(SYS.map(s=>[s.id,s]));
 let B=[],pulses=[],trails=[],flares=[];
 const add=b=>(b.alpha??=1,b.born??=1,b.dx=0,b.dy=0,B.push(b),b),get=id=>B.find(b=>b.id===id);
@@ -294,9 +294,9 @@ const signal=(s,id,label,ang,o={})=>add(Object.assign({id,sys:s,kind:'signal',la
 const queue=(s,id)=>add({id,sys:s,kind:'queue',label:'排队中'});
 
 const T=S.tfm,A=S.api,D=S.docs;
-signal(T,'t:i12','Issue #12',3.55);signal(T,'t:i13','Issue #13',4.05);signal(T,'t:ci','CI',4.75,{ci:true});
-signal(T,'t:i14','Issue #14',2.55,{claimed:false});
-pr(T,'t:pr9','PR #9',.35);pr(T,'t:pr8','PR #8',1.35,{state:'ready'});
+signal(T,'t:i12','Issue #12',3.55,{title:'--bytes 对二进制文件结果不对'});signal(T,'t:i13','Issue #13',4.05,{title:'--lines should not count a trailing newline as an extra line'});signal(T,'t:ci','CI',4.75,{ci:true,title:'CI：unittest 通过'});
+signal(T,'t:i14','Issue #14',2.55,{claimed:false,title:'Add --chars to count Unicode code points (not bytes, not grapheme clusters)'});
+pr(T,'t:pr9','PR #9',.35,{title:'feat: add Unicode character counting with --chars'});pr(T,'t:pr8','PR #8',1.35,{state:'ready',title:'feat: add raw byte counting with --bytes'});
 comet(T,'t:w12','worker #12',122,{short:'跑测试',target:'t:i12',now:'在跑单元测试，第二次迭代',diff:'wc'});
 comet(T,'t:w13','worker #13',142,{short:'读代码',target:'t:i13',now:'在读代码，准备改 --lines 的边界',diff:'cli'});
 comet(T,'t:w8','worker #8',132,{short:'等你合并',target:'t:pr8',state:'parked',now:'PR #8 已就绪，等你决定',diff:'wc'});
@@ -304,9 +304,11 @@ comet(T,'t:w3','worker #3',156,{short:'空闲 18 小时',state:'parked',stale:tr
 moon(T,'t:v9','t:pr9',{now:'在干净检出上复现 PR #9'});
 queue(T,'t:q1');
 
-[3.3,3.7,4.1,4.5].forEach((g,i)=>signal(A,'a:s'+i,'Issue #'+(41+i),g));signal(A,'a:ci','CI',5.0,{ci:true});
-pr(A,'a:p0','PR #120',.2);pr(A,'a:p1','PR #121',1.1);pr(A,'a:p2','PR #122',2.0);
-[118,130,142,154,166].forEach((r,i)=>comet(A,'a:c'+i,'worker',r,{short:'实现中',target:'a:s'+(i%4),now:'实现中',diff:'go'}));
+const A_ISSUES=['Rate limiter leaks tokens when the upstream returns 429 under burst load','分页接口在 cursor 为空时返回重复数据','Add OpenTelemetry spans around the billing webhook handler','Postgres pool exhaustion after deploy: connections never released on ctx cancel','导出 CSV 时中文列名乱码','Flaky TestRetryBackoff on arm64 runners','Support ETag / If-None-Match on GET /v1/projects','健康检查在数据库只读时仍返回 200','Upgrade to Go 1.25 and drop the x/exp/slices shim','Audit log misses actor for service-token requests','Webhook signature check accepts stale timestamps'];
+A_ISSUES.forEach((t,i)=>signal(A,'a:s'+i,'Issue #'+(41+i),3.05+i*.16,{title:t,claimed:i<5}));signal(A,'a:ci','CI',5.0,{ci:true,title:'CI 失败：lint / go vet'});
+const A_PRS=[['fix: release pool connections when the request context is cancelled','reviewing'],['feat: ETag support for project reads','reviewing'],['分页 cursor 为空时返回第一页','open'],['chore: bump golangci-lint to v2 and fix new findings','open'],['feat(billing): OpenTelemetry spans for webhook handler','open'],['fix: reject webhook timestamps older than five minutes','open'],['refactor: split handlers/projects.go into read and write paths','open'],['docs: document rate limiter burst semantics','open'],['fix: CSV export writes UTF-8 BOM so Excel shows Chinese headers','open'],['test: deflake TestRetryBackoff with a fake clock','stale'],['feat: health check reports read-only database as degraded','stale'],['chore: remove x/exp/slices shim after Go 1.25','stale'],['feat: audit actor for service tokens','open'],['perf: cache project ACL lookups for 30 seconds','stale']];
+A_PRS.forEach(([t,st],i)=>pr(A,'a:p'+i,'PR #'+(120+i),0,{title:t,st}));
+[118,130,142,154,166].forEach((r,i)=>comet(A,'a:c'+i,'worker',r,{short:'实现中',target:'a:s'+i,now:'实现中',diff:'go',task:A_ISSUES[i]}));
 moon(A,'a:m0','a:p0',{now:'跑集成测试'});moon(A,'a:m1','a:p1',{now:'读 diff'});
 queue(A,'a:q0');queue(A,'a:q1');queue(A,'a:q2');
 
@@ -315,7 +317,41 @@ comet(D,'d:c0','worker #2',128,{short:'失败',state:'failed',now:'模型返回 
 comet(D,'d:c1','worker #5',150,{short:'空闲',state:'parked',now:'等待模型恢复'});
 
 const stars=[];for(let i=0;i<520;i++)stars.push({x:(rnd()-.5)*5200,y:(rnd()-.5)*3400,r:rnd()<.9?.4+rnd()*.8:1.2+rnd()*.8,a:.25+rnd()*.6,cross:rnd()<.06});
+/* —— 星系内部：放不下就聚合 —— */
+const CAP_PR=9,CAP_SIG=6;
+const PRI_PR={ready:4,reviewing:3,open:2,stale:1};
+const prPri=b=>PRI_PR[b.state==='ready'?'ready':B.some(m=>m.kind==='moon'&&m.pr===b.id)?'reviewing':b.st||'open'];
+function layoutSys(s){B=B.filter(b=>!(b.kind==='cluster'&&b.sys===s));
+  const prs=B.filter(b=>b.sys===s&&b.kind==='pr'&&b.state!=='merging').sort((a,b)=>prPri(b)-prPri(a));
+  if(prs.length>CAP_PR){const keep=prs.slice(0,CAP_PR-1),rest=prs.slice(CAP_PR-1),n=CAP_PR;
+    keep.forEach((b,i)=>{b.hidden=false;b.ang=.15+i*TAU/n});rest.forEach(b=>b.hidden=true);
+    add({id:s.id+':cpr',sys:s,kind:'cluster',of:'pr',ang:.15+(n-1)*TAU/n,items:rest,label:`还有 ${rest.length} 个 PR`})}
+  else prs.forEach(b=>b.hidden=false);
+  const sig=B.filter(b=>b.sys===s&&b.kind==='signal'&&!b.ci).sort((a,b)=>(a.claimed-b.claimed)||(a.ang-b.ang));
+  if(sig.length>CAP_SIG){const keep=sig.slice(0,CAP_SIG-1),rest=sig.slice(CAP_SIG-1);
+    keep.sort((a,b)=>a.ang-b.ang).forEach((b,i)=>{b.hidden=false;b.ang=3.05+i*.2});rest.forEach(b=>b.hidden=true);
+    add({id:s.id+':csig',sys:s,kind:'cluster',of:'signal',ang:3.05+(CAP_SIG-1)*.2,items:rest,label:`还有 ${rest.length} 个 Issue`})}
+  else sig.forEach(b=>b.hidden=false)}
+
+/* —— 历史繁星：做完的事散在星系最外层 —— */
+const hh=str=>{let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)}h^=h>>>16;h=Math.imul(h,2246822507);h^=h>>>13;h=Math.imul(h,3266489909);h^=h>>>16;return(h>>>0)/4294967296};
+const H_IN=R_SIG+70,H_OUT=760,H_CAP=500;
+/* 内缘紧贴 Issue 外圈，向外按指数变稀，最远到 H_OUT；扁度和星系一致，略厚一点 */
+function histPos(s,id){const a=hh(id+':a')*TAU,u=hh(id+':r'),r=Math.min(H_OUT,H_IN+(H_OUT-H_IN)*(-Math.log(1-u*.97))/3.2),c=Math.cos(a)*r,d=Math.sin(a)*r*(AS+.12);
+  return{x:s.x+c*Math.cos(TILT)-d*Math.sin(TILT),y:s.y+c*Math.sin(TILT)+d*Math.cos(TILT)}}
+const H_TITLES=['feat: add --lines flag to wordcount','修复空文件时的除零错误','docs: README usage for --bytes','fix: handle CRLF line endings in count_lines','test: subprocess tests for missing file','refactor: extract argv parsing into parse_args()','支持从标准输入读取','chore: pin python to 3.12 in CI','feat: JSON output mode','fix: exit code 2 on unreadable file','Implement RFC 4180 CSV parsing utility','Implement canonical JSON signatures per RFC 8785','Implement IDNA2008 domain conversion','feat(api): cursor pagination for /v1/projects','fix: race in token bucket refill','perf: avoid N+1 query in project list','docs: 部署指南补充反向代理配置','fix: 时区导致的日报统计偏差','feat: retry with jitter for outbound webhooks','chore: drop Go 1.22 support'];
+function genHist(s,n){const H=[];for(let i=0;i<n;i++){const u=rnd(),out=u<.46?'merged':u<.8?'done':u<.92?'cancelled':'failed';
+    const age=rnd()<.7?-Math.log(1-rnd())*60:rnd()*24*60;const id=s.id+':h'+i;
+    H.push(Object.assign({id,sys:s,kind:'hist',out,age,title:H_TITLES[Math.floor(rnd()*H_TITLES.length)]+(rnd()<.3?'，并补充测试与文档说明，保持现有行为不变':'')},histPos(s,id)))}
+  H.sort((a,b)=>a.age-b.age);let k=0;for(const h of H){if(h.out==='cancelled')continue;h.dust=++k>H_CAP}return H}
+SYS.forEach(s=>s.hist=genHist(s,{docs:70,tfm:260,api:900}[s.id]));
+const ago=h=>h<1?'刚刚':h<24?Math.round(h)+' 小时前':Math.round(h/24)+' 天前';
+const OUT={merged:'已合并',done:'已完成',failed:'失败，已看过'};
+/* 显示用的短文本：汉字算 1，其他字符算 0.55，超出用省略号 */
+function short(t,n=14){let w=0,o='';for(const ch of t){w+=/[　-鿿＀-￯]/.test(ch)?1:.55;if(w>n)return o.trimEnd()+'…';o+=ch}return o}
+
 const needs=[{sys:'tfm',pr:'t:pr8'}];
+SYS.forEach(layoutSys);
 const you={kind:'you',x:0,y:0,alpha:1,born:1};
 
 const cam={x:0,y:0,s:.3,tx:0,ty:0,ts:.3};
@@ -327,6 +363,9 @@ const toS=(x,y)=>({x:(x-cam.x)*cam.s+W/2,y:(y-cam.y)*cam.s+H/2}),toW=(x,y)=>({x:
 function place(){
   const qi={};
   for(const b of B){const s=b.sys;
+    if(b.kind==='comet'&&b.state==='leaving'){const v=b.lv;v.t=Math.min(1,v.t+.003*speed);const e=ease(v.t);b.x=v.fx+(v.h.x-v.fx)*e;b.y=v.fy+(v.h.y-v.fy)*e;b.alpha=1-.45*e;
+      if(v.t>=1){b.dead=true;v.h.pending=false;v.h.glint=.001}continue}
+    if(b.kind==='cluster'){b.ang+=.00035*speed;const p=ell(s.x,s.y,b.ang,b.of==='pr'?R_PR:R_SIG);b.x=p.x;b.y=p.y;continue}
     if(b.kind==='comet'){if(b.state==='busy'||b.state==='done')b.a+=b.speed*speed;let p=ell(s.x,s.y,b.a,b.r);
       if(b.born<1){b.born=Math.min(1,b.born+.01*speed);const e=ease(b.born);p={x:s.x+(p.x-s.x)*e,y:s.y+(p.y-s.y)*e}}b.x=p.x;b.y=p.y}
     else if(b.kind==='pr'){if(b.state==='merging'){b.mt+=.0075*speed;b.ang+=.045*speed;const p=ell(s.x,s.y,b.ang,R_PR*(1-ease(clamp(b.mt,0,1))));b.x=p.x;b.y=p.y;
@@ -341,8 +380,8 @@ function place(){
 
 function routes(s){const R=[];if(!s.on)return R;const st=s.star;
   for(const b of B){if(b.sys!==s||b.born<1)continue;
-    if(b.kind==='signal'&&b.claimed)R.push([b,st]);
-    if(b.kind==='comet'&&b.state==='busy'){R.push([st,b],[b,st]);const t=b.target&&get(b.target);if(t)R.push([b,t])}
+    if(b.kind==='signal'&&b.claimed&&!b.hidden)R.push([b,st]);
+    if(b.kind==='comet'&&b.state==='busy'){R.push([st,b],[b,st]);const t=b.target&&get(b.target);if(t&&!t.hidden)R.push([b,t])}
     if(b.kind==='moon'){R.push([b,st]);const h=get(b.pr);if(h)R.push([h,b])}}
   return R}
 SYS.forEach(s=>s.star={kind:'star',sys:s,x:s.x,y:s.y,alpha:1,born:1,label:s.on?'主 Agent':'主 Agent（已停用）'});
@@ -370,12 +409,15 @@ function draw(){
   const s=cam.s;
   ctx.globalAlpha=1;ctx.fillStyle=P.paper;ctx.fillRect(0,0,W,H);
 
+  const halo=SYS.map(sy=>{const c=toS(sy.x,sy.y);return[c.x,c.y,(H_OUT+80)*s]});
   for(const st of stars){if(P.simple&&st.r<1.15)continue;const x=(st.x-cam.x*.35)*Math.max(.35,s*.55)+W/2,y=(st.y-cam.y*.35)*Math.max(.35,s*.55)+H/2;if(x<0||y<0||x>W||y>H)continue;
+    if(halo.some(([hx,hy,hr])=>Math.hypot((x-hx)/hr,(y-hy)/(hr*.8))<1))continue;
     ctx.globalAlpha=st.a*P.starA;ctx.fillStyle=P.ink;if(st.cross){ctx.strokeStyle=P.ink;ctx.lineWidth=.6*P.lw;ctx.beginPath();ctx.moveTo(x-3,y);ctx.lineTo(x+3,y);ctx.moveTo(x,y-3);ctx.lineTo(x,y+3);ctx.stroke()}else{ctx.beginPath();ctx.arc(x,y,st.r,0,TAU);ctx.fill()}}
 
   const gA=gridOn()&&!P.simple?(1-dz)*.9:0;if(gA>.02){const c=toS(0,0);ctx.strokeStyle=P.hair;ctx.lineWidth=1*P.lw;ctx.globalAlpha=gA;for(let r=420;r<2600;r+=420){ctx.beginPath();ctx.ellipse(c.x,c.y,r*s,r*s*.62,TILT*.5,0,TAU);ctx.stroke()}
     for(let k=0;k<12;k++){const a=k*TAU/12;ctx.beginPath();ctx.moveTo(c.x+Math.cos(a)*420*s,c.y+Math.sin(a)*420*s*.62);ctx.lineTo(c.x+Math.cos(a)*2600*s,c.y+Math.sin(a)*2600*s*.62);ctx.stroke()}}
 
+  drawHistory();
   if(pastF<1)drawPast();
   if(expAlpha>0){ctx.globalAlpha=expAlpha;ctx.drawImage(exp,0,0,W,H)}
 
@@ -395,12 +437,12 @@ function draw(){
   for(const f of flares){const c=toS(f.sys.x,f.sys.y);f.t+=.012*speed;ctx.globalAlpha=(1-f.t)*.8;ctx.strokeStyle=P.ink;ctx.lineWidth=.8*P.lw;ctx.beginPath();ctx.arc(c.x,c.y,(14+f.t*90)*s,0,TAU);ctx.stroke()}flares=flares.filter(f=>f.t<1);
 
   const behind=[],front=[];for(const b of B){(b.y<b.sys.y&&b.kind!=='signal'?behind:front).push(b)}
-  behind.forEach(b=>drawBody(b,.7));SYS.forEach(drawStar);front.forEach(b=>drawBody(b,1));
+  behind.forEach(b=>drawBody(b,.7));SYS.forEach(drawStar);front.forEach(b=>drawBody(b,1));placeLabels();
 
   if(dz<.98)for(const sy of SYS){const c=toS(sy.x,sy.y),y=c.y+R_HELIO*AS*s+30,a=1-dz;tlabel(sy.name,c.x,y,19,P.ink,a);
     if(needs.some(n=>n.sys===sy.id)){ctx.globalAlpha=a;ctx.fillStyle=P.accent;ctx.beginPath();ctx.arc(c.x+ctx.measureText(sy.name).width/2+10,y-5,2.5,0,TAU);ctx.fill()}}
 
-  if(hover&&hover.kind!=='star'||hover&&mode!=='cosmos'){const h=hover,p=toS(h.x,h.y);if(h!==sel)label(h.label,p.x,p.y-(h.kind==='star'?30:16),14,P.ink,1)}
+  if(hover&&hover.kind!=='star'||hover&&mode!=='cosmos'){const h=hover,p=toS(h.x,h.y),t=h.kind!=='hist'&&h.title?h.label.replace(/^(PR|Issue) /,'')+'  '+short(h.title,26):h.label;if(h!==sel)label(t,p.x,p.y-(h.kind==='star'?30:16),14,P.ink,1)}
 
   if(P.simple||!P.grain){}else if(grain){ctx.globalAlpha=P.grain;ctx.fillStyle=grain;ctx.fillRect(0,0,W,H)}
   if(!P.simple)drawFrame();ctx.globalAlpha=1;
@@ -410,6 +452,22 @@ function draw(){
   requestAnimationFrame(draw);
 }
 
+let LBL=[];
+/* 标签：按优先级逐个摆放，压到已有标签或主 Agent 的就不画 */
+function placeLabels(){const occ=[];if(focus&&mode!=='cosmos'){const c=toS(focus.x,focus.y),r=Math.max(9*cam.s,3.5)*4.2;occ.push([c.x-r,c.y-r,c.x+r,c.y+r])}
+  LBL.sort((a,b)=>b.pri-a.pri);for(const L of LBL){const it=L.italic!==false;ctx.font=`${it&&!P.simple?'italic ':''}400 ${L.size}px ${P.body}`;const w=ctx.measureText(L.t).width,al=L.align||'center',x0=al==='center'?L.x-w/2:al==='right'?L.x-w:L.x,R=[x0-4,L.y-L.size-1,x0+w+4,L.y+5];
+    if(occ.some(o=>R[0]<o[2]&&R[2]>o[0]&&R[1]<o[3]&&R[3]>o[1]))continue;occ.push(R);label(L.t,L.x,L.y,L.size,L.c,L.al,al,it)}LBL=[]}
+/* 历史繁星：越新越亮；合并过的略大；失败看过的偏暗；取消的不画；超出上限的只剩星尘 */
+function drawHistory(){const s=cam.s,zf=clamp(.55+s*.8,.7,1.6)*P.sz,dk=isDark()?1:.85;
+  for(const sy of SYS){const dim=(mode!=='cosmos'&&sy!==focus)?.3:1;ctx.fillStyle=P.ink;ctx.strokeStyle=P.ink;
+    for(const h of sy.hist){if(h.out==='cancelled'||h.pending)continue;const p=toS(h.x,h.y);if(p.x<-30||p.y<-30||p.x>W+30||p.y>H+30)continue;
+      if(h.dust){ctx.globalAlpha=.16*dim*dk;ctx.fillRect(p.x,p.y,.9,.9);continue}
+      const af=h.age<24?1:h.age<168?1-.45*(h.age-24)/144:.55,r={merged:1.35,done:.95,failed:.8}[h.out]*zf;
+      ctx.globalAlpha={merged:.85,done:.6,failed:.32}[h.out]*af*dim*dk;ctx.beginPath();ctx.arc(p.x,p.y,r,0,TAU);ctx.fill();
+      if(h.age<6&&h.out!=='failed'&&!P.simple){const L=r*3.4;ctx.lineWidth=.5*P.lw;ctx.globalAlpha*=.55;ctx.beginPath();ctx.moveTo(p.x-L,p.y);ctx.lineTo(p.x+L,p.y);ctx.moveTo(p.x,p.y-L);ctx.lineTo(p.x,p.y+L);ctx.stroke()}
+      if(h.glint>0){h.glint+=.01*speed;ctx.globalAlpha=Math.max(0,1-h.glint)*.7*dim;ctx.lineWidth=.7*P.lw;ctx.beginPath();ctx.arc(p.x,p.y,r+3+h.glint*24,0,TAU);ctx.stroke();if(h.glint>=1)h.glint=0}
+      if(hover===h||sel===h){ctx.globalAlpha=1;ctx.lineWidth=.8*P.lw;ctx.strokeStyle=P.ink2;ctx.beginPath();ctx.arc(p.x,p.y,8,0,TAU);ctx.stroke();ctx.strokeStyle=P.ink}}}}
+
 function drawStar(sy){const c=toS(sy.x,sy.y),s=cam.s,r=Math.max(9*s,3.5),d=sy.dim;ctx.globalAlpha=d;
   if(sy.on){ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(c.x,c.y,r,0,TAU);ctx.fill();ctx.strokeStyle=P.ink;ctx.lineWidth=.6*P.lw;
     for(const k of[1.8,2.6,3.6]){ctx.globalAlpha=d*(.55/k*1.6);ctx.beginPath();ctx.arc(c.x,c.y,r*k,0,TAU);ctx.stroke()}
@@ -417,10 +475,10 @@ function drawStar(sy){const c=toS(sy.x,sy.y),s=cam.s,r=Math.max(9*s,3.5),d=sy.di
   else{ctx.strokeStyle=P.ink3;ctx.lineWidth=1*P.lw;ctx.beginPath();ctx.arc(c.x,c.y,r,0,TAU);ctx.stroke();ctx.beginPath();ctx.moveTo(c.x-r*.6,c.y-r*.6);ctx.lineTo(c.x+r*.6,c.y+r*.6);ctx.stroke()}
   if(sel===sy.star){ctx.globalAlpha=d;ctx.strokeStyle=P.ink2;ctx.lineWidth=.8*P.lw;ctx.beginPath();ctx.arc(c.x,c.y,r*6.6,0,TAU);ctx.stroke()}}
 
-function drawBody(b,depth){if(b.alpha<=0)return;const p=toS(b.x,b.y),s=cam.s,d=(b.sys.dim??1)*b.alpha*depth;ctx.globalAlpha=d;
-  if(b.kind==='comet'){const st=b.sys,dx=b.x-st.x,dy=b.y-st.y,len=Math.hypot(dx,dy)||1,ux=dx/len,uy=dy/len,hr=Math.max(4*Math.min(s,1.6),2.2)*P.sz;
-    if((b.state==='busy'||b.state==='done')&&dz<.45){ctx.globalAlpha=d;ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(p.x,p.y,hr,0,TAU);ctx.fill()}
-    else if(b.state==='busy'||b.state==='done'){const L=(b.state==='done'?16:38)*Math.min(Math.max(s,.5),1.8)*b.born;ctx.lineWidth=.6*P.lw;ctx.strokeStyle=P.ink;
+function drawBody(b,depth){if(b.alpha<=0||b.hidden)return;const p=toS(b.x,b.y),s=cam.s;let d=(b.sys.dim??1)*b.alpha*depth;ctx.globalAlpha=d;
+  if(b.kind==='comet'){const st=b.sys,dx=b.x-st.x,dy=b.y-st.y,len=Math.hypot(dx,dy)||1,ux=dx/len,uy=dy/len,lv=b.state==='leaving'?ease(b.lv.t):0,hr=Math.max(4*Math.min(s,1.6),2.2)*P.sz*(1-.7*lv),fly=b.state==='busy'||b.state==='done'||b.state==='leaving';
+    if(fly&&dz<.45){ctx.globalAlpha=d;ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(p.x,p.y,hr,0,TAU);ctx.fill()}
+    else if(fly){const L=(b.state==='done'?16:b.state==='leaving'?44*(1-lv)+3:38)*Math.min(Math.max(s,.5),1.8)*b.born;ctx.lineWidth=.6*P.lw;ctx.strokeStyle=P.ink;
       for(let k=0;k<7;k++){const o=(k-3)*.055,cx=Math.cos(o),sx=Math.sin(o),vx=ux*cx-uy*sx,vy=ux*sx+uy*cx,l=L*(1-Math.abs(k-3)*.13);ctx.globalAlpha=d*(.55-Math.abs(k-3)*.11);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x+vx*l,p.y+vy*l);ctx.stroke()}
       ctx.globalAlpha=d;ctx.fillStyle=P.ink;ctx.beginPath();ctx.arc(p.x,p.y,hr,0,TAU);ctx.fill();ctx.globalAlpha=d*.35;ctx.strokeStyle=P.ink;ctx.lineWidth=.6*P.lw;ctx.beginPath();ctx.arc(p.x,p.y,hr+3.5,0,TAU);ctx.stroke()}
     else if(b.state==='parked'){ctx.strokeStyle=P.ink2;ctx.lineWidth=1*P.lw;ctx.beginPath();ctx.arc(p.x,p.y,hr,0,TAU);ctx.stroke();ctx.setLineDash([1.5,2.5]);ctx.beginPath();ctx.moveTo(p.x+ux*(hr+2),p.y+uy*(hr+2));ctx.lineTo(p.x+ux*(hr+12),p.y+uy*(hr+12));ctx.stroke();ctx.setLineDash([]);
@@ -429,7 +487,7 @@ function drawBody(b,depth){if(b.alpha<=0)return;const p=toS(b.x,b.y),s=cam.s,d=(
       ctx.setLineDash([2,5]);ctx.globalAlpha=d*.5;ctx.beginPath();ctx.moveTo(p.x+ux*6,p.y+uy*6);ctx.lineTo(p.x+ux*34*Math.min(s,1.4),p.y+uy*34*Math.min(s,1.4));ctx.stroke();ctx.setLineDash([])}
     if(b.state==='done'){b.alpha-=.008*speed;if(b.alpha<=0)b.dead=true}
     const t=b.target&&get(b.target);if(t&&t.kind==='pr'&&b.state!=='done'){const q=toS(t.x,t.y);ctx.globalAlpha=d*.35;ctx.strokeStyle=P.ink2;ctx.lineWidth=.6*P.lw;ctx.setLineDash([1,4]);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke();ctx.setLineDash([])}}
-  else if(b.kind==='pr'){const r=Math.max(7*Math.min(s,1.5),3)*b.grow*P.sz,RT=-.38;ctx.lineWidth=1.1*P.lw;ctx.strokeStyle=P.ink;
+  else if(b.kind==='pr'){const stale=b.st==='stale'&&b.state!=='ready'&&!B.some(m=>m.kind==='moon'&&m.pr===b.id),r=Math.max(7*Math.min(s,1.5),3)*b.grow*P.sz*(stale?.72:1),RT=-.38;if(stale)ctx.globalAlpha=d*=.55;ctx.lineWidth=1.1*P.lw;ctx.strokeStyle=P.ink;
     ctx.beginPath();ctx.ellipse(p.x,p.y,r*2.15,r*.62,RT,Math.PI,TAU);ctx.stroke();
     ctx.beginPath();ctx.arc(p.x,p.y,r,0,TAU);ctx.fillStyle=b.state==='merging'?P.ink:P.paper;ctx.fill();ctx.stroke();
     if(b.state!=='merging'){ctx.globalAlpha=d*.5;ctx.lineWidth=.6*P.lw;ctx.beginPath();ctx.arc(p.x,p.y,r*.55,-.4,1.9);ctx.stroke();ctx.globalAlpha=d;ctx.lineWidth=1.1*P.lw}
@@ -441,11 +499,19 @@ function drawBody(b,depth){if(b.alpha<=0)return;const p=toS(b.x,b.y),s=cam.s,d=(
     if(b.ci){ctx.beginPath();ctx.moveTo(p.x,p.y-k);ctx.lineTo(p.x+k,p.y);ctx.lineTo(p.x,p.y+k);ctx.lineTo(p.x-k,p.y);ctx.closePath();ctx.stroke()}
     else{ctx.beginPath();ctx.moveTo(p.x-k,p.y);ctx.lineTo(p.x+k,p.y);ctx.moveTo(p.x,p.y-k);ctx.lineTo(p.x,p.y+k);ctx.stroke();
       if(!b.claimed){ctx.globalAlpha=d*(.35+.35*Math.sin(frame/30));ctx.beginPath();ctx.arc(p.x,p.y,k+6,0,TAU);ctx.stroke()}}}
+  else if(b.kind==='cluster'){const k=Math.max(4*Math.min(s,1.4),2.2);ctx.strokeStyle=P.ink2;ctx.lineWidth=.8*P.lw;
+    if(b.of==='pr')for(const[ox,oy]of[[-k*1.3,0],[k*1.1,-k*.5],[0,k*.9]]){ctx.beginPath();ctx.arc(p.x+ox,p.y+oy,k*.8,0,TAU);ctx.stroke();ctx.globalAlpha=d*.5;ctx.beginPath();ctx.ellipse(p.x+ox,p.y+oy,k*1.6,k*.45,-.38,0,TAU);ctx.stroke();ctx.globalAlpha=d}
+    else for(const[ox,oy]of[[-k*1.2,0],[k*1.2,-k*.3],[0,k*1]]){ctx.beginPath();ctx.moveTo(p.x+ox-k*.7,p.y+oy);ctx.lineTo(p.x+ox+k*.7,p.y+oy);ctx.moveTo(p.x+ox,p.y+oy-k*.7);ctx.lineTo(p.x+ox,p.y+oy+k*.7);ctx.stroke()}
+    ctx.globalAlpha=d*.45;ctx.setLineDash([1,3]);ctx.beginPath();ctx.arc(p.x,p.y,k*3,0,TAU);ctx.stroke();ctx.setLineDash([])}
   else if(b.kind==='queue'){ctx.strokeStyle=P.ink2;ctx.lineWidth=.8*P.lw;ctx.beginPath();ctx.arc(p.x,p.y,Math.max(3*Math.min(s,1.4),1.8),0,TAU);ctx.stroke()}
-  if(dz>.5&&b.sys===focus&&hover!==b&&sel!==b){const la=(dz-.5)*2*b.alpha;
-    if(b.kind==='pr'||b.kind==='signal')label(b.label,p.x,p.y+(b.kind==='pr'?22:19),12,P.ink3,la);
-    else if(b.kind==='comet'){const st=b.sys,dx=b.x-st.x,dy=b.y-st.y,l=Math.hypot(dx,dy)||1;const num=b.label.replace('worker ','').replace(/^worker$/,'新'),txt=num+'  '+(b.short||{busy:'工作中',parked:'空闲',failed:'失败',done:'完成'}[b.state]),lf=dx/l>0;label(txt,p.x+(lf?-15:15),p.y+4,13,b.state==='failed'?P.ink3:P.ink2,la,lf?'right':'left',false)}
-    else if(b.kind==='moon')label('verifier 验证中',p.x,p.y-22,12,P.ink3,la,'center',false)}
+  if(dz>.5&&b.sys===focus&&hover!==b&&sel!==b&&b.state!=='leaving'){const la=(dz-.5)*2*b.alpha;
+    if(b.kind==='pr'){const pri=b.state==='ready'?100:{reviewing:45,open:40,stale:12}[b.st&&!B.some(m=>m.kind==='moon'&&m.pr===b.id)?b.st:B.some(m=>m.kind==='moon'&&m.pr===b.id)?'reviewing':'open'];
+      LBL.push({t:b.label.replace('PR ','')+'  '+short(b.title||'',13),x:p.x,y:p.y+22,size:12,c:b.state==='ready'?P.accent:P.ink3,al:la*(b.st==='stale'?.7:1),pri})}
+    else if(b.kind==='signal')LBL.push({t:b.ci?short(b.title||'CI',10):b.label.replace('Issue ','')+'  '+short(b.title||'',11),x:p.x,y:p.y+19,size:12,c:P.ink3,al:la,pri:b.claimed?20:50});
+    else if(b.kind==='comet'){const st=b.sys,dx=b.x-st.x,l=Math.hypot(dx,b.y-st.y)||1;const num=b.label.replace('worker ','').replace(/^worker$/,''),txt=(num?num+'  ':'')+short(b.short||{busy:'工作中',parked:'空闲',failed:'失败',done:'完成'}[b.state],10),lf=dx/l>0;
+      LBL.push({t:txt,x:p.x+(lf?-15:15),y:p.y+4,size:13,c:b.state==='failed'?P.ink3:P.ink2,al:la,align:lf?'right':'left',italic:false,pri:b.state==='failed'?90:b.state==='busy'?60:35})}
+    else if(b.kind==='moon')LBL.push({t:'verifier 验证中',x:p.x,y:p.y-22,size:12,c:P.ink3,al:la,italic:false,pri:55})
+    else if(b.kind==='cluster')LBL.push({t:b.label,x:p.x,y:p.y+(b.of==='pr'?24:20),size:12,c:P.ink2,al:la,italic:false,pri:85})}
   if(sel===b){ctx.globalAlpha=1;ctx.strokeStyle=P.ink2;ctx.lineWidth=.8*P.lw;ctx.beginPath();ctx.arc(p.x,p.y,13,0,TAU);ctx.stroke()}
   ctx.globalAlpha=1}
 
@@ -462,7 +528,7 @@ function setCart(){let t,l;
   const c=$('crumbs');c.innerHTML='';const items=[['全部项目',goCosmos]];if(focus)items.push([focus.name,()=>goSys(focus)]);if(mode==='lens'&&sel)items.push([sel.label,null]);
   items.forEach(([x,f],i)=>{if(i){const e=document.createElement('i');e.textContent='/';c.appendChild(e)}const a=document.createElement('a');a.textContent=x;if(i===items.length-1)a.className='on';if(f)a.onclick=f;c.appendChild(a)})}
 
-const cosmosScale=()=>Math.max(.12,Math.min((W-200)/2500,(H-300)/900));
+const cosmosScale=()=>Math.max(.1,Math.min((W-120)/3500,(H-200)/1250));
 function goCosmos(){closeLens();closeAlmanac();hideNote();mode='cosmos';focus=null;sel=null;cam.ts=cosmosScale();cam.tx=0;cam.ty=-10;setCart()}
 function goSys(sy){closeLens();hideNote();if(almOpen)setTimeout(()=>renderAlmanac(sy),0);mode='sys';focus=sy;sel=null;cam.ts=Math.max(.3,Math.min((H-250)/((R_SIG*AS+30)*2),(W-320)/((R_SIG+50)*2),1.8));cam.tx=sy.x-(almOpen?210/cam.ts:0);cam.ty=sy.y+10/cam.ts;setCart()}
 function lens(b){hideNote();mode='lens';focus=b.sys;sel=b;cam.ts=Math.min(2.4,H/420);openLens(b);setCart()}
@@ -486,6 +552,8 @@ function note(b){noteFor=b;sel=b;let h=b.label,p='',acts='';
   else if(b.kind==='pr'){p=b.state==='ready'?'另一位 Agent 验证通过，等你决定。':'等待独立验证。';if(b.state==='ready')acts='<button class="go" onclick="openDecide()">决定</button>'}
   else if(b.kind==='signal'){p=b.ci?'来自外部的检查结果，只当作数据。':b.claimed?'来自 GitHub，已有人在处理。':'来自 GitHub，还没人处理。拖到中间的主 Agent 上就会派出一个 Agent。';}
   else if(b.kind==='queue'){h='排队中';p='同时工作的 Agent 已满，有空位时按顺序补派。'}
+  else if(b.kind==='hist'){h=OUT[b.out]+'，'+ago(b.age);p=b.title;acts='<button onclick="openCatalogue()">在列表中查看</button>'}
+  else if(b.kind==='cluster'){p=b.items.slice(0,6).map(x=>`${x.label.replace(/^(PR|Issue) /,'')}  ${short(x.title||'',20)}`).join('<br>')+(b.items.length>6?`<br>……还有 ${b.items.length-6} 个`:'');acts='<button onclick="openCatalogue()">在列表中查看全部</button>'}
   $('note').innerHTML=`<h4>${h}</h4>${p?`<p>${p}</p>`:''}${acts?`<div class="acts">${acts}</div>`:''}`;$('note').classList.add('open');placeNote()}
 function placeNote(){const p=toS(noteFor.x,noteFor.y),n=$('note');n.style.left=clamp(p.x+26,40,W-300)+'px';n.style.top=clamp(p.y-24,40,H-180)+'px'}
 function hideNote(){noteFor=null;$('note').classList.remove('open')}
@@ -495,11 +563,20 @@ $('observer').onclick=()=>needs.length?$('decide').classList.toggle('open'):null
 $('later').onclick=()=>$('decide').classList.remove('open');
 $('merge').onclick=()=>{$('decide').classList.remove('open');const p=get('t:pr8');for(let i=0;i<4;i++)setTimeout(()=>emit(you,T.star,true,2.2),i*130);
   setTimeout(()=>{if(p){p.state='merging';p.mt=0}},1000);needs.length=0;$('observer').classList.remove('wait');setTimeout(setCart,400)};
-function onMerged(p){const w=B.find(b=>b.target===p.id&&b.kind==='comet');if(w&&w.state!=='done'){w.state='done';trails.push({sys:w.sys,r:w.r,a0:w.a-1.5,a1:w.a,al:.55})}}
+function onMerged(p){const w=B.find(b=>b.target===p.id&&b.kind==='comet');if(w&&w.state!=='leaving'){trails.push({sys:w.sys,r:w.r,a0:w.a-1.5,a1:w.a,al:.55});leave(w,'merged',p.title||p.label)}layoutSys(p.sys)}
+/* 完成：彗星向外飞，减速，停下变成一颗星 */
+function leave(w,out,title){const s=w.sys,id=w.id+':done:'+frame,h=Object.assign({id,sys:s,kind:'hist',out,age:0,title:title||w.task||w.now||w.label,pending:true},histPos(s,id));
+  s.hist.unshift(h);w.state='leaving';w.lv={t:0,fx:w.x,fy:w.y,h};if(RM){w.dead=true;h.pending=false}}
+/* 演示：api-server 隔一会儿完成一件事，再从主 Agent 派出新的 */
+let demoN=0;setInterval(()=>{if(RM||replay||speed===0)return;const c=B.filter(b=>b.sys===A&&b.kind==='comet'&&b.state==='busy');if(c.length<4)return;
+  const w=c[Math.floor(rnd()*c.length)],t=w.target&&get(w.target);leave(w,rnd()<.6?'merged':'done',t?.title||w.task);
+  setTimeout(()=>{const sig=B.filter(b=>b.sys===A&&b.kind==='signal'&&!b.ci&&!b.hidden);const tg=sig[Math.floor(rnd()*sig.length)];comet(A,'a:n'+(demoN++),'worker',w.r,{born:0,short:'实现中',target:tg?.id,now:'实现中',diff:'go',task:tg?.title})},3800)},16000);
 
 let drag=null,down=null,moved=false,pan=null;
 function hit(x,y){if(mode==='cosmos'){return SYS.find(sy=>{const c=toS(sy.x,sy.y);return Math.hypot((c.x-x)/R_HELIO,(c.y-y)/(R_HELIO*AS))<cam.s*1.15})?.star}
-  let best=null,bd=16;for(const b of[...B,...SYS.map(s=>s.star)]){if(b.alpha<=0||(b.sys.dim??1)<.5)continue;const p=toS(b.x,b.y),dd=Math.hypot(p.x-x,p.y-y);if(dd<bd){bd=dd;best=b}}return best}
+  let best=null,bd=16;for(const b of[...B,...SYS.map(s=>s.star)]){if(b.alpha<=0||b.hidden||b.state==='leaving'||(b.sys.dim??1)<.5)continue;const p=toS(b.x,b.y),dd=Math.hypot(p.x-x,p.y-y);if(dd<bd){bd=dd;best=b}}
+  if(!best&&focus){bd=7;for(const h of focus.hist){if(h.out==='cancelled'||h.pending||h.dust)continue;const p=toS(h.x,h.y),dd=Math.hypot(p.x-x,p.y-y);if(dd<bd){bd=dd;best=h}}if(best)best.label=short(best.title,20)+' · '+OUT[best.out]+' · '+ago(best.age)}
+  return best}
 cv.addEventListener('mousedown',e=>{down={x:e.clientX,y:e.clientY,cx:cam.tx,cy:cam.ty};moved=false;const h=mode!=='cosmos'&&hit(e.clientX,e.clientY);if(h&&h.kind==='signal'&&!h.claimed&&h.sys.on)drag=h;else if(!h)pan=true});
 addEventListener('mousemove',e=>{if(down&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>4)moved=true;
   if(drag){const w=toW(e.clientX,e.clientY),b=ell(drag.sys.x,drag.sys.y,drag.ang,R_SIG);drag.dx=w.x-b.x;drag.dy=w.y-b.y;cv.style.cursor='grabbing';return}
@@ -610,11 +687,12 @@ const GLY={star:'<circle r="4.5" fill="currentColor"/>',busy:'<circle r="3" fill
   pr:'<ellipse rx="9" ry="2.6" transform="rotate(-20)" fill="none" stroke="currentColor"/><circle r="4" fill="var(--paper)" stroke="currentColor"/>',signal:'<path d="M-5 0h10M0 -5v10" stroke="currentColor"/>',ci:'<path d="M0 -5l5 5-5 5-5-5z" fill="none" stroke="currentColor"/>',queue:'<circle r="3" fill="none" stroke="currentColor"/>'};
 const glyph=b=>`<svg viewBox="-12 -12 24 24">${GLY[b.kind==='comet'?(b.state==='busy'||b.state==='done'?'busy':b.state):b.kind==='signal'&&b.ci?'ci':b.kind]}</svg>`;
 function renderCatalogue(){const q=$('cat-q').value.trim().toLowerCase();let h='';
-  for(const sy of [...SYS].sort((a,b)=>(needs.some(n=>n.sys===b.id)-needs.some(n=>n.sys===a.id))||(b.on-a.on))){const items=[sy.star,...B.filter(b=>b.sys===sy&&b.alpha>0)];const rows=items.filter(b=>!q||(b.label+sy.name+STATUS(b)).toLowerCase().includes(q));if(!rows.length)continue;
+  for(const sy of [...SYS].sort((a,b)=>(needs.some(n=>n.sys===b.id)-needs.some(n=>n.sys===a.id))||(b.on-a.on))){const items=[sy.star,...B.filter(b=>b.sys===sy&&b.alpha>0&&b.kind!=='cluster'&&b.state!=='leaving')];const rows=items.filter(b=>!q||(b.label+sy.name+STATUS(b)).toLowerCase().includes(q));if(!rows.length)continue;
     h+=`<tr class="grp"><td colspan="4">${sy.name}<small>${sy.method}，今天 ${money(INFO[sy.id].today)}</small></td></tr>`;
-    rows.forEach(b=>{const i=items.indexOf(b);h+=`<tr class="item" data-s="${sy.id}" data-i="${i}"><td class="g">${glyph(b)}</td><td>${b.kind==='queue'?'等待中的请求':b.label}</td><td class="s">${STATUS(b)}</td><td class="c">${b.kind==='comet'||b.kind==='moon'?money(.01+((b.r||60)%7)/100):''}</td></tr>`})}
+    rows.forEach(b=>{const i=items.indexOf(b);h+=`<tr class="item" data-s="${sy.id}" data-i="${i}"><td class="g">${glyph(b)}</td><td>${b.kind==='queue'?'等待中的请求':b.title?b.label+'  '+short(b.title,26):b.label}</td><td class="s">${STATUS(b)}</td><td class="c">${b.kind==='comet'||b.kind==='moon'?money(.01+((b.r||60)%7)/100):''}</td></tr>`})}
+  for(const sy of SYS){const n=sy.hist.filter(x=>x.out!=='cancelled').length,w=sy.hist.filter(x=>x.out!=='cancelled'&&x.age<168).length;if(n&&!q)h+=`<tr><td></td><td class="s" colspan="3">${sy.name}：历史做完 ${n} 件，最近 7 天 ${w} 件</td></tr>`}
   $('cat-t').innerHTML=h||'<tr><td class="s">没有找到。</td></tr>';
-  $('cat-t').querySelectorAll('tr.item').forEach(tr=>tr.onclick=()=>{const sy=S[tr.dataset.s],items=[sy.star,...B.filter(b=>b.sys===sy&&b.alpha>0)],b=items[+tr.dataset.i];closeCatalogue();flyTo(b)})}
+  $('cat-t').querySelectorAll('tr.item').forEach(tr=>tr.onclick=()=>{const sy=S[tr.dataset.s],items=[sy.star,...B.filter(b=>b.sys===sy&&b.alpha>0&&b.kind!=='cluster'&&b.state!=='leaving')],b=items[+tr.dataset.i];closeCatalogue();flyTo(b)})}
 function openCatalogue(){hideNote();closeAppendix();$('cat-q').value='';renderCatalogue();$('catalogue').classList.add('open');setTimeout(()=>$('cat-q').focus(),50)}
 function closeCatalogue(){$('catalogue').classList.remove('open');$('cat-q').blur()}
 $('cat-q').addEventListener('input',renderCatalogue);$('cat-x').onclick=closeCatalogue;$('catbtn').onclick=openCatalogue;
@@ -666,8 +744,8 @@ $('display').querySelectorAll('[data-grid]').forEach(b=>b.onclick=()=>{if((b.dat
 function pop(id){const el=$(id),open=!el.classList.contains('open');['legend','display'].forEach(x=>{$(x).classList.remove('open');$('t-'+x).classList.remove('on')});if(open){el.classList.add('open');$('t-'+id).classList.add('on')}}
 $('t-legend').onclick=()=>pop('legend');$('t-display').onclick=()=>{syncDisplay();pop('display')};
 $('t-list').onclick=openCatalogue;$('t-time').onclick=toggleTimeline;$('t-brief').onclick=()=>briefOpen()?closeBrief():openBrief();
-const LEG=[['star','主 Agent，每个项目中间的那颗'],['busy','工作中的 Agent，尾巴越长越忙'],['parked','空闲的 Agent'],['failed','失败的 Agent'],['pr','PR'],['ready','等你决定的 PR'],['moon','正在验证 PR 的 verifier'],['signal','GitHub 上的 Issue'],['queue','排队等待的任务'],['you','你']];
-const LGLY=Object.assign({},GLY,{ready:GLY.pr+'<circle r="9" fill="none" stroke="var(--accent)" stroke-dasharray="2 2"/>',you:'<circle r="7" fill="none" stroke="currentColor"/><circle r="1.6" fill="currentColor"/>'});
+const LEG=[['star','主 Agent，每个项目中间的那颗'],['hist','做完的事，散在最外层；越亮越新'],['cluster','放不下的 PR 或 Issue，点开看全部'],['busy','工作中的 Agent，尾巴越长越忙'],['parked','空闲的 Agent'],['failed','失败的 Agent'],['pr','PR'],['ready','等你决定的 PR'],['moon','正在验证 PR 的 verifier'],['signal','GitHub 上的 Issue'],['queue','排队等待的任务'],['you','你']];
+const LGLY=Object.assign({},GLY,{hist:'<circle r="1.6" fill="currentColor"/><path d="M-5 0h10M0 -5v10" stroke="currentColor" stroke-width=".5"/>',cluster:'<circle r="2.6" cx="-3.5" fill="none" stroke="currentColor"/><circle r="2.6" cx="3" cy="-1.5" fill="none" stroke="currentColor"/><circle r="2.6" cy="3" fill="none" stroke="currentColor"/>',ready:GLY.pr+'<circle r="9" fill="none" stroke="var(--accent)" stroke-dasharray="2 2"/>',you:'<circle r="7" fill="none" stroke="currentColor"/><circle r="1.6" fill="currentColor"/>'});
 $('legend-k').innerHTML=LEG.map(([k,t])=>`<div class="k"><svg viewBox="-12 -12 24 24">${LGLY[k]}</svg>${t}</div>`).join('');
 const briefOpen=()=>document.body.classList.contains('briefing');
 function renderBrief(){const allBusy=B.filter(b=>b.kind==='comet'&&b.state==='busy'&&b.sys.on),busy=allBusy.slice(0,3),need=needs.length;

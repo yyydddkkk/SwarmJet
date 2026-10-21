@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { shouldCollapseLongText } from "../../data";
 export function useFocus(active = true) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -31,7 +32,7 @@ export function useFocus(active = true) {
     node?.addEventListener("keydown", trap);
     return () => {
       node?.removeEventListener("keydown", trap);
-      if (previous?.isConnected) previous.focus();
+      if (previous?.isConnected && (node?.contains(document.activeElement) || document.activeElement === document.body)) previous.focus();
     };
   }, [active]);
   return ref;
@@ -156,6 +157,20 @@ export function CopyField({ label, text }: { label: string; text: string }) {
       <CopyButton text={text} />
     </div>
   );
+}
+export function ShortCopy({ value, short, label }: { value: string; short: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return <button type="button" className="pc-short-copy" title={`${label}：${value}，点击复制完整值`} aria-label={`复制完整${label}：${short}，完整值 ${value}`} onClick={() => {
+    void navigator.clipboard.writeText(value).then(() => setCopied(true)).catch(() => setCopied(false));
+  }}><code>{short}</code>{copied && <span className="pc-copy-status">已复制</span>}</button>;
+}
+export function LongText({ text, label }: { text: string; label: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = shouldCollapseLongText(text);
+  return <div className="pc-long-text">
+    <p className={collapsible && !expanded ? "pc-clamped" : undefined}>{text}</p>
+    {collapsible && <button type="button" className="pc-italic-action" aria-expanded={expanded} aria-label={`${expanded ? "收起" : "展开"}${label}`} onClick={() => setExpanded(!expanded)}>{expanded ? "收起" : "展开"}</button>}
+  </div>;
 }
 export function Dialog({
   title,

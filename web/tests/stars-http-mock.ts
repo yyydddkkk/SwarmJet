@@ -41,7 +41,9 @@ export async function mockStarsHTTP(
                   ? "parked"
                   : a.state,
           updatedAt:
-            i === 3
+            i === 2
+              ? new Date(Date.now() - 3600000).toISOString()
+              : i === 3
               ? new Date(Date.now() - 8 * 3600000).toISOString()
               : a.updatedAt,
         },

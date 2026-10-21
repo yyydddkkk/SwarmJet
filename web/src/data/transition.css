@@ -1,0 +1,6 @@
+:root{--paper:#F4F3EF;--ink:#131927;--ink2:rgba(19,25,39,.74);--hair:rgba(19,25,39,.10);--body:"Source Serif 4","Noto Serif SC",serif;--title:"IM Fell English","Noto Serif SC",serif}
+.stars-transition{position:fixed;inset:0;display:grid;place-items:center;background:var(--paper);color:var(--ink);font-family:var(--body)}
+.stars-transition-inner{width:min(360px,calc(100vw - 48px));text-align:center}
+.stars-transition h1{font:400 36px var(--title);margin:0 0 26px}
+.stars-transition p{font-size:16px;font-style:italic;color:var(--ink2);margin:0;padding:8px 0;border-bottom:1px solid var(--hair)}
+.stars-transition button{font:italic 16px var(--body);background:none;border:0;border-bottom:1px solid var(--hair);margin-top:22px;padding:4px 14px;color:var(--ink);cursor:pointer}

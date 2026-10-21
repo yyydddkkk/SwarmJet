@@ -13,7 +13,7 @@ const project = (id: string) => `/hives/${encodeURIComponent(id)}`;
 export const api = {
   ...hiveAPI,
   listPRs: (id: string, state: "open" | "all" = "all", signal?: AbortSignal) =>
-    request<{ prs: PullRequest[] }>(
+    request<{ prs: PullRequest[]; stale?: boolean; unavailable?: boolean }>(
       `${project(id)}/prs?state=${state}`,
       "GET",
       undefined,
@@ -81,6 +81,8 @@ export const api = {
     hiveAPI.sendMessage(id, { to: "queen", body: `请处理 Issue #${number}` }),
 };
 export type DataAPI = typeof api;
+export type ResourceName = "hive" | "agents" | "queen" | "prs" | "queue" | "signals" | "methodology" | "methodologyEvents" | "messages";
+export type ResourceUpdate = (name: ResourceName, patch?: Partial<ProjectSnapshot>, error?: unknown, meta?: { stale?: boolean; unavailable?: boolean }) => void;
 
 // Inbox pagination is oldest-first. Drain each inbox so a busy project doesn't
 // silently show only its first 50 messages. Preserve full bodies for panels.
@@ -95,44 +97,56 @@ async function inbox(id: string, to: string, signal?: AbortSignal) {
   } while (!signal?.aborted);
   return messages;
 }
+export const isActiveAgent = (agent: import("./types").Agent) =>
+  ["creating", "active", "parked", "hibernated"].includes(agent.state);
+
+/** Full message bodies are fetched only for a selected historical Agent. */
+export function fetchAgentMessages(id: string, agentId: string, signal?: AbortSignal) {
+  return inbox(id, `forager:${agentId}`, signal);
+}
+
+/** Each resource publishes as soon as its own request settles. */
+export async function loadProjectResources(id: string, update: ResourceUpdate, signal?: AbortSignal): Promise<void> {
+  const run = async <T>(name: ResourceName, load: () => Promise<T>, patch: (value: T) => Partial<ProjectSnapshot>) => {
+    try { update(name, patch(await load())); }
+    catch (error) { if (!signal?.aborted) update(name, undefined, error); }
+  };
+  const detail = api.getHive(id, signal);
+  const foragers = api.listForagers(id, signal);
+  const independent = [
+    run("hive", () => detail, (value) => ({ hive: value.hive, localAddress: value.localAddress })),
+    run("agents", () => foragers, (value) => ({ agents: value.foragers, queenAgent: value.queen, localAddress: value.localAddress })),
+    run("queen", () => api.getQueen(id, signal), (queen) => ({ queen })),
+    (async () => {
+      try {
+        const value = await api.listPRs(id, "all", signal);
+        update("prs", { prs: value.prs }, undefined, { stale: value.stale, unavailable: value.unavailable });
+      } catch (error) { if (!signal?.aborted) update("prs", undefined, error, { unavailable: true }); }
+    })(),
+    run("queue", () => api.listQueue(id, signal), (value) => ({ queue: value.queue })),
+    run("signals", () => api.listSignals(id, undefined, signal), (value) => ({ signals: value.signals })),
+    run("methodology", () => api.getMethodology(id, undefined, signal), (methodology) => ({ methodology })),
+    run("methodologyEvents", () => api.listMethodologyEvents(id, 50, signal), (value) => ({ methodologyEvents: value.events })),
+  ];
+  const messages = run("messages", async () => {
+    const [hive, agents] = await Promise.all([detail, foragers]);
+    const addresses = ["queen", "hive", hive.localAddress, ...agents.foragers.filter(isActiveAgent).map((agent) => `forager:${agent.id}`)];
+    const pages = await Promise.all([...new Set(addresses)].filter(Boolean).map((to) => inbox(id, to, signal)));
+    return [...new Map(pages.flat().map((message) => [message.id, message])).values()]
+      .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  }, (messages) => ({ messages }));
+  await Promise.all([...independent, messages]);
+}
 export async function fetchProjectSnapshot(
   id: string,
   signal?: AbortSignal,
 ): Promise<ProjectSnapshot> {
-  const [detail, agents, queen, prs, queue, signals, methodology, events] =
-    await Promise.all([
-      api.getHive(id, signal),
-      api.listForagers(id, signal),
-      api.getQueen(id, signal),
-      api.listPRs(id, "all", signal),
-      api.listQueue(id, signal),
-      api.listSignals(id, undefined, signal),
-      api.getMethodology(id, undefined, signal),
-      api.listMethodologyEvents(id, 50, signal),
-    ]);
-  const addresses = [
-    "queen",
-    "hive",
-    detail.localAddress,
-    ...agents.foragers.map((a) => `forager:${a.id}`),
-  ];
-  const pages = await Promise.all(
-    [...new Set(addresses)].filter(Boolean).map((to) => inbox(id, to, signal)),
-  );
-  const messages = [
-    ...new Map(pages.flat().map((m) => [m.id, m])).values(),
-  ].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-  return {
-    hive: detail.hive,
-    localAddress: detail.localAddress,
-    agents: agents.foragers,
-    queen,
-    queenAgent: agents.queen,
-    prs: prs.prs,
-    queue: queue.queue,
-    signals: signals.signals,
-    methodology,
-    methodologyEvents: events.events,
-    messages,
-  };
+  let partial: Partial<ProjectSnapshot> = {};
+  let failure: unknown;
+  await loadProjectResources(id, (_name, patch, error) => {
+    if (patch) partial = { ...partial, ...patch };
+    if (error && !failure) failure = error;
+  }, signal);
+  if (failure) throw failure;
+  return partial as ProjectSnapshot;
 }

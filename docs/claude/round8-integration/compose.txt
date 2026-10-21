@@ -1,0 +1,2 @@
+docker compose --env-file .env.example -f compose.yaml -f compose.cells.yaml config -q
+退出码：0

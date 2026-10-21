@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 import "./periphery.css";
 import { APIError, useDataAPI, type Principal } from "../data";
-// Task D owns the login surface. Authentication uses the injectable shared API.
 export default function LoginSlot({
   onLogin,
   notice,
@@ -12,6 +11,7 @@ export default function LoginSlot({
   const api = useDataAPI();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [exiting, setExiting] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const fields = new FormData(event.currentTarget);
@@ -22,7 +22,9 @@ export default function LoginSlot({
         String(fields.get("username")),
         String(fields.get("password")),
       );
-      onLogin(await api.getSession());
+      const principal = await api.getSession();
+      setExiting(true);
+      window.setTimeout(() => onLogin(principal), 300);
     } catch (e) {
       setError(
         e instanceof APIError && e.status === 401
@@ -36,9 +38,12 @@ export default function LoginSlot({
     }
   }
   return (
-    <main className="stars-app">
+    <main className={`stars-app stars-login-page${exiting ? " leaving" : ""}`}>
+      <div className="stars-login-mark">SwarmJet</div>
       <form className="stars-login" onSubmit={submit}>
+        <p className="stars-login-kicker">平台入口</p>
         <h1>登录 SwarmJet</h1>
+        <p className="stars-login-lead">登录后查看项目与正在进行的工作。</p>
         {notice && <p role="status">{notice}</p>}
         <label>
           用户名
@@ -53,7 +58,7 @@ export default function LoginSlot({
             required
           />
         </label>
-        <button disabled={busy}>{busy ? "正在登录…" : "登录"}</button>
+        <button className="stars-login-submit" disabled={busy || exiting}>{busy || exiting ? "正在登录…" : "登录"}</button>
         {error && <p role="alert">{error}</p>}
       </form>
     </main>

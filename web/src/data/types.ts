@@ -500,6 +500,9 @@ export type PullRequest = {
   ownerId?: string;
   attestations?: Attestation[];
   updatedAt?: string;
+  /** Optional fields returned by the faster round-eight PR endpoint. */
+  unavailable?: boolean;
+  stale?: boolean;
 };
 export type QueueItem = {
   agentId: string;

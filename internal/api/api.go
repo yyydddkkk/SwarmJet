@@ -55,13 +55,16 @@ type Config struct {
 }
 
 type server struct {
-	s         *store.Store
-	cfg       Config
-	mu        sync.Mutex
-	attempts  map[string]attempt
-	prCache   map[prCacheKey]prCacheEntry
-	prCacheMu sync.Mutex
-	events    *eventHub
+	s                *store.Store
+	cfg              Config
+	mu               sync.Mutex
+	attempts         map[string]attempt
+	prCache          map[prCacheKey]prCacheEntry
+	prCacheMu        sync.Mutex
+	prInFlight       map[prCacheKey]*prCall
+	prLists          map[string]prListCacheEntry
+	prListRefreshing map[string]bool
+	events           *eventHub
 }
 
 type attempt struct {

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockHiveAPI } from "./hive-api-mock";
 import { mockStarsHTTP } from "./stars-http-mock";
+import AxeBuilder from "@axe-core/playwright";
 async function open(page: Page) {
   const state = await mockHiveAPI(page);
   state.prStatuses["swarmjet:88"].headSha = "panel-observed-head";
@@ -13,6 +14,12 @@ async function open(page: Page) {
   await page.goto("/panel-test");
   return state;
 }
+async function syncMessages(page: Page) {
+  await page.evaluate(() => (window as unknown as {panelHarnessSyncMessages(): Promise<void>}).panelHarnessSyncMessages());
+}
+async function openMethodology(page: Page) {
+  await page.getByRole("button", { name: "编辑方法论与版本历史" }).click();
+}
 test.use({ viewport: { width: 1440, height: 1000 } });
 test("every panel opens and closes; platform replaces both sides", async ({
   page,
@@ -20,10 +27,13 @@ test("every panel opens and closes; platform replaces both sides", async ({
   await open(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
   const project = page.getByRole("region", { name: "项目面板" });
-  for (const name of ["方法论", "设置", "花费", "记忆"]) {
-    await project.getByRole("button", { name, exact: true }).click();
-    await expect(project).toBeVisible();
-  }
+  await expect(project.getByRole("heading", {name:"方法论"})).toBeVisible();
+  await expect(project.getByRole("heading", {name:"设置"})).toBeVisible();
+  await expect(project.getByRole("heading", {name:"花费"})).toBeVisible();
+  await expect(project.getByRole("heading", {name:"记忆"})).toBeVisible();
+  await openMethodology(page);
+  await expect(page.getByTestId("methodology-version")).toBeVisible();
+  await project.getByRole("button", {name:"返回项目面板"}).click();
   await page.getByRole("button", { name: "Agent详情", exact: true }).click();
   await expect(project).toBeVisible();
   await expect(page.getByRole("region", { name: "对象详情" })).toBeVisible();
@@ -66,6 +76,7 @@ test("interjection sends the exact agent address and full messages are visible",
     to: expect.stringMatching(/^forager:/),
     body: "请先验证兼容行为",
   });
+  await syncMessages(page);
   await expect(panel).toContainText("请先验证兼容行为");
 });
 test("project settings PATCH includes CSRF and selected fields", async ({
@@ -73,7 +84,7 @@ test("project settings PATCH includes CSRF and selected fields", async ({
 }) => {
   const state = await open(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "更多项目设置" }).click();
   await page.getByLabel("并发上限", { exact: true }).fill("7");
   await page.getByRole("button", { name: "保存设置" }).click();
   await expect(page.getByRole("status")).toContainText("项目设置已保存");
@@ -86,6 +97,7 @@ test("methodology activation and rollback are confirmed and retain notes", async
 }) => {
   const state = await open(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
+  await openMethodology(page);
   await expect(page.locator(".pc-version-table tbody tr")).toHaveCount(3);
   await page.getByText("版本历史与回滚", { exact: true }).click();
   for (const version of [2, 3]) {
@@ -120,6 +132,38 @@ test("methodology activation and rollback are confirmed and retain notes", async
     { version: 3, note: "test v3" },
   ]);
 });
+test("project view changes start at the top after scrolling the overview", async ({page}) => {
+  await open(page);
+  await page.getByRole("button", {name:"项目", exact:true}).click();
+  const panel = page.getByRole("region", {name:"项目面板"});
+  await panel.evaluate(el => el.scrollTop = el.scrollHeight);
+  expect(await panel.evaluate(el => el.scrollTop)).toBeGreaterThan(100);
+  await panel.getByRole("button", {name:"编辑方法论与版本历史"}).click();
+  await expect.poll(() => panel.evaluate(el => el.scrollTop)).toBe(0);
+  await expect(panel.getByRole("combobox", {name:"查看方法论版本"})).toBeInViewport();
+  await panel.evaluate(el => el.scrollTop = el.scrollHeight);
+  await panel.getByRole("button", {name:"返回项目面板"}).click();
+  await expect.poll(() => panel.evaluate(el => el.scrollTop)).toBe(0);
+  await panel.evaluate(el => el.scrollTop = el.scrollHeight);
+  await panel.getByRole("button", {name:"查看第 2 版"}).click();
+  await expect.poll(() => panel.evaluate(el => el.scrollTop)).toBe(0);
+  await expect(panel.getByRole("combobox", {name:"查看方法论版本"})).toHaveValue("2");
+  await expect(panel.getByRole("combobox", {name:"查看方法论版本"})).toBeInViewport();
+});
+test("saving project settings keeps the current scroll position", async ({page}) => {
+  await open(page);
+  await page.getByRole("button", {name:"项目", exact:true}).click();
+  const panel = page.getByRole("region", {name:"项目面板"});
+  await panel.getByRole("button", {name:"更多项目设置"}).click();
+  await panel.getByLabel("并发上限", {exact:true}).fill("7");
+  await panel.evaluate(el => el.scrollTop = el.scrollHeight);
+  const before = await panel.evaluate(el => el.scrollTop);
+  expect(before).toBeGreaterThan(100);
+  await panel.getByRole("button", {name:"保存设置"}).dispatchEvent("click");
+  await expect(panel.getByRole("status")).toContainText("项目设置已保存");
+  const after = await panel.evaluate(el => el.scrollTop);
+  expect(after).toBeGreaterThan(100);
+});
 test("merge submits the head actually displayed and prevents double click", async ({
   page,
 }) => {
@@ -141,6 +185,12 @@ test("merge submits the head actually displayed and prevents double click", asyn
     });
   });
   await page.getByRole("button", { name: "PR详情", exact: true }).click();
+  const head = page.getByRole("button", {name: /复制完整已读取提交/});
+  await expect(head).toContainText("panel-o");
+  await expect(head).not.toContainText("panel-observed-head");
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await head.click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("panel-observed-head");
   await page.getByRole("button", { name: "确认合并", exact: true }).dblclick();
   await expect.poll(() => count).toBe(1);
   expect(body).toEqual({ headSha: "panel-observed-head" });
@@ -207,6 +257,7 @@ test("complete conversations drain pages, include bootstrap, sort instants and r
     body: "半秒消息",
     createdAt: "2026-10-20T00:00:00.5Z",
   });
+  await syncMessages(page);
   await page.getByRole("button", { name: "主Agent详情", exact: true }).click();
   const panel = page.getByRole("region", { name: "对象详情" });
   await expect(panel).toContainText("完整引导 204");
@@ -299,6 +350,7 @@ test("panels remain legible in each theme and on mobile", async ({
 }, testInfo) => {
   await open(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
+  await openMethodology(page);
   await expect(page.getByTestId("methodology-version")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("project-panel.png") });
   await page.getByRole("button", { name: "平台", exact: true }).click();
@@ -340,6 +392,7 @@ test("administrator questions reply to their actual sender and chain", async ({
     state: "pending",
     createdAt: "2026-10-20T12:00:00Z",
   });
+  await syncMessages(page);
   await page.getByRole("button", { name: "主Agent详情", exact: true }).click();
   await page.getByRole("button", { name: "回复这条提问" }).click();
   await page
@@ -371,6 +424,7 @@ test("catalog distinguishes source release from project version and confirms ins
   const active = state.methodologies.swarmjet.find((v) => v.active)!;
   active.source = { url: "builtin:pstack", ref: "older-test-release" };
   await page.getByRole("button", { name: "项目", exact: true }).click();
+  await openMethodology(page);
   await page.getByText("从内置目录安装方法论", { exact: true }).click();
   await expect(
     page.getByText("当前来源版本：older-test-release。", { exact: false }),
@@ -465,8 +519,9 @@ test("usage ranking opens agent details and pending events retain complete exter
     body: "这是完整的任务原文。".repeat(30),
     createdAt: "2026-10-20T00:00:00Z",
   });
+  await syncMessages(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
-  await page.getByRole("button", { name: "花费", exact: true }).click();
+  await page.getByRole("button", { name: "查看花费详情" }).click();
   const rank = page.getByRole("list", { name: "Agent 花费排行" });
   await rank.getByRole("button").first().click();
   await expect(page.getByRole("region", { name: "对象详情" })).toBeVisible();
@@ -492,6 +547,84 @@ test("usage ranking opens agent details and pending events retain complete exter
     state.calls.find((c) => c.method === "POST" && c.path.endsWith("/messages"))
       ?.body,
   ).toMatchObject({ to: "queen", body: "请处理 Issue #42" });
+});
+test("usage ranking uses quiet meters, one rank number and copyable readable Agent names", async ({page, context}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await open(page);
+  await page.getByRole("button", {name:"项目", exact:true}).click();
+  await page.getByRole("button", {name:"查看花费详情"}).click();
+  const ranking = page.getByRole("list", {name:"Agent 花费排行"});
+  await expect(ranking.locator("li")).toHaveCount(3);
+  await expect(ranking).toHaveCSS("list-style-type", "none");
+  expect(await ranking.locator(".pc-usage-rank").allTextContents()).toEqual(["1", "2", "3"]);
+  const visible = await ranking.innerText();
+  expect(visible).toContain("主 Agent");
+  expect(visible).not.toContain("queen-swarmjet");
+  expect(visible).not.toContain("forager-7f3a");
+  const meter = ranking.getByRole("meter").first();
+  await expect(meter).toHaveCSS("background-color", "rgb(204, 204, 204)");
+  await expect(meter.locator("span")).toHaveCSS("background-color", "rgb(148, 112, 31)");
+  const forager = ranking.locator("li").filter({hasText:"ger-7f3a"});
+  await forager.getByRole("button", {name:/复制完整Agent 编号/}).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("forager-7f3a");
+  const queen = ranking.locator("li").filter({hasText:"主 Agent"});
+  await queen.getByRole("button", {name:/复制完整主 Agent 编号/}).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("queen-swarmjet");
+  const axe = await new AxeBuilder({page}).include(".pc-left").analyze();
+  expect(axe.violations).toEqual([]);
+  await queen.getByRole("button", {name:"查看主 Agent详情"}).click();
+  await expect(page.getByRole("region", {name:"对象详情"}).locator("h2")).toHaveText("主 Agent");
+});
+test("platform ledger uses reference rows with real today and all-time amounts", async ({page}) => {
+  const state = await open(page);
+  await page.getByRole("button", {name:"平台", exact:true}).click();
+  const platform = page.getByRole("dialog", {name:"平台设置", exact:true});
+  await platform.getByRole("button", {name:"账簿", exact:true}).click();
+  const row = platform.locator(".pc-ledger-row");
+  await expect(row).toHaveCount(1);
+  await expect(row.locator("dt")).toHaveText(state.hives[0].hive.name);
+  await expect(row.locator("dt")).toHaveCSS("font-size", "17px");
+  await expect(row.locator("dt")).toHaveCSS("font-weight", "400");
+  await expect(row).toHaveCSS("border-top-width", "1px");
+  await expect(row.locator("dd")).toHaveCSS("text-align", "right");
+  await expect(row.locator("dd")).toContainText("今天 $12.4700");
+  await expect(row.locator("dd")).toContainText("累计 $12.4700");
+  await expect(platform.locator(".pc-ledger-row h3")).toHaveCount(0);
+  await expect(platform).not.toContainText("本周花费");
+  const periods = state.calls.filter(call => call.method === "GET" && call.path === "/api/usage").map(call => new URLSearchParams(call.query).get("period"));
+  expect(periods).toEqual(["today", "all"]);
+});
+test("platform account keeps the reference admin row and italic exit without inventing login time", async ({page}) => {
+  await open(page);
+  await page.getByRole("button", {name:"平台", exact:true}).click();
+  const platform = page.getByRole("dialog", {name:"平台设置", exact:true});
+  await platform.getByRole("button", {name:"账号", exact:true}).click();
+  await expect(platform.getByRole("heading", {name:"账号", exact:true})).toBeVisible();
+  await expect(platform.getByText("这是一套单管理员部署。", {exact:true})).toBeVisible();
+  const row = platform.locator(".pc-account-row");
+  await expect(row).toHaveText("管理员admin");
+  await expect(row).toHaveCSS("border-top-width", "1px");
+  await expect(row).toHaveCSS("border-bottom-width", "1px");
+  await expect(row).toHaveCSS("font-size", "17px");
+  await expect(row.locator("span").last()).toHaveCSS("font-style", "italic");
+  await expect(platform).not.toContainText("本次登录");
+  const exit = platform.getByRole("button", {name:"退出登录"});
+  await expect(exit).toHaveCSS("font-style", "italic");
+  await expect(exit).toHaveCSS("border-bottom-width", "1px");
+});
+test("check and pull request signals are read only; only Issues can be assigned", async ({page}) => {
+  const state = await open(page);
+  const baseline = state.calls.filter(call => call.method === "POST" && call.path.endsWith("/messages")).length;
+  for (const name of ["检查详情", "外部PR详情"]) {
+    await page.getByRole("button", {name, exact:true}).click();
+    const panel = page.getByRole("region", {name:"对象详情"});
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole("link", {name:"在 GitHub 查看"})).toBeVisible();
+    await expect(panel.getByRole("button", {name:/请主 Agent 处理 Issue/})).toHaveCount(0);
+    await page.getByRole("button", {name:"关闭对象详情"}).click();
+    await expect(panel).toHaveCount(0);
+  }
+  expect(state.calls.filter(call => call.method === "POST" && call.path.endsWith("/messages"))).toHaveLength(baseline);
 });
 for (const result of ["delay", "failure"] as const) {
   test(`new PR head cannot merge with old validation while detail refresh ${result}`, async ({
@@ -670,6 +803,7 @@ for (const failure of [false, true]) {
       1: [{ path: "methodology.yaml", content: "B项目独有文件正文" }],
     };
     await page.getByRole("button", { name: "项目", exact: true }).click();
+    await openMethodology(page);
     await page.getByLabel("查看方法论版本", { exact: true }).selectOption("2");
     await expect(page.getByTestId("methodology-version")).toContainText("v2");
     await page.getByText("查看文件内容", { exact: true }).click();
@@ -686,6 +820,7 @@ for (const failure of [false, true]) {
       );
     await page.getByRole("button", { name: "切到B项目", exact: true }).click();
     const panel = page.getByRole("region", { name: "项目面板" });
+    await openMethodology(page);
     await expect(
       panel.getByRole("heading", {
         name: state.hives.find((p) => p.hive.id === "orders")!.hive.name,
@@ -720,6 +855,8 @@ test("methodology first view prioritizes role diagram and plain rules while adva
   await open(page);
   await page.getByRole("button", { name: "项目", exact: true }).click();
   const panel = page.getByRole("region", { name: "项目面板" });
+  await expect(panel.getByRole("img", { name: "方法论角色轨道" })).toBeVisible();
+  await openMethodology(page);
   await expect(panel.getByRole("img", { name: "角色分工示意" })).toBeVisible();
   const diagram = await panel
     .getByRole("img", { name: "角色分工示意" })
@@ -763,13 +900,12 @@ test("methodology layout also renders in the real application shell with bundled
   await page.goto("/");
   await page.getByRole("dialog", { name: "简报", exact: true })
     .getByRole("button", { name: "进入星图", exact: true }).click();
-  await page.getByRole("dialog", { name: "图例", exact: true })
-    .getByRole("button", { name: "关闭", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "选择项目", exact: true })
-    .selectOption("swarmjet");
-  await page.getByRole("button", { name: "项目面板", exact: true }).click();
+  await page.getByLabel("对话与命令").fill(state.hives[0].hive.name);
+  await page.getByLabel("对话与命令").press("Enter");
+  await page.locator(".stars-cartouche").click();
   const panel = page.getByRole("region", { name: "项目面板" });
+  await expect(panel.getByRole("img", { name: "方法论角色轨道" })).toBeVisible();
+  await openMethodology(page);
   await expect(panel.getByRole("img", { name: "角色分工示意" })).toBeVisible();
   await expect(
     panel.getByRole("heading", { name: "合并规则", exact: true }),

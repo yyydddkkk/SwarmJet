@@ -65,6 +65,48 @@ type PullState struct {
 	MergeableState string    `json:"mergeableState,omitempty"`
 }
 
+// ListPullStates reads one state of the repository's PR collection. GitHub's
+// list response includes merged_at, while its merged boolean is only reliable
+// on the single-PR endpoint.
+func (c *Client) ListPullStates(ctx context.Context, id int64, state string) ([]PullState, error) {
+	if state != "open" && state != "closed" {
+		return nil, errors.New("invalid pull request state")
+	}
+	p, err := c.repo(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	type row struct {
+		Number    int64      `json:"number"`
+		Title     string     `json:"title"`
+		UpdatedAt time.Time  `json:"updated_at"`
+		ClosedAt  *time.Time `json:"closed_at"`
+		MergedAt  *time.Time `json:"merged_at"`
+		State     string     `json:"state"`
+		Draft     bool       `json:"draft"`
+		URL       string     `json:"html_url"`
+		Head      struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+		Base struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+	}
+	rows, err := paginate[row](ctx, c, p+"/pulls", url.Values{"state": {state}})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PullState, 0, len(rows))
+	for _, r := range rows {
+		pull := PullState{Number: r.Number, Title: r.Title, UpdatedAt: r.UpdatedAt.UTC(), State: r.State, Draft: r.Draft, URL: r.URL, HeadSHA: r.Head.SHA, BaseRef: r.Base.Ref, Merged: r.MergedAt != nil}
+		if r.ClosedAt != nil {
+			pull.ClosedAt = r.ClosedAt.UTC()
+		}
+		out = append(out, pull)
+	}
+	return out, nil
+}
+
 // GetPullState reads the fields the merge gate needs, including the base
 // repository and the mergeable state the forge view does not expose.
 func (c *Client) GetPullState(ctx context.Context, id, number int64) (PullState, error) {
@@ -152,13 +194,20 @@ func (c *Client) CheckRuns(ctx context.Context, id int64, sha string) ([]CheckRu
 	var all []CheckRun
 	for page := 1; page <= 10000; page++ {
 		var out struct {
-			Runs []CheckRun `json:"check_runs"`
+			Runs []struct {
+				CheckRun
+				GitHubHeadSHA string `json:"head_sha"`
+			} `json:"check_runs"`
 		}
 		h, err := c.request(ctx, "GET", fmt.Sprintf("%s/commits/%s/check-runs?filter=latest&per_page=100&page=%d", p, url.PathEscape(sha), page), nil, &out)
 		if err != nil {
 			return nil, err
 		}
-		all = append(all, out.Runs...)
+		for _, raw := range out.Runs {
+			run := raw.CheckRun
+			run.HeadSHA = raw.GitHubHeadSHA
+			all = append(all, run)
+		}
 		if !strings.Contains(h.Get("Link"), `rel="next"`) {
 			return all, nil
 		}

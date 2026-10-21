@@ -10,9 +10,9 @@
 .stars-app * {
   box-sizing: border-box;
 }
-.stars-app button,
-.stars-app input,
-.stars-app select {
+:where(.stars-app) button,
+:where(.stars-app) input,
+:where(.stars-app) select {
   font: inherit;
   color: inherit;
 }
@@ -26,83 +26,14 @@
   color: inherit;
 }
 .stars-app :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
+  outline: 1px solid var(--ink2);
+  outline-offset: 5px;
 }
 .stars-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-}
-.stars-mark {
-  position: absolute;
-  top: 54px;
-  left: 60px;
-}
-.stars-mark b {
-  font: italic 400 21px var(--title);
-  margin-right: 18px;
-}
-.stars-cartouche {
-  position: absolute;
-  left: 60px;
-  bottom: 58px;
-}
-.stars-cartouche h1 {
-  font: italic 400 30px var(--title);
-  margin: 0 0 8px;
-}
-.stars-cartouche > span {
-  display: block;
-  max-width: min(430px, 40vw);
-  font-size: 15px;
-  color: var(--ink2);
-}
-.stars-cartouche select {
-  display: inline-block;
-  max-width: 170px;
-  background: transparent;
-  border: 0;
-  margin-top: 12px;
-  color: var(--ink2);
-  font-size: 13px;
-}
-.stars-tools {
-  position: absolute;
-  right: 60px;
-  bottom: 47px;
-  max-width: 50%;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-.stars-say {
-  position: absolute;
-  bottom: 46px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(420px, 90vw);
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid var(--hair);
-  gap: 12px;
-  padding: 4px 0;
-  font-style: italic;
-}
-.stars-say > span:first-child {
-  font-size: 29px;
-  color: var(--accent);
-}
-.stars-say input {
-  background: transparent;
-  border: 0;
-  flex: 1;
-  min-width: 0;
-  padding: 4px 0;
-}
-.stars-say input:focus {
-  outline: 0;
 }
 [data-style="simple"] .stars-app * {
   font-style: normal !important;
@@ -139,6 +70,15 @@
   background: var(--veil);
   border: 1px solid var(--hair);
   padding: 10px 14px;
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity .3s, transform .3s;
+}
+.stars-status.open {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
 }
 .stars-empty {
   position: absolute;
@@ -147,30 +87,6 @@
   transform: translateX(-50%);
 }
 @media (max-width: 650px) {
-  .stars-mark {
-    left: 18px;
-    top: 20px;
-  }
-  .stars-mark b {
-    font-size: 22px;
-    margin-right: 5px;
-  }
-  .stars-cartouche {
-    left: 18px;
-    bottom: 155px;
-    padding: 10px;
-  }
-  .stars-cartouche h1 {
-    font-size: 23px;
-  }
-  .stars-tools {
-    right: 12px;
-    bottom: 100px;
-    max-width: 95%;
-  }
-  .stars-say {
-    bottom: 20px;
-  }
   .stars-panel {
     right: 5vw;
     bottom: 150px;
@@ -182,26 +98,4 @@
     animation: none !important;
     transition: none !important;
   }
-}
-.stars-login {
-  position: absolute;
-  left: 50%;
-  top: 40%;
-  transform: translate(-50%, -50%);
-  width: min(380px, 85vw);
-}
-.stars-login h1 {
-  font: 36px var(--title);
-}
-.stars-login label {
-  display: block;
-  margin: 22px 0;
-}
-.stars-login input {
-  display: block;
-  width: 100%;
-  border: 0;
-  border-bottom: 1px solid var(--ink3);
-  background: transparent;
-  padding: 10px 0;
 }

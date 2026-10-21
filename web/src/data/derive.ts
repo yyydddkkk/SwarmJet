@@ -1,4 +1,5 @@
 import type { Agent, LiveMessage, ProjectSnapshot } from "./types";
+import { agentVisibility, aggregateIssues, aggregatePRs, failedCI, historyStars, nodeSummary, readAcknowledged } from "./rules";
 export type StarNode = {
   id: string;
   kind: "star" | "comet" | "satellite" | "planet" | "signal" | "queue";
@@ -141,8 +142,28 @@ export function deriveProject(snapshot: ProjectSnapshot, now = Date.now()) {
         message,
       })),
   ];
+  const prGroups = aggregatePRs(prs, agents, now);
+  const issueGroups = aggregateIssues(snapshot.signals, agents, now);
+  const mapAgents = new Set(agents.filter((agent) => agentVisibility(agent, now, readAcknowledged(hive.id, agent.id)) === "orbit").map((agent) => agent.id));
+  const mapPRs = new Set(prGroups.visible.map((pr) => pr.number));
+  const mapIssues = new Set(issueGroups.visible.map((issue) => issue.messageId));
+  const mapNodes = nodes.filter((node) => node.kind === "star" || node.kind === "queue" ||
+    (node.agentId && mapAgents.has(node.agentId)) ||
+    (node.kind === "planet" && node.prNumber !== undefined && mapPRs.has(node.prNumber)) ||
+    (node.kind === "signal" && mapIssues.has(node.id)))
+    .map((node) => {
+      const agent = agents.find((item) => item.id === node.agentId);
+      const pr = prs.find((item) => item.number === node.prNumber);
+      const issue = snapshot.signals.find((item) => item.messageId === node.id);
+      return { ...node, label: agent ? nodeSummary("agent", agent, { prs, issues: snapshot.signals }) : pr ? nodeSummary("pr", pr) : issue ? nodeSummary("issue", issue) : node.label };
+    });
   return {
     nodes,
+    mapNodes,
+    history: historyStars(agents, prs, now, (id) => readAcknowledged(hive.id, id), { x: 0, y: 0 }, snapshot.signals),
+    prGroups,
+    issueGroups,
+    failedCI: failedCI(prs, snapshot.signals, messages),
     decisions,
     needsAttention: decisions.length > 0,
     agentStatuses: Object.fromEntries(

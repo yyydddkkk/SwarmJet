@@ -71,7 +71,7 @@ export default function ModelsPage() {
     <div className="pc-page">
       <header className="pc-page-head">
         <div>
-          <h1>模型</h1>
+          <h2>模型</h2>
           <p className="pc-page-sub">
             工作环境不保存模型凭证。凭证由平台的 凭证服务 保管并刷新，Agent
             通过平台代理调用模型。
