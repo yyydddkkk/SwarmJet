@@ -938,6 +938,28 @@ test("hovering a finished Agent shows summary and opens its historical card", as
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
+test("an expired unacknowledged failure is not described as already read", async ({ page }) => {
+  await mount(page);
+  await page.evaluate(() => {
+    const x = (window as any).__canvas;
+    x.ui.selectProject(x.hive.id);
+    for (let i = 0; i < 20; i++) x.mock.push(x.hive.id, { type: "agent", data: {
+      ...x.agent, id: `old-failure-${i}`, roleName: "worker", state: "failed",
+      issueNumber: undefined, prNumber: undefined, task: "旧任务失败",
+      updatedAt: new Date(Date.now() - 25 * 3600000).toISOString(),
+    } });
+  });
+  await settle(page);
+  const point = await page.locator(".stars-canvas").evaluate((canvas: any) => Object.entries(canvas.starMapMetrics.positions)
+    .filter(([id, p]: any) => id.startsWith("history:old-failure-") && p.x > 50 && p.x < canvas.clientWidth - 50 && p.y > 50 && p.y < canvas.clientHeight - 50)
+    .map(([, p]) => p as {x: number; y: number})[0]);
+  expect(point).toBeTruthy();
+  await page.mouse.click(point.x, point.y);
+  const title = page.locator(".stars-note.open h2");
+  await expect(title).toContainText("失败");
+  await expect(title).not.toContainText("已看过");
+});
+
 test("reduced motion renders a static canvas after camera settles", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await mount(page);

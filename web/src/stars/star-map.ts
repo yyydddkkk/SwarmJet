@@ -606,7 +606,7 @@ export class StarMap {
         this.onHistoryHoverChange?.();
         const s = this.systems.find((x) => x.id === history.systemId)!;
         const q = this.screen({ x: s.x + history.history.x, y: s.y + history.history.y });
-        this.note = { kind: "history", x: q.x, y: q.y, title: `${history.history.result === "merged" ? "已合并" : history.history.result === "failed" ? "失败，已看过" : "已完成"}，${relativeTime(history.history.endedAt)}`, body: `${history.history.summary}\n结束时间按 Agent 最近更新时间估算。`, scope: "history", query: history.history.id };
+        this.note = { kind: "history", x: q.x, y: q.y, title: `${history.history.result === "merged" ? "已合并" : history.history.result === "failed" ? "失败" : "已完成"}，${relativeTime(history.history.endedAt)}`, body: `${history.history.summary}\n结束时间按 Agent 最近更新时间估算。`, scope: "history", query: history.history.id };
         this.onNoteChange?.(this.note);
       } else if (body?.cluster) {
         const q = this.screen(body);
