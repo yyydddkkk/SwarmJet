@@ -131,6 +131,24 @@ test("methodology activation and rollback are confirmed and retain notes", async
     { version: 3, note: "test v3" },
   ]);
 });
+test("project view changes start at the top after scrolling the overview", async ({page}) => {
+  await open(page);
+  await page.getByRole("button", {name:"项目", exact:true}).click();
+  const panel = page.getByRole("region", {name:"项目面板"});
+  await panel.evaluate(el => el.scrollTop = el.scrollHeight);
+  expect(await panel.evaluate(el => el.scrollTop)).toBeGreaterThan(100);
+  await panel.getByRole("button", {name:"编辑方法论与版本历史"}).click();
+  await expect.poll(() => panel.evaluate(el => el.scrollTop)).toBe(0);
+  await expect(panel.getByRole("combobox", {name:"查看方法论版本"})).toBeInViewport();
+  await panel.evaluate(el => el.scrollTop = el.scrollHeight);
+  await panel.getByRole("button", {name:"返回项目面板"}).click();
+  await expect.poll(() => panel.evaluate(el => el.scrollTop)).toBe(0);
+  await panel.evaluate(el => el.scrollTop = el.scrollHeight);
+  await panel.getByRole("button", {name:"查看第 2 版"}).click();
+  await expect.poll(() => panel.evaluate(el => el.scrollTop)).toBe(0);
+  await expect(panel.getByRole("combobox", {name:"查看方法论版本"})).toHaveValue("2");
+  await expect(panel.getByRole("combobox", {name:"查看方法论版本"})).toBeInViewport();
+});
 test("merge submits the head actually displayed and prevents double click", async ({
   page,
 }) => {
