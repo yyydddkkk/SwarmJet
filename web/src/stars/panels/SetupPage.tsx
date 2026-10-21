@@ -67,7 +67,7 @@ export default function SetupPage({
     <div className="pc-page">
       <header className="pc-page-head">
         <div>
-          <h1>{mode === "connections" ? "连接" : "接入"}</h1>
+          <h2>{mode === "connections" ? "连接" : "接入"}</h2>
           <p className="pc-page-sub">
             {mode === "connections"
               ? "让本地 Agent 通过 MCP 连接平台。明文 Token 只显示一次。"
