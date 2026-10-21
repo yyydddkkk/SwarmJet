@@ -1,4 +1,4 @@
-import type { Agent, PullRequest, Signal } from "./types";
+import type { Agent, LiveMessage, PullRequest, Signal } from "./types";
 
 export const SUMMARY_WIDTH = { star: 14, list: 40, briefing: 30 } as const;
 const wide = (character: string) => /[\u3000-\u9fff\uff00-\uffef]/u.test(character);
@@ -103,7 +103,33 @@ export function agentVisibility(agent: Agent, now = Date.now(), acknowledged = f
 export const prVisible = (pr: PullRequest) => !pr.merged && pr.state === "open";
 export const issueVisible = (issue: Signal, agents: Agent[], now = Date.now()) =>
   issue.kind === "issue" && (!issue.claimed || agents.some((a) => a.issueNumber === issue.number && agentVisibility(a, now) === "orbit"));
-export const failedCIVisible = (status: string) => status === "failed" || status === "failure";
+export const failedCIVisible = (status: string) => ["failed", "failure", "error", "timed_out", "cancelled", "action_required"].includes(status.toLowerCase());
+export type FailedCI = { id: string; prNumber: number; source: "message" | "pr-reason"; reason: string; signalId?: string };
+/** Only definite failures already present in loaded data; no extra historical inbox reads. */
+export function failedCI(prs: PullRequest[], signals: Signal[], messages: LiveMessage[]): FailedCI[] {
+  const open = new Set(prs.filter(prVisible).map((pr) => pr.number));
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  const result: FailedCI[] = [];
+  for (const signal of signals) {
+    if (signal.kind !== "check" || !open.has(signal.number)) continue;
+    const message = byId.get(signal.messageId);
+    if (!message || !("body" in message)) continue;
+    const start = message.body.indexOf("GitHub event: ");
+    if (start < 0) continue;
+    const header = message.body.slice(start).split("\n\n", 1)[0];
+    const line = header.split("\n").find((value) => /^(Check|Status): /i.test(value));
+    const state = line?.split(" -> ").at(-1)?.replace(/^(Check|Status): /i, "").trim().toLowerCase();
+    if (state && failedCIVisible(state))
+      result.push({ id: `ci:${signal.messageId}`, prNumber: signal.number, source: "message", reason: "GitHub CI 未通过", signalId: signal.messageId });
+  }
+  const covered = new Set(result.map((item) => item.prNumber));
+  for (const pr of prs) {
+    if (!open.has(pr.number) || covered.has(pr.number)) continue;
+    if (pr.reasons?.some((reason) => /check\s+.+\s+failed\s*\(|required checks are not green|ci failed/i.test(reason)))
+      result.push({ id: `ci:pr:${pr.number}`, prNumber: pr.number, source: "pr-reason", reason: "GitHub CI 未通过" });
+  }
+  return result;
+}
 
 // These constants and hash operations are transcribed from design/stars/index.html histPos.
 export const HISTORY_POSITION = { issueRadius: 352, inner: 422, outer: 760, aspect: .55, tilt: -.24, cap: 500 } as const;

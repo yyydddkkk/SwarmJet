@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { round8Project } from "../src/fixtures/round8";
-import { aggregateIssues, aggregatePRs, agentSummary, agentVisibility, firstSentence, historyPosition, historyStars, localizedReason, relativeTime, shortAgentId, shortSha, shouldCollapseLongText, uniqueLongTexts, weightedTruncate } from "../src/data/rules";
+import { aggregateIssues, aggregatePRs, agentSummary, agentVisibility, failedCI, firstSentence, historyPosition, historyStars, localizedReason, relativeTime, shortAgentId, shortSha, shouldCollapseLongText, uniqueLongTexts, weightedTruncate } from "../src/data/rules";
 import { mockStarsHTTP } from "./stars-http-mock";
 import { createMockDataSource } from "../src/data/mock";
 import { createProjectStore } from "../src/data/store";
@@ -44,6 +44,17 @@ test("legacy animation nodes retain terminal objects while map nodes show curren
   expect(derived.mapNodes.some((node) => node.prNumber === 17)).toBe(false);
   expect(derived.mapNodes.some((node) => node.prNumber === 1)).toBe(true);
   expect(derived.mapNodes.filter((node) => node.kind === "planet")).toHaveLength(8);
+});
+
+test("failed CI uses definite PR gate reasons or loaded check headers only", () => {
+  const data = round8Project();
+  const pr = { ...data.prs[0], reasons: ["check build failed (failure)"] };
+  const signal = { ...data.signals[0], messageId: "check-1", kind: "check", number: pr.number };
+  const message = { ...data.messages[0], id: signal.messageId, body: "GitHub event: check_run.completed\nNumber: #1\nCheck: build -> failure\n\nExternal excerpt:\nStatus: success" };
+  expect(failedCI([pr], [signal], [message])).toEqual([{ id: "ci:check-1", prNumber: 1, source: "message", reason: "GitHub CI 未通过", signalId: "check-1" }]);
+  expect(failedCI([pr], [], [])).toEqual([{ id: "ci:pr:1", prNumber: 1, source: "pr-reason", reason: "GitHub CI 未通过" }]);
+  expect(failedCI([{ ...pr, reasons: ["no attestation for the current head"] }], [signal], [{ ...message, body: "GitHub event: check_run.completed\nCheck: build -> success\n\nStatus: failure" }])).toEqual([]);
+  expect(deriveProject({ ...data, prs: [pr], signals: [signal], messages: [message] }).failedCI).toHaveLength(1);
 });
 
 test("a 20 second PR request does not hold the other briefing sections", async ({ page }) => {

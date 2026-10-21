@@ -1,5 +1,5 @@
 import type { Agent, LiveMessage, ProjectSnapshot } from "./types";
-import { agentVisibility, aggregateIssues, aggregatePRs, historyStars, nodeSummary, readAcknowledged } from "./rules";
+import { agentVisibility, aggregateIssues, aggregatePRs, failedCI, historyStars, nodeSummary, readAcknowledged } from "./rules";
 export type StarNode = {
   id: string;
   kind: "star" | "comet" | "satellite" | "planet" | "signal" | "queue";
@@ -163,6 +163,7 @@ export function deriveProject(snapshot: ProjectSnapshot, now = Date.now()) {
     history: historyStars(agents, prs, now, (id) => readAcknowledged(hive.id, id), { x: 0, y: 0 }, snapshot.signals),
     prGroups,
     issueGroups,
+    failedCI: failedCI(prs, snapshot.signals, messages),
     decisions,
     needsAttention: decisions.length > 0,
     agentStatuses: Object.fromEntries(
