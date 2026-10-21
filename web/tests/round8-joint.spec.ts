@@ -76,3 +76,17 @@ test("lazy panels retain their contents throughout exit while closing keyboard a
   await expect(panel.locator("h2")).toHaveText("test-for-myself");
   await expect(panel).toHaveCount(0, { timeout: 1600 });
 });
+
+test("reduced motion redraws text coverage after deferred panels mount and close", async ({ page }) => {
+  await boot(page);
+  const canvas = page.locator(".stars-canvas");
+  await page.getByRole("button", { name: "SwarmJet 平台设置", exact: true }).click();
+  await expect(page.locator(".pc-platform")).toHaveClass(/pc-open/);
+  await expect.poll(async () => Number(await canvas.getAttribute("data-labels-covered"))).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "关闭平台设置", exact: true }).click();
+  await expect(page.locator(".pc-platform")).toHaveCount(0);
+  await expect(canvas).toHaveAttribute("data-labels-covered", "0");
+  const frame = await canvas.getAttribute("data-frames");
+  await page.waitForTimeout(350);
+  await expect(canvas).toHaveAttribute("data-frames", frame!);
+});
