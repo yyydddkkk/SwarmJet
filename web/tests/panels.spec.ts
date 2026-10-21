@@ -580,6 +580,24 @@ test("platform ledger uses reference rows with real today and all-time amounts",
   const periods = state.calls.filter(call => call.method === "GET" && call.path === "/api/usage").map(call => new URLSearchParams(call.query).get("period"));
   expect(periods).toEqual(["today", "all"]);
 });
+test("platform account keeps the reference admin row and italic exit without inventing login time", async ({page}) => {
+  await open(page);
+  await page.getByRole("button", {name:"平台", exact:true}).click();
+  const platform = page.getByRole("dialog", {name:"平台设置", exact:true});
+  await platform.getByRole("button", {name:"账号", exact:true}).click();
+  await expect(platform.getByRole("heading", {name:"账号", exact:true})).toBeVisible();
+  await expect(platform.getByText("这是一套单管理员部署。", {exact:true})).toBeVisible();
+  const row = platform.locator(".pc-account-row");
+  await expect(row).toHaveText("管理员admin");
+  await expect(row).toHaveCSS("border-top-width", "1px");
+  await expect(row).toHaveCSS("border-bottom-width", "1px");
+  await expect(row).toHaveCSS("font-size", "17px");
+  await expect(row.locator("span").last()).toHaveCSS("font-style", "italic");
+  await expect(platform).not.toContainText("本次登录");
+  const exit = platform.getByRole("button", {name:"退出登录"});
+  await expect(exit).toHaveCSS("font-style", "italic");
+  await expect(exit).toHaveCSS("border-bottom-width", "1px");
+});
 test("check and pull request signals are read only; only Issues can be assigned", async ({page}) => {
   const state = await open(page);
   const baseline = state.calls.filter(call => call.method === "POST" && call.path.endsWith("/messages")).length;
