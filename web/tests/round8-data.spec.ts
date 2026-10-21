@@ -220,3 +220,26 @@ test("reconnect keeps resources that finish before the slower hive", async () =>
   expect(store.getSnapshot().snapshot?.agents.map((agent) => agent.id)).toEqual(["new-agent"]);
   store.stop();
 });
+
+test("a PR event received while its slow snapshot is loading wins over that snapshot", async () => {
+  const fixture = round8Project();
+  const mock = createMockDataSource({ swarmjet: fixture });
+  let finishPR!: () => void;
+  const store = createProjectStore("swarmjet", {
+    ...mock.source,
+    async load(_id, update) {
+      update("hive", { hive: fixture.hive });
+      update("agents", { agents: fixture.agents });
+      await new Promise<void>((resolve) => { finishPR = resolve; });
+      update("prs", { prs: fixture.prs });
+    },
+  });
+  store.start();
+  mock.ready("swarmjet");
+  mock.push("swarmjet", { type: "pr", data: { hiveId: "swarmjet", number: 1, headSha: "new-head", state: "open", merged: false, ready: true } });
+  expect(store.getSnapshot().resources.prs.status).toBe("loading");
+  finishPR();
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(store.getSnapshot().snapshot?.prs.find((pr) => pr.number === 1)).toMatchObject({ headSha: "new-head", ready: true });
+  store.stop();
+});
