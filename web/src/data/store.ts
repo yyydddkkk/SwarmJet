@@ -1,4 +1,4 @@
-import { api, APIError, fetchProjectSnapshot, loadProjectResources, type DataAPI, type ResourceName, type ResourceUpdate } from "./api";
+import { api, APIError, fetchProjectSnapshot, loadProjectResources, isActiveAgent, type DataAPI, type ResourceName, type ResourceUpdate } from "./api";
 import { deriveProject, messageEndpoint, type LightPulse } from "./derive";
 import type { ProjectSnapshot, ProjectEvent } from "./types";
 export type ConnectionState =
@@ -213,6 +213,7 @@ export class ProjectStore {
     const generation = ++this.generation;
     this.abort?.abort();
     this.abort = new AbortController();
+    this.loadedMessageInboxes.clear();
     this.pending ??= [];
     const observedNumbers = [...this.observedPRs.keys()];
     this.publish({ connection: ready ? "syncing" : this.state.connection, resources: loadingResources() });
@@ -227,6 +228,10 @@ export class ProjectStore {
           const status = error ? { status: "error" as const, error: error instanceof Error ? error.message : String(error), unavailable: name === "prs" } : { status: "ready" as const, ...(name === "prs" ? { stale: meta?.stale || patch?.prs?.some((pr) => pr.stale), unavailable: meta?.unavailable || patch?.prs?.some((pr) => pr.unavailable) } : {}) };
           const resources = { ...this.state.resources, [name]: status };
           if (patch) partial = { ...partial, ...patch };
+          if (name === "messages" && patch) {
+            ["queen", "hive", partial.localAddress, ...(partial.agents || []).filter(isActiveAgent).map((agent) => `forager:${agent.id}`)]
+              .filter(Boolean).forEach((address) => this.loadedMessageInboxes.add(address!));
+          }
           if (partial.hive) {
             const current = this.state.snapshot;
             const next = current ? { ...current, ...patch } : emptySnapshot(partial);
@@ -238,6 +243,8 @@ export class ProjectStore {
         snapshot = this.state.snapshot || emptySnapshot(partial);
       } else {
         snapshot = await this.source.snapshot(this.hiveId, this.abort.signal);
+        ["queen", "hive", snapshot.localAddress, ...snapshot.agents.filter(isActiveAgent).map((agent) => `forager:${agent.id}`)]
+          .filter(Boolean).forEach((address) => this.loadedMessageInboxes.add(address));
         this.publish({ resources: Object.fromEntries(resourceNames.map((name) => [name, { status: "ready" }])) as ProjectState["resources"] });
       }
       // List readiness is cached server-side for 30 seconds. Before discarding

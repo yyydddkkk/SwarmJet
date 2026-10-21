@@ -84,3 +84,15 @@ test("partial 401 remains an authentication failure", async () => {
   expect(store.getSnapshot().resources.prs.status).toBe("error");
   store.stop();
 });
+
+test("active inboxes loaded at startup are not requested again for agent events", async () => {
+  const fixture = round8Project();
+  const mock = createMockDataSource({ swarmjet: fixture });
+  const store = createProjectStore("swarmjet", mock.source);
+  store.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  mock.push("swarmjet", { type: "agent", data: fixture.agents[0] });
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(mock.calls.filter((call) => call.method === "listMessages")).toHaveLength(0);
+  store.stop();
+});
