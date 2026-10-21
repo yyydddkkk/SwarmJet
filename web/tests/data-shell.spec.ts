@@ -122,7 +122,7 @@ test("snapshot and SSE increments preserve canonical fields and produce unique p
   store.stop();
   expect(mock.connections).toBe(0);
 });
-test("ready reload buffers increments even if the snapshot includes the same message", async () => {
+test("first ready skips reload; later ready buffers increments during resync", async () => {
   const mock = createMockDataSource({ swarmjet: fixture() });
   let resolve!: (s: ProjectSnapshot) => void;
   let count = 0;
@@ -139,19 +139,16 @@ test("ready reload buffers increments even if the snapshot includes the same mes
   store.start();
   await flush();
   mock.ready("swarmjet");
+  expect(count).toBe(1);
+  mock.ready("swarmjet");
   const event = message("during");
   mock.push("swarmjet", { type: "message", data: event });
-  const resolveOlder = resolve;
-  // An unattributable queue/methodology frame may request another snapshot
-  // before this one completes. The buffered real message must survive it.
-  mock.ready("swarmjet");
   const next = fixture();
   next.hive.name = "Fresh";
   next.messages = [event];
   resolve(next);
-  resolveOlder(fixture());
   await flush();
-  expect(count).toBe(3);
+  expect(count).toBe(2);
   expect(store.getSnapshot().snapshot?.hive.name).toBe("Fresh");
   expect(store.getSnapshot().snapshot?.messages).toHaveLength(1);
   expect(store.getSnapshot().pulses).toHaveLength(1);
@@ -407,6 +404,7 @@ test("a ready snapshot supersedes late signal fetches and stopped stores stay un
     },
   ];
   mock.setSnapshot("swarmjet", next);
+  mock.ready("swarmjet");
   mock.ready("swarmjet");
   await flush();
   resolve({ signals: [] });

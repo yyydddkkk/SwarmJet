@@ -64,12 +64,11 @@ function StarsSession() {
     return <LoginSlot notice={sessionNotice} onLogin={() => setAttempt((v) => v + 1)} />;
   if (!principal)
     return (
-      <main className="stars-app">
+      <main className="stars-transition"><div className="stars-transition-inner">
+        <h1>SwarmJet</h1>
         <p role={error ? "alert" : "status"}>{error || "正在连接项目…"}</p>
-        {error && (
-          <button onClick={() => setAttempt((v) => v + 1)}>重试</button>
-        )}
-      </main>
+        {error && <button onClick={() => setAttempt((v) => v + 1)}>重试</button>}
+      </div></main>
     );
   return (
     <StarsWorkspace
@@ -160,8 +159,9 @@ export function StarsWorkspace({
     (status?.retryDelay !== undefined ? "连接已断开，正在重连" : "");
   if (!projectsLoaded && (projectsLoading || error)) {
     return (
-      <main className="stars-app">
-        <div className="stars-status">
+      <main className="stars-transition">
+        <div className="stars-transition-inner">
+          <h1>SwarmJet</h1>
           <p role={error ? "alert" : "status"}>{error || "正在读取项目…"}</p>
           {error && <button onClick={() => setAttempt((v) => v + 1)}>重试</button>}
         </div>
