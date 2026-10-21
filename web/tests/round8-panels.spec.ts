@@ -169,6 +169,12 @@ test("visual evidence for every panel and subpage in bright and night", async ({
       ["queen", "主 Agent"],
     ] as const) {
       await objectFromList(page, search);
+      if (key === "signal") {
+        const signal = page.getByRole("region", {name: "对象详情"});
+        await expect(signal.locator(".pc-kicker")).toContainText("外部事件");
+        await expect(signal.locator("h2")).toHaveAttribute("title", "Issue #100：处理超长字段与重复导入");
+        await expect(signal.getByRole("link", {name: "在 GitHub 查看"})).toHaveAttribute("href", "https://example.test/issues/100");
+      }
       await design.evaluate("lens(B.find(b=>b.kind==='comet'&&b.state==='busy'))");
       await page.waitForTimeout(800);
       await design.waitForTimeout(800);
