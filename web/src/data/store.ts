@@ -138,6 +138,7 @@ export class ProjectStore {
   private clock?: ReturnType<typeof setInterval>;
   private pulsed = new Set<string>();
   private loadedMessageInboxes = new Set<string>();
+  private messageHydrations = new Map<string, Promise<void>>();
   private firstReady = true;
   private observedPRs = new Map<
     number,
@@ -497,19 +498,37 @@ export class ProjectStore {
     const address = `forager:${agentId}`;
     if (!this.state.snapshot || this.loadedMessageInboxes.has(address)) return;
     this.loadedMessageInboxes.add(address);
+    try { await this.hydrateInbox(address); }
+    catch (error) { this.loadedMessageInboxes.delete(address); throw error; }
+  };
+  /** Hydrate only previews visible in the currently opened conversation. */
+  hydrateMessages = async (messageIds: string[]) => {
+    const wanted = new Set(messageIds);
+    const previews = this.state.snapshot?.messages.filter((message) => wanted.has(message.id) && "preview" in message) ?? [];
+    const addresses = [...new Set(previews.map((message) => message.to))];
+    await Promise.all(addresses.map(async (address) => {
+      await this.hydrateInbox(address);
+      // A preview may arrive after an already-running page read took its snapshot.
+      const missing = this.state.snapshot?.messages.some((message) => wanted.has(message.id) && message.to === address && "preview" in message);
+      if (missing && !this.stopped) await this.hydrateInbox(address);
+    }));
+  };
+  private hydrateInbox = (address: string): Promise<void> => {
+    const pending = this.messageHydrations.get(address);
+    if (pending) return pending;
+    const request = this.readInbox(address).finally(() => this.messageHydrations.delete(address));
+    this.messageHydrations.set(address, request);
+    return request;
+  };
+  private readInbox = async (address: string) => {
     const messages: import("./types").Message[] = [];
     let after: string | undefined;
-    try {
-      do {
-        const page = await this.source.api.listMessages(this.hiveId, { to: address, after, limit: 200 });
-        messages.push(...page.messages);
-        if (!page.truncated || !page.cursor || page.cursor === after) break;
-        after = page.cursor;
-      } while (!this.stopped);
-    } catch (error) {
-      this.loadedMessageInboxes.delete(address);
-      throw error;
-    }
+    do {
+      const page = await this.source.api.listMessages(this.hiveId, { to: address, after, limit: 200 });
+      messages.push(...page.messages);
+      if (!page.truncated || !page.cursor || page.cursor === after) break;
+      after = page.cursor;
+    } while (!this.stopped);
     if (this.stopped || !this.state.snapshot) return;
     const merged = new Map(this.state.snapshot.messages.map((message) => [message.id, message]));
     for (const message of messages) {
