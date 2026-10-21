@@ -723,7 +723,10 @@ export class StarMap {
       ctx.stroke();
     };
     const glyph = (kind: StarGlyph, at: Point, scale = 1, angle = 0, options?: CanvasGlyphOptions) => {
+      // Geometry follows the zoom; the source drawing width is in screen pixels.
+      const strokePixels = ctx.lineWidth;
       ctx.save(); ctx.translate(at.x, at.y); ctx.rotate(angle); ctx.scale(scale, scale);
+      ctx.lineWidth = strokePixels / scale;
       drawCanvasGlyph(ctx, kind, options); ctx.restore();
     };
     const orbit = (p: Point, radius: number, a = 0, b = TAU) => {
@@ -811,7 +814,8 @@ export class StarMap {
         const r = (h.result === "merged" ? 1.35 : h.result === "failed" ? .8 : .95) * z;
         ctx.fillStyle = C.ink;
         ctx.globalAlpha = (h.result === "merged" ? .85 : h.result === "failed" ? .32 : .6) * h.brightness * dim;
-        drawCanvasStar(ctx, q.x, q.y, r, h.fresh && h.result !== "failed" && !simple);
+        ctx.lineWidth = .5 * R.lw;
+        drawCanvasStar(ctx, q.x, q.y, r, h.fresh && h.result !== "failed" && !simple, .55);
         if (this.hoverHistory?.history.id === h.id) {
           ctx.strokeStyle = C.ink2; ctx.globalAlpha = 1; circle(q, 8);
         }
@@ -912,6 +916,7 @@ export class StarMap {
           const sr = Math.max(3.5, 9 * s) * R.sz;
           if (system.on) {
             drawCanvasStar(ctx, q.x, q.y, sr);
+            ctx.lineWidth = .6 * R.lw;
             for (const k of [1.8, 2.6, 3.6]) {
               ctx.globalAlpha = (dim * 0.55) / k;
               circle(q, sr * k);
@@ -931,6 +936,7 @@ export class StarMap {
               );
             }
           } else {
+            ctx.lineWidth = R.lw;
             circle(q, sr);
             line(
               { x: q.x - sr * 0.6, y: q.y - sr * 0.6 },
@@ -946,8 +952,10 @@ export class StarMap {
           if (!view.hiveId) {
             drawCanvasStar(ctx, q.x, q.y, r);
           } else if (node.state === "failed") {
+            ctx.lineWidth = R.lw;
             drawCanvasAgent(ctx, "failed", q.x, q.y, r * 3 / 3.5);
             ctx.setLineDash([2, 5]);
+            ctx.globalAlpha *= .5;
             line(
               { x: q.x + ux * 6, y: q.y + uy * 6 },
               { x: q.x + ux * 34, y: q.y + uy * 34 },
@@ -956,13 +964,18 @@ export class StarMap {
           } else if (
             ["parked", "hibernated", "cancelled"].includes(node.state ?? "")
           ) {
+            ctx.lineWidth = R.lw;
             drawCanvasAgent(ctx, "parked", q.x, q.y, r, Math.atan2(uy, ux));
-            if (node.label.includes("仍占着名额")) circle(q, r + 5);
+            if (node.label.includes("仍占着名额")) {
+              ctx.globalAlpha *= .7;
+              ctx.setLineDash([1, 2.5]); circle(q, r + 5); ctx.setLineDash([]);
+            }
           } else {
             const length =
               (node.state === "completed" ? 16 : 38) *
               Math.min(Math.max(s, 0.5), 1.8);
             const rays = [-3, -2, -1, 0, 1, 2, 3];
+            ctx.lineWidth = .6 * R.lw;
             for (const offset of rays) {
               const a = offset * 0.055,
                 vx = ux * Math.cos(a) - uy * Math.sin(a),
@@ -983,12 +996,16 @@ export class StarMap {
           const grow = born === undefined ? 1 : Math.max(.05, Math.min(1, (now - born) / 1100));
           const pr = Math.max(3, 7 * Math.min(s, 1.5)) * R.sz * grow * (body.stale ? .72 : 1);
           ctx.fillStyle = C.paper;
-          glyph("pr", q, pr / 4);
+          ctx.lineWidth = 1.1 * R.lw;
+          glyph("pr", q, pr / 4, 0, { prMapDetail: true });
           if (system.decisionIds.has(node.id)) {
             ctx.strokeStyle = C.accent;
+            ctx.lineWidth = R.lw;
             ctx.setLineDash([2, 3]);
+            ctx.lineDashOffset = this.reduced.matches ? 0 : -now * .012;
             circle(q, pr + 7);
             ctx.setLineDash([]);
+            ctx.lineDashOffset = 0;
           }
         } else if (node.kind === "satellite") {
           const parent = system.bodies.find((b) => b.node.id === node.parentId);
@@ -997,16 +1014,20 @@ export class StarMap {
             const pp = this.screen(parentWorld);
             ctx.strokeStyle = C.ink3;
             ctx.fillStyle = C.ink;
-            glyph("moon", pp, 1, 0, { moonAngle: this.reduced.matches || this.frozen ? body.angle : now * .0018 + body.angle, moonOrbitX: 15 * s, moonOrbitY: 9 * s, moonRadius: Math.max(1.5, 2.5 * s) });
+            ctx.lineWidth = .7 * R.lw;
+            glyph("moon", pp, 1, 0, { moonAngle: this.reduced.matches || this.frozen ? body.angle : now * .0018 + body.angle, moonOrbitX: 15 * s, moonOrbitY: 9 * s, moonRadius: Math.max(1.5, 2.5 * Math.min(s, 1.5)), moonOrbitAlpha: .6 });
           }
           else glyph("star", q, Math.max(1.5, 2.5 * s) / 4.5);
         } else if (body.cluster) {
+          ctx.lineWidth = .8 * R.lw;
           glyph("cluster", q, Math.max(.5, s));
+          ctx.globalAlpha *= .45;
           ctx.setLineDash([1, 3]); circle(q, Math.max(7, s * 9)); ctx.setLineDash([]);
         } else if (node.kind === "signal") {
           const signal = body.signal,
             k = Math.max(2.8, 5 * Math.min(s, 1.4));
           ctx.strokeStyle = signal?.claimed ? C.ink2 : C.ink;
+          ctx.lineWidth = signal?.claimed ? .8 : 1.1;
           if (body.ci) {
             glyph("ci", q, k / 5);
           } else {
@@ -1017,6 +1038,7 @@ export class StarMap {
             }
           }
         } else if (node.kind === "queue") {
+          ctx.lineWidth = .8 * R.lw;
           glyph("queue", q, Math.max(.6, s));
         }
         if (view.hiveId && node.kind !== "star") {
@@ -1100,8 +1122,10 @@ export class StarMap {
         const t = Math.min(1, (now - merge.start) / 1400);
         const world = ellipse(sys, merge.body.angle + t * TAU * 2, merge.body.radius * (1 - t) ** 2);
         const q = this.screen(world);
-        ctx.save(); ctx.translate(q.x, q.y); ctx.scale(Math.max(.4, s * (1 - t)), Math.max(.4, s * (1 - t)));
-        ctx.globalAlpha = 1 - t; ctx.strokeStyle = C.ink; ctx.fillStyle = C.paper; drawCanvasGlyph(ctx, "pr"); ctx.restore();
+        const mergeScale = Math.max(.4, s * (1 - t));
+        ctx.save(); ctx.translate(q.x, q.y); ctx.scale(mergeScale, mergeScale);
+        ctx.globalAlpha = 1 - t; ctx.strokeStyle = C.ink; ctx.fillStyle = C.ink; ctx.lineWidth = 1.1 * R.lw / mergeScale;
+        drawCanvasGlyph(ctx, "pr"); ctx.restore();
         if (t >= 1) { this.merging.delete(id); this.flares.push({ systemId: sys.id, start: now }); }
       }
       this.flares = this.flares.filter((flare) => now - flare.start < 1200);
