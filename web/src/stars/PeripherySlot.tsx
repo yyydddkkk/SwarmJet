@@ -28,6 +28,7 @@ export default function PeripherySlot(props: StarsSlotProps) {
   const listInput = useRef<HTMLInputElement>(null);
   const legendSeen = useRef(preference.read("sj-legend-seen") === "1");
   const legendTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const legendAutoOpen = useRef(false);
   const [text, setText] = useState("");
   const [search, setSearch] = useState("");
   const [scope, setScope] = useState<"active" | "today" | "history">("active");
@@ -85,14 +86,26 @@ export default function PeripherySlot(props: StarsSlotProps) {
   }, [api, projects.length, state.platformPanel, platformAttempt]);
   useEffect(() => { if (preference.read("sj-brief") !== "off" && !ui.getSnapshot().platformPanel) ui.openOverlay("brief"); }, [ui]);
   useEffect(() => {
-    if (state.overlay || state.platformPanel || state.selection || create || legendSeen.current) return;
+    const live = ui.getSnapshot();
+    if (live.overlay || live.platformPanel || live.selection || create || legendSeen.current) return;
     legendSeen.current = true;
     preference.write("sj-legend-seen", "1");
     legendTimer.current = setTimeout(() => {
+      legendAutoOpen.current = true;
       ui.openOverlay("legend");
-      legendTimer.current = setTimeout(() => { if (ui.getSnapshot().overlay === "legend") ui.close(); }, 7000);
+      legendTimer.current = setTimeout(() => {
+        legendAutoOpen.current = false;
+        if (ui.getSnapshot().overlay === "legend") ui.close();
+      }, 7000);
     }, 900);
   }, [state.overlay, state.platformPanel, state.selection, create, ui]);
+  useEffect(() => ui.subscribe(() => {
+    if (legendAutoOpen.current && ui.getSnapshot().overlay !== "legend") {
+      legendAutoOpen.current = false;
+      clearTimeout(legendTimer.current);
+      legendTimer.current = undefined;
+    }
+  }), [ui]);
   useEffect(() => () => clearTimeout(legendTimer.current), []);
   useEffect(() => {
     if (state.overlay === "list") requestAnimationFrame(() => listInput.current?.focus());
