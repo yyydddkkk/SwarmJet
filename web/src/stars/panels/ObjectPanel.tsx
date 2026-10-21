@@ -570,10 +570,10 @@ export function Ledger({ projects }: { projects: HiveOverview[] }) {
   return (
     <>
       <h3>账簿</h3>
-      <p>按项目查看今天与累计花费。本周花费暂时无法获取。</p>
-      {projects.map((p) => (
+      <p>按项目查看今天与累计花费。</p>
+      <dl className="pc-ledger-list">{projects.map((p) => (
         <LedgerRow key={p.hive.id} project={p} />
-      ))}
+      ))}</dl>
     </>
   );
 }
@@ -587,22 +587,14 @@ function LedgerRow({ project }: { project: HiveOverview }) {
       ]),
     [project.hive.id],
   );
-  return (
-    <Panel title={project.hive.name}>
-      {data.error ? (
-        <ErrorNotice message={data.error} onRetry={data.reload} />
-      ) : data.data ? (
-        data.data.map((usage, i) => (
-          <p key={i}>
-            {i === 0 ? "今天" : "累计"}：${usage.totals.costUsd.toFixed(4)}
-            {usage.totals.unknownPriceRequests > 0
-              ? `（有 ${usage.totals.unknownPriceRequests} 次调用价格未知，金额不完整）`
-              : ""}
-          </p>
-        ))
-      ) : (
-        <p>正在读取…</p>
-      )}
-    </Panel>
-  );
+  const [today, all] = data.data ?? [];
+  const unknown = (today?.totals.unknownPriceRequests ?? 0) + (all?.totals.unknownPriceRequests ?? 0);
+  return <div className="pc-ledger-row">
+    <dt>{project.hive.name}</dt>
+    <dd>{data.error ? <ErrorNotice message={data.error} onRetry={data.reload} /> : today && all ? <>
+      <span>今天 ${today.totals.costUsd.toFixed(4)}</span>
+      <span>累计 ${all.totals.costUsd.toFixed(4)}</span>
+      {unknown > 0 && <small>有调用价格未知，金额不完整</small>}
+    </> : <span role="status">正在读取…</span>}</dd>
+  </div>;
 }

@@ -561,6 +561,25 @@ test("usage ranking uses quiet meters, one rank number and copyable readable Age
   await queen.getByRole("button", {name:"查看主 Agent详情"}).click();
   await expect(page.getByRole("region", {name:"对象详情"}).locator("h2")).toHaveText("主 Agent");
 });
+test("platform ledger uses reference rows with real today and all-time amounts", async ({page}) => {
+  const state = await open(page);
+  await page.getByRole("button", {name:"平台", exact:true}).click();
+  const platform = page.getByRole("dialog", {name:"平台设置", exact:true});
+  await platform.getByRole("button", {name:"账簿", exact:true}).click();
+  const row = platform.locator(".pc-ledger-row");
+  await expect(row).toHaveCount(1);
+  await expect(row.locator("dt")).toHaveText(state.hives[0].hive.name);
+  await expect(row.locator("dt")).toHaveCSS("font-size", "18px");
+  await expect(row.locator("dt")).toHaveCSS("font-weight", "500");
+  await expect(row).toHaveCSS("border-top-width", "1px");
+  await expect(row.locator("dd")).toHaveCSS("text-align", "right");
+  await expect(row.locator("dd")).toContainText("今天 $12.4700");
+  await expect(row.locator("dd")).toContainText("累计 $12.4700");
+  await expect(platform.locator(".pc-ledger-row h3")).toHaveCount(0);
+  await expect(platform).not.toContainText("本周花费");
+  const periods = state.calls.filter(call => call.method === "GET" && call.path === "/api/usage").map(call => new URLSearchParams(call.query).get("period"));
+  expect(periods).toEqual(["today", "all"]);
+});
 test("check and pull request signals are read only; only Issues can be assigned", async ({page}) => {
   const state = await open(page);
   const baseline = state.calls.filter(call => call.method === "POST" && call.path.endsWith("/messages")).length;
