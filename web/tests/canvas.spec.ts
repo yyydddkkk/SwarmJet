@@ -352,6 +352,50 @@ test("canvas labels stay out of mounted side panels and overlays during exit", a
   }
   await expect.poll(async () => Number(await canvas.getAttribute("data-labels-drawn"))).toBeGreaterThan(0);
 });
+test("reduced motion redraws once when covers or local cards change, then rests", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mount(page, true);
+  await page.evaluate(() => { const x = (window as any).__canvas; x.ui.selectProject(x.hive.id); });
+  const canvas = page.locator(".stars-canvas");
+  const frames = async () => Number(await canvas.getAttribute("data-frames"));
+  const rest = async () => { await page.waitForTimeout(250); const before = await frames(); await page.waitForTimeout(300); expect(await frames()).toBe(before); };
+  await rest();
+  let before = await frames();
+  await page.evaluate(() => {
+    const cover = document.createElement("section"); cover.className = "pc-right"; cover.id = "rm-cover";
+    Object.assign(cover.style, { position: "fixed", inset: "0", width: "100vw", height: "100vh", opacity: "1", pointerEvents: "none" });
+    document.body.append(cover);
+    requestAnimationFrame(() => cover.classList.add("pc-open"));
+  });
+  await expect.poll(frames).toBeGreaterThan(before);
+  await expect.poll(async () => Number(await canvas.getAttribute("data-labels-covered"))).toBeGreaterThan(0);
+  await rest();
+  before = await frames();
+  await page.locator("#rm-cover").evaluate((el) => el.remove());
+  await expect.poll(frames).toBeGreaterThan(before);
+  await rest();
+
+  before = await frames();
+  await page.locator(".stars-observer").click();
+  await expect.poll(frames).toBeGreaterThan(before);
+  await rest();
+  before = await frames();
+  await page.getByRole("button", { name: "关闭等你决定的事" }).click();
+  await expect.poll(frames).toBeGreaterThan(before);
+  await rest();
+
+  const id = await page.evaluate(() => `${(window as any).__canvas.hive.id}:cluster:pr`);
+  const q = await point(page, id);
+  before = await frames();
+  await page.mouse.click(q.x, q.y);
+  await expect(page.locator(".stars-note.open")).toBeVisible();
+  await expect.poll(frames).toBeGreaterThan(before);
+  await rest();
+  before = await frames();
+  await page.locator(".stars-note.open").getByRole("button", { name: "关闭" }).click();
+  await expect.poll(frames).toBeGreaterThan(before);
+  await rest();
+});
 test("observer manual PR and question decisions open correct detail", async ({
   page,
 }) => {

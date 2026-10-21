@@ -189,6 +189,15 @@ export class StarMap {
       }),
     );
     this.cleanups.push(timelineFor(ui).subscribe(this.syncTimeline));
+    const isCover = (node: Node) => node instanceof Element && (node.matches(TEXT_COVER_SELECTOR) || !!node.closest(TEXT_COVER_SELECTOR));
+    const containsCover = (node: Node) => node instanceof Element && (node.matches(TEXT_COVER_SELECTOR) || !!node.querySelector(TEXT_COVER_SELECTOR));
+    const coverObserver = new MutationObserver((records) => {
+      if (records.some((record) => record.type === "attributes"
+        ? isCover(record.target)
+        : isCover(record.target) || [...record.addedNodes, ...record.removedNodes].some(containsCover))) this.schedule();
+    });
+    coverObserver.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style", "aria-hidden"] });
+    this.cleanups.push(() => coverObserver.disconnect());
     const visibility = () => { if (document.hidden && this.frame !== undefined) cancelAnimationFrame(this.frame); if (document.hidden) this.frame = undefined; else this.schedule(); };
     document.addEventListener("visibilitychange", visibility);
     this.cleanups.push(() => document.removeEventListener("visibilitychange", visibility));
