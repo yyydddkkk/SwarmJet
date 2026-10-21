@@ -73,6 +73,7 @@ export type MapMetrics = {
   history: number;
   clusters: number;
   completing: number;
+  flares: number;
 };
 export class StarMap {
   readonly metrics: MapMetrics = {
@@ -87,6 +88,7 @@ export class StarMap {
     history: 0,
     clusters: 0,
     completing: 0,
+    flares: 0,
   };
   private ctx: CanvasRenderingContext2D;
   private width = 1;
@@ -182,6 +184,7 @@ export class StarMap {
         this.merging.clear();
         this.completing.clear();
         this.growing.clear();
+        this.flares = [];
       }
       this.camera = { ...this.target };
       this.schedule();
@@ -1129,6 +1132,7 @@ export class StarMap {
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
+    this.metrics.flares = this.flares.length;
     this.metrics.frames++;
     this.metrics.durations.push(performance.now() - started);
     if (this.metrics.durations.length > 2000) this.metrics.durations.shift();
@@ -1140,10 +1144,11 @@ export class StarMap {
     this.canvas.dataset.history = String(this.metrics.history);
     this.canvas.dataset.clusters = String(this.metrics.clusters);
     this.canvas.dataset.completing = String(this.completing.size);
+    this.canvas.dataset.flares = String(this.flares.length);
     this.canvas.dataset.mode = this.metrics.mode;
     if (
       moving || (!this.reduced.matches && !this.frozen) ||
-      (!this.frozen &&
+      (!this.reduced.matches && !this.frozen &&
         (this.pulses.length || this.merging.size || this.completing.size || this.growing.size || this.flares.length))
     )
       this.schedule();

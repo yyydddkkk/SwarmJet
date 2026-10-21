@@ -509,6 +509,20 @@ test("merge transition and owner completion trail respect reduced motion", async
   );
   await settle(page);
 });
+test("turning on reduced motion during a merge flare stops the flare and redraw loop", async ({ page }) => {
+  await mount(page);
+  await page.evaluate(() => {
+    const x = (window as any).__canvas;
+    x.ui.selectProject(x.hive.id);
+    x.mock.push(x.hive.id, { type: "pr", data: { ...x.snapshot.prs[0], hiveId: x.hive.id, merged: true } });
+  });
+  await expect(page.locator(".stars-canvas")).toHaveAttribute("data-flares", "1", { timeout: 4000 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(page.locator(".stars-canvas")).toHaveAttribute("data-flares", "0");
+  const frames = await page.locator(".stars-canvas").getAttribute("data-frames");
+  await page.waitForTimeout(400);
+  await expect(page.locator(".stars-canvas")).toHaveAttribute("data-frames", frames!);
+});
 test("observer local Escape restores focus without closing project, and queue explains wait", async ({
   page,
 }) => {
