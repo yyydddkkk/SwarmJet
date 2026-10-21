@@ -799,7 +799,7 @@ export class StarMap {
       }
     }
     this.metrics.positions = {};
-    const pendingLabels: { text: string; p: Point; size: number; italic: boolean; color: string; align: CanvasTextAlign; priority: number; alpha: number }[] = [];
+    const pendingLabels: { extent: number; anchor: Point; text: string; p: Point; size: number; italic: boolean; color: string; align: CanvasTextAlign; priority: number; alpha: number }[] = [];
     for (const system of systems) {
       const dim = view.hiveId && system.id !== view.hiveId ? .3 : 1;
       for (const h of system.history) {
@@ -908,6 +908,7 @@ export class StarMap {
         ctx.fillStyle = C.ink;
         ctx.lineWidth = R.lw;
         const r = Math.max(2.2, Math.min(s, 1.6) * 4) * R.sz;
+        let extent = r + 4; // drawn glyph half-size, so labels keep clear of it
         if (far) {
           drawCanvasStar(ctx, q.x, q.y, 1.2);
           continue;
@@ -998,6 +999,7 @@ export class StarMap {
           ctx.fillStyle = C.paper;
           ctx.lineWidth = 1.1 * R.lw;
           glyph("pr", q, pr / 4, 0, { prMapDetail: true });
+          extent = pr + 2 + (system.decisionIds.has(node.id) ? 7 : 0);
           if (system.decisionIds.has(node.id)) {
             ctx.strokeStyle = C.accent;
             ctx.lineWidth = R.lw;
@@ -1021,11 +1023,13 @@ export class StarMap {
         } else if (body.cluster) {
           ctx.lineWidth = .8 * R.lw;
           glyph("cluster", q, Math.max(.5, s));
+          extent = Math.max(7, s * 9) + 2;
           ctx.globalAlpha *= .45;
           ctx.setLineDash([1, 3]); circle(q, Math.max(7, s * 9)); ctx.setLineDash([]);
         } else if (node.kind === "signal") {
           const signal = body.signal,
             k = Math.max(2.8, 5 * Math.min(s, 1.4));
+          extent = k + (signal?.claimed || body.ci ? 2 : 8);
           ctx.strokeStyle = signal?.claimed ? C.ink2 : C.ink;
           ctx.lineWidth = signal?.claimed ? .8 : 1.1;
           if (body.ci) {
@@ -1040,14 +1044,15 @@ export class StarMap {
         } else if (node.kind === "queue") {
           ctx.lineWidth = .8 * R.lw;
           glyph("queue", q, Math.max(.6, s));
+          extent = 10 * Math.max(.6, s);
         }
         if (view.hiveId && node.kind !== "star") {
           ctx.globalAlpha = dim * opacity;
           const comet = node.kind === "comet",
             satellite = node.kind === "satellite",
             right = body.x > system.x;
-          pendingLabels.push({ text: body.cluster ? body.annotation : node.kind === "queue" ? weightedTruncate(body.annotation, 14) : body.annotation, p: {
-              x: q.x + (comet ? (right ? -15 : 15) : satellite ? -12 : 0),
+          pendingLabels.push({ extent: satellite ? 0 : extent, anchor: q, text: body.cluster ? body.annotation : node.kind === "queue" ? weightedTruncate(body.annotation, 14) : body.annotation, p: {
+              x: q.x + (comet ? (right ? -1 : 1) * Math.max(15, extent + 5) : satellite ? -12 : 0),
               y: q.y + (comet ? 4 : satellite ? -22 : 22),
             }, size: comet ? 13 : 12, italic: !comet && !body.cluster, color: node.kind === "planet" && system.decisionIds.has(node.id) ? C.accent : body.cluster ? C.ink2 : comet ? C.ink2 : C.ink3,
             align: comet ? (right ? "right" : "left") : satellite ? "right" : "center",
@@ -1079,7 +1084,11 @@ export class StarMap {
       const q = focus && this.screen(focus);
       const r = Math.max(9 * s, 3.5) * 4.2;
       const occupied: [number, number, number, number][] = q ? [[q.x - r, q.y - r, q.x + r, q.y + r]] : [];
+      // Drawn body glyphs (PR ring, comet head, crosses) are occupied areas too.
+      for (const item of pendingLabels) if (item.extent) occupied.push([item.anchor.x - item.extent, item.anchor.y - item.extent, item.anchor.x + item.extent, item.anchor.y + item.extent]);
       for (const item of pendingLabels.sort((a, b) => a.priority - b.priority)) {
+        // Centered labels sit below their own glyph, clear of its outermost ring.
+        if (item.align === "center" && item.extent) item.p = { x: item.p.x, y: Math.max(item.p.y, item.anchor.y + item.extent + item.size + 3) };
         ctx.font = `${item.italic && !simple ? "italic " : ""}${item.size}px ${simple ? '"IBM Plex Sans","Noto Sans SC",sans-serif' : '"Source Serif 4","Noto Serif SC",serif'}`;
         const w = ctx.measureText(item.text).width;
         const left = item.align === "center" ? item.p.x - w / 2 : item.align === "right" ? item.p.x - w : item.p.x;

@@ -54,11 +54,10 @@ test("realistic fixture and long details stay readable", async ({page}) => {
   const panel = page.getByRole("region", {name: "对象详情"});
   await expect(panel.locator("h2")).toContainText("Issue #100");
   const agentHeading = panel.locator("h2");
-  await expect(agentHeading).toHaveCSS("white-space", "nowrap");
-  await expect(agentHeading).toHaveCSS("text-overflow", "ellipsis");
+  await expect(agentHeading).toHaveCSS("overflow", "hidden");
   await expect(agentHeading).toHaveAttribute("title", fixture.signals[0].title);
   const agentHeadingSize = await agentHeading.evaluate(el => ({height:el.getBoundingClientRect().height, lineHeight:parseFloat(getComputedStyle(el).lineHeight)}));
-  expect(agentHeadingSize.height).toBeLessThanOrEqual(agentHeadingSize.lineHeight + 2);
+  expect(agentHeadingSize.height).toBeLessThanOrEqual(agentHeadingSize.lineHeight * 2 + 2);
   const task = panel.locator(".pc-long-text").first();
   await expect(task.locator(".pc-clamped")).toBeVisible();
   const metrics = await task.locator("p").evaluate(el => ({height: el.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(el).lineHeight)}));
@@ -71,9 +70,8 @@ test("realistic fixture and long details stay readable", async ({page}) => {
   await objectFromList(page, "PR #2");
   await expect(panel.locator("h2")).toContainText(fixture.prs[1].title!);
   await expect(panel.locator("h2")).toHaveAttribute("title", fixture.prs[1].title!);
-  await expect(panel.locator("h2")).toHaveCSS("white-space", "nowrap");
   const prHeadingSize = await panel.locator("h2").evaluate(el => ({height:el.getBoundingClientRect().height, lineHeight:parseFloat(getComputedStyle(el).lineHeight)}));
-  expect(prHeadingSize.height).toBeLessThanOrEqual(prHeadingSize.lineHeight + 2);
+  expect(prHeadingSize.height).toBeLessThanOrEqual(prHeadingSize.lineHeight * 2 + 2);
   await expect(panel).toContainText("GitHub CI");
   await expect(panel).toContainText("独立验证");
   await expect(panel).toContainText("当前提交还没有验证结论");

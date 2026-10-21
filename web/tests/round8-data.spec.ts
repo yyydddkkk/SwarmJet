@@ -27,6 +27,9 @@ test("the star label budget includes its object identifier", () => {
     expect(width, label).toBeLessThanOrEqual(14.01);
   }
   expect(nodeSummary("pr", { ...data.prs[0], title: "修复" })).toBe("#1 修复");
+  const bare = { ...data.agents[1], issueNumber: undefined, prNumber: undefined, task: "自动回滚验收占位" };
+  expect(nodeSummary("agent", bare)).toBe("自动回滚验收占位");
+  expect(nodeSummary("agent", { ...bare, prNumber: 7 })).toBe("#7 自动回滚验收占位");
 });
 
 test("attestation labels describe their relation to the reviewed commit", () => {

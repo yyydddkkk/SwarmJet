@@ -35,8 +35,12 @@ export const agentSummary = (agent: Agent, links: { prs?: PullRequest[]; issues?
   oneLineSummary(agent, links, width);
 export const prSummary = (pr: PullRequest, width: number = SUMMARY_WIDTH.list) =>
   weightedTruncate(pr.title || `PR #${pr.number}`, width);
+const agentStarText = (agent: Agent, links: { prs?: PullRequest[]; issues?: Signal[] }) => {
+  const number = agent.issueNumber || agent.prNumber;
+  return `${number ? `#${number} ` : ""}${oneLineSummary(agent, links)}`;
+};
 export const nodeSummary = (kind: "agent" | "pr" | "issue", item: Agent | PullRequest | Signal, links: { prs?: PullRequest[]; issues?: Signal[] } = {}) =>
-  weightedTruncate(kind === "agent" ? `#${(item as Agent).id.slice(-8)} ${oneLineSummary(item as Agent, links)}` :
+  weightedTruncate(kind === "agent" ? agentStarText(item as Agent, links) :
     kind === "pr" ? `#${(item as PullRequest).number} ${(item as PullRequest).title || `PR #${(item as PullRequest).number}`}` :
     `#${(item as Signal).number} ${(item as Signal).title}`, SUMMARY_WIDTH.star);
 
