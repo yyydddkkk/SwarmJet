@@ -583,8 +583,8 @@ test("platform ledger uses reference rows with real today and all-time amounts",
   const row = platform.locator(".pc-ledger-row");
   await expect(row).toHaveCount(1);
   await expect(row.locator("dt")).toHaveText(state.hives[0].hive.name);
-  await expect(row.locator("dt")).toHaveCSS("font-size", "18px");
-  await expect(row.locator("dt")).toHaveCSS("font-weight", "500");
+  await expect(row.locator("dt")).toHaveCSS("font-size", "17px");
+  await expect(row.locator("dt")).toHaveCSS("font-weight", "400");
   await expect(row).toHaveCSS("border-top-width", "1px");
   await expect(row.locator("dd")).toHaveCSS("text-align", "right");
   await expect(row.locator("dd")).toContainText("今天 $12.4700");

@@ -446,7 +446,7 @@
 .pc-ledger-list { margin: 26px 0 0; }
 .pc-ledger-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: baseline; gap: 24px; padding: 16px 0; border-bottom: 1px solid var(--hair); }
 .pc-ledger-row:first-child { border-top: 1px solid var(--hair); }
-.pc-ledger-row dt { font: 500 18px var(--body); min-width: 0; }
+.pc-ledger-row dt { font: 400 17px var(--body); min-width: 0; }
 .pc-ledger-row dd { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; margin: 0; color: var(--ink2); font: italic 17px var(--body); text-align: right; }
 .pc-ledger-row dd span { white-space: nowrap; }
 .pc-ledger-row dd small { font-size: 13px; }
