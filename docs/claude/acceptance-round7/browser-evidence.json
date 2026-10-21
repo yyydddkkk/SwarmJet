@@ -1,0 +1,656 @@
+{
+  "browser": "153.0.8010.12",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "mock": false,
+  "pageErrors": [],
+  "flow": [
+    {
+      "index": 1,
+      "at": "2026-10-21T01:43:04.985Z",
+      "nodes": 71,
+      "pulses": 2,
+      "merges": 0,
+      "trails": 4,
+      "newIds": []
+    },
+    {
+      "index": 2,
+      "at": "2026-10-21T01:43:09.792Z",
+      "nodes": 72,
+      "pulses": 3,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 3,
+      "at": "2026-10-21T01:43:15.533Z",
+      "nodes": 72,
+      "pulses": 3,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 4,
+      "at": "2026-10-21T01:43:16.534Z",
+      "nodes": 73,
+      "pulses": 4,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 5,
+      "at": "2026-10-21T01:43:18.146Z",
+      "nodes": 73,
+      "pulses": 5,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 6,
+      "at": "2026-10-21T01:43:29.148Z",
+      "nodes": 74,
+      "pulses": 6,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 7,
+      "at": "2026-10-21T01:43:42.981Z",
+      "nodes": 74,
+      "pulses": 7,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 8,
+      "at": "2026-10-21T01:43:44.961Z",
+      "nodes": 76,
+      "pulses": 8,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "forager-c46d3117beea62ba670c3725",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 9,
+      "at": "2026-10-21T01:43:47.969Z",
+      "nodes": 77,
+      "pulses": 8,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "forager-c46d3117beea62ba670c3725",
+        "680a4a31a140831b421fe16666bc3dfe:pr:14",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 10,
+      "at": "2026-10-21T01:43:53.595Z",
+      "nodes": 77,
+      "pulses": 9,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "forager-c46d3117beea62ba670c3725",
+        "680a4a31a140831b421fe16666bc3dfe:pr:14",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 11,
+      "at": "2026-10-21T01:44:01.184Z",
+      "nodes": 77,
+      "pulses": 10,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "forager-c46d3117beea62ba670c3725",
+        "680a4a31a140831b421fe16666bc3dfe:pr:14",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 12,
+      "at": "2026-10-21T01:44:05.990Z",
+      "nodes": 77,
+      "pulses": 11,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "forager-c46d3117beea62ba670c3725",
+        "680a4a31a140831b421fe16666bc3dfe:pr:14",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 13,
+      "at": "2026-10-21T01:44:09.394Z",
+      "nodes": 77,
+      "pulses": 11,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "forager-c46d3117beea62ba670c3725",
+        "680a4a31a140831b421fe16666bc3dfe:pr:14",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 14,
+      "at": "2026-10-21T01:45:18.677Z",
+      "nodes": 77,
+      "pulses": 13,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "forager-c46d3117beea62ba670c3725",
+        "680a4a31a140831b421fe16666bc3dfe:pr:14",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 15,
+      "at": "2026-10-21T01:45:20.079Z",
+      "nodes": 77,
+      "pulses": 15,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "forager-c46d3117beea62ba670c3725",
+        "680a4a31a140831b421fe16666bc3dfe:pr:14",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 16,
+      "at": "2026-10-21T01:45:23.289Z",
+      "nodes": 77,
+      "pulses": 16,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "forager-c46d3117beea62ba670c3725",
+        "680a4a31a140831b421fe16666bc3dfe:pr:14",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 17,
+      "at": "2026-10-21T01:45:26.287Z",
+      "nodes": 77,
+      "pulses": 17,
+      "merges": 0,
+      "trails": 4,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "forager-c46d3117beea62ba670c3725",
+        "680a4a31a140831b421fe16666bc3dfe:pr:14",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 18,
+      "at": "2026-10-21T01:46:48.473Z",
+      "nodes": 78,
+      "pulses": 21,
+      "merges": 1,
+      "trails": 5,
+      "newIds": [
+        "forager-5de1d3cdbe7a9450d36d619604830d03",
+        "forager-c46d3117beea62ba670c3725",
+        "680a4a31a140831b421fe16666bc3dfe:pr:14",
+        "gh-e8aa55bc67b6cab75fc35031b115dfd1",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 19,
+      "at": "2026-10-21T01:46:49.410Z",
+      "nodes": 78,
+      "pulses": 21,
+      "merges": 1,
+      "trails": 5,
+      "newIds": [
+        "forager-c46d3117beea62ba670c3725",
+        "680a4a31a140831b421fe16666bc3dfe:pr:14",
+        "gh-e8aa55bc67b6cab75fc35031b115dfd1",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    },
+    {
+      "index": 20,
+      "at": "2026-10-21T01:46:49.807Z",
+      "nodes": 78,
+      "pulses": 21,
+      "merges": 1,
+      "trails": 5,
+      "newIds": [
+        "forager-c46d3117beea62ba670c3725",
+        "gh-e8aa55bc67b6cab75fc35031b115dfd1",
+        "gh-fba126ada75d88a4625693d5b6dfc7c4",
+        "gh-62d8c47b919048f5bcbf7dbfa96584cf",
+        "gh-4387c3663fc1d408a45c09a2e9d43bfa"
+      ]
+    }
+  ],
+  "merge": {
+    "requests": [
+      {
+        "at": "2026-10-21T01:46:12.795Z",
+        "body": {
+          "headSha": "bbc5ef91357920d32a7af8704d8f616ed1108968"
+        }
+      }
+    ],
+    "response": {
+      "merged": true,
+      "queued": false,
+      "method": "squash",
+      "headSha": "bbc5ef91357920d32a7af8704d8f616ed1108968",
+      "ready": true,
+      "reasons": [],
+      "message": "已合并"
+    },
+    "verifiedHead": "bbc5ef91357920d32a7af8704d8f616ed1108968",
+    "ready": true,
+    "attestations": [
+      {
+        "headSha": "bbc5ef91357920d32a7af8704d8f616ed1108968",
+        "attesterId": "forager-c46d3117beea62ba670c3725",
+        "isAuthor": false,
+        "result": "pass"
+      }
+    ]
+  },
+  "reconnect": {
+    "startedAt": "2026-10-21T01:47:42.702Z",
+    "bannerSeen": true,
+    "recoveredAt": "2026-10-21T01:48:16.707Z",
+    "sseEvents": [
+      {
+        "at": "2026-10-21T01:47:50.927Z",
+        "name": "ready"
+      }
+    ],
+    "requests": [
+      {
+        "at": "2026-10-21T01:47:42.732Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/methodology"
+      },
+      {
+        "at": "2026-10-21T01:47:42.732Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/methodology/versions"
+      },
+      {
+        "at": "2026-10-21T01:47:42.749Z",
+        "method": "GET",
+        "path": "/api/methodology-templates"
+      },
+      {
+        "at": "2026-10-21T01:47:42.749Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/methodology"
+      },
+      {
+        "at": "2026-10-21T01:47:42.749Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/methodology"
+      },
+      {
+        "at": "2026-10-21T01:47:43.887Z",
+        "method": "GET",
+        "path": "/api/session"
+      },
+      {
+        "at": "2026-10-21T01:47:44.891Z",
+        "method": "GET",
+        "path": "/api/events"
+      },
+      {
+        "at": "2026-10-21T01:47:44.894Z",
+        "method": "GET",
+        "path": "/api/session"
+      },
+      {
+        "at": "2026-10-21T01:47:46.899Z",
+        "method": "GET",
+        "path": "/api/events"
+      },
+      {
+        "at": "2026-10-21T01:47:46.903Z",
+        "method": "GET",
+        "path": "/api/session"
+      },
+      {
+        "at": "2026-10-21T01:47:50.913Z",
+        "method": "GET",
+        "path": "/api/events"
+      },
+      {
+        "at": "2026-10-21T01:47:50.927Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe"
+      },
+      {
+        "at": "2026-10-21T01:47:50.927Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/foragers"
+      },
+      {
+        "at": "2026-10-21T01:47:50.927Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/queen"
+      },
+      {
+        "at": "2026-10-21T01:47:50.927Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/prs"
+      },
+      {
+        "at": "2026-10-21T01:47:50.927Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/queue"
+      },
+      {
+        "at": "2026-10-21T01:47:50.927Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/signals"
+      },
+      {
+        "at": "2026-10-21T01:47:50.927Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/methodology"
+      },
+      {
+        "at": "2026-10-21T01:47:50.927Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/methodology/events"
+      },
+      {
+        "at": "2026-10-21T01:48:14.042Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.042Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.042Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.043Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.043Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.043Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.043Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.043Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.043Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.043Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.044Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.045Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.045Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.046Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.046Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.046Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.046Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.046Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.046Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.046Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.046Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.046Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.046Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/messages"
+      },
+      {
+        "at": "2026-10-21T01:48:14.078Z",
+        "method": "GET",
+        "path": "/api/hives/680a4a31a140831b421fe16666bc3dfe/prs/14"
+      }
+    ]
+  }
+}
