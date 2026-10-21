@@ -81,3 +81,26 @@ export function catalogueRows(snapshot: ProjectSnapshot, scope?: CatalogueScope,
   const needle = query.trim().toLowerCase();
   return rows.filter((row) => (!scope || row.scopes.includes(scope)) && (!needle || row.search.toLowerCase().includes(needle)));
 }
+
+const methodologyDescriptions: Record<string, string> = {
+  "A worker implements each task and an independent verifier checks every PR head. Merging requires a non-author attestation and passing CI; the user decides when to merge.": "开发 Agent 处理任务，另一位 Agent 独立验证每个 PR 的当前提交。验证和 GitHub CI 通过后，由你决定是否合并。",
+  "A single worker implements tasks and publishes its branch and PR. There is no independent verifier or automatic merge.": "由一个开发 Agent 完成任务并提交分支和 PR，不另派验证 Agent，也不自动合并。",
+  "Owns one task end to end. Builds the change on its own branch, keeps it green and answers review findings.": "负责一项任务，在自己的分支上开发、完成检查，并处理审查意见。",
+  "Independent, read-only check of one PR head commit it did not write. Runs the change and attests PASS, PASS_NOTES, FAIL or BLOCKED.": "只读核对其他 Agent 的 PR 当前提交，运行检查并给出通过、附建议通过、失败或受阻的结论。",
+  "Implements one task, validates the result, and publishes its branch and PR.": "完成一项任务，验证结果后提交分支和 PR。",
+  "Engineering principles every SwarmJet Agent follows (adapted from pstack).": "所有 Agent 遵循的工程原则，参考 pstack。",
+  "Use for a defect, regression or failing test. Reproduce first, find the root cause with evidence, fix minimally, prove the repro now passes.": "先复现缺陷并找到原因，再做最小修复并验证。",
+  "Use for new or changed behaviour. Understand the subsystem, settle the data shape first, build in small verified commits, prove it end to end.": "先了解模块和数据，再分步实现功能并完成验证。",
+  "Use as a verifier. Independently prove or disprove one PR head commit you did not write, then attest a verdict for that exact SHA.": "独立核对指定提交，给出与该提交对应的验证结论。",
+  "Use for a behaviour-preserving change to structure. Pin current behaviour, change in small steps, prove nothing observable changed.": "先固定现有行为，再分步调整结构并验证行为没有变化。",
+  "Use as a PR owner when CI fails, a verifier reports findings or a reviewer comments. Classify before you change code; never churn code to quiet a bot.": "先区分 CI、验证与审查的问题，再按证据修复并验证。",
+  "Use for a read-only question (how does X work, why is Y like this, is Z safe). Answer with evidence; change no code.": "只读调查系统行为并提供证据，不改代码。",
+};
+/** Translate known bundled descriptions; preserve unknown source prose in details. */
+export function methodologyDescription(raw = ""): { text: string; detail?: string } {
+  const value = raw.trim();
+  if (!value) return { text: "暂无说明。" };
+  if (methodologyDescriptions[value]) return { text: methodologyDescriptions[value] };
+  if (/[\u3400-\u9fff]/u.test(value)) return { text: value };
+  return { text: "这项说明尚未提供中文。", detail: raw };
+}
