@@ -1049,7 +1049,7 @@ export class StarMap {
           pendingLabels.push({ text: body.cluster ? body.annotation : node.kind === "queue" ? weightedTruncate(body.annotation, 14) : body.annotation, p: {
               x: q.x + (comet ? (right ? -15 : 15) : satellite ? -12 : 0),
               y: q.y + (comet ? 4 : satellite ? -22 : 22),
-            }, size: comet ? 13 : 12, italic: !comet && !body.cluster, color: body.cluster ? C.ink2 : comet ? C.ink2 : C.ink3,
+            }, size: comet ? 13 : 12, italic: !comet && !body.cluster, color: node.kind === "planet" && system.decisionIds.has(node.id) ? C.accent : body.cluster ? C.ink2 : comet ? C.ink2 : C.ink3,
             align: comet ? (right ? "right" : "left") : satellite ? "right" : "center",
             priority: body.cluster ? 3 : node.state === "failed" ? 2 : node.kind === "comet" ? node.state === "parked" ? 8 : 4 : node.kind === "satellite" ? 5 : node.kind === "signal" ? signalIsClaimed(body) ? 9 : 6 : node.kind === "planet" ? system.decisionIds.has(node.id) ? 1 : 7 : 10,
             alpha: body.stale ? .4 : 1 });

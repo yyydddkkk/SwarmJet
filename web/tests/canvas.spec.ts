@@ -946,6 +946,38 @@ test("PR and verifier strokes keep design pixel widths at project and object zoo
   expect(object.filter((p: any) => p.kind === "moon-dot").every((p: any) => p.radius <= 3.75)).toBe(true);
 });
 
+test("only a PR waiting for a decision gets the accent label", async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = CanvasRenderingContext2D.prototype.fillText;
+    (window as any).__prText = [];
+    CanvasRenderingContext2D.prototype.fillText = function(this: CanvasRenderingContext2D, text: string, ...args: any[]) {
+      if (text.startsWith("#8 ")) (window as any).__prText.push({ color: this.fillStyle, font: this.font, alpha: this.globalAlpha });
+      return original.call(this, text, args[0], args[1]);
+    };
+  });
+  await mount(page);
+  const expected = await page.evaluate(async () => {
+    const x = (window as any).__canvas;
+    const { themeStore } = await x.load("/src/stars/theme.ts");
+    themeStore.setTheme("bright"); x.ui.selectProject(x.hive.id);
+    const ctx = document.createElement("canvas").getContext("2d")!;
+    ctx.fillStyle = themeStore.getSnapshot().colors.ink3; const inactive = ctx.fillStyle;
+    ctx.fillStyle = themeStore.getSnapshot().colors.accent; return { inactive, accent: ctx.fillStyle };
+  });
+  await settle(page);
+  const inactive = await page.evaluate(() => (window as any).__prText.at(-1));
+  expect(inactive).toMatchObject({ color: expected.inactive, alpha: 1 });
+  expect(inactive.font).toContain("italic");
+  await page.evaluate(() => {
+    const x = (window as any).__canvas; (window as any).__prText = [];
+    x.mock.push(x.hive.id, { type: "pr", data: { ...x.snapshot.prs[0], hiveId: x.hive.id, ready: true } });
+  });
+  await expect.poll(async () => page.evaluate(() => (window as any).__prText.at(-1)?.color)).toBe(expected.accent);
+  const ready = await page.evaluate(() => (window as any).__prText.at(-1));
+  expect(ready).toMatchObject({ color: expected.accent, alpha: 1 });
+  expect(ready.font).toContain("italic");
+});
+
 test("failed CI backed by a real check message opens that signal", async ({ page }) => {
   await mount(page);
   await page.evaluate(() => {
