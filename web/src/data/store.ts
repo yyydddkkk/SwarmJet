@@ -220,8 +220,10 @@ export class ProjectStore {
       let snapshot: ProjectSnapshot;
       if (this.source.load) {
         let partial: Partial<ProjectSnapshot> = {};
+        let authError: APIError | undefined;
         await this.source.load(this.hiveId, (name, patch, error, meta) => {
           if (generation !== this.generation || this.stopped) return;
+          if (error instanceof APIError && error.status === 401) authError = error;
           const status = error ? { status: "error" as const, error: error instanceof Error ? error.message : String(error), unavailable: name === "prs" } : { status: "ready" as const, ...(name === "prs" ? { stale: meta?.stale || patch?.prs?.some((pr) => pr.stale), unavailable: meta?.unavailable || patch?.prs?.some((pr) => pr.unavailable) } : {}) };
           const resources = { ...this.state.resources, [name]: status };
           if (patch) partial = { ...partial, ...patch };
@@ -231,6 +233,7 @@ export class ProjectStore {
             this.publish({ snapshot: next, resources });
           } else this.publish({ resources });
         }, this.abort.signal);
+        if (authError) throw authError;
         if (!partial.hive) throw new Error(this.state.resources.hive.error || "无法读取项目");
         snapshot = this.state.snapshot || emptySnapshot(partial);
       } else {

@@ -4,6 +4,7 @@ import { aggregateIssues, aggregatePRs, agentSummary, historyStars, localizedRea
 import { mockStarsHTTP } from "./stars-http-mock";
 import { createMockDataSource } from "../src/data/mock";
 import { createProjectStore } from "../src/data/store";
+import { APIError } from "../src/data/api";
 
 test("realistic fixture exercises density and text rules", () => {
   const data = round8Project();
@@ -64,5 +65,22 @@ test("PR envelope stale and unavailable flags reach the resource state", async (
   store.start();
   await new Promise((resolve) => setImmediate(resolve));
   expect(store.getSnapshot().resources.prs).toMatchObject({ status: "ready", stale: true, unavailable: true });
+  store.stop();
+});
+
+test("partial 401 remains an authentication failure", async () => {
+  const fixture = round8Project();
+  const mock = createMockDataSource({ swarmjet: fixture });
+  const store = createProjectStore("swarmjet", {
+    ...mock.source,
+    async load(_id, update) {
+      update("hive", { hive: fixture.hive });
+      update("prs", undefined, new APIError("session expired", 401));
+    },
+  });
+  store.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(store.getSnapshot().errorStatus).toBe(401);
+  expect(store.getSnapshot().resources.prs.status).toBe("error");
   store.stop();
 });
