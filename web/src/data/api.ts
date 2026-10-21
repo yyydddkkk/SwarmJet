@@ -98,8 +98,7 @@ async function inbox(id: string, to: string, signal?: AbortSignal) {
   return messages;
 }
 export const isActiveAgent = (agent: import("./types").Agent) =>
-  ["creating", "active", "parked", "hibernated"].includes(agent.state) ||
-  (agent.state === "failed" && Date.now() - Date.parse(agent.updatedAt) < 86400000);
+  ["creating", "active", "parked", "hibernated"].includes(agent.state);
 
 /** Full message bodies are fetched only for a selected historical Agent. */
 export function fetchAgentMessages(id: string, agentId: string, signal?: AbortSignal) {

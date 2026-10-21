@@ -97,7 +97,7 @@ test("message request count stays tied to active Agents at 40 and 400 historical
   try {
     for (const historicalCount of [40, 400]) {
       const history = fixture.agents.filter((agent) => ["completed", "cancelled", "failed"].includes(agent.state));
-      const agents = [...fixture.agents.slice(0, 4), ...Array.from({ length: historicalCount }, (_, i) => ({ ...history[i % history.length], id: `history-${i}`, updatedAt: "2026-10-01T00:00:00Z" }))];
+      const agents = [...fixture.agents.slice(0, 4), ...Array.from({ length: historicalCount }, (_, i) => ({ ...history[i % history.length], id: `history-${i}`, state: i % 5 === 0 ? "failed" as const : history[i % history.length].state, updatedAt: i % 5 === 0 ? new Date().toISOString() : "2026-10-01T00:00:00Z" }))];
       const paths: string[] = [];
       globalThis.fetch = async (input) => {
         const url = new URL(String(input), "http://localhost");
