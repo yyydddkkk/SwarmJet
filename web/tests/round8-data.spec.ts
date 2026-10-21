@@ -308,3 +308,34 @@ test("acknowledgement recomputes shared visibility without a network refresh", a
     else Reflect.deleteProperty(globalThis, "localStorage");
   }
 });
+
+
+test("opened conversations hydrate incoming and outgoing previews once per inbox", async () => {
+  const fixture = round8Project();
+  fixture.messages = [];
+  const agent = fixture.agents[1];
+  const address = `forager:${agent.id}`;
+  const full = [
+    { id: "detail-in", hiveId: "swarmjet", from: "queen", to: address, kind: "report" as const, chainId: "detail", hop: 0, body: "完整传入正文".repeat(100), state: "handled" as const, createdAt: new Date().toISOString() },
+    { id: "detail-out", hiveId: "swarmjet", from: address, to: "queen", kind: "report" as const, chainId: "detail", hop: 0, body: "完整传出正文".repeat(100), state: "handled" as const, createdAt: new Date().toISOString() },
+  ];
+  const mock = createMockDataSource({ swarmjet: fixture }, {
+    listMessages: async (_id, query) => ({ to: query.to, messages: full.filter((message) => message.to === query.to), truncated: false }),
+  });
+  const store = createProjectStore("swarmjet", mock.source);
+  try {
+    store.start();
+    await expect.poll(() => !!store.getSnapshot().snapshot).toBe(true);
+    for (const message of full) {
+      const { body, hop, state, ...metadata } = message;
+      mock.push("swarmjet", { type: "message", data: { ...metadata, preview: body.slice(0, 120) } });
+    }
+    await Promise.all([store.hydrateMessages(full.map((message) => message.id)), store.hydrateMessages(full.map((message) => message.id))]);
+    for (const message of full) expect(store.getSnapshot().snapshot?.messages.find((item) => item.id === message.id)).toMatchObject({ body: message.body });
+    const requests = mock.calls.filter((call) => call.method === "listMessages");
+    expect(requests).toHaveLength(2);
+    expect(new Set(requests.map((call) => (call.args[1] as { to: string }).to))).toEqual(new Set([address, "queen"]));
+    await store.hydrateMessages(full.map((message) => message.id));
+    expect(mock.calls.filter((call) => call.method === "listMessages")).toHaveLength(2);
+  } finally { store.stop(); }
+});
