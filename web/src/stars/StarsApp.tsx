@@ -17,8 +17,13 @@ import "./stars.css";
 const PanelsSlot = lazy(() => import("./PanelsSlot"));
 function DeferredPanels(props: StarsSlotProps) {
   const state = useStarsUI(props.ui);
-  if (!state.selection && !state.projectPanel && !state.platformPanel) return null;
-  return <Suspense fallback={null}><PanelsSlot {...props} /></Suspense>;
+  const active = !!(state.selection || state.projectPanel || state.platformPanel);
+  const [opened, setOpened] = useState(false);
+  useEffect(() => { if (active) setOpened(true); }, [active]);
+  if (!active && !opened) return null;
+  return <div className="stars-panels-host" aria-hidden={!active} inert={!active}>
+    <Suspense fallback={null}><PanelsSlot {...props} /></Suspense>
+  </div>;
 }
 export default function StarsApp({ source }: { source?: DataSource } = {}) {
   return (
