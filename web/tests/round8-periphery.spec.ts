@@ -79,6 +79,7 @@ test("登录、命令和断线状态的 axe violations 为零", async ({ browser
   await mockStarsHTTP(login, { unauthenticated: true });
   await login.goto("/");
   await expect(login.getByRole("heading", { name: "登录 SwarmJet" })).toBeVisible();
+  await expect(login.locator(".stars-login")).toHaveCSS("opacity", "1");
   expect((await new AxeBuilder({ page: login }).analyze()).violations).toEqual([]);
   await login.close();
   const page = await context.newPage();
