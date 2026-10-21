@@ -94,8 +94,8 @@ export function agentVisibility(agent: Agent, now = Date.now(), acknowledged = f
   return "history";
 }
 export const prVisible = (pr: PullRequest) => !pr.merged && pr.state === "open";
-export const issueVisible = (issue: Signal, agents: Agent[]) =>
-  issue.kind === "issue" && (!issue.claimed || agents.some((a) => a.issueNumber === issue.number && agentVisibility(a) === "orbit"));
+export const issueVisible = (issue: Signal, agents: Agent[], now = Date.now()) =>
+  issue.kind === "issue" && (!issue.claimed || agents.some((a) => a.issueNumber === issue.number && agentVisibility(a, now) === "orbit"));
 export const failedCIVisible = (status: string) => status === "failed" || status === "failure";
 
 // These constants and hash operations are transcribed from design/stars/index.html histPos.
@@ -116,15 +116,15 @@ export function historyPosition(id: string, center = { x: 0, y: 0 }) {
 }
 export type HistoryStar = { id: string; summary: string; result: "merged" | "done" | "failed"; endedAt: string; ageHours: number; fresh: boolean; brightness: number; dust: boolean; x: number; y: number };
 /** updatedAt is an approximation of the actual completion time. */
-export function historyStars(agents: Agent[], prs: PullRequest[], now = Date.now(), acknowledged: (id: string) => boolean = () => false, center = { x: 0, y: 0 }): HistoryStar[] {
-  return agents.filter((agent) => agentVisibility(agent, now, acknowledged(agent.id)) === "history")
+export function historyStars(agents: Agent[], prs: PullRequest[], now = Date.now(), acknowledged: (id: string) => boolean = () => false, center = { x: 0, y: 0 }, issues: Signal[] = []): HistoryStar[] {
+  return agents.filter((agent) => agent.roleName !== "verifier" && agentVisibility(agent, now, acknowledged(agent.id)) === "history")
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
     .map((agent, index) => {
       const ageHours = Math.max(0, (now - Date.parse(agent.updatedAt)) / 3600000);
       const merged = prs.some((pr) => pr.merged && pr.ownerId === agent.id);
       const result = agent.state === "failed" ? "failed" : merged ? "merged" : "done";
       const fade = Math.max(0, Math.min(1, (ageHours - 24) / (6 * 24)));
-      return { id: agent.id, summary: oneLineSummary(agent, { prs }), result, endedAt: agent.updatedAt, ageHours, fresh: ageHours < 6, brightness: (result === "failed" ? .35 : result === "merged" ? 1.15 : 1) * (1 - .8 * fade), dust: index >= 500, ...historyPosition(agent.id, center) };
+      return { id: agent.id, summary: oneLineSummary(agent, { prs, issues }), result, endedAt: agent.updatedAt, ageHours, fresh: ageHours < 6, brightness: (result === "failed" ? .35 : result === "merged" ? 1.15 : 1) * (1 - .8 * fade), dust: index >= 500, ...historyPosition(agent.id, center) };
     });
 }
 
@@ -136,8 +136,8 @@ export function aggregatePRs(prs: PullRequest[], agents: Agent[], now = Date.now
   const cluster = ordered.length > 9 ? ordered.slice(8) : [];
   return { visible, cluster, clusterPreview: cluster.slice(0, 6), clusterLabel: cluster.length ? `还有 ${cluster.length} 个 PR` : undefined };
 }
-export function aggregateIssues(issues: Signal[], agents: Agent[]): Aggregation<Signal> {
-  const ordered = issues.filter((issue) => issueVisible(issue, agents)).sort((a, b) => Number(a.claimed) - Number(b.claimed) || Date.parse(b.createdAt) - Date.parse(a.createdAt));
+export function aggregateIssues(issues: Signal[], agents: Agent[], now = Date.now()): Aggregation<Signal> {
+  const ordered = issues.filter((issue) => issueVisible(issue, agents, now)).sort((a, b) => Number(a.claimed) - Number(b.claimed) || Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const visible = ordered.length > 6 ? ordered.slice(0, 5) : ordered;
   const cluster = ordered.length > 6 ? ordered.slice(5) : [];
   return { visible, cluster, clusterPreview: cluster.slice(0, 6), clusterLabel: cluster.length ? `还有 ${cluster.length} 个 Issue` : undefined };

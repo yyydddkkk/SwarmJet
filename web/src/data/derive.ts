@@ -93,7 +93,7 @@ export function deriveProject(snapshot: ProjectSnapshot, now = Date.now()) {
       state: p.merged ? "merged" : p.state,
     }),
   );
-  const issueGroups = aggregateIssues(snapshot.signals, agents);
+  const issueGroups = aggregateIssues(snapshot.signals, agents, now);
   issueGroups.visible.forEach((s) =>
     nodes.push({
       id: s.messageId,
@@ -146,7 +146,7 @@ export function deriveProject(snapshot: ProjectSnapshot, now = Date.now()) {
   ];
   return {
     nodes,
-    history: historyStars(agents, prs, now, (id) => readAcknowledged(hive.id, id)),
+    history: historyStars(agents, prs, now, (id) => readAcknowledged(hive.id, id), { x: 0, y: 0 }, snapshot.signals),
     prGroups,
     issueGroups,
     decisions,

@@ -22,9 +22,11 @@ test("realistic fixture exercises density and text rules", () => {
   expect(aggregatePRs(data.prs, data.agents).cluster.length).toBe(8);
   expect(aggregateIssues(data.signals, data.agents).visible.length).toBe(5);
   const now = Date.now();
-  const stars = historyStars(data.agents, data.prs, now);
+  const stars = historyStars(data.agents, data.prs, now, () => false, { x: 0, y: 0 }, data.signals);
   expect(stars.length).toBeGreaterThan(30);
-  expect(historyStars(data.agents, data.prs, now)).toEqual(stars);
+  expect(stars.some((star) => data.agents.find((agent) => agent.id === star.id)?.roleName === "verifier")).toBe(false);
+  expect(stars.find((star) => star.id === data.agents[4].id)?.summary).toContain("Issue #104");
+  expect(historyStars(data.agents, data.prs, now, () => false, { x: 0, y: 0 }, data.signals)).toEqual(stars);
 });
 
 test("a 20 second PR request does not hold the other briefing sections", async ({ page }) => {
