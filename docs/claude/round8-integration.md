@@ -6,7 +6,13 @@
 
 A（perf/pr-list）与 B（feat/frontend-data-v2）从 origin/dev bb53602 并行开发。B 经审查后，C/D/E 从 B 分支开始。集成分支 integrate/round8 从 origin/dev 开始，按 B → A → D → E → C，以 --no-ff 合并，每步前端构建。所有远端 PR 合并、部署均等待用户明确批准。
 
+## 已确认的范围补充
+
+用户明确批准任务 A 对 internal/router/event.go、router.go 做最小改动，仅传递并保存 webhook PR 状态与时间，不改变派工、验证或合并逻辑。
+
 ## 验证与审查
+
+基线验证：origin/dev bb53602 前端 `npm ci`、`npm run build` 和 `npx playwright test` 已真实运行；85 项 Playwright 全部通过（1.3 分钟）。原有测试包含“空闲停止绘制”等旧规格断言，本轮会按新规格更新为环境动画与隐藏/减少动态时停止。
 
 尚在开发；本文件后续仅记录实际执行结果。真实部署验收留待用户批准集成 PR 后进行。未验证项目必须明确标为“未验证”。
 
