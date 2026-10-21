@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
@@ -50,17 +51,20 @@ type Event struct {
 	// SenderLogin and SenderType are the raw webhook sender. They are kept
 	// separate from Author because the Router uses them to recognise events
 	// caused by the platform's own GitHub App bot.
-	SenderLogin string `json:"senderLogin,omitempty"`
-	SenderType  string `json:"senderType,omitempty"`
-	Title       string `json:"title,omitempty"`
-	URL         string `json:"url,omitempty"`
-	Merged      bool   `json:"merged,omitempty"`
-	ReviewState string `json:"reviewState,omitempty"`
-	Conclusion  string `json:"conclusion,omitempty"`
-	State       string `json:"state,omitempty"`
-	Context     string `json:"context,omitempty"`
-	SHA         string `json:"sha,omitempty"`
-	Excerpt     string `json:"excerpt,omitempty"`
+	SenderLogin string    `json:"senderLogin,omitempty"`
+	SenderType  string    `json:"senderType,omitempty"`
+	Title       string    `json:"title,omitempty"`
+	URL         string    `json:"url,omitempty"`
+	Merged      bool      `json:"merged,omitempty"`
+	ReviewState string    `json:"reviewState,omitempty"`
+	Conclusion  string    `json:"conclusion,omitempty"`
+	State       string    `json:"state,omitempty"`
+	PRState     string    `json:"prState,omitempty"`
+	Context     string    `json:"context,omitempty"`
+	SHA         string    `json:"sha,omitempty"`
+	ClosedAt    time.Time `json:"closedAt,omitempty"`
+	UpdatedAt   time.Time `json:"updatedAt,omitempty"`
+	Excerpt     string    `json:"excerpt,omitempty"`
 }
 
 // Normalize converts a raw GitHub webhook payload into an Event. It returns
@@ -146,6 +150,9 @@ type githubPullRequest struct {
 	Body              string        `json:"body"`
 	HTMLURL           string        `json:"html_url"`
 	Merged            bool          `json:"merged"`
+	State             string        `json:"state"`
+	ClosedAt          *time.Time    `json:"closed_at"`
+	UpdatedAt         *time.Time    `json:"updated_at"`
 	Labels            []githubLabel `json:"labels"`
 	User              githubUser    `json:"user"`
 	AuthorAssociation string        `json:"author_association"`
@@ -284,6 +291,20 @@ func normalizePullRequest(payload []byte) (Event, bool) {
 	if p.Repository.FullName == "" || p.PullRequest.Number <= 0 {
 		return Event{}, false
 	}
+	state := p.PullRequest.State
+	if p.Action == "closed" {
+		state = "closed"
+	}
+	if p.Action == "reopened" {
+		state = "open"
+	}
+	var closedAt, updatedAt time.Time
+	if p.PullRequest.ClosedAt != nil {
+		closedAt = p.PullRequest.ClosedAt.UTC()
+	}
+	if p.PullRequest.UpdatedAt != nil {
+		updatedAt = p.PullRequest.UpdatedAt.UTC()
+	}
 	return Event{
 		Type:              EventPullRequest,
 		Action:            p.Action,
@@ -297,6 +318,9 @@ func normalizePullRequest(payload []byte) (Event, bool) {
 		Title:             p.PullRequest.Title,
 		URL:               p.PullRequest.HTMLURL,
 		Merged:            p.PullRequest.Merged,
+		PRState:           state,
+		ClosedAt:          closedAt,
+		UpdatedAt:         updatedAt,
 		SHA:               p.PullRequest.Head.SHA,
 		Excerpt:           excerptOf(p.PullRequest.Body),
 		SenderLogin:       p.Sender.Login,

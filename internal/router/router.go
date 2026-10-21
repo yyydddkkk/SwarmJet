@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/yyydddkkk/SwarmJet/internal/domain"
 )
@@ -167,9 +168,34 @@ func normalizeAppSlug(raw string) string {
 func (r *Router) Route(ctx context.Context, e Event) (decision Decision, routeErr error) {
 	defer func() {
 		if routeErr == nil && decision.HiveID != "" && prReference(e) > 0 {
+			terminalSnapshot := false
+			if e.Type == EventPullRequest {
+				prState := e.PRState
+				if e.Action == "closed" {
+					prState = "closed"
+				}
+				if e.Action == "reopened" {
+					prState = "open"
+				}
+				if recorder, ok := r.backend.(interface {
+					SaveWebhookPR(context.Context, string, int64, string, string, bool, time.Time, string, string, time.Time) error
+				}); ok {
+					if err := recorder.SaveWebhookPR(ctx, decision.HiveID, e.Number, e.Title, prState, e.Merged, e.ClosedAt, e.URL, e.SHA, e.UpdatedAt); err != nil {
+						slog.Warn("routed PR snapshot failed", "hive", decision.HiveID, "pr", e.Number, "error", err)
+					} else if e.PRState == "closed" || e.Action == "closed" {
+						if publisher, ok := r.backend.(interface {
+							PublishPRSnapshotEvent(context.Context, string, int64) error
+						}); ok {
+							if err := publisher.PublishPRSnapshotEvent(ctx, decision.HiveID, e.Number); err == nil {
+								terminalSnapshot = true
+							}
+						}
+					}
+				}
+			}
 			if publisher, ok := r.backend.(interface {
 				PublishPREvent(context.Context, string, int64) error
-			}); ok {
+			}); ok && !terminalSnapshot {
 				if err := publisher.PublishPREvent(ctx, decision.HiveID, prReference(e)); err != nil {
 					slog.Warn("routed PR event notification failed", "hive", decision.HiveID, "pr", prReference(e), "error", err)
 				}

@@ -148,6 +148,17 @@ func (a *server) eventData(ctx context.Context, ref store.EventRef) (any, error)
 		if err != nil {
 			return nil, err
 		}
+		snapshots, err := a.s.PRSnapshots(ctx, ref.HiveID)
+		if err != nil {
+			return nil, err
+		}
+		if snapshot, ok := snapshots[number]; ok && (ref.Source == "snapshot" || snapshot.State == "closed") {
+			a.applyPRSnapshot(snapshot)
+			return map[string]any{"hiveId": ref.HiveID, "number": number, "headSha": snapshot.HeadSHA, "state": snapshot.State, "ready": snapshot.Ready, "merged": snapshot.Merged}, nil
+		}
+		if ref.Source == "snapshot" {
+			return nil, store.ErrNotFound
+		}
 		hive, err := a.s.Hive(ctx, ref.HiveID)
 		if err != nil {
 			return nil, err
@@ -159,6 +170,26 @@ func (a *server) eventData(ctx context.Context, ref store.EventRef) (any, error)
 		if err != nil {
 			return nil, err
 		}
+		_, _ = a.s.SavePRSnapshot(ctx, store.PRSnapshot{HiveID: ref.HiveID, Number: number, Title: ready.Pull.Title, State: ready.Pull.State, Merged: ready.Pull.Merged, ClosedAt: ready.Pull.ClosedAt, URL: ready.Pull.URL, HeadSHA: ready.HeadSHA, UpdatedAt: ready.Pull.UpdatedAt, Ready: ready.Ready, Reasons: ready.Reasons})
+		a.prCacheMu.Lock()
+		for key := range a.prCache {
+			if key.hive == ref.HiveID && key.number == number {
+				delete(a.prCache, key)
+			}
+		}
+		if entry, ok := a.prLists[ref.HiveID]; ok {
+			items := append([]prListItem(nil), entry.prs...)
+			for i := range items {
+				if items[i].Number == number {
+					items[i].Title, items[i].URL, items[i].HeadSHA, items[i].State, items[i].Merged, items[i].Ready, items[i].Reasons, items[i].UpdatedAt, items[i].ClosedAt = ready.Pull.Title, ready.Pull.URL, ready.HeadSHA, ready.Pull.State, ready.Pull.Merged, ready.Ready, ready.Reasons, ready.Pull.UpdatedAt, ready.Pull.ClosedAt
+					items[i].Unavailable = false
+					break
+				}
+			}
+			entry.prs = items
+			a.prLists[ref.HiveID] = entry
+		}
+		a.prCacheMu.Unlock()
 		return map[string]any{"hiveId": ref.HiveID, "number": number, "headSha": ready.HeadSHA, "state": ready.Pull.State, "ready": ready.Ready, "merged": ready.Pull.Merged}, nil
 	}
 	data, err := a.s.EventData(ctx, ref)
@@ -173,6 +204,31 @@ func (a *server) eventData(ctx context.Context, ref store.EventRef) (any, error)
 		return agents[0], nil
 	}
 	return data, nil
+}
+
+func (a *server) applyPRSnapshot(snapshot store.PRSnapshot) {
+	a.prCacheMu.Lock()
+	defer a.prCacheMu.Unlock()
+	for key := range a.prCache {
+		if key.hive == snapshot.HiveID && key.number == snapshot.Number {
+			delete(a.prCache, key)
+		}
+	}
+	entry, ok := a.prLists[snapshot.HiveID]
+	if !ok {
+		return
+	}
+	items := append([]prListItem(nil), entry.prs...)
+	for i := range items {
+		if items[i].Number == snapshot.Number {
+			items[i].Title, items[i].URL, items[i].HeadSHA, items[i].State, items[i].Merged, items[i].Ready, items[i].Reasons, items[i].UpdatedAt, items[i].ClosedAt = snapshot.Title, snapshot.URL, snapshot.HeadSHA, snapshot.State, snapshot.Merged, snapshot.Ready, snapshot.Reasons, snapshot.UpdatedAt, snapshot.ClosedAt
+			items[i].Unavailable = false
+			entry.prs = items
+			a.prLists[snapshot.HiveID] = entry
+			return
+		}
+	}
+	delete(a.prLists, snapshot.HiveID)
 }
 
 func (a *server) eventStream(w http.ResponseWriter, r *http.Request) {

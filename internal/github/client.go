@@ -152,6 +152,15 @@ func (c *Client) repo(ctx context.Context, id int64) (string, error) {
 	r, err := c.GetRepository(ctx, id)
 	return "/repos/" + r.FullName, err
 }
+
+// SetRepositoryName uses the already validated Hive repository name for
+// read-only list calls, avoiding an extra lookup for every short-lived App client.
+func (c *Client) SetRepositoryName(id int64, name string) {
+	parts := strings.Split(name, "/")
+	if id > 0 && len(parts) == 2 && parts[0] != "" && parts[1] != "" && !strings.ContainsAny(name, "?#%\\") {
+		c.names.Store(id, name)
+	}
+}
 func (c *Client) ListRepositories(ctx context.Context) ([]Repository, error) {
 	var all []Repository
 	for page := 1; page <= 10000; page++ {

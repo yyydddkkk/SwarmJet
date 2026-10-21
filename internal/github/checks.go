@@ -21,6 +21,10 @@ type requiredCheck struct {
 	AppID         *int64 `json:"app_id"`
 	IntegrationID *int64 `json:"integration_id"`
 }
+type requiredStatus struct {
+	Context string `json:"context"`
+	State   string `json:"state"`
+}
 
 func (c *Client) requirements(ctx context.Context, id int64, branch string) ([]requiredCheck, bool, error) {
 	p, e := c.repo(ctx, id)
@@ -94,44 +98,51 @@ func (c *Client) RequiredChecks(ctx context.Context, id, number int64, sha strin
 	if e != nil {
 		return result, e
 	}
-	statuses, e := paginate[struct {
-		Context string `json:"context"`
-		State   string `json:"state"`
-	}](ctx, c, p+"/commits/"+url.PathEscape(sha)+"/statuses", nil)
+	statuses, e := paginate[requiredStatus](ctx, c, p+"/commits/"+url.PathEscape(sha)+"/statuses", nil)
 	if e != nil {
 		return result, e
 	}
-	latestStatus := map[string]string{}
-	for _, s := range statuses {
-		if _, ok := latestStatus[s.Context]; !ok {
-			latestStatus[s.Context] = s.State
-		}
+	type rawCheck struct {
+		CheckRun
+		GitHubHeadSHA string `json:"head_sha"`
 	}
-	type check struct {
-		ID         int64  `json:"id"`
-		Name       string `json:"name"`
-		HeadSHA    string `json:"head_sha"`
-		Status     string `json:"status"`
-		Conclusion string `json:"conclusion"`
-		App        struct {
-			ID int64 `json:"id"`
-		} `json:"app"`
-	}
-	var checks []check
+	var checks []CheckRun
 	for page := 1; page <= 10000; page++ {
 		var out struct {
-			Runs []check `json:"check_runs"`
+			Runs []rawCheck `json:"check_runs"`
 		}
 		h, e := c.request(ctx, "GET", fmt.Sprintf("%s/commits/%s/check-runs?filter=latest&per_page=100&page=%d", p, url.PathEscape(sha), page), nil, &out)
 		if e != nil {
 			return result, e
 		}
-		checks = append(checks, out.Runs...)
+		for _, raw := range out.Runs {
+			check := raw.CheckRun
+			check.HeadSHA = raw.GitHubHeadSHA
+			checks = append(checks, check)
+		}
 		if !strings.Contains(h.Get("Link"), `rel="next"`) {
 			break
 		}
 		if page == 10000 {
 			return result, errors.New("GitHub checks pagination exceeds limit")
+		}
+	}
+	return evaluateRequiredChecks(required, queue, statuses, checks, sha), nil
+}
+
+// evaluateRequiredChecks is shared by live merging and the concurrent
+// read-only list path, keeping their readiness rules identical.
+func evaluateRequiredChecks(required []requiredCheck, queue bool, statuses []requiredStatus, checks []CheckRun, sha string) CheckResult {
+	result := CheckResult{RequiredCount: len(required), MergeQueue: queue}
+	if len(required) == 0 {
+		result.Failed = true
+		result.Reason = "target branch has no required checks"
+		return result
+	}
+	latestStatus := map[string]string{}
+	for _, s := range statuses {
+		if _, ok := latestStatus[s.Context]; !ok {
+			latestStatus[s.Context] = s.State
 		}
 	}
 	for _, r := range required {
@@ -147,7 +158,7 @@ func (c *Client) RequiredChecks(ctx context.Context, id, number int64, sha strin
 			passed = state == "success"
 			failed = state == "error" || state == "failure"
 		}
-		latest := map[int64]check{}
+		latest := map[int64]CheckRun{}
 		for _, ch := range checks {
 			if ch.Name != r.Context || ch.HeadSHA != sha || (app != nil && *app > 0 && ch.App.ID != *app) {
 				continue
@@ -180,7 +191,7 @@ func (c *Client) RequiredChecks(ctx context.Context, id, number int64, sha strin
 		result.Waiting = false
 	}
 	result.Ready = !result.Failed && !result.Waiting
-	return result, nil
+	return result
 }
 func (c *Client) RequiredCIPassed(ctx context.Context, id, number int64, sha string, require bool) (bool, error) {
 	if !require {
