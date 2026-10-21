@@ -1,0 +1,65 @@
+{
+  "project": {
+    "queenEnabled": true,
+    "queenState": "parked",
+    "version": 7,
+    "active": true,
+    "source": "builtin:pstack",
+    "catalogVersion": "2",
+    "autoRolledBackAt": null
+  },
+  "lastNight": {
+    "completed": 16
+  },
+  "newAgents": [
+    {
+      "id": "forager-5de1d3cdbe7a9450d36d619604830d03",
+      "role": "worker",
+      "state": "completed",
+      "issueNumber": 13,
+      "prNumber": 14,
+      "createdAt": "2026-10-21T01:43:16.342247+00:00",
+      "updatedAt": "2026-10-21T01:46:30.300305+00:00"
+    },
+    {
+      "id": "forager-c46d3117beea62ba670c3725",
+      "role": "verifier",
+      "state": "completed",
+      "issueNumber": 0,
+      "prNumber": 14,
+      "createdAt": "2026-10-21T01:43:44.851597+00:00",
+      "updatedAt": "2026-10-21T01:45:19.896051+00:00"
+    }
+  ],
+  "attestations": [
+    {
+      "attesterId": "forager-c46d3117beea62ba670c3725",
+      "headSha": "bbc5ef91357920d32a7af8704d8f616ed1108968",
+      "isAuthor": false,
+      "result": "pass",
+      "createdAt": "2026-10-21T01:45:13.071574+00:00"
+    }
+  ],
+  "ownerCell": "",
+  "verifierCell": "",
+  "pr": {
+    "headRefOid": "bbc5ef91357920d32a7af8704d8f616ed1108968",
+    "mergeCommit": {
+      "oid": "89d351248c6d61b1fc96e5e7ffc2d6a0547d1177"
+    },
+    "mergedAt": "2026-10-21T01:46:21Z",
+    "state": "MERGED"
+  },
+  "usageBeforeWorkflow": {
+    "phase": "安装新版pstack和创建Issue前的真实psql结果（初次验收）",
+    "requests": 0,
+    "costUsd": 0
+  },
+  "usageAfterWorkflow": {
+    "queriedAt": "2026-10-21T01:51:24.920104+00:00",
+    "requests": 69,
+    "costUsd": 0.10355299999999996,
+    "unknownPriceRequests": 0
+  },
+  "usageQuery": "SELECT json_build_object('queriedAt',now(),'requests',count(*),'costUsd',coalesce(sum(cost_usd),0),'unknownPriceRequests',count(*) FILTER (WHERE unknown_price)) FROM llm_usage WHERE created_at>=date_trunc('day',now())"
+}

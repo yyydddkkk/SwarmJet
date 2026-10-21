@@ -1,0 +1,27 @@
+{
+  "queriedAt": "2026-10-21T01:51:49.094622+00:00",
+  "github": {
+    "configured": true,
+    "installations": 1
+  },
+  "tunnel": {
+    "enabled": true,
+    "url": "https://record-suzuki-demanding-heated.trycloudflare.com",
+    "webhookSynced": true,
+    "lastError": ""
+  },
+  "cells": {
+    "enabled": true,
+    "dockerAvailable": true,
+    "image": "swarmjet-agent:local",
+    "model": "deepseek/deepseek-v4-flash"
+  },
+  "models": {
+    "available": true,
+    "configured": true,
+    "defaultModel": "deepseek/deepseek-v4-flash",
+    "providers": [
+      "deepseek"
+    ]
+  }
+}
