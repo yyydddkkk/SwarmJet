@@ -31,7 +31,8 @@ test("真实简报四组、正常快照、SSE断线与无障碍", async ({ page 
     await expect(
       brief.getByRole("heading", { name: text, exact: true }),
     ).toBeVisible();
-  await expect(brief.getByRole("button", { name: "知道了" })).toHaveCount(1);
+  await expect(brief.getByRole("button", { name: "知道了" })).toHaveCount(2);
+  await expect(brief.getByText(/接入 GitHub check_run 事件/)).toHaveCount(0);
   await expect(
     brief.getByText(/昨晚合并数和花费暂时无法获取/),
   ).toBeVisible();

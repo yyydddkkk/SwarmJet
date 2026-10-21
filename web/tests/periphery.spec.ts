@@ -16,6 +16,8 @@ test("简报逐段显示，决定最多三项，旧失败不再堆积", async ({
     await expect(brief.getByRole("heading", { name: title, exact: true })).toBeVisible();
   await expect(brief.getByText("PR #88 修复兼容问题")).toBeVisible();
   await expect(brief.locator(".periphery-brief-body .need")).toHaveCount(2);
+  await expect(brief.getByRole("button", { name: "知道了" })).toHaveCount(2);
+  await brief.getByRole("button", { name: "知道了" }).first().click();
   await expect(brief.getByRole("button", { name: "知道了" })).toHaveCount(1);
   await brief.getByRole("button", { name: "知道了" }).click();
   await expect(brief.getByRole("button", { name: "知道了" })).toHaveCount(0);
