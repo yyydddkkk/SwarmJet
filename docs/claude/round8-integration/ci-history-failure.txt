@@ -1,0 +1,83 @@
+2026-10-21T05:38:28.3267599Z 
+2026-10-21T05:38:28.3273276Z 
+2026-10-21T05:38:28.3280344Z   1) tests/canvas.spec.ts:998:1 › hovering a finished Agent shows summary and opens its historical card 
+2026-10-21T05:38:28.3280936Z 
+2026-10-21T05:38:28.3281219Z     Error: expect(received).toEqual(expected) // deep equality
+2026-10-21T05:38:28.3281461Z 
+2026-10-21T05:38:28.3281619Z     - Expected  -  1
+2026-10-21T05:38:28.3282007Z     + Received  + 58
+2026-10-21T05:38:28.3282193Z 
+2026-10-21T05:38:28.3282351Z     - Array []
+2026-10-21T05:38:28.3282643Z     + Array [
+2026-10-21T05:38:28.3282969Z     +   Object {
+2026-10-21T05:38:28.3283640Z     +     "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+2026-10-21T05:38:28.3284366Z     +     "help": "Elements must meet minimum color contrast ratio thresholds",
+2026-10-21T05:38:28.3285756Z     +     "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=playwright",
+2026-10-21T05:38:28.3286306Z     +     "id": "color-contrast",
+2026-10-21T05:38:28.3286662Z     +     "impact": "serious",
+2026-10-21T05:38:28.3287106Z     +     "nodes": Array [
+2026-10-21T05:38:28.3287418Z     +       Object {
+2026-10-21T05:38:28.3287778Z     +         "all": Array [],
+2026-10-21T05:38:28.3288224Z     +         "any": Array [
+2026-10-21T05:38:28.3288553Z     +           Object {
+2026-10-21T05:38:28.3288865Z     +             "data": Object {
+2026-10-21T05:38:28.3289259Z     +               "bgColor": "#f7f6f4",
+2026-10-21T05:38:28.3289689Z     +               "contrastRatio": 3.82,
+2026-10-21T05:38:28.3290137Z     +               "expectedContrastRatio": "4.5:1",
+2026-10-21T05:38:28.3290640Z     +               "fgColor": "#7a7d83",
+2026-10-21T05:38:28.3291019Z     +               "fontSize": "11.3pt (15px)",
+2026-10-21T05:38:28.3291400Z     +               "fontWeight": "normal",
+2026-10-21T05:38:28.3291883Z     +               "messageKey": null,
+2026-10-21T05:38:28.3292267Z     +             },
+2026-10-21T05:38:28.3292911Z     +             "id": "color-contrast",
+2026-10-21T05:38:28.3293323Z     +             "impact": "serious",
+2026-10-21T05:38:28.3294266Z     +             "message": "Element has insufficient color contrast of 3.82 (foreground color: #7a7d83, background color: #f7f6f4, font size: 11.3pt (15px), font weight: normal). Expected contrast ratio of 4.5:1",
+2026-10-21T05:38:28.3295170Z     +             "relatedNodes": Array [
+2026-10-21T05:38:28.3295804Z     +               Object {
+2026-10-21T05:38:28.3296474Z     +                 "html": "<div class=\"stars-note open\" aria-live=\"polite\" aria-hidden=\"false\" style=\"left: 980px; top: 400px;\">",
+2026-10-21T05:38:28.3297171Z     +                 "target": Array [
+2026-10-21T05:38:28.3297535Z     +                   ".stars-note",
+2026-10-21T05:38:28.3297867Z     +                 ],
+2026-10-21T05:38:28.3298190Z     +               },
+2026-10-21T05:38:28.3298490Z     +             ],
+2026-10-21T05:38:28.3298779Z     +           },
+2026-10-21T05:38:28.3299082Z     +         ],
+2026-10-21T05:38:28.3299510Z     +         "failureSummary": "Fix any of the following:
+2026-10-21T05:38:28.3300458Z     +   Element has insufficient color contrast of 3.82 (foreground color: #7a7d83, background color: #f7f6f4, font size: 11.3pt (15px), font weight: normal). Expected contrast ratio of 4.5:1",
+2026-10-21T05:38:28.3301301Z     +         "html": "<p>",
+2026-10-21T05:38:28.3301634Z     +         "impact": "serious",
+2026-10-21T05:38:28.3302022Z     +         "none": Array [],
+2026-10-21T05:38:28.3302508Z     +         "target": Array [
+2026-10-21T05:38:28.3302920Z     +           ".stars-note > p",
+2026-10-21T05:38:28.3303261Z     +         ],
+2026-10-21T05:38:28.3303588Z     +       },
+2026-10-21T05:38:28.3303878Z     +     ],
+2026-10-21T05:38:28.3304151Z     +     "tags": Array [
+2026-10-21T05:38:28.3304466Z     +       "cat.color",
+2026-10-21T05:38:28.3304797Z     +       "wcag2aa",
+2026-10-21T05:38:28.3305109Z     +       "wcag143",
+2026-10-21T05:38:28.3305583Z     +       "TTv5",
+2026-10-21T05:38:28.3305892Z     +       "TT13.c",
+2026-10-21T05:38:28.3306227Z     +       "EN-301-549",
+2026-10-21T05:38:28.3306523Z     +       "EN-9.1.4.3",
+2026-10-21T05:38:28.3306859Z     +       "ACT",
+2026-10-21T05:38:28.3307160Z     +       "RGAAv4",
+2026-10-21T05:38:28.3307430Z     +       "RGAA-3.2.1",
+2026-10-21T05:38:28.3307784Z     +     ],
+2026-10-21T05:38:28.3308040Z     +   },
+2026-10-21T05:38:28.3308328Z     + ]
+2026-10-21T05:38:28.3308486Z 
+2026-10-21T05:38:28.3309423Z       1015 |   await page.evaluate(() => { const h1 = document.createElement("h1"); h1.textContent = "星图"; document.querySelector("main.stars-app")!.prepend(h1); });
+2026-10-21T05:38:28.3310310Z       1016 |   const historyAxe = await new AxeBuilder({ page }).analyze();
+2026-10-21T05:38:28.3311018Z     > 1017 |   expect(historyAxe.violations).toEqual([]);
+2026-10-21T05:38:28.3311874Z            |                                 ^
+2026-10-21T05:38:28.3312933Z       1018 |   await page.evaluate(async () => { const x = (window as any).__canvas; const { themeStore } = await x.load("/src/stars/theme.ts"); themeStore.setTheme("night"); });
+2026-10-21T05:38:28.3313851Z       1019 |   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+2026-10-21T05:38:28.3314349Z       1020 | });
+2026-10-21T05:38:28.3314821Z         at /home/runner/work/SwarmJet/SwarmJet/web/tests/canvas.spec.ts:1017:33
+2026-10-21T05:38:28.3315164Z 
+2026-10-21T05:38:28.3316141Z     Error Context: test-results/canvas-hovering-a-finished-b204f-d-opens-its-historical-card/error-context.md
+2026-10-21T05:38:28.3316661Z 
+2026-10-21T05:38:28.3316761Z   1 failed
+2026-10-21T05:38:28.3317442Z     tests/canvas.spec.ts:998:1 › hovering a finished Agent shows summary and opens its historical card 
+2026-10-21T05:38:28.3318017Z   155 passed (3.7m)

@@ -1013,6 +1013,8 @@ test("hovering a finished Agent shows summary and opens its historical card", as
   await page.mouse.click(q.x, q.y);
   await expect(page.locator(".stars-note.open")).toContainText("结束时间按 Agent 最近更新时间估算");
   await page.evaluate(() => { const h1 = document.createElement("h1"); h1.textContent = "星图"; document.querySelector("main.stars-app")!.prepend(h1); });
+  // Contrast is meaningful after the designed 300 ms card fade has finished.
+  await expect(page.locator(".stars-note.open")).toHaveCSS("opacity", "1");
   const historyAxe = await new AxeBuilder({ page }).analyze();
   expect(historyAxe.violations).toEqual([]);
   await page.evaluate(async () => { const x = (window as any).__canvas; const { themeStore } = await x.load("/src/stars/theme.ts"); themeStore.setTheme("night"); });

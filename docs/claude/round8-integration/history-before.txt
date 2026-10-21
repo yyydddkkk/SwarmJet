@@ -1,0 +1,101 @@
+[WebServer] (node:3378857) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:3379030) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:3378884) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 3 tests using 2 workers
+
+(node:3379101) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:3379102) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  2 tests/canvas.spec.ts:998:1 › hovering a finished Agent shows summary and opens its historical card (2.0s)
+(node:3379393) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 tests/canvas.spec.ts:998:1 › hovering a finished Agent shows summary and opens its historical card (2.3s)
+  ✓  3 tests/canvas.spec.ts:998:1 › hovering a finished Agent shows summary and opens its historical card (2.0s)
+
+
+  1) tests/canvas.spec.ts:998:1 › hovering a finished Agent shows summary and opens its historical card 
+
+    Error: expect(received).toEqual(expected) // deep equality
+
+    - Expected  -  1
+    + Received  + 58
+
+    - Array []
+    + Array [
+    +   Object {
+    +     "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    +     "help": "Elements must meet minimum color contrast ratio thresholds",
+    +     "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=playwright",
+    +     "id": "color-contrast",
+    +     "impact": "serious",
+    +     "nodes": Array [
+    +       Object {
+    +         "all": Array [],
+    +         "any": Array [
+    +           Object {
+    +             "data": Object {
+    +               "bgColor": "#f7f6f3",
+    +               "contrastRatio": 4.43,
+    +               "expectedContrastRatio": "4.5:1",
+    +               "fgColor": "#70727a",
+    +               "fontSize": "11.3pt (15px)",
+    +               "fontWeight": "normal",
+    +               "messageKey": null,
+    +             },
+    +             "id": "color-contrast",
+    +             "impact": "serious",
+    +             "message": "Element has insufficient color contrast of 4.43 (foreground color: #70727a, background color: #f7f6f3, font size: 11.3pt (15px), font weight: normal). Expected contrast ratio of 4.5:1",
+    +             "relatedNodes": Array [
+    +               Object {
+    +                 "html": "<div class=\"stars-note open\" aria-live=\"polite\" aria-hidden=\"false\" style=\"left: 980px; top: 400px;\">",
+    +                 "target": Array [
+    +                   ".stars-note",
+    +                 ],
+    +               },
+    +             ],
+    +           },
+    +         ],
+    +         "failureSummary": "Fix any of the following:
+    +   Element has insufficient color contrast of 4.43 (foreground color: #70727a, background color: #f7f6f3, font size: 11.3pt (15px), font weight: normal). Expected contrast ratio of 4.5:1",
+    +         "html": "<p>",
+    +         "impact": "serious",
+    +         "none": Array [],
+    +         "target": Array [
+    +           ".stars-note > p",
+    +         ],
+    +       },
+    +     ],
+    +     "tags": Array [
+    +       "cat.color",
+    +       "wcag2aa",
+    +       "wcag143",
+    +       "TTv5",
+    +       "TT13.c",
+    +       "EN-301-549",
+    +       "EN-9.1.4.3",
+    +       "ACT",
+    +       "RGAAv4",
+    +       "RGAA-3.2.1",
+    +     ],
+    +   },
+    + ]
+
+      1015 |   await page.evaluate(() => { const h1 = document.createElement("h1"); h1.textContent = "星图"; document.querySelector("main.stars-app")!.prepend(h1); });
+      1016 |   const historyAxe = await new AxeBuilder({ page }).analyze();
+    > 1017 |   expect(historyAxe.violations).toEqual([]);
+           |                                 ^
+      1018 |   await page.evaluate(async () => { const x = (window as any).__canvas; const { themeStore } = await x.load("/src/stars/theme.ts"); themeStore.setTheme("night"); });
+      1019 |   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      1020 | });
+        at /home/yang/mycode/swarmjet-r8/web/tests/canvas.spec.ts:1017:33
+
+    Error Context: test-results/canvas-hovering-a-finished-b204f-d-opens-its-historical-card-repeat1/error-context.md
+
+  1 failed
+    tests/canvas.spec.ts:998:1 › hovering a finished Agent shows summary and opens its historical card 
+  2 passed (10.5s)

@@ -57,6 +57,8 @@ C最后挑入ca868bc修复缩放把PR描边一起放粗的问题，恢复参考�
 
 前三项通过后仅修改前端与证据，未受影响结果复用。首次组合全量被SIGTERM中断，未算通过；新增测试曾将CSS终态none误写为单位矩阵，已纠正并验证中间帧。遗留测试预览进程已清理并改由exec直接持有，避免下次端口冲突。全量结论只取最后一次完成的运行。
 
+首次远端CI（39550297918）Go、Compose、部署脚本通过，前端155/156；历史卡片axe在300ms淡入中捕获中间透明度，报3.82:1。该卡片正文原本已用ink2，未改产品颜色或动画。原测试本地限定重复3次复现1次失败；在axe前等待卡片opacity=1后3/3通过，双主题检查及所有规则保留。证据：[CI失败](round8-integration/ci-history-failure.txt)、[本地复现](round8-integration/history-before.txt)、[修复后](round8-integration/history-regression.txt)。这次仅补测试等待，最终远端完整结果以本PR最新检查为准。
+
 ## 性能
 
 [PR接口完整说明](pr-list-performance-round8.md)及[原始数据](round8-pr-list/performance.txt)：15个未预热历史PR+3个需CI判断的开放PR，每个假GitHub HTTP延迟1秒，真实HTTP客户端、gate和测试数据库下冷读2.017745946秒/17次请求，热读1.62588毫秒/额外0次。不含真实App签发和仓库解析，**不是sj-r3原20.954秒接口的实机改善结论**；实机冷/热对照待部署。
