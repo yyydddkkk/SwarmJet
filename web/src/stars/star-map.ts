@@ -35,6 +35,7 @@ type System = Point & {
 };
 type Camera = Point & { scale: number };
 export type MapNote = { kind: "history" | "cluster"; x: number; y: number; title: string; body: string; scope: "history" | "active"; query?: string };
+export type MapHistoryHover = { id: string; x: number; y: number; summary: string; result: string; time: string };
 const TAU = Math.PI * 2,
   TILT = -0.24,
   AS = 0.55;
@@ -110,6 +111,7 @@ export class StarMap {
   private hoverHistory?: { history: HistoryStar; systemId: string };
   private note?: MapNote;
   private onNoteChange?: (note?: MapNote) => void;
+  private onHistoryHoverChange?: (hover?: MapHistoryHover) => void;
   private dragging?: {
     body?: Body;
     start: Point;
@@ -134,8 +136,10 @@ export class StarMap {
     private assign: (id: string, number: number) => Promise<unknown>,
     private feedback: (message: string) => void,
     onNoteChange?: (note?: MapNote) => void,
+    onHistoryHoverChange?: (hover?: MapHistoryHover) => void,
   ) {
     this.onNoteChange = onNoteChange;
+    this.onHistoryHoverChange = onHistoryHoverChange;
     this.ctx = canvas.getContext("2d")!;
     const resize = new ResizeObserver(() => {
       const r = canvas.getBoundingClientRect();
@@ -208,10 +212,12 @@ export class StarMap {
       this.dragging = undefined;
       this.schedule();
     });
-    on("pointerleave", () => {
+    on("pointerleave", (event) => {
+      if (event.relatedTarget instanceof Element && event.relatedTarget.closest(".stars-history-hover")) return;
       if (!this.dragging) {
         this.hover = undefined;
         this.hoverHistory = undefined;
+        this.onHistoryHoverChange?.();
         this.schedule();
       }
     });
@@ -517,7 +523,18 @@ export class StarMap {
       }
     } else {
       this.hover = this.hit(p);
-      this.hoverHistory = this.hover ? undefined : this.hitHistory(p);
+      const next = this.hover ? undefined : this.hitHistory(p);
+      if (next?.history.id !== this.hoverHistory?.history.id) {
+        this.hoverHistory = next;
+        const system = next && this.systems.find((s) => s.id === next.systemId);
+        const q = next && system && this.screen({ x: system.x + next.history.x, y: system.y + next.history.y });
+        this.onHistoryHoverChange?.(next && q ? {
+          id: next.history.id, x: q.x, y: q.y,
+          summary: next.history.summary,
+          result: next.history.result === "merged" ? "已合并" : next.history.result === "failed" ? "失败" : "已完成",
+          time: relativeTime(next.history.endedAt),
+        } : undefined);
+      }
     }
     this.canvas.style.cursor = d?.moved
       ? d.body
@@ -564,6 +581,7 @@ export class StarMap {
             window.dispatchEvent(new CustomEvent("swarmjet:create-project"));
         }, 280);
       } else if (history) {
+        this.onHistoryHoverChange?.();
         const s = this.systems.find((x) => x.id === history.systemId)!;
         const q = this.screen({ x: s.x + history.history.x, y: s.y + history.history.y });
         this.note = { kind: "history", x: q.x, y: q.y, title: `${history.history.result === "merged" ? "已合并" : history.history.result === "failed" ? "失败，已看过" : "已完成"}，${relativeTime(history.history.endedAt)}`, body: `${history.history.summary}\n结束时间按 Agent 最近更新时间估算。`, scope: "history", query: history.history.id };
@@ -753,7 +771,6 @@ export class StarMap {
         }
         if (this.hoverHistory?.history.id === h.id) {
           ctx.strokeStyle = C.ink2; ctx.globalAlpha = 1; circle(q, 8);
-          label(`${weightedTruncate(h.summary, 26)} · ${h.result === "merged" ? "已合并" : h.result === "failed" ? "失败" : "已完成"} · ${relativeTime(h.endedAt)}`, { x: q.x, y: q.y - 16 }, 14, true, C.ink);
         }
       }
     }

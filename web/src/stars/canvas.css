@@ -155,3 +155,7 @@
 .stars-note .acts { display: flex; gap: 18px; margin-top: 12px; font-style: italic; font-size: 16px; }
 .stars-note .acts button { color: var(--ink2); }
 .stars-note .acts button:hover { color: var(--ink); }
+.stars-history-hover { position: fixed; z-index: 5; width: min(340px, calc(100vw - 48px)); max-height: calc(100vh - 80px); overflow: auto; padding: 12px 16px; background: var(--veil); border: 1px solid var(--hair); color: var(--ink); font: italic 14px/1.55 var(--body); overflow-wrap: anywhere; }
+.stars-history-hover p { margin: 0; white-space: normal; }
+.stars-history-hover small { display: block; margin-top: 6px; color: var(--ink2); font: 13px/1.4 var(--body); }
+[data-style="simple"] .stars-history-hover { font-style: normal; }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { messagePreview, prSummary, useDataAPI, weightedTruncate } from "../data";
 import type { StarsSlotProps } from "./slots";
-import { StarMap, type MapNote } from "./star-map";
+import { StarMap, type MapHistoryHover, type MapNote } from "./star-map";
 import "./canvas.css";
 export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
   const canvas = useRef<HTMLCanvasElement>(null),
@@ -10,7 +10,8 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
     decisionPanel = useRef<HTMLElement>(null);
   const [feedback, setFeedback] = useState(""),
     [deciding, setDeciding] = useState(false),
-    [note, setNote] = useState<MapNote>();
+    [note, setNote] = useState<MapNote>(),
+    [historyHover, setHistoryHover] = useState<MapHistoryHover>();
   const idKey = projects.map((p) => p.hive.id).join("\0");
   useSyncExternalStore(
     (fn) => {
@@ -36,6 +37,7 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
       (id, number) => api.assignIssue(id, number),
       setFeedback,
       setNote,
+      setHistoryHover,
     );
     Object.defineProperty(element, "starMapMetrics", {
       configurable: true,
@@ -58,6 +60,7 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
         if (ui.getSnapshot().overlay || ui.getSnapshot().platformPanel) {
           setDeciding(false);
           setNote(undefined);
+          setHistoryHover(undefined);
         }
       }),
     [ui],
@@ -79,6 +82,12 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
         className="stars-canvas"
         aria-label="项目星图；使用列表可访问所有对象和操作"
       />
+      {historyHover && !note && <div
+        className="stars-history-hover"
+        role="tooltip"
+        style={{ left: Math.max(24, Math.min(innerWidth - 360, historyHover.x + 24)), top: Math.max(24, Math.min(innerHeight - 320, historyHover.y - 24)) }}
+        onPointerLeave={() => setHistoryHover(undefined)}
+      ><p>{historyHover.summary}</p><small>{historyHover.result} · {historyHover.time}</small></div>}
       <button
         ref={observer}
         onKeyDown={(e) => {

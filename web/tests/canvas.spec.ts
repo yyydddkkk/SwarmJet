@@ -747,13 +747,17 @@ test("hovering a finished Agent shows summary and opens its historical card", as
   await mount(page);
   await page.evaluate(() => {
     const x = (window as any).__canvas; x.ui.selectProject(x.hive.id);
-    for (let i = 0; i < 20; i++) x.mock.push(x.hive.id, { type: "agent", data: { ...x.agent, id: `historic-${i}`, state: "completed", updatedAt: new Date().toISOString() } });
+    for (let i = 0; i < 20; i++) x.mock.push(x.hive.id, { type: "agent", data: { ...x.agent, id: `historic-${i}`, state: "completed", issueNumber: undefined, prNumber: undefined, task: "长标题".repeat(120), updatedAt: new Date().toISOString() } });
   });
   await settle(page);
-  const q: any = await page.locator(".stars-canvas").evaluate((el: any) => Object.entries(el.starMapMetrics.positions).filter(([id, p]: any) => id.startsWith("history:historic-") && p.x > 50 && p.x < el.clientWidth - 50 && p.y > 50 && p.y < el.clientHeight - 50).map(([, p]) => p)[0]);
+  const chosen: any = await page.locator(".stars-canvas").evaluate((el: any) => Object.entries(el.starMapMetrics.positions).filter(([id, p]: any) => id.startsWith("history:historic-") && p.x > 50 && p.x < el.clientWidth - 50 && p.y > 50 && p.y < el.clientHeight - 50).map(([id, p]) => ({ id: id.slice(8), p }))[0]);
+  const q = chosen?.p;
   expect(q).toBeTruthy();
   await page.mouse.move(q.x, q.y);
   expect(Number(await page.locator(".stars-canvas").getAttribute("data-history"))).toBeGreaterThan(0);
+  const expected = await page.evaluate((id) => (window as any).__canvas.store.getSnapshot().derived.history.find((h: any) => h.id === id).summary, chosen.id);
+  await expect(page.locator(".stars-history-hover p")).toHaveText(expected);
+  expect((await page.locator(".stars-history-hover").boundingBox())!.width).toBeLessThanOrEqual(341);
   await page.mouse.click(q.x, q.y);
   await expect(page.locator(".stars-note.open")).toContainText("结束时间按 Agent 最近更新时间估算");
 });
