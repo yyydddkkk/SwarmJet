@@ -7,6 +7,7 @@ import { createProjectStore } from "../src/data/store";
 import { APIError } from "../src/data/api";
 import { loadProjectResources } from "../src/data/api";
 import type { MessagePage } from "../src/data/http";
+import { deriveProject } from "../src/data/derive";
 
 test("realistic fixture exercises density and text rules", () => {
   const data = round8Project();
@@ -32,6 +33,17 @@ test("realistic fixture exercises density and text rules", () => {
   expect(stars.some((star) => data.agents.find((agent) => agent.id === star.id)?.roleName === "verifier")).toBe(false);
   expect(stars.find((star) => star.id === data.agents[4].id)?.summary).toContain("Issue #104");
   expect(historyStars(data.agents, data.prs, now, () => false, { x: 0, y: 0 }, data.signals)).toEqual(stars);
+});
+
+test("legacy animation nodes retain terminal objects while map nodes show current work", () => {
+  const data = round8Project();
+  const derived = deriveProject(data);
+  expect(derived.nodes.some((node) => node.agentId === data.agents[4].id)).toBe(true);
+  expect(derived.mapNodes.some((node) => node.agentId === data.agents[4].id)).toBe(false);
+  expect(derived.nodes.some((node) => node.prNumber === 17)).toBe(true);
+  expect(derived.mapNodes.some((node) => node.prNumber === 17)).toBe(false);
+  expect(derived.mapNodes.some((node) => node.prNumber === 1)).toBe(true);
+  expect(derived.mapNodes.filter((node) => node.kind === "planet")).toHaveLength(8);
 });
 
 test("a 20 second PR request does not hold the other briefing sections", async ({ page }) => {

@@ -1,5 +1,5 @@
 import type { Agent, LiveMessage, ProjectSnapshot } from "./types";
-import { agentVisibility, aggregateIssues, aggregatePRs, historyStars, oneLineSummary, SUMMARY_WIDTH, weightedTruncate, readAcknowledged } from "./rules";
+import { agentVisibility, aggregateIssues, aggregatePRs, historyStars, nodeSummary, readAcknowledged } from "./rules";
 export type StarNode = {
   id: string;
   kind: "star" | "comet" | "satellite" | "planet" | "signal" | "queue";
@@ -67,7 +67,7 @@ export function deriveProject(snapshot: ProjectSnapshot, now = Date.now()) {
       state: snapshot.queen.state,
     },
   ];
-  agents.filter((a) => agentVisibility(a, now, readAcknowledged(hive.id, a.id)) === "orbit").forEach((a) =>
+  agents.forEach((a) =>
     nodes.push({
       id: a.id,
       kind: a.roleName === "verifier" ? "satellite" : "comet",
@@ -78,28 +78,26 @@ export function deriveProject(snapshot: ProjectSnapshot, now = Date.now()) {
         a.roleName === "verifier" && a.prNumber
           ? `${hive.id}:pr:${a.prNumber}`
           : undefined,
-      label: `#${a.id.slice(-8)} ${oneLineSummary(a, { prs, issues: snapshot.signals }, SUMMARY_WIDTH.star)}`,
+      label: agentStatus(a, messages, now),
       state: a.state,
     }),
   );
-  const prGroups = aggregatePRs(prs, agents, now);
-  prGroups.visible.forEach((p) =>
+  prs.forEach((p) =>
     nodes.push({
       id: `${hive.id}:pr:${p.number}`,
       kind: "planet",
       hiveId: hive.id,
       prNumber: p.number,
-      label: `#${p.number} ${weightedTruncate(p.title || `PR #${p.number}`, SUMMARY_WIDTH.star)}`,
+      label: `PR #${p.number}`,
       state: p.merged ? "merged" : p.state,
     }),
   );
-  const issueGroups = aggregateIssues(snapshot.signals, agents, now);
-  issueGroups.visible.forEach((s) =>
+  snapshot.signals.forEach((s) =>
     nodes.push({
       id: s.messageId,
       kind: "signal",
       hiveId: hive.id,
-      label: `#${s.number} ${weightedTruncate(s.title, SUMMARY_WIDTH.star)}`,
+      label: s.title,
     }),
   );
   snapshot.queue.forEach((q) =>
@@ -144,8 +142,24 @@ export function deriveProject(snapshot: ProjectSnapshot, now = Date.now()) {
         message,
       })),
   ];
+  const prGroups = aggregatePRs(prs, agents, now);
+  const issueGroups = aggregateIssues(snapshot.signals, agents, now);
+  const mapAgents = new Set(agents.filter((agent) => agentVisibility(agent, now, readAcknowledged(hive.id, agent.id)) === "orbit").map((agent) => agent.id));
+  const mapPRs = new Set(prGroups.visible.map((pr) => pr.number));
+  const mapIssues = new Set(issueGroups.visible.map((issue) => issue.messageId));
+  const mapNodes = nodes.filter((node) => node.kind === "star" || node.kind === "queue" ||
+    (node.agentId && mapAgents.has(node.agentId)) ||
+    (node.kind === "planet" && node.prNumber !== undefined && mapPRs.has(node.prNumber)) ||
+    (node.kind === "signal" && mapIssues.has(node.id)))
+    .map((node) => {
+      const agent = agents.find((item) => item.id === node.agentId);
+      const pr = prs.find((item) => item.number === node.prNumber);
+      const issue = snapshot.signals.find((item) => item.messageId === node.id);
+      return { ...node, label: agent ? nodeSummary("agent", agent, { prs, issues: snapshot.signals }) : pr ? nodeSummary("pr", pr) : issue ? nodeSummary("issue", issue) : node.label };
+    });
   return {
     nodes,
+    mapNodes,
     history: historyStars(agents, prs, now, (id) => readAcknowledged(hive.id, id), { x: 0, y: 0 }, snapshot.signals),
     prGroups,
     issueGroups,

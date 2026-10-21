@@ -16,7 +16,7 @@ shell 在 `StarsApp.tsx` 为每个项目创建且持有一个 `ProjectStore`，�
 - agent 按 id、pr 按 number 浅合并。PR 事件还会回拉 canonical 列表，补齐 title/attestations/ownerId，保留当前快照周期内已观察到的SSE head/state/merged/ready，防30秒后端缓存回退；后续快照会对已观察的PR使用无缓存 getPRStatus 校准再接续增量，因此断线期间真实的新head也会生效；signals 在 external message 或 agent 事件后回拉。
 - 重连 1、2、4、8、16、30 秒，之后最大30秒；ready 快照成功才重置。显示 `连接已断开，正在重连`。
 - `snapshot.messages` 是 `LiveMessage = Message | MessagePreview`。SSE 没有完整 body/state/hop，使用 `messagePreview()` 显示简短内容；初始消息只读主 Agent、hive、当前管理员和活跃 Agent（creating/active/parked/hibernated）。已结束的 Agent 打开详情时调用 `store.loadAgentMessages(id)`；该方法分页、去重、缓存，保留请求期间新到的 SSE 消息。
-- `derived`：`nodes`、`history`、`prGroups`、`issueGroups`、`decisions`、`needsAttention`、`agentStatuses`。verifier 不单独生成历史星；历史结束时间用 Agent `updatedAt` **近似**。历史坐标使用设计稿 `histPos` 的同一哈希和参数。
+- `derived`：`nodes`（旧画布动画需要的完整终态节点）、`mapNodes`（新星图当前可见节点）、`history`、`prGroups`、`issueGroups`、`decisions`、`needsAttention`、`agentStatuses`。新星图读 `mapNodes`，并用 `prGroups/issueGroups` 渲染小簇；不要从旧 `nodes` 自行筛选。verifier 不单独生成历史星；历史结束时间用 Agent `updatedAt` **近似**。历史坐标使用设计稿 `histPos` 的同一哈希和参数。
 
 ### 文本与可见性纯函数
 
