@@ -143,7 +143,8 @@ test("命令精确跳转、长句发queen、所有快捷键与输入隔离", asy
   await expect.poll(() => page.evaluate(() => localStorage.getItem("sj-grid"))).not.toBeNull();
   await page.keyboard.press("/"); await expect(say).toBeFocused();
   await say.fill("bclstgad"); await page.keyboard.press("Escape");
-  await expect(say).toBeFocused();
+  await expect(say).not.toBeFocused();
+  await expect(say).toHaveValue("bclstgad");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await say.fill(""); await say.blur();
   await page.keyboard.press("Control+b");
