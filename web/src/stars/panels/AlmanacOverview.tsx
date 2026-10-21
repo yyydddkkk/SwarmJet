@@ -8,7 +8,7 @@ export default function AlmanacOverview({ snapshot, methodologyResource, onRetry
   snapshot: ProjectSnapshot;
   methodologyResource: ProjectState["resources"]["methodology"];
   onRetryMethodology(): void;
-  onMethodology(): void;
+  onMethodology(version?: number): void;
   onSettings(): void;
   onUsage(): void;
   onSaved(): void;
@@ -61,9 +61,9 @@ export default function AlmanacOverview({ snapshot, methodologyResource, onRetry
       </div>
       <div className="pc-almanac-files">{method.files.map(file => <div key={file.path}>{file.path}</div>)}</div>
       <div className="pc-almanac-versions">第 {method.version} 版，{method.note || `${relativeTime(method.createdAt)}由 ${method.createdBy || "项目"}创建`}。<br/>
-        {previous.map(version => <button key={version.version} type="button" onClick={onMethodology}>查看第 {version.version} 版</button>)}
+        {previous.map(version => <button key={version.version} type="button" onClick={() => onMethodology(version.version)}>查看第 {version.version} 版</button>)}
       </div>
-      <button type="button" className="pc-almanac-link" onClick={onMethodology}>编辑方法论与版本历史</button>
+      <button type="button" className="pc-almanac-link" onClick={() => onMethodology()}>编辑方法论与版本历史</button>
       </> : methodologyResource.status === "loading" ? <p role="status">正在读取方法论…</p> : <ErrorNotice message="方法论暂时无法读取。" onRetry={onRetryMethodology} />}
     </section>
     <section>

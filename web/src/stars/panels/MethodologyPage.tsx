@@ -31,9 +31,10 @@ import { formatDateTime, formatUsd, shortSha } from "./format";
 import { Icon } from "./icons";
 import { useResource } from "./use-resource";
 
-export default function MethodologySection({ hiveId }: { hiveId: string }) {
+export default function MethodologySection({ hiveId, initialVersion }: { hiveId: string; initialVersion?: number }) {
   const api = useDataAPI();
-  const [viewVersion, setViewVersion] = useState<number | undefined>(undefined);
+  const [viewVersion, setViewVersion] = useState<number | undefined>(initialVersion);
+  useEffect(() => setViewVersion(initialVersion), [hiveId, initialVersion]);
   const current = useResource(
     (signal) => api.getMethodology(hiveId, viewVersion, signal),
     [hiveId, viewVersion],

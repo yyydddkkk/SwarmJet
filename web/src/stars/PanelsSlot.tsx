@@ -48,6 +48,7 @@ function ProjectPanel({
   const ref = useFocus(active && !ui.getSnapshot().selection);
   const data = state.snapshot;
   const [methodologyAdvanced, setMethodologyAdvanced] = useState(false);
+  const [methodologyVersion, setMethodologyVersion] = useState<number | undefined>();
   const overview = tab === "methodology" && !methodologyAdvanced;
   return (
     <div
@@ -69,7 +70,7 @@ function ProjectPanel({
         ×
       </button>
       <h2>{data?.hive.name ?? "项目"}</h2>
-      {!overview && <button type="button" className="pc-almanac-back" onClick={() => { setMethodologyAdvanced(false); ui.openProject("methodology"); }}>返回项目面板</button>}
+      {!overview && <button type="button" className="pc-almanac-back" onClick={() => { setMethodologyAdvanced(false); setMethodologyVersion(undefined); ui.openProject("methodology"); }}>返回项目面板</button>}
       {!data ? (
         state.error ? (
           <ErrorNotice
@@ -80,9 +81,9 @@ function ProjectPanel({
           <p>正在读取项目…</p>
         )
       ) : overview ? (
-        <AlmanacOverview snapshot={data} methodologyResource={state.resources.methodology} onRetryMethodology={() => void store.refresh()} onMethodology={() => setMethodologyAdvanced(true)} onSettings={() => ui.openProject("settings")} onUsage={() => ui.openProject("usage")} onSaved={() => void store.refresh()} />
+        <AlmanacOverview snapshot={data} methodologyResource={state.resources.methodology} onRetryMethodology={() => void store.refresh()} onMethodology={(version) => { setMethodologyVersion(version); setMethodologyAdvanced(true); }} onSettings={() => ui.openProject("settings")} onUsage={() => ui.openProject("usage")} onSaved={() => void store.refresh()} />
       ) : tab === "methodology" ? (
-        <Methodology hiveId={data.hive.id} />
+        <Methodology key={`${data.hive.id}:${methodologyVersion ?? "current"}`} hiveId={data.hive.id} initialVersion={methodologyVersion} />
       ) : tab === "settings" ? (
         <Settings
           key={data.hive.id}
