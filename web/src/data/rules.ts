@@ -40,8 +40,9 @@ export const nodeSummary = (kind: "agent" | "pr" | "issue", item: Agent | PullRe
   kind === "pr" ? `#${(item as PullRequest).number} ${prSummary(item as PullRequest, SUMMARY_WIDTH.star)}` :
   `#${(item as Signal).number} ${weightedTruncate((item as Signal).title, SUMMARY_WIDTH.star)}`;
 
-export const shouldCollapseLongText = (value: string, lines = 4): boolean =>
-  value.split("\n").length > lines || value.length > lines * 80;
+export const shouldCollapseLongText = (value: string, lines = 4, lineWidth = 16): boolean =>
+  value.split("\n").reduce((used, line) =>
+    used + Math.max(1, Math.ceil([...line].reduce((width, character) => width + (wide(character) ? 1 : .55), 0) / lineWidth)), 0) > lines;
 export function uniqueLongTexts(values: string[]): string[] {
   const seen = new Set<string>();
   return values.filter((value) => {

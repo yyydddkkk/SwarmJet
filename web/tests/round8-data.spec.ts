@@ -102,6 +102,9 @@ test("time windows, acknowledgement, star cap and PR priority use fixed inputs",
   expect(relativeTime("2026-10-18T12:00:00Z", now)).not.toContain("T12:00:00Z");
   expect(shouldCollapseLongText("one\ntwo\nthree\nfour")).toBe(false);
   expect(shouldCollapseLongText("one\ntwo\nthree\nfour\nfive")).toBe(true);
+  expect(shouldCollapseLongText("中文".repeat(50))).toBe(true);
+  expect(shouldCollapseLongText("中文".repeat(100))).toBe(true);
+  expect(shouldCollapseLongText("简短说明")).toBe(false);
   expect(historyPosition("stable-id")).toEqual(historyPosition("stable-id"));
   const agents = Array.from({ length: 501 }, (_, i) => ({ ...base, id: `done-${i}`, roleName: "worker", state: "completed" as const, updatedAt: "2026-10-10T12:00:00Z" }));
   const stars = historyStars(agents, [], now);
