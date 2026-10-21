@@ -36,9 +36,9 @@ export const agentSummary = (agent: Agent, links: { prs?: PullRequest[]; issues?
 export const prSummary = (pr: PullRequest, width: number = SUMMARY_WIDTH.list) =>
   weightedTruncate(pr.title || `PR #${pr.number}`, width);
 export const nodeSummary = (kind: "agent" | "pr" | "issue", item: Agent | PullRequest | Signal, links: { prs?: PullRequest[]; issues?: Signal[] } = {}) =>
-  kind === "agent" ? `#${(item as Agent).id.slice(-8)} ${agentSummary(item as Agent, links, SUMMARY_WIDTH.star)}` :
-  kind === "pr" ? `#${(item as PullRequest).number} ${prSummary(item as PullRequest, SUMMARY_WIDTH.star)}` :
-  `#${(item as Signal).number} ${weightedTruncate((item as Signal).title, SUMMARY_WIDTH.star)}`;
+  weightedTruncate(kind === "agent" ? `#${(item as Agent).id.slice(-8)} ${oneLineSummary(item as Agent, links)}` :
+    kind === "pr" ? `#${(item as PullRequest).number} ${(item as PullRequest).title || `PR #${(item as PullRequest).number}`}` :
+    `#${(item as Signal).number} ${(item as Signal).title}`, SUMMARY_WIDTH.star);
 
 export const shouldCollapseLongText = (value: string, lines = 4, lineWidth = 16): boolean =>
   value.split("\n").reduce((used, line) =>

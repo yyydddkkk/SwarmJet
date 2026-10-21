@@ -9,6 +9,25 @@ import { loadProjectResources } from "../src/data/api";
 import { methodologyDescription, activeAgents, attentionAgents, catalogueRows, completedLastNight } from "../src/data/views";
 import type { MessagePage } from "../src/data/http";
 import { deriveProject } from "../src/data/derive";
+import { nodeSummary } from "../src/data/rules";
+
+test("the star label budget includes its object identifier", () => {
+  const data = round8Project();
+  const title = "修复数据导入时丢失空字段并保持原有兼容行为";
+  data.signals[1].title = title;
+  data.prs[0].title = title;
+  const labels = [
+    nodeSummary("agent", data.agents[1], { issues: data.signals }),
+    nodeSummary("pr", data.prs[0]),
+    nodeSummary("issue", data.signals[1]),
+    ...deriveProject(data).mapNodes.filter(node => ["comet", "satellite", "planet", "signal"].includes(node.kind)).map(node => node.label),
+  ];
+  for (const label of labels) {
+    const width = [...label.replace(/…$/, "")].reduce((sum, c) => sum + (/[\u3000-\u9fff\uff00-\uffef]/u.test(c) ? 1 : .55), 0);
+    expect(width, label).toBeLessThanOrEqual(14.01);
+  }
+  expect(nodeSummary("pr", { ...data.prs[0], title: "修复" })).toBe("#1 修复");
+});
 
 test("realistic fixture exercises density and text rules", () => {
   const data = round8Project();
