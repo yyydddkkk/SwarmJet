@@ -6,7 +6,7 @@ import { createMockDataSource } from "../src/data/mock";
 import { createProjectStore } from "../src/data/store";
 import { APIError } from "../src/data/api";
 import { loadProjectResources } from "../src/data/api";
-import { activeAgents, attentionAgents, catalogueRows, completedLastNight } from "../src/data/views";
+import { methodologyDescription, activeAgents, attentionAgents, catalogueRows, completedLastNight } from "../src/data/views";
 import type { MessagePage } from "../src/data/http";
 import { deriveProject } from "../src/data/derive";
 
@@ -363,4 +363,11 @@ test("brief and catalogue rules include fresh history without counting old failu
   expect(catalogueRows(fixture, "active", "failed-now", now, () => true)).toHaveLength(0);
   expect(catalogueRows(fixture, "history", "done-today", now)[0].status).toBe("已完成");
   expect(completedLastNight(fixture.agents, now)).toBe(1);
+});
+
+
+test("bundled methodology descriptions are Chinese and unknown prose remains available", () => {
+  expect(methodologyDescription("Owns one task end to end. Builds the change on its own branch, keeps it green and answers review findings.").text).toContain("审查意见");
+  expect(methodologyDescription("中文说明")).toEqual({ text: "中文说明" });
+  expect(methodologyDescription("Custom role supplied by the project")).toEqual({ text: "这项说明尚未提供中文。", detail: "Custom role supplied by the project" });
 });
