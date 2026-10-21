@@ -17,13 +17,11 @@ async function enter(page: Page) {
 
 async function settle(page: Page) {
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
-  let previous = -1;
-  await expect.poll(async () => {
-    const frames = Number(await page.locator(".stars-canvas").getAttribute("data-frames"));
-    const stopped = frames > 0 && frames === previous;
-    previous = frames;
-    return stopped;
-  }).toBe(true);
+  const canvas = page.locator(".stars-canvas");
+  await expect.poll(async () => Number(await canvas.getAttribute("data-frames"))).toBeGreaterThan(0);
+  const before = Number(await canvas.getAttribute("data-frames"));
+  await page.waitForTimeout(2400);
+  expect(Number(await canvas.getAttribute("data-frames"))).toBeGreaterThan(before);
 }
 
 test("联合桌面入口连接真实详情、项目设置和平台账号", async ({ page }) => {
