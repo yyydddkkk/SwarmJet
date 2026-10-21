@@ -75,6 +75,11 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
     setDeciding(false);
     observer.current?.focus();
   };
+  const historyHoverStyle = historyHover ? {
+    left: innerWidth < 720 ? 24 : historyHover.x + 364 <= innerWidth - 24 ? historyHover.x + 24 : Math.max(24, historyHover.x - 364),
+    top: innerWidth < 720 ? historyHover.y + 344 < innerHeight ? historyHover.y + 24 : Math.max(24, historyHover.y - 344)
+      : Math.max(24, Math.min(innerHeight - 320, historyHover.y - 24)),
+  } : undefined;
   return (
     <>
       <canvas
@@ -85,7 +90,7 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
       {historyHover && !note && <div
         className="stars-history-hover"
         role="tooltip"
-        style={{ left: Math.max(24, Math.min(innerWidth - 360, historyHover.x + 24)), top: Math.max(24, Math.min(innerHeight - 320, historyHover.y - 24)) }}
+        style={historyHoverStyle}
         onPointerLeave={() => setHistoryHover(undefined)}
       ><p>{historyHover.summary}</p><small>{historyHover.result} · {historyHover.time}</small></div>}
       <button
