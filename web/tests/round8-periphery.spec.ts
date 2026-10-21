@@ -90,6 +90,7 @@ test("真实应用壳按设计计算外围字号并保持简报可见密度", as
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   const page = await context.newPage();
   await preview(page);
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const brief = page.getByRole("dialog", { name: "简报" });
   const briefMetrics = await brief.evaluate((element) => {
     const need = element.querySelector<HTMLElement>(".periphery-it.need")!;
@@ -113,6 +114,7 @@ test("真实应用壳按设计计算外围字号并保持简报可见密度", as
   const mobile = await browser.newContext({ viewport: { width: 375, height: 812 }, reducedMotion: "reduce" });
   const small = await mobile.newPage();
   await preview(small);
+  await small.evaluate(() => document.fonts.ready.then(() => undefined));
   await small.getByRole("button", { name: "进入星图" }).click();
   const mobileToolFont = await small.getByRole("navigation", { name: "工具" }).getByRole("button", { name: "列表" }).evaluate((element) => getComputedStyle(element).fontSize);
   expect(mobileToolFont).toBe("14px");
