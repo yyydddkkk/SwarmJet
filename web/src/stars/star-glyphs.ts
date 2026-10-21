@@ -20,15 +20,16 @@ export const LGLY = {
 } as const;
 
 export type StarGlyph = keyof typeof LGLY;
-export type CanvasGlyphOptions = { moonAngle?: number; moonOrbitX?: number; moonOrbitY?: number; moonRadius?: number; accent?: string };
+export type CanvasGlyphOptions = { moonAngle?: number; moonOrbitX?: number; moonOrbitY?: number; moonRadius?: number; moonOrbitAlpha?: number; prMapDetail?: boolean; accent?: string };
 
 /** The common circle/cross geometry used by the legend and dense history field. */
-export function drawCanvasStar(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, cross = false) {
+export function drawCanvasStar(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, cross = false, crossAlpha = 1) {
   ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
   if (cross) {
     const arm = radius * (5 / 1.6);
+    ctx.save(); ctx.globalAlpha *= crossAlpha;
     ctx.beginPath(); ctx.moveTo(x - arm, y); ctx.lineTo(x + arm, y);
-    ctx.moveTo(x, y - arm); ctx.lineTo(x, y + arm); ctx.stroke();
+    ctx.moveTo(x, y - arm); ctx.lineTo(x, y + arm); ctx.stroke(); ctx.restore();
   }
 }
 
@@ -72,11 +73,16 @@ export function drawCanvasGlyph(ctx: CanvasRenderingContext2D, kind: StarGlyph, 
     case "cluster": circle(-3.5, 0, 2.6); circle(3, -1.5, 2.6); circle(0, 3, 2.6); break;
     case "you": circle(0, 0, 7); circle(0, 0, 1.6, true); break;
     case "moon":
-      ctx.save(); ctx.setLineDash([1, 1.5]); ctx.beginPath(); ctx.ellipse(0, 0, options.moonOrbitX ?? 7, options.moonOrbitY ?? 4, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.globalAlpha *= options.moonOrbitAlpha ?? 1; ctx.setLineDash([1, 1.5]); ctx.beginPath(); ctx.ellipse(0, 0, options.moonOrbitX ?? 7, options.moonOrbitY ?? 4, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
       circle(Math.cos(options.moonAngle ?? 0) * (options.moonOrbitX ?? 7), Math.sin(options.moonAngle ?? 0) * (options.moonOrbitY ?? 4), options.moonRadius ?? 1.8, true); break;
     case "pr": case "ready":
-      ctx.beginPath(); ctx.ellipse(0, 0, 9, 2.6, -Math.PI / 9, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(0, 0, 9, 2.6, -Math.PI / 9, options.prMapDetail ? Math.PI : 0, Math.PI * 2); ctx.stroke();
       circle(0, 0, 4, true); circle(0, 0, 4);
+      if (options.prMapDetail) {
+        ctx.save(); ctx.globalAlpha *= .5; ctx.lineWidth *= .6 / 1.1;
+        ctx.beginPath(); ctx.arc(0, 0, 4 * .55, -.4, 1.9); ctx.stroke(); ctx.restore();
+        ctx.beginPath(); ctx.ellipse(0, 0, 9, 2.6, -Math.PI / 9, 0, Math.PI); ctx.stroke();
+      }
       if (kind === "ready") { ctx.save(); ctx.strokeStyle = options.accent ?? ctx.strokeStyle; ctx.setLineDash([2, 2]); circle(0, 0, 9); ctx.restore(); }
       break;
   }

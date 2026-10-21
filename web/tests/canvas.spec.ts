@@ -897,6 +897,55 @@ test("only a confirmed failed CI appears as a diamond beside its PR", async ({ p
   expect(await page.evaluate(() => (window as any).__canvas.ui.getSnapshot().selection)).toMatchObject({ kind: "pr", id: prId, number: 8 });
 });
 
+test("PR and verifier strokes keep design pixel widths at project and object zoom", async ({ page }) => {
+  await page.addInitScript(() => {
+    const proto = CanvasRenderingContext2D.prototype as any;
+    const originalEllipse = proto.ellipse;
+    const originalStroke = proto.stroke;
+    const originalArc = proto.arc;
+    (window as any).__glyphPens = [];
+    proto.ellipse = function(this: CanvasRenderingContext2D, ...args: any[]) {
+      const [x, y, rx, ry] = args;
+      if (x === 0 && y === 0 && rx === 9 && ry === 2.6) (this as any).__glyphKind = "pr";
+      else if (x === 0 && y === 0 && this.getLineDash().join(",") === "1,1.5") (this as any).__glyphKind = "moon";
+      return originalEllipse.apply(this, args);
+    };
+    proto.stroke = function(this: CanvasRenderingContext2D, ...args: any[]) {
+      const kind = (this as any).__glyphKind;
+      if (kind) {
+        const t = this.getTransform();
+        (window as any).__glyphPens.push({ kind, width: this.lineWidth * Math.hypot(t.a, t.b) / devicePixelRatio });
+        (this as any).__glyphKind = undefined;
+        if (kind === "moon") (this as any).__nextMoonDot = true;
+      }
+      return originalStroke.apply(this, args);
+    };
+    proto.arc = function(this: CanvasRenderingContext2D, ...args: any[]) {
+      if ((this as any).__nextMoonDot) {
+        (window as any).__glyphPens.push({ kind: "moon-dot", radius: args[2] });
+        (this as any).__nextMoonDot = false;
+      }
+      return originalArc.apply(this, args);
+    };
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await mount(page);
+  const readPens = () => page.evaluate(() => { const p = (window as any).__glyphPens; (window as any).__glyphPens = []; return p; });
+  await page.evaluate(async () => { const x = (window as any).__canvas; const { themeStore } = await x.load("/src/stars/theme.ts"); themeStore.setTheme("bright"); x.ui.selectProject(x.hive.id); });
+  await settle(page);
+  const project = await readPens();
+  expect(project.some((p: any) => p.kind === "pr")).toBe(true);
+  expect(project.some((p: any) => p.kind === "moon")).toBe(true);
+  expect(project.filter((p: any) => p.kind === "pr").every((p: any) => Math.abs(p.width - 1.32) < .05)).toBe(true);
+  expect(project.filter((p: any) => p.kind === "moon").every((p: any) => Math.abs(p.width - .84) < .05)).toBe(true);
+  await page.evaluate(() => { const x = (window as any).__canvas; x.ui.selectObject({ hiveId: x.hive.id, kind: "pr", id: `${x.hive.id}:pr:8`, number: 8 }); });
+  await settle(page);
+  const object = await readPens();
+  expect(object.filter((p: any) => p.kind === "pr").every((p: any) => Math.abs(p.width - 1.32) < .05)).toBe(true);
+  expect(object.filter((p: any) => p.kind === "moon").every((p: any) => Math.abs(p.width - .84) < .05)).toBe(true);
+  expect(object.filter((p: any) => p.kind === "moon-dot").every((p: any) => p.radius <= 3.75)).toBe(true);
+});
+
 test("failed CI backed by a real check message opens that signal", async ({ page }) => {
   await mount(page);
   await page.evaluate(() => {
