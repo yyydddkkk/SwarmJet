@@ -368,7 +368,7 @@
 }
 
 /* The three sheets copy the spacing, typography and motion of the stars reference. */
-.pc-sheet { background: var(--paper); scrollbar-width: none; }
+.pc-sheet { background: var(--veil); scrollbar-width: none; }
 .stars-app:has(.pc-right) .stars-tools { opacity: 0; pointer-events: none; }
 .pc-sheet::-webkit-scrollbar, .pc-platform-body::-webkit-scrollbar { display: none; }
 .pc-left {
@@ -421,6 +421,7 @@
   left: 26px; right: 26px; bottom: 26px; top: auto;
   height: min(68vh, 640px); grid-template-columns: 230px minmax(0,1fr);
   gap: 0; padding: 64px 72px 48px;
+  background: var(--paper);
   transform: translateY(calc(100% + 40px)); transition: transform .75s cubic-bezier(.2,.8,.2,1);
 }
 .pc-platform.pc-open { transform: none; }
