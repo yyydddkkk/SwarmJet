@@ -1,0 +1,47 @@
+{
+  "services": [
+    {
+      "Names": "sj-r3-auth-gateway-1",
+      "Status": "Up About a minute (healthy)",
+      "Image": "swarmjet-agent:local"
+    },
+    {
+      "Names": "sj-r3-api-1",
+      "Status": "Up About a minute (healthy)",
+      "Image": "swarmjet:local"
+    },
+    {
+      "Names": "sj-r3-auth-broker-1",
+      "Status": "Up About a minute (healthy)",
+      "Image": "swarmjet-agent:local"
+    },
+    {
+      "Names": "sj-r3-migrate-1",
+      "Status": "Exited (0) About a minute ago",
+      "Image": "swarmjet:local"
+    },
+    {
+      "Names": "sj-r3-tunnel-1",
+      "Status": "Up 28 hours",
+      "Image": "cloudflare/cloudflared:2026.10.1"
+    },
+    {
+      "Names": "sj-r3-postgres-1",
+      "Status": "Up 47 hours (healthy)",
+      "Image": "postgres:18.1-alpine3.23"
+    }
+  ],
+  "schema": "16|pr_snapshots",
+  "snapshots_by_state": [
+    "closed|t|4",
+    "open|f|5"
+  ],
+  "webhook_sync": [
+    {
+      "time": "2026-10-21T05:48:46.829611888Z",
+      "msg": "GitHub App webhook synchronized"
+    }
+  ],
+  "backup_mode": "0o600",
+  "measured_at_utc": "2026-10-21T05:50:24.977589+00:00"
+}

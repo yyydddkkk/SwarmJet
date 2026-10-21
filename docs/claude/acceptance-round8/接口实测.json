@@ -1,0 +1,88 @@
+{
+  "commit": "29bbff79175295591c4cf08ecd3f5a1997d31877",
+  "measured_at_utc": "2026-10-21T05:50:04.308658+00:00",
+  "browser_tests": "按用户要求未执行",
+  "cold_measurement": "未验证：早先探测已读取PR列表，随后因验收脚本误用agents路由返回404而中断，首次计时未保存；已改为实际foragers路由。未为清缓存额外重启服务。",
+  "measurements": [
+    {
+      "path": "/healthz",
+      "status": 200,
+      "ms": 1.809,
+      "bytes": 12
+    },
+    {
+      "path": "/",
+      "status": 200,
+      "ms": 0.801,
+      "bytes": 497
+    },
+    {
+      "label": "本次首次记录（已有缓存）",
+      "path": "/api/hives/{test_project}/prs?state=all",
+      "status": 200,
+      "ms": 1.484,
+      "prs": 9,
+      "unavailable": 0,
+      "stale": false
+    },
+    {
+      "label": "立即热读",
+      "path": "/api/hives/{test_project}/prs?state=all",
+      "status": 200,
+      "ms": 1.053,
+      "prs": 9,
+      "unavailable": 0,
+      "stale": false
+    },
+    {
+      "label": "过期返回旧结果",
+      "path": "/api/hives/{test_project}/prs?state=all",
+      "status": 200,
+      "ms": 1.531,
+      "prs": 9,
+      "unavailable": 0,
+      "stale": true
+    },
+    {
+      "label": "后台刷新后",
+      "path": "/api/hives/{test_project}/prs?state=all",
+      "status": 200,
+      "ms": 1.431,
+      "prs": 9,
+      "unavailable": 0,
+      "stale": false
+    }
+  ],
+  "assets": [
+    {
+      "path": "/assets/index-zKAy-aQj.js",
+      "status": 200,
+      "bytes": 224176
+    },
+    {
+      "path": "/assets/index-D3ldAAwO.css",
+      "status": 200,
+      "bytes": 772
+    }
+  ],
+  "login_status": 200,
+  "session_status": 200,
+  "snapshots_before_first_measurement": 9,
+  "agents": {
+    "status": 200,
+    "count": 40,
+    "states": {
+      "cancelled": 15,
+      "completed": 18,
+      "failed": 6,
+      "parked": 1
+    }
+  },
+  "setup": {
+    "status": 200,
+    "tunnelEnabled": true,
+    "webhookSynced": true,
+    "lastErrorPresent": false
+  },
+  "logout_status": 204
+}
