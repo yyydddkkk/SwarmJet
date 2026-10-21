@@ -13,7 +13,7 @@ const project = (id: string) => `/hives/${encodeURIComponent(id)}`;
 export const api = {
   ...hiveAPI,
   listPRs: (id: string, state: "open" | "all" = "all", signal?: AbortSignal) =>
-    request<{ prs: PullRequest[] }>(
+    request<{ prs: PullRequest[]; stale?: boolean; unavailable?: boolean }>(
       `${project(id)}/prs?state=${state}`,
       "GET",
       undefined,
@@ -82,7 +82,7 @@ export const api = {
 };
 export type DataAPI = typeof api;
 export type ResourceName = "hive" | "agents" | "queen" | "prs" | "queue" | "signals" | "methodology" | "methodologyEvents" | "messages";
-export type ResourceUpdate = (name: ResourceName, patch?: Partial<ProjectSnapshot>, error?: unknown) => void;
+export type ResourceUpdate = (name: ResourceName, patch?: Partial<ProjectSnapshot>, error?: unknown, meta?: { stale?: boolean; unavailable?: boolean }) => void;
 
 // Inbox pagination is oldest-first. Drain each inbox so a busy project doesn't
 // silently show only its first 50 messages. Preserve full bodies for panels.
@@ -118,7 +118,12 @@ export async function loadProjectResources(id: string, update: ResourceUpdate, s
     run("hive", () => detail, (value) => ({ hive: value.hive, localAddress: value.localAddress })),
     run("agents", () => foragers, (value) => ({ agents: value.foragers, queenAgent: value.queen, localAddress: value.localAddress })),
     run("queen", () => api.getQueen(id, signal), (queen) => ({ queen })),
-    run("prs", () => api.listPRs(id, "all", signal), (value) => ({ prs: value.prs })),
+    (async () => {
+      try {
+        const value = await api.listPRs(id, "all", signal);
+        update("prs", { prs: value.prs }, undefined, { stale: value.stale, unavailable: value.unavailable });
+      } catch (error) { if (!signal?.aborted) update("prs", undefined, error, { unavailable: true }); }
+    })(),
     run("queue", () => api.listQueue(id, signal), (value) => ({ queue: value.queue })),
     run("signals", () => api.listSignals(id, undefined, signal), (value) => ({ signals: value.signals })),
     run("methodology", () => api.getMethodology(id, undefined, signal), (methodology) => ({ methodology })),

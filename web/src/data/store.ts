@@ -220,9 +220,9 @@ export class ProjectStore {
       let snapshot: ProjectSnapshot;
       if (this.source.load) {
         let partial: Partial<ProjectSnapshot> = {};
-        await this.source.load(this.hiveId, (name, patch, error) => {
+        await this.source.load(this.hiveId, (name, patch, error, meta) => {
           if (generation !== this.generation || this.stopped) return;
-          const status = error ? { status: "error" as const, error: error instanceof Error ? error.message : String(error), unavailable: name === "prs" } : { status: "ready" as const, ...(name === "prs" && patch?.prs ? { stale: patch.prs.some((pr) => pr.stale), unavailable: patch.prs.some((pr) => pr.unavailable) } : {}) };
+          const status = error ? { status: "error" as const, error: error instanceof Error ? error.message : String(error), unavailable: name === "prs" } : { status: "ready" as const, ...(name === "prs" ? { stale: meta?.stale || patch?.prs?.some((pr) => pr.stale), unavailable: meta?.unavailable || patch?.prs?.some((pr) => pr.unavailable) } : {}) };
           const resources = { ...this.state.resources, [name]: status };
           if (patch) partial = { ...partial, ...patch };
           if (partial.hive) {

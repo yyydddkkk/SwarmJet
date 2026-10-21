@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 import { round8Project } from "../src/fixtures/round8";
 import { aggregateIssues, aggregatePRs, agentSummary, historyStars, localizedReason, shortAgentId, shortSha, shouldCollapseLongText, uniqueLongTexts, weightedTruncate } from "../src/data/rules";
 import { mockStarsHTTP } from "./stars-http-mock";
+import { createMockDataSource } from "../src/data/mock";
+import { createProjectStore } from "../src/data/store";
 
 test("realistic fixture exercises density and text rules", () => {
   const data = round8Project();
@@ -47,4 +49,20 @@ test("a 20 second PR request does not hold the other briefing sections", async (
   expect(prRequests).toBe(1);
   await expect(page.getByRole("button", { name: /PR #88 修复兼容问题/ })).toBeVisible({ timeout: 25000 });
   expect(prRequests).toBe(1);
+});
+
+test("PR envelope stale and unavailable flags reach the resource state", async () => {
+  const fixture = round8Project();
+  const mock = createMockDataSource({ swarmjet: fixture });
+  const store = createProjectStore("swarmjet", {
+    ...mock.source,
+    async load(_id, update) {
+      update("hive", { hive: fixture.hive, localAddress: fixture.localAddress });
+      update("prs", { prs: fixture.prs }, undefined, { stale: true, unavailable: true });
+    },
+  });
+  store.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(store.getSnapshot().resources.prs).toMatchObject({ status: "ready", stale: true, unavailable: true });
+  store.stop();
 });
