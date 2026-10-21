@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockHiveAPI } from "./hive-api-mock";
 import { mockStarsHTTP } from "./stars-http-mock";
+import AxeBuilder from "@axe-core/playwright";
 async function open(page: Page) {
   const state = await mockHiveAPI(page);
   state.prStatuses["swarmjet:88"].headSha = "panel-observed-head";
@@ -532,6 +533,33 @@ test("usage ranking opens agent details and pending events retain complete exter
     state.calls.find((c) => c.method === "POST" && c.path.endsWith("/messages"))
       ?.body,
   ).toMatchObject({ to: "queen", body: "请处理 Issue #42" });
+});
+test("usage ranking uses quiet meters, one rank number and copyable readable Agent names", async ({page, context}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await open(page);
+  await page.getByRole("button", {name:"项目", exact:true}).click();
+  await page.getByRole("button", {name:"查看花费详情"}).click();
+  const ranking = page.getByRole("list", {name:"Agent 花费排行"});
+  await expect(ranking.locator("li")).toHaveCount(3);
+  await expect(ranking).toHaveCSS("list-style-type", "none");
+  expect(await ranking.locator(".pc-usage-rank").allTextContents()).toEqual(["1", "2", "3"]);
+  const visible = await ranking.innerText();
+  expect(visible).toContain("主 Agent");
+  expect(visible).not.toContain("queen-swarmjet");
+  expect(visible).not.toContain("forager-7f3a");
+  const meter = ranking.getByRole("meter").first();
+  await expect(meter).toHaveCSS("background-color", "rgb(204, 204, 204)");
+  await expect(meter.locator("span")).toHaveCSS("background-color", "rgb(148, 112, 31)");
+  const forager = ranking.locator("li").filter({hasText:"ger-7f3a"});
+  await forager.getByRole("button", {name:/复制完整Agent 编号/}).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("forager-7f3a");
+  const queen = ranking.locator("li").filter({hasText:"主 Agent"});
+  await queen.getByRole("button", {name:/复制完整主 Agent 编号/}).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("queen-swarmjet");
+  const axe = await new AxeBuilder({page}).include(".pc-left").analyze();
+  expect(axe.violations).toEqual([]);
+  await queen.getByRole("button", {name:"查看主 Agent详情"}).click();
+  await expect(page.getByRole("region", {name:"对象详情"}).locator("h2")).toHaveText("主 Agent");
 });
 test("check and pull request signals are read only; only Issues can be assigned", async ({page}) => {
   const state = await open(page);

@@ -460,6 +460,22 @@
 .pc-sheet .pc-facts code { white-space: nowrap; }
 .pc-sheet .pc-facts > div { align-items: baseline; }
 .pc-sheet [role="alert"] { border-left: 1px solid var(--accent); }
+.pc-usage-hero { border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); padding: 18px 0; }
+.pc-usage-label { display: block; font: italic 16px var(--body); color: var(--ink2); }
+.pc-usage-hero .pc-usage-total { display: block; font: italic 30px var(--title); margin: 6px 0; }
+.pc-sheet .pc-usage-ranking { list-style: none; padding: 0; margin: 18px 0 0; }
+.pc-sheet .pc-usage-row { display: flex; align-items: flex-start; gap: 16px; margin: 0; padding: 16px 0; border-bottom: 1px solid var(--hair); }
+.pc-sheet .pc-usage-row:first-child { border-top: 1px solid var(--hair); }
+.pc-usage-rank { flex: 0 0 16px; font: italic 16px var(--body); color: var(--ink2); }
+.pc-usage-main { min-width: 0; flex: 1; }
+.pc-usage-row-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; font-size: 16px; }
+.pc-sheet .pc-usage-row-head button { padding: 0; margin: 0; font: italic 16px var(--body); }
+.pc-sheet .pc-usage-row-head button.pc-usage-copy { border: 0; color: var(--ink2); white-space: nowrap; }
+.pc-usage-copy-status { margin-left: 5px; color: var(--ink2); }
+.pc-usage-cost { margin-left: auto; font: 16px var(--body); white-space: nowrap; }
+.pc-usage-tokens { display: block; font-size: 13px; line-height: 1.5; margin-top: 5px; }
+.pc-usage-meter { display: block; width: 100%; height: 3px; margin-top: 8px; background: var(--hair); }
+.pc-usage-meter > span { display: block; height: 100%; background: var(--accent); }
 @media (max-width: 720px) {
   .pc-left, .pc-right { width: 100%; padding: 90px 30px 40px; }
   .pc-left:has(~ .pc-right) { visibility: visible; }

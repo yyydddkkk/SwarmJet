@@ -109,9 +109,10 @@ function ProjectPanel({
           <HiveUsagePanel
             hiveId={data.hive.id}
             agents={data.agents}
-            onAgent={(id) =>
-              ui.selectObject({ hiveId: data.hive.id, kind: "agent", id })
-            }
+            queenId={data.queenAgent?.id ?? data.queen.agentId}
+            onAgent={(id) => ui.selectObject(id === (data.queenAgent?.id ?? data.queen.agentId)
+              ? { hiveId: data.hive.id, kind: "queen", id: `${data.hive.id}:queen` }
+              : { hiveId: data.hive.id, kind: "agent", id })}
           />
           <p>7 天走势、本周花费：暂时无法获取。</p>
           <h3>方法论预算</h3>

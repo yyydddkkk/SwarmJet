@@ -3,7 +3,8 @@
 // the Forager page shows one Agent's own spend and model breakdown. Both ask
 // for period=today because every label here says 今天/今日. The response has
 // no role names, so they are joined from the Agents the page already loaded.
-import { useDataAPI } from "../../data";
+import { useState } from "react";
+import { addressLabel, shortAgentId, useDataAPI } from "../../data";
 import type { Agent, UsageGroup, UsageResponse } from "../../data";
 import {
   BeeLoader,
@@ -12,7 +13,6 @@ import {
   Panel,
   StatusGrid,
   StatusItem,
-  UsageBar,
 } from "./primitives";
 import { formatTokens, formatUsd } from "./format";
 import { Icon } from "./icons";
@@ -26,13 +26,23 @@ export function agentUsage(
   return (usage.byAgent ?? []).find((item) => item.agentId === agentId);
 }
 
+function UsageId({ id, label }: { id: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const short = shortAgentId(id);
+  return <><button type="button" className="pc-usage-copy" title={`${label}：${id}，点击复制完整值`} aria-label={`复制完整${label}：${short}，完整值 ${id}`} onClick={() => {
+    void navigator.clipboard.writeText(id).then(() => setCopied(true)).catch(() => setCopied(false));
+  }}><code>{short}</code></button>{copied && <span className="pc-usage-copy-status" role="status">已复制</span>}</>;
+}
+
 export function HiveUsagePanel({
   hiveId,
   agents = [],
+  queenId,
   onAgent,
 }: {
   hiveId: string;
   agents?: Agent[];
+  queenId?: string;
   onAgent?: (id: string) => void;
 }) {
   const api = useDataAPI();
@@ -117,6 +127,8 @@ export function HiveUsagePanel({
                 .sort((left, right) => right.costUsd - left.costUsd)
                 .map((agent, index) => {
                   const roleName = roleNames.get(agent.agentId ?? "");
+                  const isQueen = !!agent.agentId && agent.agentId === queenId;
+                  const readable = isQueen ? "主 Agent" : agent.agentId ? addressLabel(`forager:${agent.agentId}`) : "Agent";
                   return (
                     <li key={agent.agentId} className="pc-usage-row">
                       <span className="pc-usage-rank">{index + 1}</span>
@@ -124,12 +136,14 @@ export function HiveUsagePanel({
                         <div className="pc-usage-row-head">
                           <button
                             disabled={!agent.agentId || !onAgent}
+                            aria-label={`查看${readable}详情`}
                             onClick={() =>
                               agent.agentId && onAgent?.(agent.agentId)
                             }
                           >
-                            <code>{agent.agentId}</code>
+                            {isQueen ? "主 Agent" : "Agent"}
                           </button>
+                          {agent.agentId && <UsageId id={agent.agentId} label={isQueen ? "主 Agent 编号" : "Agent 编号"} />}
                           {roleName ? (
                             <span className="pc-badge pc-tone-neutral">
                               {roleName}
@@ -139,7 +153,9 @@ export function HiveUsagePanel({
                             {formatUsd(agent.costUsd)}
                           </span>
                         </div>
-                        <UsageBar value={agent.costUsd} max={maxCost} />
+                        <div className="pc-usage-meter" role="meter" aria-label={`${readable}相对花费`} aria-valuemin={0} aria-valuemax={maxCost || 1} aria-valuenow={agent.costUsd}>
+                          <span style={{ width: `${Math.max(0, Math.min(100, agent.costUsd / (maxCost || 1) * 100))}%` }} />
+                        </div>
                         <span className="pc-muted pc-usage-tokens">
                           输入 {formatTokens(agent.inputTokens)} / 输出{" "}
                           {formatTokens(agent.outputTokens)} tokens
