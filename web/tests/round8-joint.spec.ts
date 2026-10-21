@@ -40,7 +40,7 @@ test("history and cluster cards open the corresponding catalogue scope and objec
   expect(cluster).toBeTruthy();
   await page.mouse.click(cluster.x, cluster.y);
   await page.locator(".stars-note.open").getByRole("button", { name: "在列表中查看全部", exact: true }).click();
-  await expect(list.getByRole("button", { name: "当前", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(list.getByRole("button", { name: "活跃", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(list.getByRole("textbox")).toHaveValue("PR");
   expect(await list.locator("tr.item").count()).toBeGreaterThanOrEqual(16);
 });
@@ -66,7 +66,7 @@ test("acknowledging a failure removes it from the map and preserves its historic
 test("lazy panels retain their contents throughout exit while closing keyboard access", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await boot(page);
-  await page.getByRole("button", { name: "项目面板", exact: true }).click();
+  await page.locator(".stars-cartouche").click();
   const panel = page.locator(".pc-left");
   await expect(panel).toHaveClass(/pc-open/);
   await expect(panel).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");

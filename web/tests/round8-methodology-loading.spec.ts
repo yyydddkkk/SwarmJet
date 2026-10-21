@@ -7,8 +7,10 @@ async function openProject(page: Page) {
     localStorage.setItem("sj-legend-seen", "1");
   });
   await page.goto("/");
-  await page.getByLabel("选择项目").selectOption("swarmjet");
-  await page.getByRole("button", { name: "项目面板" }).click();
+  const command = page.getByLabel("对话与命令");
+  await command.fill("SwarmJet 平台");
+  await command.press("Enter");
+  await page.locator(".stars-cartouche").click();
   return page.getByRole("region", { name: "项目面板" });
 }
 
