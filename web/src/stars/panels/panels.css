@@ -446,6 +446,10 @@
 .pc-ledger-row dd { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; margin: 0; color: var(--ink2); font: italic 17px var(--body); text-align: right; }
 .pc-ledger-row dd span { white-space: nowrap; }
 .pc-ledger-row dd small { font-size: 13px; }
+.pc-account-row { display: flex; justify-content: space-between; align-items: baseline; gap: 24px; margin-top: 26px; padding: 16px 0; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); font-size: 17px; }
+.pc-account-row span:last-child { color: var(--ink2); font-style: italic; text-align: right; }
+.pc-account-acts { display: flex; gap: 22px; margin-top: 26px; font: italic 17px var(--body); }
+.pc-sheet .pc-account-acts button { padding: 0; margin: 0; color: var(--ink2); border-bottom: 1px solid var(--hair); }
 .pc-sheet button.go, .pc-sheet .pc-acts .go { color: var(--accent); border-bottom: 1px solid var(--accent); font-style: italic; }
 .pc-sheet form button[type="submit"], .pc-sheet form button:not([type]), .pc-dialog footer button:last-child {
   color: var(--accent); border-bottom: 1px solid var(--accent); font-style: italic;

@@ -219,8 +219,9 @@ function Account({
   return (
     <>
       <h3>账号</h3>
-      <p>{principal.displayName || principal.username}</p>
-      <button
+      <p>这是一套单管理员部署。</p>
+      <div className="pc-account-row"><span>管理员</span><span>{principal.displayName || principal.username}</span></div>
+      <div className="pc-account-acts"><button
         disabled={busy}
         onClick={async () => {
           setBusy(true);
@@ -235,7 +236,7 @@ function Account({
         }}
       >
         {busy ? "正在退出…" : "退出登录"}
-      </button>
+      </button></div>
       {error && <p role="alert">退出失败：{error}。请重试。</p>}
     </>
   );
