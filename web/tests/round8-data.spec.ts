@@ -116,3 +116,34 @@ test("an opened historical inbox preserves SSE messages arriving during paginati
   expect(store.getSnapshot().snapshot?.messages.some((message) => message.id === incoming.id)).toBe(true);
   store.stop();
 });
+
+test("reconnect keeps resources that finish before the slower hive", async () => {
+  const fixture = round8Project();
+  const mock = createMockDataSource({ swarmjet: fixture });
+  let finishHive!: () => void;
+  let loads = 0;
+  const store = createProjectStore("swarmjet", {
+    ...mock.source,
+    async load(_id, update) {
+      loads++;
+      if (loads === 1) {
+        update("hive", { hive: fixture.hive });
+        update("agents", { agents: fixture.agents });
+        return;
+      }
+      update("agents", { agents: [{ ...fixture.agents[0], id: "new-agent" }] });
+      await new Promise<void>((resolve) => { finishHive = resolve; });
+      update("hive", { hive: { ...fixture.hive, name: "Fresh hive" } });
+    },
+  });
+  store.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  mock.ready("swarmjet");
+  mock.ready("swarmjet");
+  expect(store.getSnapshot().resources.agents.status).toBe("ready");
+  finishHive();
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(store.getSnapshot().snapshot?.hive.name).toBe("Fresh hive");
+  expect(store.getSnapshot().snapshot?.agents.map((agent) => agent.id)).toEqual(["new-agent"]);
+  store.stop();
+});

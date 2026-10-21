@@ -234,7 +234,9 @@ export class ProjectStore {
           }
           if (partial.hive) {
             const current = this.state.snapshot;
-            const next = current ? { ...current, ...patch } : emptySnapshot(partial);
+            // A fast resource may settle before the hive on a reconnect.
+            // Merge every result from this generation when the hive arrives.
+            const next = current ? { ...current, ...partial } : emptySnapshot(partial);
             this.publish({ snapshot: next, resources });
           } else this.publish({ resources });
         }, this.abort.signal);
