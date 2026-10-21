@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import type { StarsSlotProps } from "./slots";
 import { useStarsUI, type ProjectTab, type PlatformTab } from "./ui";
 import { useProjectState } from "../data";
@@ -50,9 +50,23 @@ function ProjectPanel({
   const [methodologyAdvanced, setMethodologyAdvanced] = useState(false);
   const [methodologyVersion, setMethodologyVersion] = useState<number | undefined>();
   const overview = tab === "methodology" && !methodologyAdvanced;
+  const viewIdentity = tab === "methodology" ? overview ? "overview" : `methodology:${methodologyVersion ?? "current"}` : tab;
+  useLayoutEffect(() => {
+    if (ref.current) ref.current.scrollTop = 0;
+  }, [viewIdentity, ref]);
+  const resetForInternalVersion = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return;
+    const select = target.closest<HTMLSelectElement>('select[aria-label="查看方法论版本"]');
+    const versionButton = target.closest<HTMLButtonElement>(".pc-version-table .pc-row-actions button");
+    if (select || versionButton?.textContent?.trim() === "查看") {
+      if (ref.current) ref.current.scrollTop = 0;
+    }
+  };
   return (
     <div
       ref={ref}
+      onChangeCapture={(event) => resetForInternalVersion(event.target)}
+      onClickCapture={(event) => resetForInternalVersion(event.target)}
       className={`pc-sheet pc-left ${active ? "pc-open" : ""}`}
       role="region"
       aria-label="项目面板"
