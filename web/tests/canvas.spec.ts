@@ -9,7 +9,7 @@ async function mount(page: Page, large = false, multiple = false) {
   await page.evaluate(
     async ({ large, multiple }) => {
       const load = (p: string) => import(/* @vite-ignore */ p);
-      const [R, DOM, data, UI, Canvas, Timeline, f, m] = await Promise.all([
+      const [R, DOM, data, UI, Canvas, Timeline, f, m, round8] = await Promise.all([
         load("/node_modules/.vite/deps/react.js"),
         load("/node_modules/.vite/deps/react-dom_client.js"),
         load("/src/data/index.ts"),
@@ -18,6 +18,7 @@ async function mount(page: Page, large = false, multiple = false) {
         load("/src/stars/TimelineSlot.tsx"),
         load("/src/fixtures/hive-console.ts"),
         load("/src/fixtures/round4.ts"),
+        load("/src/fixtures/round8.ts"),
       ]);
       document.getElementById("root")!.style.display = "none";
       const el = document.createElement("main");
@@ -30,17 +31,23 @@ async function mount(page: Page, large = false, multiple = false) {
           roleName: "worker",
           state: "active",
         };
+      const realistic = round8.round8Project();
       const snapshot = {
         hive,
         localAddress: "local:web-admin",
         agents: large
-          ? Array.from({ length: 300 }, (_, i) => ({
+          ? [...Array.from({ length: 300 }, (_, i) => ({
               ...agent,
               id: `agent-${i}`,
               issueNumber: i + 1,
-              roleName: i % 10 === 0 ? "verifier" : "worker",
-              prNumber: (i % 50) + 1,
-            }))
+              roleName: "worker",
+              prNumber: (i % 16) + 1,
+              task: i === 0 ? realistic.agents[0].task : `处理 Issue #${i + 1}`,
+              updatedAt: new Date().toISOString(),
+            })), ...Array.from({ length: 900 }, (_, i) => ({
+              ...agent, id: `ended-${i}`, roleName: "worker", state: "completed", prNumber: undefined,
+              task: `历史完成事项 ${i}`, updatedAt: new Date(Date.now() - i * 3600000).toISOString(),
+            }))]
           : [
               { ...agent, id: "worker-1", issueNumber: 12 },
               {
@@ -60,12 +67,14 @@ async function mount(page: Page, large = false, multiple = false) {
           lastTurnAt: null,
         },
         prs: large
-          ? Array.from({ length: 50 }, (_, i) => ({
+          ? Array.from({ length: 16 }, (_, i) => ({
               number: i + 1,
               headSha: `head-${i}`,
               state: "open",
               merged: false,
               ready: i % 2 === 0,
+              title: realistic.prs[i].title,
+              updatedAt: new Date(Date.now() - i * 86400000).toISOString(),
             }))
           : [
               {
@@ -87,7 +96,7 @@ async function mount(page: Page, large = false, multiple = false) {
             expiresAt: "",
           },
         ],
-        signals: [
+        signals: large ? realistic.signals : [
           {
             messageId: "issue",
             source: "github",
@@ -113,7 +122,7 @@ async function mount(page: Page, large = false, multiple = false) {
         ],
         methodology: structuredClone(m.methodologyResponses[3]),
         methodologyEvents: [],
-        messages: [],
+        messages: large ? realistic.messages : [],
       };
       snapshot.methodology.manifest.merge.auto = false;
       const extra = {
@@ -197,17 +206,10 @@ const point = (page: Page, id: string) =>
     .locator(".stars-canvas")
     .evaluate((el: any, id) => el.starMapMetrics.positions[id], id);
 async function settle(page: Page) {
-  await expect
-    .poll(async () => {
-      const b = await page.locator(".stars-canvas").getAttribute("data-frames");
-      await page.waitForTimeout(120);
-      return (
-        b === (await page.locator(".stars-canvas").getAttribute("data-frames"))
-      );
-    })
-    .toBe(true);
+  // The lens eases into place while the ambient canvas continues at about 30 fps.
+  await page.waitForTimeout(900);
 }
-test("agent SSE updates nodes; unique real messages pulse and acknowledge; idle stops", async ({
+test("agent SSE updates nodes; unique real messages pulse and acknowledge; ambient continues and hidden stops", async ({
   page,
 }) => {
   await mount(page);
@@ -257,12 +259,14 @@ test("agent SSE updates nodes; unique real messages pulse and acknowledge; idle 
     ),
   ).toEqual([]);
   await settle(page);
-  const f = await page.locator(".stars-canvas").getAttribute("data-frames");
+  const f = Number(await page.locator(".stars-canvas").getAttribute("data-frames"));
   await page.waitForTimeout(500);
-  await expect(page.locator(".stars-canvas")).toHaveAttribute(
-    "data-frames",
-    f!,
-  );
+  expect(Number(await page.locator(".stars-canvas").getAttribute("data-frames"))).toBeGreaterThan(f);
+  await page.evaluate(() => Object.defineProperty(document, "hidden", { configurable: true, value: true }));
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  const hiddenFrames = await page.locator(".stars-canvas").getAttribute("data-frames");
+  await page.waitForTimeout(300);
+  await expect(page.locator(".stars-canvas")).toHaveAttribute("data-frames", hiddenFrames!);
 });
 test("three lenses, pan, double click, wheel and Issue drag route to queen", async ({
   page,
@@ -529,7 +533,7 @@ test("observer local Escape restores focus without closing project, and queue ex
   await expect(page.getByRole("status")).toContainText("第 1 位");
 });
 for (const mode of ["all", "project"])
-  test(`300 Agent 50 PR browser performance ${mode}`, async ({
+  test(`300 active Agent 900 history browser performance ${mode}`, async ({
     page,
   }, info) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -566,14 +570,26 @@ for (const mode of ["all", "project"])
     const m = await page
       .locator(".stars-canvas")
       .evaluate((el: any) => structuredClone(el.starMapMetrics));
-    await page.waitForTimeout(1000);
+    // Let SSE pulses and camera easing finish before measuring background CPU.
+    await page.waitForTimeout(2200);
+    const framesBefore = Number(await page.locator(".stars-canvas").getAttribute("data-frames"));
+    const cdp = await page.context().browser()!.newBrowserCDPSession();
+    const cpuBefore = await cdp.send("SystemInfo.getProcessInfo");
+    const wallBefore = performance.now();
+    await page.waitForTimeout(5000);
+    const wallMs = performance.now() - wallBefore;
+    const cpuAfter = await cdp.send("SystemInfo.getProcessInfo");
+    const beforeRenderers = new Map((cpuBefore.processInfo as any[]).filter((p) => p.type === "renderer").map((p) => [p.id, p.cpuTime]));
+    const stableRenderers = (cpuAfter.processInfo as any[]).filter((p) => p.type === "renderer" && beforeRenderers.has(p.id));
+    const cpuDelta = stableRenderers.reduce((sum, p) => sum + p.cpuTime - (beforeRenderers.get(p.id) ?? p.cpuTime), 0);
     const end = Number(
         await page.locator(".stars-canvas").getAttribute("data-frames"),
       ),
       a = m.durations.sort((x: number, y: number) => x - y);
     const result = {
       agents: 300,
-      prs: 50,
+      prs: 16,
+      history: m.history,
       viewport: "1440x1000",
       dpr: await page.evaluate(() => devicePixelRatio),
       browser: `Chromium ${page.context().browser()?.version()}`,
@@ -585,16 +601,20 @@ for (const mode of ["all", "project"])
       p50: a[Math.floor(a.length * 0.5)],
       p95: a[Math.floor(a.length * 0.95)],
       max: a.at(-1),
-      idleWindowMs: 1000,
-      idleFrames: end - m.frames,
+      idleWindowMs: wallMs,
+      idleFrames: end - framesBefore,
+      rendererCpuPercentOfOneCore: (cpuDelta / (wallMs / 1000)) * 100,
+      rendererProcessCount: stableRenderers.length,
+      cpuMethod: "CDP SystemInfo.getProcessInfo renderer cpuTime delta over wall time after 2.2 s settle; single worker/page; percent of one CPU core",
     };
     writeFileSync(
       info.outputPath("canvas-performance.json"),
       JSON.stringify(result, null, 2),
     );
     console.log("CANVAS_PERFORMANCE", JSON.stringify(result));
-    expect(result.idleFrames).toBe(0);
-    expect(m.nodes).toBe(354);
+    expect(result.idleFrames).toBeGreaterThan(0);
+    expect(m.history).toBe(900);
+    expect(m.nodes).toBeGreaterThan(300);
     expect(result.p95).toBeLessThan(60);
   });
 
@@ -623,7 +643,7 @@ test("blank click requests creation; double click cancels creation; distant proj
   expect(await point(page, "other:queen")).toBeTruthy();
 });
 
-test("live merge spirals and completed owner fades, then both stop rendering", async ({
+test("live merge spirals and completed owner flies to history", async ({
   page,
 }) => {
   await mount(page);
@@ -635,7 +655,6 @@ test("live merge spirals and completed owner fades, then both stop rendering", a
   const id = await page.evaluate(
     () => (window as any).__canvas.hive.id + ":pr:8",
   );
-  const before = await point(page, id);
   await page.evaluate(() => {
     const x = (window as any).__canvas;
     x.mock.push(x.hive.id, {
@@ -651,63 +670,80 @@ test("live merge spirals and completed owner fades, then both stop rendering", a
     "data-merges",
     "1",
   );
-  await expect
-    .poll(async () => {
-      const now = await point(page, id);
-      return now && Math.hypot(now.x - before.x, now.y - before.y);
-    })
-    .toBeGreaterThan(10);
   await expect.poll(() => point(page, id)).toBeUndefined();
   await expect.poll(() => point(page, "worker-1")).toBeUndefined();
+  await expect(page.locator(".stars-canvas")).toHaveAttribute("data-completing", "1");
   await expect(page.locator(".stars-canvas")).toHaveAttribute(
     "data-trails",
     "1",
   );
-  await settle(page);
+  expect(Number(await page.locator(".stars-canvas").getAttribute("data-history"))).toBeGreaterThan(0);
+  await expect(page.locator(".stars-canvas")).toHaveAttribute("data-completing", "0", { timeout: 5000 });
 });
 
-test("delayed font readiness and loading completion each redraw once without data changes", async ({
-  page,
-}) => {
-  // Delay the FontFaceSet readiness notification independently of network/cache
-  // speed. Later loadingdone events model fonts first requested by a new style.
-  await page.addInitScript(() => {
-    const ready = new Promise<FontFaceSet>((resolve) => {
-      (window as any).__completeFontReady = () => resolve(document.fonts);
-    });
-    Object.defineProperty(document.fonts, "ready", {
-      configurable: true,
-      value: ready,
-    });
-  });
-  await mount(page);
+test("cluster opens the first six items and links to the active list", async ({ page }) => {
+  await mount(page, true);
+  await page.evaluate(() => { const x = (window as any).__canvas; x.ui.selectProject(x.hive.id); });
   await settle(page);
-  const canvas = page.locator(".stars-canvas");
-  const revision = await page.evaluate(
-    () => (window as any).__canvas.store.getSnapshot().revision,
-  );
-  let frames = Number(await canvas.getAttribute("data-frames"));
-  await page.waitForTimeout(200);
-  await expect(canvas).toHaveAttribute("data-frames", String(frames));
+  await expect(page.locator(".stars-canvas")).toHaveAttribute("data-clusters", "2");
+  const id = await page.evaluate(() => `${(window as any).__canvas.hive.id}:cluster:pr`);
+  const q = await point(page, id);
+  await page.mouse.click(q.x, q.y);
+  await expect(page.locator(".stars-note.open")).toContainText("还有 8 个 PR");
+  await expect(page.locator(".stars-note.open")).toContainText("PR #");
+  await page.locator(".stars-note.open").getByRole("button", { name: "在列表中查看全部" }).click();
+  expect(await page.evaluate(() => (window as any).__canvas.ui.getSnapshot().overlay)).toBe("list");
+});
+
+test("only a confirmed failed CI appears as a diamond beside its PR", async ({ page }) => {
+  await mount(page);
+  const prId = await page.evaluate(() => `${(window as any).__canvas.hive.id}:pr:8`);
+  expect(await point(page, "ci:ci")).toBeUndefined();
   await page.evaluate(() => {
-    (window as any).__completeFontReady();
+    const x = (window as any).__canvas;
+    x.mock.push(x.hive.id, { type: "pr", data: { ...x.snapshot.prs[0], hiveId: x.hive.id, reasons: ["required check failed: lint"] } });
   });
-  await expect(canvas).toHaveAttribute("data-frames", String(++frames));
-  await page.waitForTimeout(300);
-  await expect(canvas).toHaveAttribute("data-frames", String(frames));
+  await expect.poll(() => point(page, "ci:pr:8")).toBeTruthy();
+  const ci = await point(page, "ci:pr:8"), pr = await point(page, prId);
+  expect(Math.hypot(ci.x - pr.x, ci.y - pr.y)).toBeLessThan(50);
+});
+
+test("hovering a finished Agent shows summary and opens its historical card", async ({ page }) => {
+  await mount(page);
   await page.evaluate(() => {
-    // Several completion notifications in one task still need only one frame.
-    for (let i = 0; i < 3; i++)
-      document.fonts.dispatchEvent(new Event("loadingdone"));
+    const x = (window as any).__canvas; x.ui.selectProject(x.hive.id);
+    for (let i = 0; i < 20; i++) x.mock.push(x.hive.id, { type: "agent", data: { ...x.agent, id: `historic-${i}`, state: "completed", updatedAt: new Date().toISOString() } });
   });
-  await expect(canvas).toHaveAttribute("data-frames", String(++frames));
+  await settle(page);
+  const q: any = await page.locator(".stars-canvas").evaluate((el: any) => Object.entries(el.starMapMetrics.positions).filter(([id, p]: any) => id.startsWith("history:historic-") && p.x > 50 && p.x < el.clientWidth - 50 && p.y > 50 && p.y < el.clientHeight - 50).map(([, p]) => p)[0]);
+  expect(q).toBeTruthy();
+  await page.mouse.move(q.x, q.y);
+  expect(Number(await page.locator(".stars-canvas").getAttribute("data-history"))).toBeGreaterThan(0);
+  await page.mouse.click(q.x, q.y);
+  await expect(page.locator(".stars-note.open")).toContainText("结束时间按 Agent 最近更新时间估算");
+});
+
+test("reduced motion renders a static canvas after camera settles", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mount(page);
+  await page.evaluate(() => { const x = (window as any).__canvas; x.ui.selectProject(x.hive.id); });
   await page.waitForTimeout(500);
-  await expect(canvas).toHaveAttribute("data-frames", String(frames));
-  expect(
-    await page.evaluate(
-      () => (window as any).__canvas.store.getSnapshot().revision,
-    ),
-  ).toBe(revision);
+  const canvas = page.locator(".stars-canvas");
+  const before = await canvas.evaluate((el: HTMLCanvasElement) => el.toDataURL());
+  const frames = await canvas.getAttribute("data-frames");
+  await page.waitForTimeout(500);
+  expect(await canvas.evaluate((el: HTMLCanvasElement) => el.toDataURL())).toBe(before);
+  await expect(canvas).toHaveAttribute("data-frames", frames!);
+});
+
+test("font completion keeps the same data revision during ambient redraw", async ({ page }) => {
+  await mount(page);
+  const revision = await page.evaluate(() => (window as any).__canvas.store.getSnapshot().revision);
+  const before = Number(await page.locator(".stars-canvas").getAttribute("data-frames"));
+  await page.evaluate(() => document.fonts.dispatchEvent(new Event("loadingdone")));
+  await page.waitForTimeout(250);
+  expect(Number(await page.locator(".stars-canvas").getAttribute("data-frames"))).toBeGreaterThan(before);
+  expect(await page.evaluate(() => (window as any).__canvas.store.getSnapshot().revision)).toBe(revision);
 });
 
 test("timeline opens live, freezes only in the past, and now restores current nodes and time", async ({

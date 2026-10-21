@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { messagePreview, useDataAPI } from "../data";
+import { messagePreview, prSummary, useDataAPI, weightedTruncate } from "../data";
 import type { StarsSlotProps } from "./slots";
-import { StarMap } from "./star-map";
+import { StarMap, type MapNote } from "./star-map";
 import "./canvas.css";
 export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
   const canvas = useRef<HTMLCanvasElement>(null),
@@ -9,7 +9,8 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
   const observer = useRef<HTMLButtonElement>(null),
     decisionPanel = useRef<HTMLElement>(null);
   const [feedback, setFeedback] = useState(""),
-    [deciding, setDeciding] = useState(false);
+    [deciding, setDeciding] = useState(false),
+    [note, setNote] = useState<MapNote>();
   const idKey = projects.map((p) => p.hive.id).join("\0");
   useSyncExternalStore(
     (fn) => {
@@ -34,6 +35,7 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
       ui,
       (id, number) => api.assignIssue(id, number),
       setFeedback,
+      setNote,
     );
     Object.defineProperty(element, "starMapMetrics", {
       configurable: true,
@@ -53,8 +55,10 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
   useEffect(
     () =>
       ui.subscribe(() => {
-        if (ui.getSnapshot().overlay || ui.getSnapshot().platformPanel)
+        if (ui.getSnapshot().overlay || ui.getSnapshot().platformPanel) {
           setDeciding(false);
+          setNote(undefined);
+        }
       }),
     [ui],
   );
@@ -95,8 +99,11 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
         aria-controls="stars-decisions"
         onClick={() => setDeciding((v) => !v)}
       >
-        ⊙{decisions.length > 0 && <small>{decisions.length}</small>}
+        <svg viewBox="-10 -10 20 20" aria-hidden="true"><circle r="7" fill="none" stroke="currentColor" strokeWidth="1"/><circle r="1.6" fill="currentColor"/></svg>
       </button>
+      <div className={`stars-note${note ? " open" : ""}`} style={note ? { left: Math.max(40, Math.min(innerWidth - 300, note.x + 26)), top: Math.max(40, Math.min(innerHeight - 320, note.y - 24)) } : undefined} aria-live="polite">
+        {note && <><h4>{note.title}</h4><p>{note.body}</p><div className="acts"><button onClick={() => { ui.openOverlay("list"); window.dispatchEvent(new CustomEvent("swarmjet:catalogue-open", { detail: { scope: note.scope, query: note.query } })); setNote(undefined); }}>{note.kind === "history" ? "在列表中查看" : "在列表中查看全部"}</button><button onClick={() => setNote(undefined)}>关闭</button></div></>}
+      </div>
       {deciding && (
         <section
           ref={decisionPanel}
@@ -118,7 +125,7 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
           >
             关闭
           </button>
-          <h2>等你决定</h2>
+          <h4>等你决定</h4>
           {decisions.length === 0 && <p>暂时没有需要你决定的事。</p>}
           {decisions.map((d) => (
             <button
@@ -146,8 +153,8 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
             >
               {d.name}：
               {d.kind === "pr"
-                ? `PR #${d.pr.number} 等你决定`
-                : `回答${d.message.from === "queen" ? "主 Agent" : " Agent"}的问题：${messagePreview(d.message).slice(0, 40)}`}
+                ? `PR #${d.pr.number} 等你决定：${prSummary(d.pr, 30)}`
+                : `回答${d.message.from === "queen" ? "主 Agent" : " Agent"}的问题：${weightedTruncate(messagePreview(d.message), 30)}`}
             </button>
           ))}
         </section>

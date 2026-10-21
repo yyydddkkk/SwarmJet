@@ -1,14 +1,17 @@
 import type {
   HiveOverview,
+  HistoryStar,
   ProjectState,
   ProjectStore,
   StarNode,
   LightPulse,
   PulseEndpoint,
 } from "../data";
+import { oneLineSummary, relativeTime, weightedTruncate } from "../data";
 import type { StarsUI, ObjectSelection } from "./ui";
 import { themeStore } from "./theme";
 import { timelineFor } from "./timeline-state";
+import { drawCanvasGlyph } from "./star-glyphs";
 type Point = { x: number; y: number };
 type Body = Point & {
   node: StarNode;
@@ -16,6 +19,9 @@ type Body = Point & {
   radius: number;
   annotation: string;
   signal?: { kind: string; claimed: boolean };
+  cluster?: { kind: "pr" | "issue"; items: { id: string; label: string }[] };
+  ci?: boolean;
+  stale?: boolean;
 };
 type System = Point & {
   id: string;
@@ -25,8 +31,10 @@ type System = Point & {
   bodies: Body[];
   decisionIds: Set<string>;
   needsAttention: boolean;
+  history: HistoryStar[];
 };
 type Camera = Point & { scale: number };
+export type MapNote = { kind: "history" | "cluster"; x: number; y: number; title: string; body: string; scope: "history" | "active"; query?: string };
 const TAU = Math.PI * 2,
   TILT = -0.24,
   AS = 0.55;
@@ -45,6 +53,14 @@ const ellipse = (p: Point, angle: number, radius: number): Point => {
     y: p.y + x * Math.sin(TILT) + y * Math.cos(TILT),
   };
 };
+const signalIsClaimed = (body: Body) => !!body.signal?.claimed;
+const backgroundStars = (() => {
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  return Array.from({ length: 520 }, () => ({ x: (rnd() - .5) * 5200, y: (rnd() - .5) * 3400,
+    r: rnd() < .9 ? .4 + rnd() * .8 : 1.2 + rnd() * .8,
+    alpha: .25 + rnd() * .6, cross: rnd() < .06 }));
+})();
 export type MapMetrics = {
   frames: number;
   durations: number[];
@@ -54,6 +70,9 @@ export type MapMetrics = {
   mode: string;
   positions: Record<string, Point>;
   trails: number;
+  history: number;
+  clusters: number;
+  completing: number;
 };
 export class StarMap {
   readonly metrics: MapMetrics = {
@@ -65,6 +84,9 @@ export class StarMap {
     mode: "all",
     positions: {},
     trails: 0,
+    history: 0,
+    clusters: 0,
+    completing: 0,
   };
   private ctx: CanvasRenderingContext2D;
   private width = 1;
@@ -76,11 +98,16 @@ export class StarMap {
   private frozen?: System[];
   private frozenTrails = new Map<string, Body>();
   private pulses: { pulse: LightPulse; start: number }[] = [];
-  private merging = new Map<string, { start: number }>();
-  private completing = new Map<string, number>();
+  private merging = new Map<string, { start: number; body: Body; systemId: string }>();
+  private completing = new Map<string, { start: number; from: Point; to: Point; body: Body; systemId: string }>();
+  private growing = new Map<string, number>();
+  private flares: { systemId: string; start: number }[] = [];
   private previous = new Map<string, string>();
   private trails = new Map<string, Body>();
   private hover?: Body;
+  private hoverHistory?: { history: HistoryStar; systemId: string };
+  private note?: MapNote;
+  private onNoteChange?: (note?: MapNote) => void;
   private dragging?: {
     body?: Body;
     start: Point;
@@ -94,6 +121,7 @@ export class StarMap {
   private createTimer?: ReturnType<typeof setTimeout>;
   private cleanups: (() => void)[] = [];
   private reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  private lastFrame = 0;
   private grain?: CanvasPattern | null;
   private lastView = "";
   constructor(
@@ -103,7 +131,9 @@ export class StarMap {
     private ui: StarsUI,
     private assign: (id: string, number: number) => Promise<unknown>,
     private feedback: (message: string) => void,
+    onNoteChange?: (note?: MapNote) => void,
   ) {
+    this.onNoteChange = onNoteChange;
     this.ctx = canvas.getContext("2d")!;
     const resize = new ResizeObserver(() => {
       const r = canvas.getBoundingClientRect();
@@ -143,11 +173,15 @@ export class StarMap {
       }),
     );
     this.cleanups.push(timelineFor(ui).subscribe(this.syncTimeline));
+    const visibility = () => { if (document.hidden && this.frame !== undefined) cancelAnimationFrame(this.frame); if (document.hidden) this.frame = undefined; else this.schedule(); };
+    document.addEventListener("visibilitychange", visibility);
+    this.cleanups.push(() => document.removeEventListener("visibilitychange", visibility));
     const motion = () => {
       if (this.reduced.matches) {
         this.pulses = [];
         this.merging.clear();
         this.completing.clear();
+        this.growing.clear();
       }
       this.camera = { ...this.target };
       this.schedule();
@@ -174,12 +208,15 @@ export class StarMap {
     on("pointerleave", () => {
       if (!this.dragging) {
         this.hover = undefined;
+        this.hoverHistory = undefined;
         this.schedule();
       }
     });
     on("dblclick", () => {
       clearTimeout(this.createTimer);
-      this.ui.selectProject();
+      const view = this.ui.getSnapshot();
+      if (view.selection) this.ui.selectProject(view.hiveId);
+      else this.ui.selectProject();
       this.updateCamera(true);
       this.schedule();
     });
@@ -212,6 +249,8 @@ export class StarMap {
   }
   private sync() {
     const now = performance.now();
+    const oldBodies = new Map(this.systems.flatMap((s) => s.bodies.map((b) => [b.node.id, { body: b, systemId: s.id }] as const)));
+    const wasReady = this.systems.some((s) => !!s.state.snapshot);
     this.systems = this.projects.map((project, index) => {
       const state = this.stores.get(project.hive.id)!.getSnapshot();
       const system: System = {
@@ -226,9 +265,13 @@ export class StarMap {
         bodies: [],
         decisionIds: new Set(state.derived?.decisions.map((d) => d.id)),
         needsAttention: state.derived?.needsAttention ?? false,
+        history: state.derived?.history ?? [],
       };
-      for (const node of state.derived?.nodes ?? []) {
-        const angle = hash(node.id) * TAU;
+      for (const node of state.derived?.mapNodes ?? []) {
+        const prIndex = node.kind === "planet" ? state.derived?.prGroups.visible.findIndex((pr) => pr.number === node.prNumber) ?? -1 : -1;
+        const issueIndex = node.kind === "signal" ? state.derived?.issueGroups.visible.findIndex((issue) => issue.messageId === node.id) ?? -1 : -1;
+        const angle = prIndex >= 0 ? .15 + prIndex * TAU / (state.derived!.prGroups.cluster.length ? 9 : Math.max(1, state.derived!.prGroups.visible.length))
+          : issueIndex >= 0 ? 3.05 + issueIndex * .2 : hash(node.id) * TAU;
         const radius =
           node.kind === "star"
             ? 0
@@ -243,18 +286,11 @@ export class StarMap {
         const signal = state.snapshot?.signals.find(
           (signal) => signal.messageId === node.id,
         );
-        const annotation =
-          node.kind === "comet"
-            ? `${agent?.issueNumber ? `#${agent.issueNumber}` : (agent?.roleName ?? "Agent")}  ${node.label}`
-            : node.kind === "signal"
-              ? signal?.kind === "issue"
-                ? `Issue #${signal.number}`
-                : node.label
-              : node.kind === "satellite"
-                ? `verifier ${node.label}`
-                : node.kind === "queue"
-                  ? "排队中"
-                  : node.label;
+        const annotation = node.kind === "comet" ? node.label
+          : node.kind === "signal" ? node.label
+          : node.kind === "satellite" ? "验证中"
+          : node.kind === "queue" ? "排队中" : node.label;
+        const pr = state.snapshot?.prs.find((p) => p.number === node.prNumber);
         const body: Body = {
           ...ellipse(system, angle, radius),
           node,
@@ -262,20 +298,24 @@ export class StarMap {
           radius,
           annotation,
           signal: signal && { kind: signal.kind, claimed: signal.claimed },
+          stale: !!(pr && !pr.ready && Date.now() - Date.parse(pr.updatedAt || "") >= 7 * 86400000),
         };
         system.bodies.push(body);
         const old = this.previous.get(node.id);
-        if (old && old !== "merged" && node.state === "merged") {
-          this.metrics.merges++;
-          if (!this.reduced.matches) this.merging.set(node.id, { start: now });
-        }
-        if (node.kind === "comet" && node.state === "completed") {
-          this.trails.set(node.id, body);
-          if (old && old !== "completed" && !this.reduced.matches)
-            this.completing.set(node.id, now);
-        }
+        if (!oldBodies.has(node.id) && wasReady && !this.reduced.matches && ["comet", "planet"].includes(node.kind)) this.growing.set(node.id, now);
         this.previous.set(node.id, node.state ?? "");
       }
+      for (const ci of state.derived?.failedCI ?? []) {
+        const parent = system.bodies.find((b) => b.node.prNumber === ci.prNumber && b.node.kind === "planet");
+        if (!parent) continue;
+        system.bodies.push({ ...ellipse(parent, 0.65, 27), node: { id: ci.id, kind: "signal", hiveId: system.id, prNumber: ci.prNumber, label: ci.reason }, angle: .65, radius: 27, annotation: "CI 未通过", ci: true });
+      }
+      const addCluster = (kind: "pr" | "issue", label: string | undefined, items: { id: string; label: string }[], angle: number, radius: number) => {
+        if (!label) return;
+        system.bodies.push({ ...ellipse(system, angle, radius), node: { id: `${system.id}:cluster:${kind}`, kind: "queue", hiveId: system.id, label }, angle, radius, annotation: label, cluster: { kind, items } });
+      };
+      addCluster("pr", state.derived?.prGroups.clusterLabel, (state.derived?.prGroups.clusterPreview ?? []).map((pr) => ({ id: String(pr.number), label: `PR #${pr.number}  ${weightedTruncate(pr.title || "", 20)}` })), .15 + 8 * TAU / 9, 212);
+      addCluster("issue", state.derived?.issueGroups.clusterLabel, (state.derived?.issueGroups.clusterPreview ?? []).map((issue) => ({ id: String(issue.number), label: `Issue #${issue.number}  ${weightedTruncate(issue.title || "", 20)}` })), 3.05 + 5 * .2, 352);
       for (const b of system.bodies.filter(
         (b) => b.node.kind === "satellite",
       )) {
@@ -287,15 +327,19 @@ export class StarMap {
       }
       return system;
     });
-    const ids = new Set(
-      this.systems.flatMap((system) =>
-        system.bodies.map((body) => body.node.id),
-      ),
-    );
-    for (const id of this.merging.keys())
-      if (!ids.has(id)) this.merging.delete(id);
-    for (const id of this.completing.keys())
-      if (!ids.has(id)) this.completing.delete(id);
+    if (wasReady) for (const [id, old] of oldBodies) {
+      const next = this.systems.find((s) => s.id === old.systemId);
+      if (!next || next.bodies.some((b) => b.node.id === id)) continue;
+      if (old.body.node.kind === "comet" && next.history.some((h) => h.id === id)) {
+        const history = next.history.find((h) => h.id === id)!;
+        this.trails.set(id, old.body);
+        if (!this.reduced.matches) this.completing.set(id, { start: now, from: this.metrics.positions[id] ? this.world(this.metrics.positions[id]) : old.body, to: { x: next.x + history.x, y: next.y + history.y }, body: old.body, systemId: next.id });
+      }
+      if (old.body.node.kind === "planet" && next.state.snapshot?.prs.some((p) => `${next.id}:pr:${p.number}` === id && p.merged)) {
+        this.metrics.merges++;
+        if (!this.reduced.matches) this.merging.set(id, { start: now, body: old.body, systemId: next.id });
+      }
+    }
     // Consume synchronously and acknowledge afterwards. Acknowledge publishes again;
     // clearing the queue first prevents reentrant consumption and duplicate animation.
     for (const store of this.stores.values()) {
@@ -309,6 +353,9 @@ export class StarMap {
     }
     this.metrics.nodes = this.systems.reduce((n, s) => n + s.bodies.length, 0);
     this.metrics.trails = this.trails.size;
+    this.metrics.history = this.systems.reduce((n, s) => n + s.history.length, 0);
+    this.metrics.clusters = this.systems.reduce((n, s) => n + s.bodies.filter((b) => b.cluster).length, 0);
+    this.metrics.completing = this.completing.size;
     this.updateCamera();
     this.schedule();
   }
@@ -343,8 +390,8 @@ export class StarMap {
       const scale = selected
         ? Math.min(2.4, this.height / 420)
         : Math.max(
-            0.24,
-            Math.min((this.width - 120) / 850, (this.height - 260) / 440, 1.8),
+            0.3,
+            Math.min((this.height - 250) / ((352 * AS + 30) * 2), (this.width - 320) / ((352 + 50) * 2), 1.8),
           );
       this.target = {
         x:
@@ -388,13 +435,23 @@ export class StarMap {
     return this.systems
       .filter((s) => s.id === view.hiveId)
       .flatMap((s) => s.bodies)
-      .filter((b) => b.node.state !== "merged")
       .map((b) => ({
         b,
-        d: Math.hypot(this.screen(b).x - p.x, this.screen(b).y - p.y),
+        d: Math.hypot((this.metrics.positions[b.node.id] ?? this.screen(b)).x - p.x, (this.metrics.positions[b.node.id] ?? this.screen(b)).y - p.y),
       }))
       .filter((v) => v.d < 17)
       .sort((a, b) => a.d - b.d)[0]?.b;
+  }
+  private hitHistory(p: Point) {
+    const id = this.ui.getSnapshot().hiveId;
+    if (!id) return;
+    const system = this.systems.find((s) => s.id === id);
+    if (!system) return;
+    for (const history of system.history) {
+      if (history.dust || this.completing.has(history.id)) continue;
+      const q = this.screen({ x: system.x + history.x, y: system.y + history.y });
+      if (Math.hypot(q.x - p.x, q.y - p.y) < 7) return { history, systemId: id };
+    }
   }
   private selection(body: Body): ObjectSelection | undefined {
     const n = body.node;
@@ -450,12 +507,15 @@ export class StarMap {
           y: d.origin.y - (p.y - d.start.y) / this.camera.scale,
         };
       }
-    } else this.hover = this.hit(p);
+    } else {
+      this.hover = this.hit(p);
+      this.hoverHistory = this.hover ? undefined : this.hitHistory(p);
+    }
     this.canvas.style.cursor = d?.moved
       ? d.body
         ? "grabbing"
         : "move"
-      : this.hover
+      : this.hover || this.hoverHistory
         ? "pointer"
         : "default";
     this.schedule();
@@ -482,6 +542,7 @@ export class StarMap {
       }
     } else if (!d.moved) {
       const body = this.hit(this.local(e));
+      const history = body ? undefined : this.hitHistory(this.local(e));
       if (!this.ui.getSnapshot().hiveId && body)
         this.ui.selectProject(body.node.hiveId);
       else if (!this.ui.getSnapshot().hiveId && !body) {
@@ -494,7 +555,17 @@ export class StarMap {
           )
             window.dispatchEvent(new CustomEvent("swarmjet:create-project"));
         }, 280);
+      } else if (history) {
+        const s = this.systems.find((x) => x.id === history.systemId)!;
+        const q = this.screen({ x: s.x + history.history.x, y: s.y + history.history.y });
+        this.note = { kind: "history", x: q.x, y: q.y, title: `${history.history.result === "merged" ? "已合并" : history.history.result === "failed" ? "失败，已看过" : "已完成"}，${relativeTime(history.history.endedAt)}`, body: `${history.history.summary}\n结束时间按 Agent 最近更新时间估算。`, scope: "history", query: history.history.id };
+        this.onNoteChange?.(this.note);
+      } else if (body?.cluster) {
+        const q = this.screen(body);
+        this.note = { kind: "cluster", x: q.x, y: q.y, title: body.annotation, body: body.cluster.items.map((item) => item.label).join("\n") + (body.cluster.items.length >= 6 ? "\n……" : ""), scope: "active", query: body.cluster.kind === "pr" ? "PR" : "Issue" };
+        this.onNoteChange?.(this.note);
       } else if (body) {
+        this.onNoteChange?.();
         const selection = this.selection(body);
         if (selection) this.ui.selectObject(selection);
         else {
@@ -540,7 +611,7 @@ export class StarMap {
     else this.ui.selectProject();
   }
   private schedule = () => {
-    if (!this.destroyed && this.frame === undefined)
+    if (!this.destroyed && !document.hidden && this.frame === undefined)
       this.frame = requestAnimationFrame(this.draw);
   };
   private endpoint(endpoint: PulseEndpoint, system: System): Point {
@@ -554,6 +625,9 @@ export class StarMap {
   }
   private draw = (now: number) => {
     this.frame = undefined;
+    if (document.hidden) return;
+    if (!this.reduced.matches && now - this.lastFrame < 32) { this.schedule(); return; }
+    this.lastFrame = now;
     const started = performance.now(),
       ctx = this.ctx,
       theme = themeStore.getSnapshot(),
@@ -565,9 +639,9 @@ export class StarMap {
       Math.abs(this.camera.scale - this.target.scale) * 1000;
     const moving = delta > 0.15 && !this.reduced.matches;
     if (moving) {
-      this.camera.x += (this.target.x - this.camera.x) * 0.2;
-      this.camera.y += (this.target.y - this.camera.y) * 0.2;
-      this.camera.scale += (this.target.scale - this.camera.scale) * 0.2;
+      this.camera.x += (this.target.x - this.camera.x) * 0.06;
+      this.camera.y += (this.target.y - this.camera.y) * 0.06;
+      this.camera.scale = Math.exp(Math.log(this.camera.scale) + (Math.log(this.target.scale) - Math.log(this.camera.scale)) * .06);
     } else this.camera = { ...this.target };
     const s = this.camera.scale;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -615,13 +689,22 @@ export class StarMap {
     ctx.fillStyle = C.ink;
     ctx.strokeStyle = C.ink;
     ctx.lineWidth = 0.6 * R.lw;
-    for (let i = 0; i < 380; i++) {
-      const x = hash(`star-x${i}`) * this.width,
-        y = hash(`star-y${i}`) * this.height,
-        r = hash(`star-r${i}`);
-      if (simple && r < 0.8) continue;
-      ctx.globalAlpha = R.starA * (0.2 + r * 0.5);
-      circle({ x, y }, 0.3 + r * 0.8, true);
+    for (const star of backgroundStars) {
+      if (simple && star.r < 1.15) continue;
+      const parallax = Math.max(.35, s * .55);
+      const x = (star.x - this.camera.x * .35) * parallax + this.width / 2;
+      const y = (star.y - this.camera.y * .35) * parallax + this.height / 2;
+      if (x < 0 || y < 0 || x > this.width || y > this.height) continue;
+      if (this.systems.some((system) => {
+        const p = this.screen(system);
+        return Math.hypot((x - p.x) / (840 * s), (y - p.y) / (650 * s)) < 1;
+      })) continue;
+      ctx.globalAlpha = R.starA * star.alpha;
+      if (star.cross) {
+        ctx.strokeStyle = C.ink; ctx.lineWidth = .6 * R.lw;
+        line({ x: x - 3, y }, { x: x + 3, y });
+        line({ x, y: y - 3 }, { x, y: y + 3 });
+      } else circle({ x, y }, star.r, true);
     }
     const view = this.ui.getSnapshot(),
       clock = timelineFor(this.ui).getSnapshot(),
@@ -639,6 +722,33 @@ export class StarMap {
       }
     }
     this.metrics.positions = {};
+    const pendingLabels: { text: string; p: Point; size: number; italic: boolean; color: string; align: CanvasTextAlign; priority: number; alpha: number }[] = [];
+    for (const system of systems) {
+      const dim = view.hiveId && system.id !== view.hiveId ? .3 : 1;
+      for (const h of system.history) {
+        if (this.completing.has(h.id) && !this.frozen) continue;
+        const q = this.screen({ x: system.x + h.x, y: system.y + h.y });
+        if (!h.dust) this.metrics.positions[`history:${h.id}`] = q;
+        if (q.x < -30 || q.y < -30 || q.x > this.width + 30 || q.y > this.height + 30) continue;
+        if (h.dust) {
+          ctx.fillStyle = C.ink; ctx.globalAlpha = .16 * dim; ctx.fillRect(q.x, q.y, .9, .9); continue;
+        }
+        const z = Math.max(.7, Math.min(1.6, .55 + s * .8)) * R.sz;
+        const r = (h.result === "merged" ? 1.35 : h.result === "failed" ? .8 : .95) * z;
+        ctx.fillStyle = C.ink;
+        ctx.globalAlpha = (h.result === "merged" ? .85 : h.result === "failed" ? .32 : .6) * h.brightness * dim;
+        circle(q, r, true);
+        if (h.fresh && h.result !== "failed" && !simple) {
+          ctx.strokeStyle = C.ink; ctx.lineWidth = .5 * R.lw; ctx.globalAlpha *= .55;
+          line({ x: q.x - r * 3.4, y: q.y }, { x: q.x + r * 3.4, y: q.y });
+          line({ x: q.x, y: q.y - r * 3.4 }, { x: q.x, y: q.y + r * 3.4 });
+        }
+        if (this.hoverHistory?.history.id === h.id) {
+          ctx.strokeStyle = C.ink2; ctx.globalAlpha = 1; circle(q, 8);
+          label(`${weightedTruncate(h.summary, 26)} · ${h.result === "merged" ? "已合并" : h.result === "failed" ? "失败" : "已完成"} · ${relativeTime(h.endedAt)}`, { x: q.x, y: q.y - 16 }, 14, true, C.ink);
+        }
+      }
+    }
     for (const system of systems) {
       const far = !!view.hiveId && system.id !== view.hiveId,
         dim = far ? 0.1 : 1,
@@ -685,31 +795,30 @@ export class StarMap {
         }
       for (const body of system.bodies) {
         const node = body.node,
-          merge = this.frozen ? undefined : this.merging.get(node.id);
+          merge = undefined;
         let opacity = 1;
-        if (node.kind === "comet" && node.state === "completed") {
-          const completedAt = this.frozen
-            ? undefined
-            : this.completing.get(node.id);
-          if (completedAt === undefined) continue;
-          opacity = Math.max(0, 1 - (now - completedAt) / 900);
-          if (opacity <= 0) {
-            this.completing.delete(node.id);
-            continue;
-          }
-        }
         let world: Point = body;
-        if (node.state === "merged" && !merge) continue;
-        if (merge) {
-          const t = Math.min(1, (now - merge.start) / 1400);
-          world = ellipse(
-            system,
-            body.angle + t * TAU * 2,
-            body.radius * (1 - t) ** 2,
-          );
-          if (t >= 1) {
-            this.merging.delete(node.id);
-            continue;
+        if (!this.reduced.matches && !this.frozen) {
+          if (node.kind === "comet" && ["active", "creating"].includes(node.state ?? ""))
+            world = ellipse(system, body.angle + now * .00008, body.radius);
+          else if (node.kind === "planet" || body.cluster)
+            world = ellipse(system, body.angle + now * .000011, body.radius);
+          else if (node.kind === "satellite") {
+            const parent = system.bodies.find((b) => b.node.id === node.parentId);
+            if (parent) {
+              const pp = ellipse(system, parent.angle + now * .000011, parent.radius);
+              world = { x: pp.x + Math.cos(now * .0018 + body.angle) * 15, y: pp.y + Math.sin(now * .0018 + body.angle) * 9 };
+            }
+          } else if (body.ci) {
+            const parent = system.bodies.find((candidate) => candidate.node.kind === "planet" && candidate.node.prNumber === node.prNumber);
+            if (parent) world = ellipse(ellipse(system, parent.angle + now * .000011, parent.radius), .65, 27);
+          }
+          const born = this.growing.get(node.id);
+          if (born !== undefined) {
+            const t = Math.min(1, (now - born) / (node.kind === "planet" ? 1100 : 1800));
+            if (node.kind === "comet") world = { x: system.x + (world.x - system.x) * (1 - (1 - t) ** 3), y: system.y + (world.y - system.y) * (1 - (1 - t) ** 3) };
+            else opacity = Math.max(.05, t);
+            if (t >= 1) this.growing.delete(node.id);
           }
         }
         if (this.dragging?.body === body)
@@ -723,7 +832,7 @@ export class StarMap {
           q.y > this.height + 80
         )
           continue;
-        ctx.globalAlpha = dim * opacity;
+        ctx.globalAlpha = dim * opacity * (body.stale ? .55 : 1);
         ctx.strokeStyle = C.ink;
         ctx.fillStyle = C.ink;
         ctx.lineWidth = R.lw;
@@ -742,7 +851,7 @@ export class StarMap {
             }
             ctx.globalAlpha = dim * opacity * 0.5;
             for (let k = 0; k < 24; k++) {
-              const a = (k * TAU) / 24;
+              const a = (k * TAU) / 24 + (this.reduced.matches || this.frozen ? 0 : now * .00009);
               line(
                 {
                   x: q.x + Math.cos(a) * sr * 4.3,
@@ -762,8 +871,8 @@ export class StarMap {
             );
           }
         } else if (node.kind === "comet") {
-          const dx = body.x - system.x,
-            dy = body.y - system.y,
+          const dx = world.x - system.x,
+            dy = world.y - system.y,
             len = Math.hypot(dx, dy) || 1,
             ux = dx / len,
             uy = dy / len;
@@ -793,14 +902,15 @@ export class StarMap {
             const length =
               (node.state === "completed" ? 16 : 38) *
               Math.min(Math.max(s, 0.5), 1.8);
-            for (let k = 0; k < 7; k++) {
-              const a = (k - 3) * 0.055,
+            const rays = this.metrics.nodes > 200 ? [-3, 0, 3] : [-3, -2, -1, 0, 1, 2, 3];
+            for (const offset of rays) {
+              const a = offset * 0.055,
                 vx = ux * Math.cos(a) - uy * Math.sin(a),
                 vy = ux * Math.sin(a) + uy * Math.cos(a);
-              ctx.globalAlpha = dim * opacity * (0.55 - Math.abs(k - 3) * 0.11);
+              ctx.globalAlpha = dim * opacity * (0.55 - Math.abs(offset) * 0.11);
               line(q, {
-                x: q.x + vx * length * (1 - Math.abs(k - 3) * 0.13),
-                y: q.y + vy * length * (1 - Math.abs(k - 3) * 0.13),
+                x: q.x + vx * length * (1 - Math.abs(offset) * 0.13),
+                y: q.y + vy * length * (1 - Math.abs(offset) * 0.13),
               });
             }
             ctx.globalAlpha = dim * opacity;
@@ -809,7 +919,9 @@ export class StarMap {
             circle(q, r + 3.5);
           }
         } else if (node.kind === "planet") {
-          const pr = Math.max(3, 7 * Math.min(s, 1.5)) * R.sz;
+          const born = this.growing.get(node.id);
+          const grow = born === undefined ? 1 : Math.max(.05, Math.min(1, (now - born) / 1100));
+          const pr = Math.max(3, 7 * Math.min(s, 1.5)) * R.sz * grow * (body.stale ? .72 : 1);
           ctx.beginPath();
           ctx.ellipse(q.x, q.y, pr * 2.15, pr * 0.62, -0.38, Math.PI, TAU);
           ctx.stroke();
@@ -838,43 +950,40 @@ export class StarMap {
           }
           ctx.fillStyle = C.ink;
           circle(q, Math.max(1.5, 2.5 * s), true);
+        } else if (body.cluster) {
+          ctx.save(); ctx.translate(q.x, q.y); ctx.scale(Math.max(.5, s), Math.max(.5, s));
+          drawCanvasGlyph(ctx, "cluster"); ctx.restore();
+          ctx.setLineDash([1, 3]); circle(q, Math.max(7, s * 9)); ctx.setLineDash([]);
         } else if (node.kind === "signal") {
           const signal = body.signal,
             k = Math.max(2.8, 5 * Math.min(s, 1.4));
           ctx.strokeStyle = signal?.claimed ? C.ink2 : C.ink;
-          if (signal?.kind !== "issue") {
-            ctx.beginPath();
-            ctx.moveTo(q.x, q.y - k);
-            ctx.lineTo(q.x + k, q.y);
-            ctx.lineTo(q.x, q.y + k);
-            ctx.lineTo(q.x - k, q.y);
-            ctx.closePath();
-            ctx.stroke();
+          if (body.ci) {
+            ctx.save(); ctx.translate(q.x, q.y); ctx.scale(k / 5, k / 5);
+            drawCanvasGlyph(ctx, "ci"); ctx.restore();
           } else {
             line({ x: q.x - k, y: q.y }, { x: q.x + k, y: q.y });
             line({ x: q.x, y: q.y - k }, { x: q.x, y: q.y + k });
-            if (!signal.claimed) {
+            if (!signal?.claimed) {
               ctx.globalAlpha = 0.45;
               circle(q, k + 6);
             }
           }
-        } else circle(q, Math.max(1.8, 3 * s));
-        if (view.hiveId && node.kind !== "star" && node.state !== "completed") {
+        } else if (node.kind === "queue") {
+          ctx.save(); ctx.translate(q.x, q.y); ctx.scale(Math.max(.6, s), Math.max(.6, s)); drawCanvasGlyph(ctx, "queue"); ctx.restore();
+        }
+        if (view.hiveId && node.kind !== "star") {
           ctx.globalAlpha = dim * opacity;
           const comet = node.kind === "comet",
             satellite = node.kind === "satellite",
             right = body.x > system.x;
-          label(
-            body.annotation,
-            {
+          pendingLabels.push({ text: body.cluster ? body.annotation : node.kind === "queue" ? weightedTruncate(body.annotation, 14) : body.annotation, p: {
               x: q.x + (comet ? (right ? -15 : 15) : satellite ? -12 : 0),
               y: q.y + (comet ? 4 : satellite ? -22 : 22),
-            },
-            comet ? 13 : 12,
-            !comet,
-            comet ? C.ink2 : C.ink3,
-            comet ? (right ? "right" : "left") : satellite ? "right" : "center",
-          );
+            }, size: comet ? 13 : 12, italic: !comet && !body.cluster, color: body.cluster ? C.ink2 : comet ? C.ink2 : C.ink3,
+            align: comet ? (right ? "right" : "left") : satellite ? "right" : "center",
+            priority: body.cluster ? 3 : node.state === "failed" ? 2 : node.kind === "comet" ? node.state === "parked" ? 8 : 4 : node.kind === "satellite" ? 5 : node.kind === "signal" ? signalIsClaimed(body) ? 9 : 6 : node.kind === "planet" ? system.decisionIds.has(node.id) ? 1 : 7 : 10,
+            alpha: body.stale ? .4 : 1 });
         }
         if (this.hover?.node.id === node.id || view.selection?.id === node.id) {
           ctx.globalAlpha = 1;
@@ -889,17 +998,68 @@ export class StarMap {
         ctx.font = `${simple ? "" : "italic "}19px ${simple ? '"IBM Plex Sans","Noto Sans SC",sans-serif' : '"IM Fell English","Noto Serif SC",serif'}`;
         ctx.textAlign = "center";
         ctx.fillText(system.name, p.x, p.y + 300 * AS * s + 30);
-        if (system.needsAttention) {
-          ctx.fillStyle = C.accent;
-          circle(
-            {
-              x: p.x + ctx.measureText(system.name).width / 2 + 10,
-              y: p.y + 300 * AS * s + 25,
-            },
-            2.5,
-            true,
-          );
+        if (system.decisionIds.size) label(`${system.decisionIds.size} 件事等你`, { x: p.x, y: p.y + 300 * AS * s + 49 }, 13, true, C.accent);
+      }
+    }
+    // Existing labels occupy space in strict data-layer priority order.
+    if (view.hiveId) {
+      const focus = systems.find((system) => system.id === view.hiveId);
+      const q = focus && this.screen(focus);
+      const r = Math.max(9 * s, 3.5) * 4.2;
+      const occupied: [number, number, number, number][] = q ? [[q.x - r, q.y - r, q.x + r, q.y + r]] : [];
+      for (const item of pendingLabels.sort((a, b) => a.priority - b.priority)) {
+        ctx.font = `${item.italic && !simple ? "italic " : ""}${item.size}px ${simple ? '"IBM Plex Sans","Noto Sans SC",sans-serif' : '"Source Serif 4","Noto Serif SC",serif'}`;
+        const w = ctx.measureText(item.text).width;
+        const left = item.align === "center" ? item.p.x - w / 2 : item.align === "right" ? item.p.x - w : item.p.x;
+        const box: [number, number, number, number] = [left - 4, item.p.y - item.size - 1, left + w + 4, item.p.y + 5];
+        if (occupied.some((other) => box[0] < other[2] && box[2] > other[0] && box[1] < other[3] && box[3] > other[1])) continue;
+        occupied.push(box);
+        ctx.globalAlpha = item.alpha;
+        label(item.text, item.p, item.size, item.italic, item.color, item.align);
+      }
+    }
+    if (this.hover && view.hiveId === this.hover.node.hiveId) {
+      const system = systems.find((item) => item.id === view.hiveId);
+      const node = this.hover.node;
+      const agent = system?.state.snapshot?.agents.find((item) => item.id === node.agentId);
+      const pr = system?.state.snapshot?.prs.find((item) => item.number === node.prNumber);
+      const issue = system?.state.snapshot?.signals.find((item) => item.messageId === node.id);
+      const full = agent ? oneLineSummary(agent, { prs: system?.state.snapshot?.prs, issues: system?.state.snapshot?.signals })
+        : pr?.title || issue?.title || node.label;
+      const q = this.metrics.positions[node.id];
+      if (q) { ctx.globalAlpha = 1; label(full, { x: q.x, y: q.y - 18 }, 14, true, C.ink); }
+    }
+    if (!this.frozen) {
+      for (const [id, leaving] of this.completing) {
+        const t = Math.min(1, (now - leaving.start) / 2600), ease = 1 - (1 - t) ** 3;
+        const q = this.screen({ x: leaving.from.x + (leaving.to.x - leaving.from.x) * ease, y: leaving.from.y + (leaving.to.y - leaving.from.y) * ease });
+        ctx.fillStyle = C.ink; ctx.strokeStyle = C.ink; ctx.globalAlpha = 1 - .45 * ease;
+        const radius = Math.max(.8, (1 - .7 * ease) * 4 * s);
+        circle(q, radius, true);
+        if (t < 1) { ctx.globalAlpha *= .45; line(q, { x: q.x + 16 * (1 - t), y: q.y + 5 * (1 - t) }); }
+        else {
+          const age = (now - leaving.start - 2600) / 800;
+          if (age < 1) { ctx.globalAlpha = (1 - age) * .7; circle(q, radius + 3 + age * 24); }
+          else this.completing.delete(id);
         }
+      }
+      for (const [id, merge] of this.merging) {
+        const sys = systems.find((system) => system.id === merge.systemId);
+        if (!sys) continue;
+        const t = Math.min(1, (now - merge.start) / 1400);
+        const world = ellipse(sys, merge.body.angle + t * TAU * 2, merge.body.radius * (1 - t) ** 2);
+        const q = this.screen(world);
+        ctx.save(); ctx.translate(q.x, q.y); ctx.scale(Math.max(.4, s * (1 - t)), Math.max(.4, s * (1 - t)));
+        ctx.globalAlpha = 1 - t; ctx.strokeStyle = C.ink; ctx.fillStyle = C.paper; drawCanvasGlyph(ctx, "pr"); ctx.restore();
+        if (t >= 1) { this.merging.delete(id); this.flares.push({ systemId: sys.id, start: now }); }
+      }
+      this.flares = this.flares.filter((flare) => now - flare.start < 1200);
+      for (const flare of this.flares) {
+        const sys = systems.find((system) => system.id === flare.systemId);
+        if (!sys) continue;
+        const t = (now - flare.start) / 1200;
+        ctx.strokeStyle = C.ink; ctx.globalAlpha = (1 - t) * .8;
+        circle(this.screen(sys), (14 + t * 90) * s);
       }
     }
     this.pulses = this.pulses.filter((p) => now - p.start < 800);
@@ -977,11 +1137,14 @@ export class StarMap {
     this.canvas.dataset.pulses = String(this.metrics.pulses);
     this.canvas.dataset.merges = String(this.metrics.merges);
     this.canvas.dataset.trails = String(this.metrics.trails);
+    this.canvas.dataset.history = String(this.metrics.history);
+    this.canvas.dataset.clusters = String(this.metrics.clusters);
+    this.canvas.dataset.completing = String(this.completing.size);
     this.canvas.dataset.mode = this.metrics.mode;
     if (
-      moving ||
+      moving || (!this.reduced.matches && !this.frozen) ||
       (!this.frozen &&
-        (this.pulses.length || this.merging.size || this.completing.size))
+        (this.pulses.length || this.merging.size || this.completing.size || this.growing.size || this.flares.length))
     )
       this.schedule();
   };
