@@ -1,4 +1,5 @@
 import type { Agent, LiveMessage, ProjectSnapshot } from "./types";
+import { agentVisibility, aggregateIssues, aggregatePRs, historyStars, oneLineSummary, SUMMARY_WIDTH, weightedTruncate, readAcknowledged } from "./rules";
 export type StarNode = {
   id: string;
   kind: "star" | "comet" | "satellite" | "planet" | "signal" | "queue";
@@ -66,7 +67,7 @@ export function deriveProject(snapshot: ProjectSnapshot, now = Date.now()) {
       state: snapshot.queen.state,
     },
   ];
-  agents.forEach((a) =>
+  agents.filter((a) => agentVisibility(a, now, readAcknowledged(hive.id, a.id)) === "orbit").forEach((a) =>
     nodes.push({
       id: a.id,
       kind: a.roleName === "verifier" ? "satellite" : "comet",
@@ -77,26 +78,28 @@ export function deriveProject(snapshot: ProjectSnapshot, now = Date.now()) {
         a.roleName === "verifier" && a.prNumber
           ? `${hive.id}:pr:${a.prNumber}`
           : undefined,
-      label: agentStatus(a, messages, now),
+      label: `#${a.id.slice(-8)} ${oneLineSummary(a, { prs, issues: snapshot.signals }, SUMMARY_WIDTH.star)}`,
       state: a.state,
     }),
   );
-  prs.forEach((p) =>
+  const prGroups = aggregatePRs(prs, agents, now);
+  prGroups.visible.forEach((p) =>
     nodes.push({
       id: `${hive.id}:pr:${p.number}`,
       kind: "planet",
       hiveId: hive.id,
       prNumber: p.number,
-      label: `PR #${p.number}`,
+      label: `#${p.number} ${weightedTruncate(p.title || `PR #${p.number}`, SUMMARY_WIDTH.star)}`,
       state: p.merged ? "merged" : p.state,
     }),
   );
-  snapshot.signals.forEach((s) =>
+  const issueGroups = aggregateIssues(snapshot.signals, agents);
+  issueGroups.visible.forEach((s) =>
     nodes.push({
       id: s.messageId,
       kind: "signal",
       hiveId: hive.id,
-      label: s.title,
+      label: `#${s.number} ${weightedTruncate(s.title, SUMMARY_WIDTH.star)}`,
     }),
   );
   snapshot.queue.forEach((q) =>
@@ -143,6 +146,9 @@ export function deriveProject(snapshot: ProjectSnapshot, now = Date.now()) {
   ];
   return {
     nodes,
+    history: historyStars(agents, prs, now, (id) => readAcknowledged(hive.id, id)),
+    prGroups,
+    issueGroups,
     decisions,
     needsAttention: decisions.length > 0,
     agentStatuses: Object.fromEntries(
