@@ -405,7 +405,7 @@
 .pc-almanac-slot.filled { background: var(--ink); border-color: var(--ink); }
 .pc-sheet .pc-almanac-step { width: 22px; height: 22px; color: var(--ink3); font-size: 18px; line-height: 1; padding: 0; margin: 0; border: 0; text-align: center; }
 .pc-almanac-mute { font-size: 16px; color: var(--ink2); margin-top: 14px; line-height: 1.6; }
-.pc-right h2 { font: italic 300 34px var(--title); margin: 10px 0 22px; line-height: 1.15; overflow-wrap: anywhere; }
+.pc-right h2 { font: italic 300 34px var(--title); margin: 10px 0 22px; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pc-kicker { font: italic 16px var(--body); color: var(--ink2); margin: 0 !important; }
 .pc-left > nav { display: flex; flex-wrap: wrap; gap: 14px; margin: 12px 0 34px; }
 .pc-left > nav button { font: italic 16px var(--body); color: var(--ink2); border: 0; padding: 0; margin: 0; }
@@ -431,6 +431,7 @@
 .pc-platform > nav button[aria-pressed="true"] { color: var(--ink); border: 0; }
 .pc-platform-body { max-width: 640px; overflow-y: auto; scrollbar-width: none; padding-right: 8px; }
 .pc-platform-body h3 { font: italic 400 30px var(--title); }
+.pc-platform-body .pc-page-head h2 { font: italic 400 30px var(--title); }
 .pc-platform-body > p { font-size: 17px; line-height: 1.7; color: var(--ink2); max-width: 34em; }
 .pc-platform-body .pc-facts > div, .pc-platform-body .pc-section > dl > div {
   display: flex; justify-content: space-between; align-items: baseline; gap: 24px;

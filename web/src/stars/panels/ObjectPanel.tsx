@@ -109,6 +109,10 @@ export function ObjectPanel({
         : selection.kind === "signal"
           ? weightedTruncate(snapshot.signals.find((s) => s.messageId === selection.id)?.title ?? "待处理事件", 40)
           : agent ? oneLineSummary(agent, { prs: snapshot.prs, issues: snapshot.signals }, 40) : "Agent";
+  const fullTarget = selection.kind === "queen" ? "主 Agent" : selection.kind === "pr"
+    ? snapshot.prs.find((p) => p.number === selection.number)?.title || `PR #${selection.number}`
+    : selection.kind === "signal" ? snapshot.signals.find((s) => s.messageId === selection.id)?.title || "待处理事件"
+    : agent ? oneLineSummary(agent, { prs: snapshot.prs, issues: snapshot.signals }) : "Agent";
   return (
     <div
       ref={ref}
@@ -126,7 +130,7 @@ export function ObjectPanel({
         ×
       </button>
       <p className="pc-kicker">{selection.kind === "pr" ? `PR #${selection.number}` : selection.kind === "agent" ? agentStateLabel(agent?.state ?? "creating") : selection.kind === "queen" ? "主 Agent" : "外部事件"}，项目 {snapshot.hive.name}</p>
-      <h2>{target}</h2>
+      <h2 title={fullTarget} aria-label={fullTarget}>{target}</h2>
       {error && (
         <ErrorNotice message={error} onRetry={() => setAttempt((n) => n + 1)} />
       )}{" "}
