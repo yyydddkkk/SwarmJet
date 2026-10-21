@@ -47,6 +47,8 @@ const mock = createMockDataSource(
           claimedBy: "",
           createdAt: "2026-10-20T00:00:00Z",
         },
+        { messageId: "signal-check", source: "github", kind: "check", number: 43, title: "CI 检查失败", url: "https://github.example/check/43", claimed: false, claimedBy: "", createdAt: "2026-10-20T00:01:00Z" },
+        { messageId: "signal-pr", source: "github", kind: "pull_request", number: 44, title: "外部 PR 更新", url: "https://github.example/pr/44", claimed: false, claimedBy: "", createdAt: "2026-10-20T00:02:00Z" },
       ],
       methodology: methodologyResponses[3],
       methodologyEvents: [],
@@ -66,6 +68,22 @@ const ordersStore = createProjectStore("orders", mock.source);
 ordersStore.start();
 const store = createProjectStore("swarmjet", mock.source);
 store.start();
+(window as unknown as { panelHarnessSyncMessages: () => Promise<void> }).panelHarnessSyncMessages = async () => {
+  const addresses = ["queen", "hive", "local:web-admin", ...mock.snapshots.swarmjet.agents.filter(agent => ["creating", "active", "parked", "hibernated"].includes(agent.state)).map(agent => `forager:${agent.id}`)];
+  const pages = await Promise.all([...new Set(addresses)].map(async to => {
+    const result = [] as typeof mock.snapshots.swarmjet.messages;
+    let after: string | undefined;
+    do {
+      const page = await api.listMessages("swarmjet", {to, after, limit:200});
+      result.push(...page.messages);
+      if (!page.truncated || !page.cursor || page.cursor === after) break;
+      after = page.cursor;
+    } while (true);
+    return result;
+  }));
+  mock.setSnapshot("swarmjet", {...mock.snapshots.swarmjet, messages:[...new Map(pages.flat().map(message => [message.id, message])).values()].sort((a,b) => Date.parse(a.createdAt)-Date.parse(b.createdAt) || a.id.localeCompare(b.id))});
+  await store.refresh();
+};
 const props = {
   ui,
   stores: new Map([
@@ -190,6 +208,8 @@ createRoot(document.getElementById("root")!).render(
         >
           事件详情
         </button>
+        <button onClick={() => ui.selectObject({ hiveId: "swarmjet", kind: "signal", id: "signal-check", number: 43 })}>检查详情</button>
+        <button onClick={() => ui.selectObject({ hiveId: "swarmjet", kind: "signal", id: "signal-pr", number: 44 })}>外部PR详情</button>
         <button onClick={() => ui.openPlatform("setup", "github=connected")}>
           平台
         </button>

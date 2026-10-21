@@ -4,7 +4,7 @@
 // the append-only version history and modification log, diffs any two versions,
 // and switches versions behind a confirmation.
 import { useEffect, useMemo, useState } from "react";
-import { useDataAPI } from "../../data";
+import { useDataAPI, methodologyDescription } from "../../data";
 import type {
   EventRule,
   Methodology,
@@ -31,9 +31,10 @@ import { formatDateTime, formatUsd, shortSha } from "./format";
 import { Icon } from "./icons";
 import { useResource } from "./use-resource";
 
-export default function MethodologySection({ hiveId }: { hiveId: string }) {
+export default function MethodologySection({ hiveId, initialVersion }: { hiveId: string; initialVersion?: number }) {
   const api = useDataAPI();
-  const [viewVersion, setViewVersion] = useState<number | undefined>(undefined);
+  const [viewVersion, setViewVersion] = useState<number | undefined>(initialVersion);
+  useEffect(() => setViewVersion(initialVersion), [hiveId, initialVersion]);
   const current = useResource(
     (signal) => api.getMethodology(hiveId, viewVersion, signal),
     [hiveId, viewVersion],
@@ -293,6 +294,10 @@ export default function MethodologySection({ hiveId }: { hiveId: string }) {
     </div>
   );
 }
+function Description({ raw }: { raw: string }) {
+  const value = methodologyDescription(raw);
+  return <div className="pc-role-desc"><p>{value.text}</p>{value.detail && <details><summary>查看原文</summary><p>{value.detail}</p></details>}</div>;
+}
 
 function MethodologyCatalog({
   hiveId,
@@ -358,7 +363,7 @@ function MethodologyCatalog({
             <li key={template.name}>
               <article className="pc-role-card">
                 <h3>{template.title}</h3>
-                <p className="pc-role-desc">{template.description}</p>
+                <Description raw={template.description} />
                 <p className="pc-muted">
                   <code>builtin:{template.name}</code> 目录版本{" "}
                   {template.version}
@@ -400,7 +405,7 @@ function MethodologyCatalog({
           onConfirm={() => void install()}
           onCancel={() => setSelected(null)}
         >
-          <p>{selected.description}</p>
+          <Description raw={selected.description} />
           <p>
             将安装 <code>builtin:{selected.name}</code>（{selected.version}
             ），发布并立即启用这个版本。 新派出的 Agent
@@ -525,7 +530,7 @@ function RoleCard({
         ) : null}
       </header>
       {role.description ? (
-        <p className="pc-role-desc">{role.description}</p>
+        <Description raw={role.description} />
       ) : null}
       <dl className="pc-role-meta">
         <div>

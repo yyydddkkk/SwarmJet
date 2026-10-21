@@ -16,6 +16,8 @@ async function open(page: Page, prepare: (state: MockState) => void) {
     body: '<script type="module">import RefreshRuntime from "/@react-refresh";RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script><div id="root"></div><script type="module" src="/tests/panel-harness.tsx"></script>',
   }));
   await page.goto("/provenance-test");
+  await expect(page.getByRole("button", { name: "主Agent详情", exact: true })).toBeVisible();
+  await page.evaluate(() => (window as unknown as {panelHarnessSyncMessages(): Promise<void>}).panelHarnessSyncMessages());
 }
 
 test("新对话保留管理员、Agent、系统和外部消息来源", async ({ page }) => {

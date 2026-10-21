@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   useDataAPI,
   useProjectState,
+  oneLineSummary, prSummary, weightedTruncate, uniqueLongTexts, shortAgentId, shortSha, relativeTime, localizedReason, agentStateLabel, addressLabel, messageTrustLabel,
   type Agent,
   type HiveOverview,
   type Message,
@@ -9,49 +10,25 @@ import {
 } from "../../data";
 import type { StarsSlotProps } from "../slots";
 import type { ObjectSelection } from "../ui";
-import { useFocus, Panel, ErrorNotice } from "./primitives";
+import { useFocus, Panel, ErrorNotice, LongText, ShortCopy } from "./primitives";
 import { AgentUsagePanel } from "./UsagePanel";
 import Methodology from "./MethodologyPage";
 import { useResource } from "./use-resource";
-const states: Record<string, string> = {
-  active: "工作中",
-  creating: "正在准备",
-  parked: "空闲",
-  hibernated: "已休眠",
-  completed: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-  disabled: "已停用",
-};
-const address = (value: string) =>
-  value === "queen"
-    ? "主 Agent"
-    : value === "hive" || value === "system"
-      ? "系统"
-      : value.startsWith("local:")
-        ? "你"
-        : value.replace(/^forager:/, "Agent ");
-const trustName: Record<string, string> = {
-  user: "来自管理员",
-  agent: "来自 Agent",
-  external: "外部内容，未经核实",
-  system: "来自系统",
-};
 export function ObjectPanel({
   ui,
   store,
   selection,
-}: { store: ProjectStore; selection: ObjectSelection } & StarsSlotProps) {
+  active = true,
+}: { store: ProjectStore; selection: ObjectSelection; active?: boolean } & StarsSlotProps) {
   const live = useProjectState(store);
   const api = useDataAPI();
-  const ref = useFocus();
+  const ref = useFocus(active);
   const [body, setBody] = useState("");
   const [reply, setReply] = useState<Message>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [attempt, setAttempt] = useState(0);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const lock = useRef(false);
   const detail = useResource(
@@ -59,89 +36,39 @@ export function ObjectPanel({
       selection.kind === "agent"
         ? api.getForager(selection.id, signal)
         : Promise.resolve(undefined),
-    [selection.id, selection.kind, live.revision],
+    [selection.id, selection.kind],
   );
   const snapshot = live.snapshot;
   const agent =
     detail.data?.forager ?? snapshot?.agents.find((a) => a.id === selection.id);
   const local = snapshot?.localAddress;
-  const messageRevision = snapshot?.messages.map((m) => m.id).join(",");
   useEffect(() => {
-    if (!snapshot || !["queen", "agent", "signal"].includes(selection.kind))
-      return;
+    if (!snapshot || selection.kind !== "agent" || !agent || !["completed", "cancelled", "failed"].includes(agent.state)) return;
     let valid = true;
-    const controller = new AbortController();
     setLoading(true);
-    const addresses =
-      selection.kind === "signal"
-        ? ["hive"]
-        : [
-            ...new Set([
-              "queen",
-              "hive",
-              local,
-              ...snapshot.agents.map((a) => `forager:${a.id}`),
-            ]),
-          ].filter((a): a is string => !!a);
-    void Promise.all(
-      addresses.map(async (to) => {
-        const result: Message[] = [];
-        let after: string | undefined;
-        do {
-          const page = await api.listMessages(
-            selection.hiveId,
-            { to, after, limit: 200 },
-            controller.signal,
-          );
-          result.push(...page.messages);
-          if (!page.truncated || !page.cursor || page.cursor === after) break;
-          after = page.cursor;
-        } while (!controller.signal.aborted);
-        return result;
-      }),
-    )
-      .then((pages) => {
-        if (!valid) return;
-        const all = [
-          ...new Map(pages.flat().map((m) => [m.id, m])).values(),
-        ].sort(
-          (a, b) =>
-            Date.parse(a.createdAt) - Date.parse(b.createdAt) ||
-            a.id.localeCompare(b.id),
-        );
-        const target =
-          selection.kind === "queen" ? "queen" : `forager:${selection.id}`;
-        setMessages(
-          all.filter(
-            (m) =>
-              (selection.kind === "signal" && m.id === selection.id) ||
-              m.from === target ||
-              m.to === target ||
-              (selection.kind === "queen" && m.to === local),
-          ),
-        );
-        setError("");
-      })
-      .catch((cause) => {
-        if (valid)
-          setError(String(cause instanceof Error ? cause.message : cause));
-      })
-      .finally(() => {
-        if (valid) setLoading(false);
-      });
-    return () => {
-      valid = false;
-      controller.abort();
-    };
-  }, [
-    api,
-    selection.id,
-    selection.kind,
-    selection.hiveId,
-    local,
-    messageRevision,
-    attempt,
-  ]);
+    void store.loadAgentMessages(selection.id).catch((cause) => {
+      if (valid) setError(cause instanceof Error ? cause.message : String(cause));
+    }).finally(() => { if (valid) setLoading(false); });
+    return () => { valid = false; };
+  }, [store, selection.id, selection.kind, agent?.state, attempt]);
+  const targetAddress = selection.kind === "queen" ? "queen" : `forager:${selection.id}`;
+  const messages = (snapshot?.messages ?? []).filter((m) =>
+    selection.kind === "signal" ? m.id === selection.id : m.from === targetAddress || m.to === targetAddress || (selection.kind === "queen" && m.to === local),
+  );
+  const seenTexts = agent?.task ? [agent.task] : [];
+  const visibleMessages = messages.filter((message) => {
+    const value = "body" in message ? message.body : message.preview;
+    if (uniqueLongTexts([...seenTexts, value]).length === uniqueLongTexts(seenTexts).length) return false;
+    seenTexts.push(value);
+    return true;
+  });
+  const previewIds = visibleMessages.filter((message) => "preview" in message).map((message) => message.id).join(",");
+  useEffect(() => {
+    if (!previewIds) return;
+    void store.hydrateMessages(previewIds.split(",")).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    });
+  }, [store, previewIds]);
   const act = async (fn: () => Promise<unknown>, text: string) => {
     if (lock.current) return;
     lock.current = true;
@@ -165,9 +92,11 @@ export function ObjectPanel({
     return (
       <div
         ref={ref}
-        className="pc-sheet pc-right"
+        className={`pc-sheet pc-right ${active ? "pc-open" : ""}`}
         role="region"
         aria-label="对象详情"
+        aria-hidden={!active}
+        inert={!active}
       >
         <button onClick={() => ui.closeObject()}>关闭详情</button>正在读取…
       </div>
@@ -176,16 +105,22 @@ export function ObjectPanel({
     selection.kind === "queen"
       ? "主 Agent"
       : selection.kind === "pr"
-        ? `PR #${selection.number}`
+        ? prSummary(snapshot.prs.find((p) => p.number === selection.number) ?? {number: selection.number!, headSha: "", state: "open", ready: false, merged: false}, 40)
         : selection.kind === "signal"
-          ? "待处理事件"
-          : agent?.roleName || "Agent";
+          ? weightedTruncate(snapshot.signals.find((s) => s.messageId === selection.id)?.title ?? "待处理事件", 40)
+          : agent ? oneLineSummary(agent, { prs: snapshot.prs, issues: snapshot.signals }, 40) : "Agent";
+  const fullTarget = selection.kind === "queen" ? "主 Agent" : selection.kind === "pr"
+    ? snapshot.prs.find((p) => p.number === selection.number)?.title || `PR #${selection.number}`
+    : selection.kind === "signal" ? snapshot.signals.find((s) => s.messageId === selection.id)?.title || "待处理事件"
+    : agent ? oneLineSummary(agent, { prs: snapshot.prs, issues: snapshot.signals }) : "Agent";
   return (
     <div
       ref={ref}
-      className="pc-sheet pc-right"
+      className={`pc-sheet pc-right ${active ? "pc-open" : ""}`}
       role="region"
       aria-label="对象详情"
+      aria-hidden={!active}
+      inert={!active}
     >
       <button
         className="pc-close"
@@ -194,8 +129,8 @@ export function ObjectPanel({
       >
         ×
       </button>
-      <p className="pc-muted">{snapshot.hive.name}</p>
-      <h2>{target}</h2>
+      <p className="pc-kicker">{selection.kind === "pr" ? `PR #${selection.number}` : selection.kind === "agent" ? agentStateLabel(agent?.state ?? "creating") : selection.kind === "queen" ? "主 Agent" : "外部事件"}，项目 {snapshot.hive.name}</p>
+      <h2 title={fullTarget} aria-label={fullTarget}>{target}</h2>
       {error && (
         <ErrorNotice message={error} onRetry={() => setAttempt((n) => n + 1)} />
       )}{" "}
@@ -212,14 +147,13 @@ export function ObjectPanel({
             .filter((s) => s.messageId === selection.id)
             .map((signal) => (
               <section key={signal.messageId}>
-                <h3>{signal.title}</h3>
                 {messages
                   .filter((m) => m.id === signal.messageId)
                   .map((m) => (
                     <div key={m.id}>
-                      <small>{trustName[m.trust || "agent"] || m.trust}</small>
-                      <time>{new Date(m.createdAt).toLocaleString()}</time>
-                      <p className="pc-message-body">{m.body}</p>
+                      <small>{messageTrustLabel(m.trust || "agent")}</small>
+                      <time dateTime={m.createdAt}>{relativeTime(m.createdAt)}</time>
+                      {"body" in m ? <LongText text={m.body} label="事件正文" /> : <p>事件摘要：{m.preview}（正在读取完整正文…）</p>}
                     </div>
                   ))}
                 {loading && <p role="status">正在读取事件正文…</p>}
@@ -228,7 +162,7 @@ export function ObjectPanel({
                 </a>
                 {signal.claimed ? (
                   <p>已由 {signal.claimedBy} 处理</p>
-                ) : (
+                ) : signal.kind === "issue" ? (
                   <button
                     disabled={busy}
                     onClick={() =>
@@ -240,28 +174,22 @@ export function ObjectPanel({
                   >
                     请主 Agent 处理 Issue #{signal.number}
                   </button>
-                )}
+                ) : null}
               </section>
             ))}
         </>
       ) : (
         <>
-          <Panel title="此刻在做什么">
+          <Panel title={agent && ["completed", "failed", "cancelled"].includes(agent.state) ? "结果" : "此刻在做什么"}>
             <p>
               {selection.kind === "queen"
-                ? states[snapshot.queen.state]
+                ? agentStateLabel(snapshot.queen.state)
                 : agent
-                  ? states[agent.state]
+                  ? agentStateLabel(agent.state)
                   : "正在读取 Agent…"}
             </p>
-            <p>
-              {agent?.task ||
-                (selection.kind === "queen" ? "负责协调这个项目。" : "")}
-            </p>
+            {agent?.task ? <LongText text={agent.task} label="任务全文" /> : selection.kind === "queen" ? <p>负责协调这个项目。</p> : null}
             {agent && <AgentFacts agent={agent} />}
-            <p className="pc-muted">
-              最近的工具调用：平台暂未提供；下方显示真实消息。
-            </p>
           </Panel>
           {detail.error && (
             <ErrorNotice message={detail.error} onRetry={detail.reload} />
@@ -283,22 +211,22 @@ export function ObjectPanel({
           )}
           <Panel title="对话">
             {loading && <p role="status">正在读取完整对话…</p>}
-            {!loading && !messages.length && <p>还没有对话。</p>}
+            {!loading && !visibleMessages.length && <p>还没有对话。</p>}
             <ol className="pc-messages">
-              {messages.map((m) => (
+              {visibleMessages.map((m) => (
                 <li key={m.id}>
                   <header>
                     <strong>
-                      {address(m.from)} 对 {address(m.to)}
+                      {addressLabel(m.from)} 对 {addressLabel(m.to)}
                     </strong>
-                    <time>{new Date(m.createdAt).toLocaleString()}</time>
+                    <time dateTime={m.createdAt}>{relativeTime(m.createdAt)}</time>
                   </header>
                   <small>
-                    {trustName[m.trust || "agent"] || m.trust}{" "}
+                    {messageTrustLabel(m.trust || "agent")}{" "}
                     {m.kind === "question" ? "提问" : ""}
                   </small>
-                  <p>{m.body}</p>
-                  {m.kind === "question" &&
+                  {"body" in m ? <LongText text={m.body} label="消息正文" /> : <p>消息摘要：{m.preview}（正在读取完整正文…）</p>}
+                  {"body" in m && m.kind === "question" &&
                     m.to === local &&
                     (m.from === "queen" || m.from.startsWith("forager:")) && (
                       <button
@@ -313,7 +241,7 @@ export function ObjectPanel({
                         回复这条提问
                       </button>
                     )}
-                  {m.artifacts?.map((a, i) => (
+                  {("artifacts" in m ? m.artifacts : undefined)?.map((a, i) => (
                     <p key={i}>
                       <code>{a.ref}</code>
                     </p>
@@ -349,7 +277,7 @@ export function ObjectPanel({
           >
             {reply && (
               <p>
-                正在回复 {address(reply.from)} 的提问。
+                正在回复 {addressLabel(reply.from)} 的提问。
                 <button type="button" onClick={() => setReply(undefined)}>
                   取消回复
                 </button>
@@ -427,12 +355,6 @@ export function ObjectPanel({
                   roleName={agent.roleName}
                 />
               </details>
-              {["Diff", "终端", "时间线"].map((label) => (
-                <details key={label}>
-                  <summary>{label}</summary>
-                  <p>平台暂未提供{label}数据。</p>
-                </details>
-              ))}
               {!["completed", "failed", "cancelled"].includes(agent.state) && (
                 <button
                   disabled={busy}
@@ -457,19 +379,19 @@ function AgentFacts({ agent }: { agent: Agent }) {
   return (
     <dl className="pc-facts">
       {[
-        ["编号", agent.id],
-        ["分支", agent.branch],
-        ["父 Agent", agent.parentId],
-        ["检出提交", agent.revision],
-        ["对话链", agent.chainId],
+        ["编号", agent.id, "id"],
+        ["分支", agent.branch, "branch"],
+        ["父 Agent", agent.parentId, "id"],
+        ["检出提交", agent.revision, "sha"],
+        ["对话链", agent.chainId, "id"],
         ["Issue", agent.issueNumber ? `#${agent.issueNumber}` : undefined],
       ]
         .filter(([, v]) => v)
-        .map(([k, v]) => (
+        .map(([k, v, type]) => (
           <div key={k}>
             <dt>{k}</dt>
             <dd>
-              <code>{v}</code>
+              {type && v ? <ShortCopy value={v} short={type === "sha" ? shortSha(v) : type === "branch" ? weightedTruncate(v, 22) : shortAgentId(v)} label={k!} /> : <code>{v}</code>}
             </dd>
           </div>
         ))}
@@ -512,7 +434,7 @@ export function PRPanel({
   const lock = useRef(false);
   return (
     <section className="pc-pr">
-      <h3>PR #{number}</h3>
+      <h3>{live ? prSummary(live, 40) : `PR #${number}`}</h3>
       {details.error && (
         <ErrorNotice message={details.error} onRetry={details.reload} />
       )}
@@ -520,7 +442,7 @@ export function PRPanel({
         <div role="alert">
           <p>PR 有新提交，请重新查看</p>
           <p>
-            当前提交：<code>{live?.headSha}</code>
+            当前提交：{live?.headSha && <ShortCopy value={live.headSha} short={shortSha(live.headSha)} label="当前提交" />}
             ；下方检查与验证对应已读取提交。
           </p>
           <button onClick={details.reload}>重新查看</button>
@@ -536,11 +458,13 @@ export function PRPanel({
       </p>
       <p>
         已读取提交：
-        <code data-testid="reviewed-pr-head">{observed ?? "尚未读取"}</code>
+        <span data-testid="reviewed-pr-head" hidden>{observed ?? "尚未读取"}</span>
+        {observed ? <ShortCopy value={observed} short={shortSha(observed)} label="已读取提交" /> : "尚未读取"}
       </p>
-      {(pr?.reasons ?? []).map((reason) => (
-        <p key={reason}>{reason}</p>
-      ))}
+      {(pr?.reasons ?? []).map((reason) => {
+        const localized = localizedReason(reason);
+        return <div key={reason}><p>{localized.text}</p>{localized.detail && <details><summary>查看原因详情</summary><p>{localized.detail}</p></details>}</div>;
+      })}
       {(pr?.url || live?.url) && (
         <p>
           <a href={pr?.url || live?.url} target="_blank" rel="noreferrer">
@@ -548,19 +472,19 @@ export function PRPanel({
           </a>
         </p>
       )}
-      <h4>检查结果</h4>
+      <h3>GitHub CI</h3>
       {pr?.checks?.length ? (
         pr.checks.map((c, i) => (
           <p key={i}>
             {c.name}：{c.conclusion || c.status}
             {c.url && <a href={c.url}> 查看</a>}
-            {c.output && <pre>{c.output}</pre>}
+            {c.output && <LongText text={c.output} label="检查输出" />}
           </p>
         ))
       ) : (
-        <p>还没有检查结果。</p>
+        <p>无</p>
       )}
-      <h4>验证结论历史</h4>
+      <h3>独立验证</h3>
       {(pr?.attestations ?? []).map((a) => (
         <article className="pc-attestation" key={a.id}>
           <p>
@@ -572,17 +496,17 @@ export function PRPanel({
                 blocked: "受阻",
               }[a.result]
             }
-            ：{a.summary}
+            ：<LongText text={a.summary} label="验证结论" />
           </p>
           <p>
-            {a.attesterId} {a.isAuthor ? "作者" : "独立验证"}{" "}
+            <ShortCopy value={a.attesterId} short={shortAgentId(a.attesterId)} label="验证 Agent" /> {a.isAuthor ? "作者" : "独立验证"}{" "}
             {a.superseded ? "已作废" : "有效"}
           </p>
-          <code>{a.headSha}</code>
-          <time>{a.createdAt}</time>
+          <ShortCopy value={a.headSha} short={shortSha(a.headSha)} label="验证提交" />
+          <time dateTime={a.createdAt}>{relativeTime(a.createdAt)}</time>
           {a.findings?.map((f, i) => (
             <p key={i}>
-              {f.severity} {f.location} {f.finding} {f.evidence}
+              {f.severity} {f.location} <LongText text={[f.finding, f.evidence].filter(Boolean).join("\n")} label="验证发现" />
             </p>
           ))}
           {a.commentUrl && <a href={a.commentUrl}>查看评论</a>}
@@ -590,6 +514,7 @@ export function PRPanel({
       ))}
       {!pr?.attestations?.length && <p>还没有验证结论。</p>}
       <button
+        className="go"
         disabled={busy || !canMerge}
         onClick={() => {
           if (lock.current || !canMerge || !observed) return;
