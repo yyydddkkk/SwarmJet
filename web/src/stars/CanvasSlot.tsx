@@ -7,7 +7,8 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
   const canvas = useRef<HTMLCanvasElement>(null),
     api = useDataAPI();
   const observer = useRef<HTMLButtonElement>(null),
-    decisionPanel = useRef<HTMLElement>(null);
+    decisionPanel = useRef<HTMLElement>(null),
+    retainedNote = useRef<MapNote>(undefined);
   const [feedback, setFeedback] = useState(""),
     [deciding, setDeciding] = useState(false),
     [note, setNote] = useState<MapNote>(),
@@ -27,6 +28,8 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
       name: s.getSnapshot().snapshot?.hive.name ?? hiveId,
     })),
   );
+  if (note) retainedNote.current = note;
+  const displayedNote = note ?? retainedNote.current;
   useEffect(() => {
     const element = canvas.current!;
     const map = new StarMap(
@@ -115,10 +118,9 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
       >
         <svg viewBox="-10 -10 20 20" aria-hidden="true"><circle r="7" fill="none" stroke="currentColor" strokeWidth="1"/><circle r="1.6" fill="currentColor"/></svg>
       </button>
-      <div className={`stars-note${note ? " open" : ""}`} style={note ? { left: Math.max(40, Math.min(innerWidth - 300, note.x + 26)), top: Math.max(40, Math.min(innerHeight - 320, note.y - 24)) } : undefined} aria-live="polite">
-        {note && <><h4>{note.title}</h4><p>{note.body}</p><div className="acts"><button onClick={() => { ui.openOverlay("list"); window.dispatchEvent(new CustomEvent("swarmjet:catalogue-open", { detail: { scope: note.scope, query: note.query } })); setNote(undefined); }}>{note.kind === "history" ? "在列表中查看" : "在列表中查看全部"}</button><button onClick={() => setNote(undefined)}>关闭</button></div></>}
+      <div className={`stars-note${note ? " open" : ""}`} style={displayedNote ? { left: Math.max(40, Math.min(innerWidth - 300, displayedNote.x + 26)), top: Math.max(40, Math.min(innerHeight - 320, displayedNote.y - 24)) } : undefined} aria-live="polite" aria-hidden={!note} inert={!note}>
+        {displayedNote && <><h2>{displayedNote.title}</h2><p>{displayedNote.body}</p><div className="acts"><button onClick={() => { ui.openOverlay("list"); window.dispatchEvent(new CustomEvent("swarmjet:catalogue-open", { detail: { scope: displayedNote.scope, query: displayedNote.query } })); setNote(undefined); }}>{displayedNote.kind === "history" ? "在列表中查看" : "在列表中查看全部"}</button><button onClick={() => setNote(undefined)}>关闭</button></div></>}
       </div>
-      {deciding && (
         <section
           ref={decisionPanel}
           onKeyDown={(e) => {
@@ -129,8 +131,10 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
             }
           }}
           id="stars-decisions"
-          className="stars-decisions"
+          className={`stars-decisions${deciding ? " open" : ""}`}
           aria-label="等你决定的事"
+          aria-hidden={!deciding}
+          inert={!deciding}
         >
           <button
             className="stars-decisions-close"
@@ -139,7 +143,7 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
           >
             关闭
           </button>
-          <h4>等你决定</h4>
+          <h2>等你决定</h2>
           {decisions.length === 0 && <p>暂时没有需要你决定的事。</p>}
           {decisions.map((d) => (
             <button
@@ -172,7 +176,6 @@ export default function CanvasSlot({ projects, stores, ui }: StarsSlotProps) {
             </button>
           ))}
         </section>
-      )}
       {feedback && (
         <div className="stars-canvas-feedback" role="status">
           {feedback}

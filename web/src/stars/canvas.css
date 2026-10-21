@@ -118,8 +118,11 @@
   position: fixed;
   left: 50%;
   bottom: 140px;
-  transform: translate(-50%, 0);
-  transition: opacity .4s, transform .4s;
+  transform: translate(-50%, 8px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .4s, transform .4s, visibility 0s linear .4s;
   text-align: center;
   min-width: 180px;
   max-width: 260px;
@@ -131,8 +134,10 @@
   outline-offset: 3px;
   padding: 22px 30px 18px;
   z-index: 5;
+  scrollbar-width: none;
 }
-.stars-decisions h4 {
+.stars-decisions.open { transform: translate(-50%, 0); opacity: 1; visibility: visible; pointer-events: auto; transition: opacity .4s, transform .4s, visibility 0s; }
+.stars-decisions h2 {
   font-family: var(--title);
   font-weight: 400;
   font-style: italic;
@@ -148,14 +153,18 @@
 .stars-decisions-close {
   float: right;
 }
-.stars-note { position: fixed; background: var(--veil); border: 1px solid var(--hair); outline: 1px solid var(--hair); outline-offset: 3px; padding: 16px 20px 14px; min-width: 180px; max-width: 260px; max-height: calc(100vh - 80px); overflow: auto; opacity: 0; pointer-events: none; transition: opacity .3s; z-index: 5; }
-.stars-note.open { opacity: 1; pointer-events: auto; }
-.stars-note h4 { font-family: var(--title); font-weight: 400; font-style: italic; font-size: 19px; }
+.stars-note { position: fixed; background: var(--veil); border: 1px solid var(--hair); outline: 1px solid var(--hair); outline-offset: 3px; padding: 16px 20px 14px; min-width: 180px; max-width: 260px; max-height: calc(100vh - 80px); overflow: auto; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .3s, visibility 0s linear .3s; z-index: 5; scrollbar-width: none; }
+.stars-note.open { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity .3s, visibility 0s; }
+.stars-note h2 { font-family: var(--title); font-weight: 400; font-style: italic; font-size: 19px; }
 .stars-note p { font-size: 15px; line-height: 1.6; color: var(--ink2); margin-top: 6px; white-space: pre-line; }
 .stars-note .acts { display: flex; gap: 18px; margin-top: 12px; font-style: italic; font-size: 16px; }
 .stars-note .acts button { color: var(--ink2); }
 .stars-note .acts button:hover { color: var(--ink); }
-.stars-history-hover { position: fixed; z-index: 5; width: min(340px, calc(100vw - 48px)); max-height: calc(100vh - 80px); overflow: auto; padding: 12px 16px; background: var(--veil); border: 1px solid var(--hair); color: var(--ink); font: italic 14px/1.55 var(--body); overflow-wrap: anywhere; }
+.stars-history-hover { position: fixed; z-index: 5; width: min(340px, calc(100vw - 48px)); max-height: calc(100vh - 80px); overflow: auto; scrollbar-width: none; padding: 12px 16px; background: var(--veil); border: 1px solid var(--hair); color: var(--ink); font: italic 14px/1.55 var(--body); overflow-wrap: anywhere; }
 .stars-history-hover p { margin: 0; white-space: normal; }
 .stars-history-hover small { display: block; margin-top: 6px; color: var(--ink2); font: 13px/1.4 var(--body); }
 [data-style="simple"] .stars-history-hover { font-style: normal; }
+.stars-note::-webkit-scrollbar,.stars-decisions::-webkit-scrollbar,.stars-history-hover::-webkit-scrollbar { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .stars-note,.stars-note.open,.stars-decisions,.stars-decisions.open,.stars-history-hover { animation: none; transition: none; }
+}

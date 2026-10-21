@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { writeFileSync } from "node:fs";
 async function mount(page: Page, large = false, multiple = false) {
   page.on("pageerror", (e) => console.log("CANVAS_ERROR", e.message));
@@ -520,6 +521,7 @@ test("turning on reduced motion during a merge flare stops the flare and redraw 
   await expect(page.locator(".stars-canvas")).toHaveAttribute("data-flares", "1", { timeout: 4000 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(page.locator(".stars-canvas")).toHaveAttribute("data-flares", "0");
+  await page.waitForTimeout(150);
   const frames = await page.locator(".stars-canvas").getAttribute("data-frames");
   await page.waitForTimeout(400);
   await expect(page.locator(".stars-canvas")).toHaveAttribute("data-frames", frames!);
@@ -712,6 +714,57 @@ test("cluster opens the first six items and links to the active list", async ({ 
   expect(await page.evaluate(() => (window as any).__canvas.ui.getSnapshot().overlay)).toBe("list");
 });
 
+test("note and decision cards fade with their content, then become inert", async ({ page }) => {
+  await mount(page, true);
+  await page.evaluate(() => { const x = (window as any).__canvas; x.ui.selectProject(x.hive.id); const h1 = document.createElement("h1"); h1.textContent = "星图"; document.querySelector("main.stars-app")!.prepend(h1); });
+  await settle(page);
+  const id = await page.evaluate(() => `${(window as any).__canvas.hive.id}:cluster:pr`);
+  const q = await point(page, id);
+  await page.mouse.click(q.x, q.y);
+  const note = page.locator(".stars-note");
+  await expect(note).toHaveClass(/open/);
+  await page.waitForTimeout(100);
+  const entering = Number(await note.evaluate((el) => getComputedStyle(el).opacity));
+  expect(entering).toBeGreaterThan(0);
+  expect(entering).toBeLessThan(1);
+  await expect(note).toHaveCSS("opacity", "1");
+  const noteAxe = await new AxeBuilder({ page }).analyze();
+  expect(noteAxe.violations.filter((v) => v.id === "heading-order" || ["serious", "critical"].includes(v.impact ?? ""))).toEqual([]);
+  await note.getByRole("button", { name: "关闭" }).click();
+  await expect(note).toHaveAttribute("aria-hidden", "true");
+  await expect(note).toHaveAttribute("inert", "");
+  await page.waitForTimeout(100);
+  const leaving = Number(await note.evaluate((el) => getComputedStyle(el).opacity));
+  expect(leaving).toBeGreaterThan(0);
+  expect(leaving).toBeLessThan(1);
+  await expect(note).toContainText("还有 8 个 PR");
+  await expect(note).toHaveCSS("visibility", "hidden", { timeout: 1000 });
+  expect(await note.getByRole("button", { name: "关闭", includeHidden: true }).evaluate((el) => { (el as HTMLElement).focus(); return document.activeElement === el; })).toBe(false);
+
+  await page.locator(".stars-observer").click();
+  const decisions = page.locator(".stars-decisions");
+  await expect(decisions).toHaveClass(/open/);
+  await page.waitForTimeout(100);
+  const opening = Number(await decisions.evaluate((el) => getComputedStyle(el).opacity));
+  expect(opening).toBeGreaterThan(0);
+  expect(opening).toBeLessThan(1);
+  await expect(decisions).toHaveCSS("opacity", "1");
+  const decisionAxe = await new AxeBuilder({ page }).analyze();
+  expect(decisionAxe.violations.filter((v) => v.id === "heading-order" || ["serious", "critical"].includes(v.impact ?? ""))).toEqual([]);
+  await decisions.getByRole("button", { name: "关闭等你决定的事" }).click();
+  await expect(decisions).toHaveAttribute("aria-hidden", "true");
+  await expect(decisions).toHaveAttribute("inert", "");
+  await page.waitForTimeout(100);
+  const closing = Number(await decisions.evaluate((el) => getComputedStyle(el).opacity));
+  expect(closing).toBeGreaterThan(0);
+  expect(closing).toBeLessThan(1);
+  await expect(decisions).toHaveCSS("visibility", "hidden", { timeout: 1000 });
+  expect(await decisions.getByRole("button", { name: "关闭等你决定的事", includeHidden: true }).evaluate((el) => { (el as HTMLElement).focus(); return document.activeElement === el; })).toBe(false);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(note).toHaveCSS("transition-duration", "0s");
+  await expect(decisions).toHaveCSS("transition-duration", "0s");
+});
+
 test("only a confirmed failed CI appears as a diamond beside its PR", async ({ page }) => {
   await mount(page);
   await page.evaluate(() => { const x = (window as any).__canvas; x.ui.selectProject(x.hive.id); });
@@ -763,6 +816,9 @@ test("hovering a finished Agent shows summary and opens its historical card", as
   expect((await page.locator(".stars-history-hover").boundingBox())!.width).toBeLessThanOrEqual(341);
   await page.mouse.click(q.x, q.y);
   await expect(page.locator(".stars-note.open")).toContainText("结束时间按 Agent 最近更新时间估算");
+  await page.evaluate(() => { const h1 = document.createElement("h1"); h1.textContent = "星图"; document.querySelector("main.stars-app")!.prepend(h1); });
+  const historyAxe = await new AxeBuilder({ page }).analyze();
+  expect(historyAxe.violations.filter((v) => v.id === "heading-order" || ["serious", "critical"].includes(v.impact ?? ""))).toEqual([]);
 });
 
 test("reduced motion renders a static canvas after camera settles", async ({ page }) => {
