@@ -32,13 +32,14 @@
 
 ## 验证与性能
 
-`npm ci`、`npm run build` 通过；`PLAYWRIGHT_PORT=5276 npx playwright test tests/canvas.spec.ts tests/starmap-visual.spec.ts --reporter=line --workers=1` 为 **23 passed**，完整输出见 [test-log.txt](test-log.txt)。回归包含完成飞出、小簇点击、历史星悬停/点击、全部项目点击进入、减少动态静止、页面隐藏停止、合并动画、确认失败的 CI 与 PR 关联、Issue 拖拽、镜头和时间轴兼容。
+`npm ci`、`npm run build` 通过；完整 Web Playwright 命令为 `PLAYWRIGHT_PORT=5276 npx playwright test --reporter=line --workers=1`，最终 **110 passed**，见 [full-test-log.txt](full-test-log.txt)。默认两 worker 的一轮曾有 B 的 1 秒冷启动时间断言在即时编译负载下测得 1110 ms；单 worker 全套的同项测得 617 ms，未修改该断言或数据层。专项回归包含完成飞出、小簇点击、历史星悬停全文与点击、全部项目点击进入、运行中切换减少动态效果、页面隐藏停止、合并动画、两种来源的失败 CI 点击、Issue 拖拽、镜头和时间轴兼容。小簇、历史星和 ⊙ 卡片另测进退场中间帧、关闭后不可聚焦，以及明亮/夜空的 axe 全部违规项为空。实际侧板、列表和平台设置覆盖区的画布文字按 DOM 矩形屏蔽；减少动态效果下 DOM 延后挂载、开关卡片会补绘一次，随后静止。
 
-性能 fixture：300 个活跃 Agent、900 个历史 Agent、16 个开着的 PR、13 个 Issue、900 条消息和 3000 字任务提示词，明亮/经典，1440×1000，DPR 1，Chromium 153；**未开启减少动态效果**。事件过程收集帧耗时；随后静置 2.2 秒，取 5 秒空闲窗口的 CDP `SystemInfo.getProcessInfo` renderer `cpuTime` 差除以实际墙钟时长，换算为**单核百分比**。采样时单 worker、单页面、稳定的一个 renderer PID。它包含该 renderer 的合成/光栅等开销，因此可高于 `p95 × 30 fps`，后者只计 JavaScript 绘制函数耗时。空闲窗口每秒仍有 30 帧环境动画。
+性能测试使用明亮/经典，1440×1000，DPR 1，Chromium 153；**未开启减少动态效果**。第八轮常规 `round8Project()` 有 48 个 Agent、35 颗历史星，正常项目层约 30 fps；压力 fixture 有 300 个活跃 Agent、900 个历史 Agent、16 个开着的 PR、13 个 Issue、900 条消息和 3000 字以上任务提示词，超过 600 个图形时保持长彗星尾和其余设计动效，但将环境绘制降至约 20 fps。帧耗时从绘制回调开始的镜头/位置更新计到标签避让、覆盖区 DOM 矩形采集、卡片图形、状态写入及下一帧调度之后；跳过的 `requestAnimationFrame` 回调不计入绘制帧。事件过程收集压力 fixture 的帧耗时；随后静置 2.2 秒，取 5 秒空闲窗口的 CDP `SystemInfo.getProcessInfo` renderer `cpuTime` 差除以实际墙钟时长，换算为**单核百分比**。常规 fixture 在镜头稳定后同样取 5 秒。采样时单 worker、单页面、稳定的一个 renderer PID。CPU 包含该 renderer 的合成/光栅等开销，因此不能由 JavaScript 帧耗时乘帧率推算。
 
-| 镜头 | 帧耗时 p50 | p95 | CPU / 单核 | 5 秒帧数 | 原始数据 |
+| 场景 / 镜头 | 帧耗时 p50 | p95 | CPU / 单核 | 5 秒帧数 | 原始数据 |
 |---|---:|---:|---:|---:|---|
-| 全部项目 | 1.8 ms | 3.3 ms | 17.8% | 150 | [JSON](performance-all.json) |
-| 项目 | 1.5 ms | 2.5 ms | 42.2% | 150 | [JSON](performance-project.json) |
+| 常规 / 项目 | 0.9 ms | 1.2 ms | 26.0% | 151（约 30 fps） | [JSON](performance-round8.json) |
+| 300/900 / 全部项目 | 1.4 ms | 2.6 ms | 23.4% | 100（约 20 fps） | [JSON](performance-all.json) |
+| 300/900 / 项目 | 3.3 ms | 5.8 ms | 61.4% | 100（约 20 fps） | [JSON](performance-project.json) |
 
 这次测试不覆盖真实后端部署、D/E 合入后的整页交互，也不把设计稿的固定 PR #8 硬编码成产品决策。
