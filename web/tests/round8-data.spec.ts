@@ -80,9 +80,9 @@ test("a 20 second PR request does not hold the other briefing sections", async (
   await page.goto("/");
   const brief = page.getByRole("dialog", { name: "简报" });
   await expect(brief.getByRole("heading", { name: "正在进行" })).toBeVisible();
-  // Agent 摘要优先关联 PR 标题，因此这里是“修复兼容问题”而非任务原文。
+  // PR 尚在读取中，关联标题未到；应先显示 Agent 任务首句。
   const workingAgent = brief.getByRole("heading", { name: "正在进行" }).locator("xpath=following-sibling::button[1]");
-  await expect(workingAgent).toContainText("修复兼容问题", { timeout: 1000 });
+  await expect(workingAgent).toContainText("为 Hive 页的 Forager 列表增加按状态筛选", { timeout: 1000 });
   await expect(workingAgent).toBeVisible({ timeout: 1000 });
   const agentVisibleMs = Date.now() - navigationStart;
   expect(agentVisibleMs).toBeLessThan(1000);
