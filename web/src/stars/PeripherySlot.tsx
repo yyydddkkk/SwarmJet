@@ -116,9 +116,9 @@ export default function PeripherySlot(props: StarsSlotProps) {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
       const key = e.key.toLowerCase();
       if (key === "escape") {
+        if (e.target === input.current && !ui.getSnapshot().overlay) return;
         e.preventDefault();
         if (create) setCreate(false);
-        else if ((e.target as HTMLElement)?.closest("input,textarea,[contenteditable]") && !ui.getSnapshot().overlay) (e.target as HTMLElement).blur();
         else ui.close();
         return;
       }
