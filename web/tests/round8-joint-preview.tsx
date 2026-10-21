@@ -6,6 +6,7 @@ import { round8Project } from "../src/fixtures/round8";
 import { modelCatalog, swarmjetUsage } from "../src/fixtures/round4";
 import { methodologyTemplates } from "../src/fixtures/round5";
 const snapshot = round8Project();
+snapshot.agents[7].updatedAt = new Date().toISOString();
 snapshot.hive.name = "test-for-myself";
 snapshot.hive.repository = "yyydddkkk/test-for-myself";
 const mock = createMockDataSource({ swarmjet: snapshot }, {
