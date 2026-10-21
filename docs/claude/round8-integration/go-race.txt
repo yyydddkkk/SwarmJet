@@ -1,0 +1,26 @@
+ok  	github.com/yyydddkkk/SwarmJet/cmd/swarmjet	6.320s
+ok  	github.com/yyydddkkk/SwarmJet/internal/api	32.610s
+?   	github.com/yyydddkkk/SwarmJet/internal/cell	[no test files]
+ok  	github.com/yyydddkkk/SwarmJet/internal/cell/acp	1.114s
+ok  	github.com/yyydddkkk/SwarmJet/internal/cell/docker	3.488s
+ok  	github.com/yyydddkkk/SwarmJet/internal/cell/omp	1.027s
+ok  	github.com/yyydddkkk/SwarmJet/internal/connect	1.026s
+?   	github.com/yyydddkkk/SwarmJet/internal/domain	[no test files]
+ok  	github.com/yyydddkkk/SwarmJet/internal/forager	1.177s
+?   	github.com/yyydddkkk/SwarmJet/internal/forge	[no test files]
+ok  	github.com/yyydddkkk/SwarmJet/internal/github	1.108s
+ok  	github.com/yyydddkkk/SwarmJet/internal/githubapp	1.676s
+?   	github.com/yyydddkkk/SwarmJet/internal/jobs	[no test files]
+ok  	github.com/yyydddkkk/SwarmJet/internal/llmproxy	1.091s
+ok  	github.com/yyydddkkk/SwarmJet/internal/mcp	176.436s
+ok  	github.com/yyydddkkk/SwarmJet/internal/merge	1.509s
+ok  	github.com/yyydddkkk/SwarmJet/internal/methodology	1.050s
+ok  	github.com/yyydddkkk/SwarmJet/internal/methodology/catalog	1.039s
+ok  	github.com/yyydddkkk/SwarmJet/internal/observability	1.046s
+ok  	github.com/yyydddkkk/SwarmJet/internal/onboarding	3.914s
+ok  	github.com/yyydddkkk/SwarmJet/internal/queen	1.019s
+ok  	github.com/yyydddkkk/SwarmJet/internal/router	1.100s
+ok  	github.com/yyydddkkk/SwarmJet/internal/secretbox	1.021s
+ok  	github.com/yyydddkkk/SwarmJet/internal/service	5.410s
+ok  	github.com/yyydddkkk/SwarmJet/internal/store	88.037s
+?   	github.com/yyydddkkk/SwarmJet/methodologies	[no test files]

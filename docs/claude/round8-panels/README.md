@@ -24,3 +24,5 @@
 **用户批准的对比度例外**：设计稿把部分可读辅助文字设为 `ink3`，在明亮底色约 2.92:1。首次实际运行 axe 报 `color-contrast`：项目未选分区按钮、对象 kicker、方法论文件路径（6 个节点）；在相同字体/字号/间距下仅改用已有 `ink2`，约 7.05:1。首次 `heading-order`（接入页 h1→h3、PR 页 h2→h4）和 `label-content-name-mismatch`（短 sha 复制按钮）也已修正。最终 [全页面 axe 结果](axe-all-pages.json) 为 14 页×2 主题全部 0 violations；未禁用规则。[焦点/退场/375px 结果](axe-violations.json) 三类面板也全部为 0。
 
 验证：`cd web && npm ci`、`npm run build` 均通过。最终 `PLAYWRIGHT_PORT=5277 npx playwright test --workers=2` 为 **108/109**：唯一失败是 B 已有的慢 PR 测试要求 Agent 首次可见 <1000ms，本机实测 1139ms；`--workers=1` 全套同为 **108/109**，该项 1057ms。该项单独重试实测 966ms 通过，未改数据层或放宽阈值。D 新增的慢/失败方法论 2/2、旧版本 1/1、视觉与 axe 3/3 均通过；[最终 axe 结果](axe-all-pages.json) 的 28 个页面/主题组合均为 0 violations。测试配置在没有预先运行参考服务时会启动设计稿服务；预览入口仅位于 `web/tests/round8-panels-preview.tsx`，不进入生产入口或向真实 API 发请求。
+
+最终组合截图已在集成分支重拍并重新拼接；最新审查修复、156项完整测试及性能结果见[集成记录](../round8-integration.md)。本索引早期独立分支数据保留为开发过程记录。

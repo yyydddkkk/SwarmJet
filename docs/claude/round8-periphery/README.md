@@ -17,3 +17,5 @@
 验证：`cd web && npm ci && npm run build`，[当前构建日志](build-restored.log)通过；第七轮原用例恢复后详见 [覆盖映射](regression-coverage.md)。先前的 [93/93 日志](playwright.log) 在覆盖复核中被退回，**不作为最终全量结果**。最近一次完整命令 `cd web && PLAYWRIGHT_PORT=5278 npx playwright test` 的[日志](playwright-restored.log)为 **114/116**：D 的 check 详情误显示 Issue 派活按钮（依赖 D 的 Issue-only 守卫提交 `4d3d204`），以及源码 Vite 首屏 1011ms 超过既有 1 秒门槛。此前 763/997ms 和这次 1011ms 的首屏用例定位为“简报第一行”，可能命中主 Agent 提问，**均不作为 Agent 首屏通过证据**。其后已改成“正在进行”首行的明确 Agent 任务摘要；[目标单项](slow-pr-targeted.md)确认文本与可见性通过，墙钟为 **1173ms**，这是当前可靠的源码 Vite 时序读数。此修正后未再运行全量，最终组合和生产构建产物的同一秒门槛对照由根任务执行，未放宽阈值。
 
 专项测试覆盖 375px、1440×900 简报需要项和留意项同屏、快捷键、确认后共享 store 即时重算、同号 Issue/PR 命令消歧、发送期间保留新草稿。axe 在明亮与夜空两主题、减少动态效果下对简报、列表、图例、显示、登录、命令及断线提示执行全部规则，未禁用 `color-contrast`；只在界面稳定后取样。
+
+最终组合截图已在集成分支重拍并重新拼接；最新审查修复、156项完整测试及性能结果见[集成记录](../round8-integration.md)。本索引早期独立分支数据保留为开发过程记录。

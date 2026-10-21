@@ -64,4 +64,6 @@ shell 在 `StarsApp.tsx` 为每个项目创建且持有一个 `ProjectStore`，�
 
 ### 简报与列表规则
 
+`nodeSummary` 对“编号 + 正文”整行统一按约14加权字截断，编号计入预算；列表40、简报30的正文预算不变，悬停仍可取完整摘要。`attestationStateLabel(attestation, observedHead?)` 明确区分“对应已读取提交 / 其他提交 / 已作废 / 尚未核对提交”，不把未标作废当成当前提交可合并；最终合并条件仍以实时后端检查为准。
+
 `activeAgents(agents)`、`attentionAgents(snapshot, now?, acknowledged?)`、`completedLastNight(agents, now?)` 提供简报的工作中对象、最近 24 小时且未确认的失败/长期空闲项、昨晚完成数（仍按 updatedAt 近似）。`catalogueRows(snapshot, scope?, query?, now?, acknowledged?)` 返回纯数据行：id、glyph、summary、status、cost、scopes、search、selection。界面只负责把 selection 交给 UI 导航。今天按本地自然日；历史包含今天完成的对象，三个筛选可重叠，确保每颗历史星都能在历史里找到。`agentStateLabel`、`addressLabel`、`messageTrustLabel` 统一状态与来源标签。

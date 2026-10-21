@@ -29,8 +29,8 @@
 冷读的 17 次包括开放列表 1 次、关闭列表 1 次、3 个开放 PR 各 5 次并行只读请求。测试断言冷读 ≤3 秒、热读 ≤300 毫秒。GitHub App 签发凭证和仓库解析在假服务之外；这些数据不能代替升级后的真实部署冷、热验收，也没有把它们直接当成第七轮 21 秒的实机对照。
 
 ```sh
-TEST_DATABASE_URL='postgres://postgres:pw@127.0.0.1:55450/postgres?sslmode=disable' go test -count=1 -run TestPRListColdAndWarmWithDelayedGitHub -v ./internal/api
-TEST_DATABASE_URL='postgres://postgres:pw@127.0.0.1:55450/postgres?sslmode=disable' go test -race -p 1 ./...
+TEST_DATABASE_URL="$TEST_DATABASE_URL" go test -count=1 -run TestPRListColdAndWarmWithDelayedGitHub -v ./internal/api
+TEST_DATABASE_URL="$TEST_DATABASE_URL" go test -race -p 1 ./...
 ```
 
 主代理在最终代码 `dee940d` 上真实运行以上命令，均通过。原始输出在 [性能日志](round8-pr-list/performance.txt)、[全量 race 日志](round8-pr-list/go-race.txt)。本次没有遇到已知 ACP 偶发失败。

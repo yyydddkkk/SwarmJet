@@ -1,0 +1,182 @@
+{
+  "bright:.periphery-brief h3": {
+    "foreground": [
+      19,
+      25,
+      39,
+      0.74
+    ],
+    "background": [
+      244,
+      243,
+      239,
+      0.87
+    ],
+    "minimum": 5.2420108886227945
+  },
+  "bright:.periphery-it-state": {
+    "foreground": [
+      19,
+      25,
+      39,
+      0.74
+    ],
+    "background": [
+      244,
+      243,
+      239,
+      0.87
+    ],
+    "minimum": 5.2420108886227945
+  },
+  "bright:.periphery-attention .ack": {
+    "foreground": [
+      19,
+      25,
+      39,
+      0.74
+    ],
+    "background": [
+      244,
+      243,
+      239,
+      0.87
+    ],
+    "minimum": 5.2420108886227945
+  },
+  "bright:.periphery-muted": {
+    "foreground": [
+      19,
+      25,
+      39,
+      0.74
+    ],
+    "background": [
+      244,
+      243,
+      239,
+      0.87
+    ],
+    "minimum": 5.2420108886227945
+  },
+  "bright:.periphery-foot label": {
+    "foreground": [
+      19,
+      25,
+      39,
+      0.74
+    ],
+    "background": [
+      244,
+      243,
+      239,
+      0.87
+    ],
+    "minimum": 5.2420108886227945
+  },
+  "bright:display": {
+    "foreground": [
+      19,
+      25,
+      39,
+      0.74
+    ],
+    "background": [
+      244,
+      243,
+      239,
+      0.96
+    ],
+    "minimum": 6.482551490844156
+  },
+  "night:.periphery-brief h3": {
+    "foreground": [
+      220,
+      227,
+      239,
+      0.7
+    ],
+    "background": [
+      10,
+      16,
+      32,
+      0.87
+    ],
+    "minimum": 5.2731882814205555
+  },
+  "night:.periphery-it-state": {
+    "foreground": [
+      220,
+      227,
+      239,
+      0.7
+    ],
+    "background": [
+      10,
+      16,
+      32,
+      0.87
+    ],
+    "minimum": 5.2731882814205555
+  },
+  "night:.periphery-attention .ack": {
+    "foreground": [
+      220,
+      227,
+      239,
+      0.7
+    ],
+    "background": [
+      10,
+      16,
+      32,
+      0.87
+    ],
+    "minimum": 5.2731882814205555
+  },
+  "night:.periphery-muted": {
+    "foreground": [
+      220,
+      227,
+      239,
+      0.7
+    ],
+    "background": [
+      10,
+      16,
+      32,
+      0.87
+    ],
+    "minimum": 5.2731882814205555
+  },
+  "night:.periphery-foot label": {
+    "foreground": [
+      220,
+      227,
+      239,
+      0.7
+    ],
+    "background": [
+      10,
+      16,
+      32,
+      0.87
+    ],
+    "minimum": 5.2731882814205555
+  },
+  "night:display": {
+    "foreground": [
+      220,
+      227,
+      239,
+      0.7
+    ],
+    "background": [
+      10,
+      16,
+      32,
+      0.95
+    ],
+    "minimum": 6.744651860384885
+  }
+}

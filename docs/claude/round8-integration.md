@@ -1,49 +1,125 @@
 # 第八轮开发与集成记录
 
-本轮规格：round8-prompts.md。视觉依据：本轮 design/stars/index.html 和 frontend-stars-design.md 第 10 节。主目录用户改动保留，代码开发和集成均在独立 worktree。
+唯一规格：[round8-prompts.md](round8-prompts.md)。视觉依据：[设计稿](../../design/stars/index.html)、[设计说明第10节](frontend-stars-design.md)。下文“已解决”表示代码、mock和开发验证已有证据；**尚未部署，sj-r3真实数据验收全部未验证**，须等用户批准集成PR后执行。
 
-## 开发与合并计划
+主目录仍在dev，原有设计修改及未跟踪的design/topology/、.claude/launch.json均保留。所有开发与集成使用独立worktree；未合并远端PR、推tag、发布Release、部署或创建真实Issue。
 
-A（perf/pr-list）与 B（feat/frontend-data-v2）从 origin/dev bb53602 并行开发。B 经审查后，C/D/E 从 B 分支开始。集成分支 integrate/round8 从 origin/dev 开始，按 B → A → D → E → C，以 --no-ff 合并，每步前端构建。所有远端 PR 合并、部署均等待用户明确批准。
+## 分工与合并
 
-## 已确认的范围补充
+A、B从origin/dev@bb53602并行开发；B审查通过后，C/D/E从B开始并行开发。集成分支integrate/round8从同一origin/dev建立。
 
-用户明确批准任务 A 对 internal/router/event.go、router.go 做最小改动，仅传递并保存 webhook PR 状态与时间，不改变派工、验证或合并逻辑。
+|顺序|任务/分支|开发PR|本地no-ff集成提交|
+|---|---|---|---|
+|1|B feat/frontend-data-v2|[#77](https://github.com/yyydddkkk/SwarmJet/pull/77)|49735f5；A之前补合本地重算、详情全文补读、共同筛选和方法论中文说明|
+|2|A perf/pr-list|[#78](https://github.com/yyydddkkk/SwarmJet/pull/78)|ca2f0c1|
+|3|D feat/panels-v2|[#81](https://github.com/yyydddkkk/SwarmJet/pull/81)|cf172cb|
+|4|E feat/periphery-v2|[#79](https://github.com/yyydddkkk/SwarmJet/pull/79)|ca71164|
+|5|C feat/starmap-v2|[#80](https://github.com/yyydddkkk/SwarmJet/pull/80)|ea19c94|
 
-## 验证与审查
+每次合并后均实际运行并通过cd web && npm run build。E的五处冲突在Playwright配置、数据README、views.ts、round7集成测试、round8数据测试：保留B完整共享规则和D固定总览断言，适配E文字导航，保留全部回归与生产构建计时。C的三处冲突在Playwright配置、star-glyphs.ts、round7集成测试：保留计时服务，选择C最终统一图形函数，截图按正常运动/减少动态分别等待。没有通过删测试解决冲突。
 
-基线验证：origin/dev bb53602 前端 `npm ci`、`npm run build` 和 `npx playwright test` 已真实运行；85 项 Playwright 全部通过（1.3 分钟）。原有测试包含“空闲停止绘制”等旧规格断言，本轮会按新规格更新为环境动画与隐藏/减少动态时停止。
+完成初次合并后，逐页目视发现D次级界面还需返修。依次挑入四个独立修复：ef67fd2（视图切换滚顶，异步保存保位）、5c0e907（花费细条/单一排行编号/可复制短名）、12ced64（账簿参考细线行）、19476e8（账号参考管理员行），另c8fe3c4补验证；这些是合成后的审查修复，初始no-ff顺序未改变。
 
-尚在开发；本文件后续仅记录实际执行结果。真实部署验收留待用户批准集成 PR 后进行。未验证项目必须明确标为“未验证”。
+同样挑入E两项独立返修：22ca4d5修复分组首行colspan造成的fixed表格四列等分；ea0bd22降低基础font reset特异性，保留既有组件字号。完整应用壳并等待字体加载后实测：1440列宽40/484/150/90px，375列宽40/129/88/58px；简报行17px、搜索20px斜体、工具栏桌面16px/手机14px。1440×900留意末行与简报可见底边同为788px、scrollTop=0，符合一屏但没有额外垂直余量；没有缩字号或改变设计间距。
 
-## 第七轮问题清单
+C最后挑入ca868bc修复缩放把PR描边一起放粗的问题，恢复参考的像素笔宽、验证轨道与既有PR细节；d3b8b9c恢复只有待决定PR标签使用已有强调色。两项均有真实Canvas绘画目标回归。用户随后明确要求“不用过度打磨细节，没问题就提交”，据此停止继续扩展绘画细节，余项列在文末，不修改规格。
 
-|编号|验收关注点|当前结论|
+## 已获批准的例外
+
+- A对internal/router/event.go、router.go最小改动，只传递/保存webhook PR状态与时间，不改派工、验证或合并。其他后端改动仅属于PR读取。
+- axe实际指出的可读辅助文字仅由已有ink3改为已有ink2，约2.92:1→7.05:1；不改色表、字体、字号、间距和动效，不禁对比度规则，设计稿保留原样。
+
+## 审查与修复
+
+严重、重要问题均落实修复，各修复单独提交。关键结论均核对源代码、真实测试输出和截图，未以开发者自报代替验证。
+
+- A：终态PR持久化、终态读零GitHub请求；过期先返回旧结果并后台刷新推送；网络期间不持缓存锁；单项失败隔离；同PR成功/失败singleflight、最多4项远端readiness并发。修复真实head_sha解析、required CI语义、baseRef变化、可选CI失败回退。根复核补同秒webhook与在途旧读取的Postgres/API回归，修复旧head覆盖与旧事件推送（dee940d）。合并保留实时gate。
+- B：修复verifier误成星、首次inbox重复、旧分页覆盖SSE、重连慢项目盖掉先到资源、局部401和旧失败CI残留。首次ready不重拉；知道了立即本地重算；当前详情只补实际传入/传出inbox全文并合并请求。摘要、折叠、原因/时间、当前/今天/历史和方法论说明规则共享。
+- C：统一画布/图例几何，修复CI点击目标、历史悬停全文、标签避让和运行中切换减少动态的残留耀斑。保留长尾，仅在压力场景降帧。卡片内容真实退场、关闭立即不可聚焦；对D/E实际覆盖区域屏蔽文字，减少动态时只在覆盖层DOM改变后补绘一帧，随后静止。
+- D：恢复固定项目总览、参考背景/字号；标题单行、正文四行折叠、重复任务/首条消息去重、短编号复制全值。方法论慢/失败不崩、不显示假版本；查看旧版实际传版本且不激活。只有Issue可派工，check/PR信号只读；退场节点先inert/aria-hidden再卸载。
+- E：恢复被删的第七轮全部19 case，并提供[逐项映射](round8-periphery/regression-coverage.md)。修复图例旧计时器、Esc抢焦点、进入后未选项目、发送时丢新草稿。品牌/项目名导航、五工具栏、单输入线和细焦点恢复参考。面板首次需要才加载，此后宿主持续保留D退场。
+- 根任务：亲自打开参考和组合实现，补历史卡→准确历史列表、聚合卡→活跃PR列表、确认失败→移图/仍可查历史、延迟面板退出、RM补绘等联动回归。纠正Issue截图误选关联Agent的风险，要求唯一signal ID、外部事件标题和GitHub链接。另修处理Agent完整编号铺开（f3c6ca1）、编号未计入14字标签预算（1a28187）、超时失败误称已看过（5bda4b8）；均先复现失败，再验证修复。
+
+根复核还发现服务端未标作废的其他head验证会被写成“有效”。6ca0765按所读head区分“对应已读取提交/其他提交/已作废/尚未核对提交”，保留真实head合并保护；长验证fixture改为真实可出现的其他head，避免模拟数据本身矛盾。高级表单的原生选框也恢复参考既有ink色（a9f846c），不保留系统蓝色。
+
+未知英文原因置可展开详情，不猜译。任意用户标题、角色名和路径保留原内容；未补未授权后端接口。
+
+## 全量测试
+
+测试数据库为本轮Postgres18.1、sj-int-pg、55450，测试环境已设置TEST_DATABASE_URL，记录不展开连接串。最后一次完整前端运行在最终代码d3b8b9c上通过156/156，耗时4.4分钟。
+
+|命令|结果|记录|
 |---|---|---|
-|1|见 frontend-issues-round7.md 第 1 条|未验证|
-|2|见 frontend-issues-round7.md 第 2 条|未验证|
-|3|见 frontend-issues-round7.md 第 3 条|未验证|
-|4|见 frontend-issues-round7.md 第 4 条|未验证|
-|5|见 frontend-issues-round7.md 第 5 条|未验证|
-|6|见 frontend-issues-round7.md 第 6 条|未验证|
-|7|见 frontend-issues-round7.md 第 7 条|未验证|
-|8|见 frontend-issues-round7.md 第 8 条|未验证|
-|9|见 frontend-issues-round7.md 第 9 条|未验证|
-|10|见 frontend-issues-round7.md 第 10 条|未验证|
-|11|见 frontend-issues-round7.md 第 11 条|未验证|
-|12|见 frontend-issues-round7.md 第 12 条|未验证|
-|13|见 frontend-issues-round7.md 第 13 条|未验证|
-|14|见 frontend-issues-round7.md 第 14 条|未验证|
-|15|见 frontend-issues-round7.md 第 15 条|未验证|
-|16|见 frontend-issues-round7.md 第 16 条|未验证|
-|17|见 frontend-issues-round7.md 第 17 条|未验证|
-|18|见 frontend-issues-round7.md 第 18 条|未验证|
-|19|见 frontend-issues-round7.md 第 19 条|未验证|
-|20|见 frontend-issues-round7.md 第 20 条|未验证|
-|21|见 frontend-issues-round7.md 第 21 条|未验证|
-|22|见 frontend-issues-round7.md 第 22 条|未验证|
-|23|见 frontend-issues-round7.md 第 23 条|未验证|
-|24|见 frontend-issues-round7.md 第 24 条|未验证|
-|25|见 frontend-issues-round7.md 第 25 条|未验证|
-|26|见 frontend-issues-round7.md 第 26 条|未验证|
-|27|见 frontend-issues-round7.md 第 27 条|未验证|
+|TEST_DATABASE_URL="$TEST_DATABASE_URL" go test -race -p 1 ./...|全部通过，未遇ACP已知偶发失败|[Go](round8-integration/go-race.txt)|
+|python3 -m unittest discover -s deploy -p 'test_*.py'|28/28通过|[部署脚本](round8-integration/deploy-tests.txt)|
+|cd deploy && docker compose --env-file .env.example -f compose.yaml -f compose.cells.yaml config -q|退出码0|[Compose](round8-integration/compose.txt)|
+|cd web && npm ci && npm run build && npx playwright test|156/156通过，4.4分钟|[前端](round8-integration/web-final.txt)|
+
+前三项通过后仅修改前端与证据，未受影响结果复用。首次组合全量被SIGTERM中断，未算通过；新增测试曾将CSS终态none误写为单位矩阵，已纠正并验证中间帧。遗留测试预览进程已清理并改由exec直接持有，避免下次端口冲突。全量结论只取最后一次完成的运行。
+
+## 性能
+
+[PR接口完整说明](pr-list-performance-round8.md)及[原始数据](round8-pr-list/performance.txt)：15个未预热历史PR+3个需CI判断的开放PR，每个假GitHub HTTP延迟1秒，真实HTTP客户端、gate和测试数据库下冷读2.017745946秒/17次请求，热读1.62588毫秒/额外0次。不含真实App签发和仓库解析，**不是sj-r3原20.954秒接口的实机改善结论**；实机冷/热对照待部署。
+
+源码Vite明确Agent单项曾1173ms，包含即时编译，不能算1秒通过。700ms面板模块延迟回归证实静态依赖阻塞会话，延迟加载后会话先发出。早期763/997ms“简报首行”可能命中提问，已弃用。
+
+最终1秒门槛在新构建生产bundle测量，仍让PR请求延迟20秒、核对明确Agent任务摘要、检查首次快照与PR各只请求一次，未放宽阈值。源码动态导入功能仍走dev服务。生产基线(B+A+D)542ms、首轮组合554ms；最后一次组合526ms，PR请求1次；会话请求561ms，面板模块2127ms才释放。
+
+## 无障碍口径
+
+自动axe对明亮/夜空稳定态界面报告0 violations，但Canvas及半透明背景导致部分color-contrast为incomplete，不能把这些条目当作对比度通过。[原始未决项摘录](round8-integration/axe-incomplete-before-contrast-fix.json)记录具体目标。按用户已批准的同类最小例外，46f91db只将可读辅助文字/未选菜单由ink3改为已有ink2，不改色表、尺寸和动效，保留所有axe规则。
+
+新增数值回归读取真实浏览器的文字色、画布透明度和veil背景，针对被修正的简报辅助文字/显示菜单，对所有可能底层RGB值计算保守亮度边界，而非只测几个采样像素。[对比度下界](round8-integration/contrast-bounds.json)：明亮简报≥5.242、夜空简报≥5.273、明亮菜单≥6.483、夜空菜单≥6.745，均高于4.5。自动未决项仍如实保留；此补充核验不冒充对Canvas内全部图形文字的完整WCAG认证。
+
+C的[隔离原始记录](round8-starmap/README.md)：1440×1000、DPR1、正常动态、单worker/稳定renderer，常规项目约30fps，p50/p95 0.9/1.2ms，26.0%单核；300活跃+900历史压力项目约20fps，3.3/5.8ms，61.4%单核；全部项目1.4/2.6ms、23.4%单核。长尾保留，隐藏停绘、减少动态静止。以上为最后两项绘画修复之前的独立分支记录。最终组合全套另采[原始数据](round8-integration/canvas-performance.json)，默认两worker使用独立浏览器，其他worker可能同时运行，和隔离数据分开记录：常规项目29.98fps、p50/p95 0.9/1.3ms、24.98%单核；压力全部层19.99fps、1.2/1.9ms、25.98%单核；压力项目层19.99fps、3.0/5.5ms、43.97%单核。长尾保留，隐藏停绘、减少动态静止。
+
+## 第七轮27项逐条结果
+
+“已解决”以开发验证为界；真实部署验证后另写acceptance-round8.md。
+
+|#|问题|结论与证据|
+|---:|---|---|
+|1|简报长任务/状态竖排|已解决：单行摘要、状态不折行，3000字和1440×900同屏回归。|
+|2|列表全文/常驻插话|已解决：细线表格、单行摘要，操作进详情；历史搜索可用。|
+|3|详情长文/重复/长ID与sha|已解决：4行展开、去重、短值复制全值，含长任务/验证/处理Agent专项。|
+|4|星图摘要不统一|已解决：标题优先，整行含编号约14加权字，三类对象与mapNodes纯测试。|
+|5|历史终态淹没图|已解决：当前对象、历史外层、取消不画、500上限/星尘及聚合回归。|
+|6|无避让/缩放层级|已解决：优先级避让标签和主Agent，全部层仅项目/决定数，多主题同数据图。|
+|7|CI菱形不在图例|已解决：只画确定失败CI，共享图形；两种来源点击回归，不猜摘要。|
+|8|旧失败堆积|已解决：24小时窗、知道了立即重算、历史可查；超时不冒称已读。|
+|9|需要你不折叠|已解决：最多3项+还有N个，点击进列表。|
+|10|环境/出生/验证/合并动画缺失|已解决：全部动效、完成飞出、呼吸；隐藏停绘/RM静止/压力数据。|
+|11|面板硬切|已解决：九类面板/卡片进退场保留内容，关闭不可聚焦，组合退出/RM补绘回归。|
+|12|点击不推进|已解决：点击/滚轮推进，双击/Esc退回，主代理亲自核对与自动化。|
+|13|首屏/PR约21秒|部分解决：A缓存/持久化/并发、B逐资源、E延迟面板；模拟量化及生产1秒验收，原sj-r3实机未验证。|
+|14|首次ready重复快照|已解决：首次不重拉，恢复才刷新，慢PR全程一次请求断言。|
+|15|历史Agent逐个消息请求|已解决：启动仅当前目标，40/400历史均7个inbox；详情才补旧消息/全文。|
+|16|登录前裸文字|已解决：品牌排版、加载重试/登录过渡，双主题图与稳定态axe。|
+|17|PR无标题/重复号|已解决：单行标题，完整可访问名/title，不重复内层标题。|
+|18|CI与独立验证混淆|已解决：两个明确分区，CI无结果写无，验证按所读head区分对应/其他提交，合并仍实时检查。|
+|19|ISO原文|已解决：一天内相对时间，更早本地日期；消息/验证/历史/方法论覆盖。|
+|20|Agent角色作标题/终态小标题错误|已解决：任务摘要、终态写结果，标题完整可访问，正文可展开。|
+|21|开发者口吻|已解决：去掉接口/工具日志实现解释，不造日志，不可用内容短空状态。|
+|22|英文原因/内置说明|已解决：已知中文映射，未知原文置详情，不盲译用户内容。|
+|23|透出Logo/标题/文字|已解决：E遮外围文字，C屏蔽覆盖区域画布文字，含退场/RM，组合目视核对。|
+|24|半截工具栏/合并像链接|已解决：工具栏全隐藏、金色下划线动作，保留实时head/409/防双击/竞态。|
+|25|粗滚动条|已解决：各面板/卡片按设计隐藏或细化，多主题并排与375px。|
+|26|粗金色焦点|已解决：搜索/命令细线与细描边，焦点回归及截图。|
+|27|字体字符图例|已解决：SVG与Canvas共用star-glyphs几何，含历史/聚合/失败CI。|
+
+## 截图与差异
+
+全部mock，无真实凭证。以1440×900、左设计稿/右实现为主；关闭简报、等待过渡、项目面板从顶部拍摄。分图和并排图均保留。
+
+- [D：14界面×明亮/夜空，28张并排图](round8-panels/README.md)。未覆盖的版本编辑/模型凭证/连接等用既有细线、字号、斜体推导；无本周趋势/记忆/最近登录接口不造数值。
+- [E：简报/列表/图例/显示/命令双主题并排，另含登录/断线](round8-periphery/README.md)。设计无登录/首次使用/断线对应页面，索引解释推导。
+- [C：同快照3主题×2风格×2层级，及历史/聚合/决定卡双主题](round8-starmap/README.md)。参考默认对象被同fixture替换；运动相位不能锁定，差异说明见索引。
+- 复现并排图：python3 docs/claude/round8-integration/compose-evidence.py；本地需Pillow、Noto CJK。只拼接原始截图、加中文标题，不改原图内容。
+
+## 保留的局限与后续门槛
+
+没有仍需本轮修复而未修的已确认严重/重要问题。按用户最新要求停止细节打磨，保留以下次要视觉差异：未认领Issue外圈目前固定透明度，未实现原稿该圈的呼吸；PR与Issue小簇仍共用三圆符号，未区分原稿的两类细部。列表遮罩沿用已有paper而非参考veil，以保证背景文字不透出。聚合、排序、点击与列表导航已验证。
+
+其他局限：300/900动态压力项目本次约占0.44核，独立分支曾约0.61核，低端/手机耗电未验证；本轮没有靠删长尾降成本。1440×900当前fixture的留意末行恰好贴简报可见底边，更矮窗口沿设计滚动。历史时间以updatedAt近似；仅对接口可确认的合并加亮；只有Signal摘要时不猜CI。知道了不跨浏览器共享、本周走势/记忆/近期投递等平台数据缺口按已定范围保留。
+
+最终CI全绿后请求批准集成PR，并确认A～E未自动显示已合并时是否关闭。**批准前不合并、不部署。** 批准后备份环境文件、升级、确认迁移16与服务健康，再真实验证冷/热首屏、历史/动画、详情、并排图、完整Issue到合并链路和断线恢复。创建Issue前先告知内容，合并测试PR前另行同意；真实验收只记录并提文档PR，新问题等用户决定。
