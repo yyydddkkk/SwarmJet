@@ -51,13 +51,13 @@ shell 在 `StarsApp.tsx` 为每个项目创建且持有一个 `ProjectStore`，�
 
 `createMockDataSource({[hiveId]: snapshot}, partialApiOverrides?)` 返回 `source`、`calls`、`snapshots`、`setSnapshot(id,next)`、`ready(id)`、`push(id,event)`、`disconnect(id)`、`connections`。创建 store 时传 `mock.source`，或 `<StarsApp source={mock.source}/>` / `<DataProvider source={mock.source}>`。未配置的操作明确报错，不能悄悄调用真实API；默认 getMethodology/listPRs/listSignals/getPRStatus 从快照返回。ready 和断线由测试手工触发，没有隐藏测试URL或生产window开关。
 
-## B/C/D 文件槽与 UI 语义
+## C/D/E 文件槽与 UI 语义
 
-- B：`stars/CanvasSlot.tsx` 与 `TimelineSlot.tsx`（可自行拆分子文件）。
-- C：`stars/PanelsSlot.tsx` 及详情、项目、平台面板。
-- D：`stars/PeripherySlot.tsx`、`LoginSlot.tsx` 及简报、列表、图例、显示、命令行。
+- C：`stars/CanvasSlot.tsx`、`star-map.ts` 与星图内部文件。
+- D：`stars/PanelsSlot.tsx` 及详情、项目、平台面板。
+- E：`stars/PeripherySlot.tsx`、`LoginSlot.tsx` 及简报、列表、图例、显示、命令行。
 - 共同类型 `stars/slots.ts`，共享状态 `stars/ui.ts`，主题 `stars/theme.ts`；按任务归属改槽位，无需共同修改 StarsApp。
 
-`StarsUI`：`getSnapshot/subscribe`、`selectProject(hiveId?)`、`selectObject({hiveId,kind,id,number?})`、`openProject(tab)`、`openPlatform(tab,setupQuery?)`、`openOverlay(overlay)`、`close()`，React 用 `useStarsUI(ui)`。platform 单独出现并清左右；list/brief 清左右；项目面板可和右详情共存；close 按 overlay → platform → selection → project → 全项目逐层退出。只有 D 注册全局快捷键/Esc；C 负责焦点 trap/归还，避免重复 close。`#/setup?...` GitHub 回调打开 platform setup，原 query 在 setupQuery（保留 connected/error）；C 应显示对应通知。
+`StarsUI`：`getSnapshot/subscribe`、`selectProject(hiveId?)`、`selectObject({hiveId,kind,id,number?})`、`openProject(tab)`、`openPlatform(tab,setupQuery?)`、`openOverlay(overlay)`、`close()`，React 用 `useStarsUI(ui)`。platform 单独出现并清左右；list/brief 清左右；项目面板可和右详情共存；close 按 overlay → platform → selection → project → 全项目逐层退出。只有 E 注册全局快捷键/Esc；D 负责焦点 trap/归还，避免重复 close。`#/setup?...` GitHub 回调打开 platform setup，原 query 在 setupQuery（保留 connected/error）；C 应显示对应通知。
 
 主题：`THEMES` 是 bright/paper/night 可扩展表，含 colors/render；`themeStore.getSnapshot/subscribe/setTheme/setStyle/setGrid`，React `useTheme`。choice 为 system/主题id，style 为 classic/simple。colors 写 `--paper/ink/ink2/ink3/hair/accent/veil`，字体写 `--title/body`；画布订阅主题对象 render 参数。仅偏好写 localStorage（全部try/catch且校验合法主题）。
