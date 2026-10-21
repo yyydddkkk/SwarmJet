@@ -17,11 +17,14 @@ type PRSnapshot struct {
 	Title, State, URL, HeadSHA string
 	Merged, Ready              bool
 	ClosedAt, UpdatedAt        time.Time
-	Reasons                    []string
+	ObservedAt                 time.Time
+	// ReadStartedAt guards a read that began before a newer webhook write.
+	ReadStartedAt time.Time
+	Reasons       []string
 }
 
 func (s *Store) PRSnapshots(ctx context.Context, hiveID string) (map[int64]PRSnapshot, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT number,title,state,merged,closed_at,url,head_sha,updated_at,ready,reasons FROM pr_snapshots WHERE hive_id=$1`, hiveID)
+	rows, err := s.Pool.Query(ctx, `SELECT number,title,state,merged,closed_at,url,head_sha,updated_at,ready,reasons,observed_at FROM pr_snapshots WHERE hive_id=$1`, hiveID)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +35,7 @@ func (s *Store) PRSnapshots(ctx context.Context, hiveID string) (map[int64]PRSna
 		var closedAt, updatedAt *time.Time
 		var reasons []byte
 		p.HiveID = hiveID
-		if err := rows.Scan(&p.Number, &p.Title, &p.State, &p.Merged, &closedAt, &p.URL, &p.HeadSHA, &updatedAt, &p.Ready, &reasons); err != nil {
+		if err := rows.Scan(&p.Number, &p.Title, &p.State, &p.Merged, &closedAt, &p.URL, &p.HeadSHA, &updatedAt, &p.Ready, &reasons, &p.ObservedAt); err != nil {
 			return nil, err
 		}
 		if closedAt != nil {
@@ -58,12 +61,15 @@ func (s *Store) SavePRSnapshot(ctx context.Context, p PRSnapshot) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	var closedAt, updatedAt any
+	var closedAt, updatedAt, readStartedAt any
 	if !p.ClosedAt.IsZero() {
 		closedAt = p.ClosedAt.UTC()
 	}
 	if !p.UpdatedAt.IsZero() {
 		updatedAt = p.UpdatedAt.UTC()
+	}
+	if !p.ReadStartedAt.IsZero() {
+		readStartedAt = p.ReadStartedAt.UTC()
 	}
 	var number int64
 	err = s.Pool.QueryRow(ctx, `INSERT INTO pr_snapshots(hive_id,number,title,state,merged,closed_at,url,head_sha,updated_at,ready,reasons)
@@ -78,7 +84,8 @@ func (s *Store) SavePRSnapshot(ctx context.Context, p PRSnapshot) (bool, error) 
 	 AND (pr_snapshots.updated_at IS NULL OR
 	      EXCLUDED.updated_at > pr_snapshots.updated_at OR
 	      (EXCLUDED.updated_at = pr_snapshots.updated_at AND EXCLUDED.state = pr_snapshots.state))
-	 RETURNING number`, p.HiveID, p.Number, p.Title, p.State, p.Merged, closedAt, p.URL, p.HeadSHA, updatedAt, p.Ready, encoded).Scan(&number)
+	 AND ($12::timestamptz IS NULL OR pr_snapshots.observed_at <= $12)
+	 RETURNING number`, p.HiveID, p.Number, p.Title, p.State, p.Merged, closedAt, p.URL, p.HeadSHA, updatedAt, p.Ready, encoded, readStartedAt).Scan(&number)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil

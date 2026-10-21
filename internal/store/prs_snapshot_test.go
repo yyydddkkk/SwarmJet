@@ -43,3 +43,28 @@ func TestPRSnapshotMigrationAndWebhookOrder(t *testing.T) {
 		t.Fatalf("reopen=%+v", items[7])
 	}
 }
+
+
+func TestPRReadCannotOverwriteSameSecondWebhookHead(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	h := newTestHive(t, s, "acme/same-second")
+	at := time.Now().UTC().Truncate(time.Second)
+	readStartedAt := at.Add(-time.Second)
+	if err := s.SaveWebhookPR(ctx, h.ID, 9, "new head", "open", false, time.Time{}, "https://github.test/pr/9", "new-head", at); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := s.SavePRSnapshot(ctx, PRSnapshot{HiveID: h.ID, Number: 9, Title: "old head", State: "open", HeadSHA: "old-head", UpdatedAt: at, ReadStartedAt: readStartedAt})
+	if err != nil || changed {
+		t.Fatalf("in-flight old read overwrote same-second webhook: changed=%t err=%v", changed, err)
+	}
+	items, err := s.PRSnapshots(ctx, h.ID)
+	if err != nil || items[9].HeadSHA != "new-head" {
+		t.Fatalf("persisted head=%+v err=%v", items[9], err)
+	}
+	// A genuinely later read may still discover another head in the same second.
+	changed, err = s.SavePRSnapshot(ctx, PRSnapshot{HiveID: h.ID, Number: 9, Title: "later head", State: "open", HeadSHA: "later-head", UpdatedAt: at, ReadStartedAt: time.Now().UTC().Add(time.Second)})
+	if err != nil || !changed {
+		t.Fatalf("later read was incorrectly rejected: changed=%t err=%v", changed, err)
+	}
+}

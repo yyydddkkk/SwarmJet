@@ -166,31 +166,27 @@ func (a *server) eventData(ctx context.Context, ref store.EventRef) (any, error)
 		if a.cfg.Merge == nil {
 			return nil, fmt.Errorf("pull request status unavailable")
 		}
+		readStartedAt := time.Now().UTC()
 		ready, err := a.cfg.Merge.Check(ctx, hive, number)
 		if err != nil {
 			return nil, err
 		}
-		_, _ = a.s.SavePRSnapshot(ctx, store.PRSnapshot{HiveID: ref.HiveID, Number: number, Title: ready.Pull.Title, State: ready.Pull.State, Merged: ready.Pull.Merged, ClosedAt: ready.Pull.ClosedAt, URL: ready.Pull.URL, HeadSHA: ready.HeadSHA, UpdatedAt: ready.Pull.UpdatedAt, Ready: ready.Ready, Reasons: ready.Reasons})
-		a.prCacheMu.Lock()
-		for key := range a.prCache {
-			if key.hive == ref.HiveID && key.number == number {
-				delete(a.prCache, key)
-			}
+		_, err = a.s.SavePRSnapshot(ctx, store.PRSnapshot{HiveID: ref.HiveID, Number: number, Title: ready.Pull.Title, State: ready.Pull.State, Merged: ready.Pull.Merged, ClosedAt: ready.Pull.ClosedAt, URL: ready.Pull.URL, HeadSHA: ready.HeadSHA, UpdatedAt: ready.Pull.UpdatedAt, ReadStartedAt: readStartedAt, Ready: ready.Ready, Reasons: ready.Reasons})
+		if err != nil {
+			return nil, err
 		}
-		if entry, ok := a.prLists[ref.HiveID]; ok {
-			items := append([]prListItem(nil), entry.prs...)
-			for i := range items {
-				if items[i].Number == number {
-					items[i].Title, items[i].URL, items[i].HeadSHA, items[i].State, items[i].Merged, items[i].Ready, items[i].Reasons, items[i].UpdatedAt, items[i].ClosedAt = ready.Pull.Title, ready.Pull.URL, ready.HeadSHA, ready.Pull.State, ready.Pull.Merged, ready.Ready, ready.Reasons, ready.Pull.UpdatedAt, ready.Pull.ClosedAt
-					items[i].Unavailable = false
-					break
-				}
-			}
-			entry.prs = items
-			a.prLists[ref.HiveID] = entry
+		// A webhook may have won while the remote read was in flight. Hydrate
+		// the persisted winner rather than publishing the superseded result.
+		snapshots, err = a.s.PRSnapshots(ctx, ref.HiveID)
+		if err != nil {
+			return nil, err
 		}
-		a.prCacheMu.Unlock()
-		return map[string]any{"hiveId": ref.HiveID, "number": number, "headSha": ready.HeadSHA, "state": ready.Pull.State, "ready": ready.Ready, "merged": ready.Pull.Merged}, nil
+		snapshot, ok := snapshots[number]
+		if !ok {
+			return nil, store.ErrNotFound
+		}
+		a.applyPRSnapshot(snapshot)
+		return map[string]any{"hiveId": ref.HiveID, "number": number, "headSha": snapshot.HeadSHA, "state": snapshot.State, "ready": snapshot.Ready, "merged": snapshot.Merged}, nil
 	}
 	data, err := a.s.EventData(ctx, ref)
 	if err != nil {

@@ -307,6 +307,7 @@ type bulkPRLister interface {
 }
 
 func (a *server) readPRList(ctx context.Context, hive domain.Hive, notify bool) ([]prListItem, error) {
+	readStartedAt := time.Now().UTC()
 	candidates, err := a.s.ProjectPRs(ctx, hive.ID)
 	if err != nil {
 		return nil, err
@@ -414,7 +415,7 @@ func (a *server) readPRList(ctx context.Context, hive domain.Hive, notify bool) 
 					item.Title, item.URL, item.HeadSHA, item.State, item.Merged, item.UpdatedAt, item.ClosedAt = p.Title, p.URL, p.HeadSHA, p.State, p.Merged, p.UpdatedAt, p.ClosedAt
 					item.Ready = false
 					item.Reasons = []string{"pull request is not open"}
-					if err := a.savePRListItem(ctx, hive.ID, item, p.ClosedAt, notify); err != nil {
+					if err := a.savePRListItem(ctx, hive.ID, item, p.ClosedAt, notify, readStartedAt); err != nil {
 						failures <- err
 					}
 					finish(item)
@@ -438,7 +439,7 @@ func (a *server) readPRList(ctx context.Context, hive domain.Hive, notify bool) 
 					}
 					if decisive {
 						item.Title, item.URL, item.HeadSHA, item.State, item.Merged, item.Ready, item.Reasons, item.UpdatedAt = blocked.Pull.Title, blocked.Pull.URL, blocked.HeadSHA, blocked.Pull.State, blocked.Pull.Merged, blocked.Ready, blocked.Reasons, blocked.Pull.UpdatedAt
-						if err := a.savePRListItem(ctx, hive.ID, item, time.Time{}, notify); err != nil {
+						if err := a.savePRListItem(ctx, hive.ID, item, time.Time{}, notify, readStartedAt); err != nil {
 							failures <- err
 						}
 						finish(item)
@@ -458,7 +459,7 @@ func (a *server) readPRList(ctx context.Context, hive domain.Hive, notify bool) 
 				if item.Reasons == nil {
 					item.Reasons = []string{}
 				}
-				if err := a.savePRListItem(ctx, hive.ID, item, status.Pull.ClosedAt, notify); err != nil {
+				if err := a.savePRListItem(ctx, hive.ID, item, status.Pull.ClosedAt, notify, readStartedAt); err != nil {
 					failures <- err
 				}
 			}
@@ -478,7 +479,7 @@ func (a *server) readPRList(ctx context.Context, hive domain.Hive, notify bool) 
 			if !ok {
 				continue
 			}
-			if p.UpdatedAt.After(item.UpdatedAt) || p.UpdatedAt.Equal(item.UpdatedAt) && p.State != item.State {
+			if p.ObservedAt.After(readStartedAt) || p.UpdatedAt.After(item.UpdatedAt) || p.UpdatedAt.Equal(item.UpdatedAt) && p.State != item.State {
 				item.Title, item.URL, item.HeadSHA, item.State, item.Merged, item.Ready, item.Reasons, item.UpdatedAt, item.ClosedAt = p.Title, p.URL, p.HeadSHA, p.State, p.Merged, p.Ready, p.Reasons, p.UpdatedAt, p.ClosedAt
 				item.Unavailable = false
 				items[i] = item
@@ -504,8 +505,8 @@ func (a *server) withPRAttestations(ctx context.Context, hiveID string, item prL
 	return item, nil
 }
 
-func (a *server) savePRListItem(ctx context.Context, hiveID string, item prListItem, closedAt time.Time, notify bool) error {
-	changed, err := a.s.SavePRSnapshot(ctx, store.PRSnapshot{HiveID: hiveID, Number: item.Number, Title: item.Title, State: item.State, Merged: item.Merged, ClosedAt: closedAt, URL: item.URL, HeadSHA: item.HeadSHA, UpdatedAt: item.UpdatedAt, Ready: item.Ready, Reasons: item.Reasons})
+func (a *server) savePRListItem(ctx context.Context, hiveID string, item prListItem, closedAt time.Time, notify bool, readStartedAt time.Time) error {
+	changed, err := a.s.SavePRSnapshot(ctx, store.PRSnapshot{HiveID: hiveID, Number: item.Number, Title: item.Title, State: item.State, Merged: item.Merged, ClosedAt: closedAt, URL: item.URL, HeadSHA: item.HeadSHA, UpdatedAt: item.UpdatedAt, ReadStartedAt: readStartedAt, Ready: item.Ready, Reasons: item.Reasons})
 	if err != nil {
 		return err
 	}

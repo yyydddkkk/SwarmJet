@@ -282,3 +282,68 @@ func TestPRCacheDoesNotHoldGlobalLockDuringNetwork(t *testing.T) {
 }
 
 func containsJSON(body, piece string) bool { return len(body) > 0 && strings.Contains(body, piece) }
+
+type webhookDuringRead struct {
+	started chan struct{}
+	release chan struct{}
+	at      time.Time
+}
+
+func (f *webhookDuringRead) Check(ctx context.Context, _ domain.Hive, n int64) (merge.Readiness, error) {
+	close(f.started)
+	select {
+	case <-f.release:
+	case <-ctx.Done():
+		return merge.Readiness{}, ctx.Err()
+	}
+	return merge.Readiness{Ready: true, HeadSHA: "old-head", Pull: merge.Pull{Number: n, State: "open", HeadSHA: "old-head", UpdatedAt: f.at}}, nil
+}
+func (*webhookDuringRead) Attestations(context.Context, string, int64) ([]domain.Attestation, error) {
+	return nil, nil
+}
+
+func TestPREventKeepsWebhookHeadWhenOldReadCompletes(t *testing.T) {
+	s, _, _ := newHiveAPITest(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h, err := s.CreateHive(ctx, domain.Hive{Name: "ordering", Repository: "acme/widgets"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Truncate(time.Second)
+	if err := s.SaveWebhookPR(ctx, h.ID, 1, "old", "open", false, time.Time{}, "https://github.test/pr/1", "old-head", at); err != nil {
+		t.Fatal(err)
+	}
+	f := &webhookDuringRead{started: make(chan struct{}), release: make(chan struct{}), at: at}
+	a := &server{s: s, cfg: Config{Merge: f}}
+	type result struct {
+		data any
+		err  error
+	}
+	completed := make(chan result, 1)
+	go func() {
+		data, err := a.eventData(ctx, store.EventRef{Type: "pr", HiveID: h.ID, ID: "1"})
+		completed <- result{data, err}
+	}()
+	select {
+	case <-f.started:
+	case <-ctx.Done():
+		t.Fatal("read did not start")
+	}
+	if err := s.SaveWebhookPR(ctx, h.ID, 1, "new", "open", false, time.Time{}, "https://github.test/pr/1", "new-head", at); err != nil {
+		t.Fatal(err)
+	}
+	close(f.release)
+	select {
+	case got := <-completed:
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		payload := got.data.(map[string]any)
+		if payload["headSha"] != "new-head" || payload["ready"] != false {
+			t.Fatalf("out-of-order event=%+v", payload)
+		}
+	case <-ctx.Done():
+		t.Fatal("read did not complete")
+	}
+}
