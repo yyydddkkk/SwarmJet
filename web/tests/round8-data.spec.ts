@@ -80,8 +80,12 @@ test("a 20 second PR request does not hold the other briefing sections", async (
   productionURL.port = String(Number(productionURL.port) + 100);
   const navigationStart = Date.now();
   await page.goto(productionURL.href);
-  await expect(page.getByRole("heading", { name: "今天，有这些事" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /为 Hive 页的 Forager 列表增加按状态筛选/ })).toBeVisible({ timeout: 1000 });
+  const brief = page.getByRole("dialog", { name: "简报" });
+  await expect(brief.getByRole("heading", { name: "正在进行" })).toBeVisible();
+  // PR metadata is still pending, so this Agent must use its task summary.
+  const workingAgent = brief.getByRole("heading", { name: "正在进行" }).locator("xpath=following-sibling::button[1]");
+  await expect(workingAgent).toContainText("为 Hive 页的 Forager 列表增加按状态筛选", { timeout: 1000 });
+  await expect(workingAgent).toBeVisible({ timeout: 1000 });
   const agentVisibleMs = Date.now() - navigationStart;
   expect(agentVisibleMs).toBeLessThan(1000);
   expect(prRequests).toBe(1);

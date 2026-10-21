@@ -330,14 +330,14 @@ test("theme CSS and choices survive reload and denied storage", async ({
   await mockStarsHTTP(page);
   await page.goto("/");
   await page.getByRole("button", { name: "显示", exact: true }).click();
-  await page.getByLabel("主题", { exact: true }).selectOption("night");
+  await page.getByRole("dialog", { name: "显示" }).getByRole("button", { name: "夜空" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "night");
   expect(
     await page.evaluate(() =>
       document.documentElement.style.getPropertyValue("--paper"),
     ),
   ).toBe("#0A1020");
-  await page.getByLabel("风格", { exact: true }).selectOption("simple");
+  await page.getByRole("dialog", { name: "显示" }).getByRole("button", { name: "简洁" }).click();
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "night");
   await expect(page.locator("html")).toHaveAttribute("data-style", "simple");
@@ -351,7 +351,7 @@ test("theme CSS and choices survive reload and denied storage", async ({
   });
   await page.reload();
   await page.getByRole("button", { name: "显示", exact: true }).click();
-  await page.getByLabel("主题", { exact: true }).selectOption("paper");
+  await page.getByRole("dialog", { name: "显示" }).getByRole("button", { name: "纸本" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
 });
 
@@ -366,7 +366,7 @@ test("corrupted theme names fall back to a usable theme", async ({ page }) => {
     "data-theme",
     /bright|night/,
   );
-  await page.getByLabel("主题", { exact: true }).selectOption("paper");
+  await page.getByRole("dialog", { name: "显示" }).getByRole("button", { name: "纸本" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
 });
 
@@ -606,7 +606,7 @@ test("offline font files load and the default shell remains reviewable", async (
   });
   await page.goto("/");
   await page.getByRole("button", { name: "显示", exact: true }).click();
-  await page.getByLabel("主题", { exact: true }).selectOption("paper");
+  await page.getByRole("dialog", { name: "显示" }).getByRole("button", { name: "纸本" }).click();
   const loaded = await page.evaluate(async () => {
     await document.fonts.load('16px "IM Fell English"');
     await document.fonts.load('16px "Noto Serif SC"', "项目");
@@ -617,6 +617,6 @@ test("offline font files load and the default shell remains reviewable", async (
   });
   expect(loaded).toBe(true);
   expect(external).toEqual([]);
-  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.keyboard.press("Escape");
   await page.screenshot({ path: "/tmp/swarmjet-r7-a-shell.png" });
 });
