@@ -1,0 +1,36 @@
+
+
+Running 23 tests using 1 worker
+
+
+
+[1/23] tests/canvas.spec.ts:212:1 › agent SSE updates nodes; unique real messages pulse and acknowledge; ambient continues and hidden stops
+[2/23] tests/canvas.spec.ts:271:1 › three lenses, pan, double click, wheel and Issue drag route to queen
+[3/23] tests/canvas.spec.ts:330:1 › observer manual PR and question decisions open correct detail
+[4/23] tests/canvas.spec.ts:380:1 › illustrative timeline freezes presentation and never changes real snapshots
+[5/23] tests/canvas.spec.ts:437:5 › pixels bright/classic
+[6/23] tests/canvas.spec.ts:437:5 › pixels bright/simple
+[7/23] tests/canvas.spec.ts:437:5 › pixels paper/classic
+[8/23] tests/canvas.spec.ts:437:5 › pixels paper/simple
+[9/23] tests/canvas.spec.ts:437:5 › pixels night/classic
+[10/23] tests/canvas.spec.ts:437:5 › pixels night/simple
+[11/23] tests/canvas.spec.ts:486:1 › merge transition and owner completion trail respect reduced motion
+[12/23] tests/canvas.spec.ts:512:1 › observer local Escape restores focus without closing project, and queue explains wait
+[13/23] tests/canvas.spec.ts:536:3 › 300 active Agent 900 history browser performance all
+tests/canvas.spec.ts:536:3 › 300 active Agent 900 history browser performance all
+CANVAS_PERFORMANCE {"agents":300,"prs":16,"history":900,"viewport":"1440x1000","dpr":1,"browser":"Chromium 153.0.8010.12","theme":"bright","style":"classic","reducedMotion":false,"mode":"all","samples":84,"p50":1.800000011920929,"p95":3.300000011920929,"max":3.899999976158142,"idleWindowMs":5002.584075999999,"idleFrames":150,"rendererCpuPercentOfOneCore":17.790805441327695,"rendererProcessCount":1,"cpuMethod":"CDP SystemInfo.getProcessInfo renderer cpuTime delta over wall time after 2.2 s settle; single worker/page; percent of one CPU core"}
+
+[14/23] tests/canvas.spec.ts:536:3 › 300 active Agent 900 history browser performance project
+tests/canvas.spec.ts:536:3 › 300 active Agent 900 history browser performance project
+CANVAS_PERFORMANCE {"agents":300,"prs":16,"history":900,"viewport":"1440x1000","dpr":1,"browser":"Chromium 153.0.8010.12","theme":"bright","style":"classic","reducedMotion":false,"mode":"project","samples":82,"p50":1.5,"p95":2.5,"max":3.199999988079071,"idleWindowMs":5002.407235999999,"idleFrames":150,"rendererCpuPercentOfOneCore":42.17969270505031,"rendererProcessCount":1,"cpuMethod":"CDP SystemInfo.getProcessInfo renderer cpuTime delta over wall time after 2.2 s settle; single worker/page; percent of one CPU core"}
+
+[15/23] tests/canvas.spec.ts:621:1 › blank click requests creation; double click cancels creation; distant projects remain
+[16/23] tests/canvas.spec.ts:646:1 › live merge spirals and completed owner flies to history
+[17/23] tests/canvas.spec.ts:684:1 › cluster opens the first six items and links to the active list
+[18/23] tests/canvas.spec.ts:698:1 › only a confirmed failed CI appears as a diamond beside its PR
+[19/23] tests/canvas.spec.ts:711:1 › hovering a finished Agent shows summary and opens its historical card
+[20/23] tests/canvas.spec.ts:726:1 › reduced motion renders a static canvas after camera settles
+[21/23] tests/canvas.spec.ts:739:1 › font completion keeps the same data revision during ambient redraw
+[22/23] tests/canvas.spec.ts:749:1 › timeline opens live, freezes only in the past, and now restores current nodes and time
+[23/23] tests/starmap-visual.spec.ts:15:1 › same round8 fixture in current canvas and design reference
+  23 passed (1.8m)

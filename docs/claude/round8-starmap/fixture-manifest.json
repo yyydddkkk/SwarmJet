@@ -1,0 +1,16 @@
+{
+  "fixture": "round8Project()",
+  "viewport": "1440x900",
+  "projectId": "swarmjet",
+  "mapNodes": 18,
+  "history": 35,
+  "prCluster": 8,
+  "issueCluster": 5,
+  "failedCI": 0,
+  "referenceCounts": {
+    "nodes": 30,
+    "history": 35,
+    "clusters": 2
+  },
+  "referenceAdapter": "Clears the design's built-in systems and bodies; rebuilds from the same ProjectSnapshot and deriveProject result, including history, clusters, decisions and CI."
+}

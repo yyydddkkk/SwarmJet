@@ -1,0 +1,21 @@
+{
+  "agents": 300,
+  "prs": 16,
+  "history": 900,
+  "viewport": "1440x1000",
+  "dpr": 1,
+  "browser": "Chromium 153.0.8010.12",
+  "theme": "bright",
+  "style": "classic",
+  "reducedMotion": false,
+  "mode": "project",
+  "samples": 82,
+  "p50": 1.5,
+  "p95": 2.5,
+  "max": 3.199999988079071,
+  "idleWindowMs": 5002.407235999999,
+  "idleFrames": 150,
+  "rendererCpuPercentOfOneCore": 42.17969270505031,
+  "rendererProcessCount": 1,
+  "cpuMethod": "CDP SystemInfo.getProcessInfo renderer cpuTime delta over wall time after 2.2 s settle; single worker/page; percent of one CPU core"
+}
