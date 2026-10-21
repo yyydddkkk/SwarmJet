@@ -19,7 +19,7 @@ test("session and resource loading start before nonessential panel code resolves
   await page.goto("/");
   await expect.poll(() => sessionAt).toBeGreaterThan(0);
   await page.getByRole("button", { name: "进入星图", exact: true }).click();
-  await page.getByRole("button", { name: "平台设置", exact: true }).click();
+  await page.getByRole("button", { name: /^(SwarmJet )?平台设置$/ }).click();
   await expect.poll(() => panelReleasedAt).toBeGreaterThan(0);
   expect(panelRequests).toBeGreaterThan(0);
   console.log(`STARTUP_BOUNDARY session=${sessionAt - startedAt}ms panelsReleased=${panelReleasedAt - startedAt}ms`);
