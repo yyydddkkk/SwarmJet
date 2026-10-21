@@ -507,8 +507,12 @@ export class ProjectStore {
       throw error;
     }
     if (this.stopped || !this.state.snapshot) return;
-    const existing = this.state.snapshot.messages.filter((message) => message.to !== address);
-    this.publish({ snapshot: { ...this.state.snapshot, messages: [...new Map([...existing, ...messages].map((message) => [message.id, message])).values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)) } });
+    const merged = new Map(this.state.snapshot.messages.map((message) => [message.id, message]));
+    for (const message of messages) {
+      const current = merged.get(message.id);
+      if (!current || "preview" in current) merged.set(message.id, message);
+    }
+    this.publish({ snapshot: { ...this.state.snapshot, messages: [...merged.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)) } });
   };
 }
 export const createProjectStore = (id: string, source?: DataSource) =>

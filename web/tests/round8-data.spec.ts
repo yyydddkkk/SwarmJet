@@ -5,6 +5,7 @@ import { mockStarsHTTP } from "./stars-http-mock";
 import { createMockDataSource } from "../src/data/mock";
 import { createProjectStore } from "../src/data/store";
 import { APIError } from "../src/data/api";
+import type { MessagePage } from "../src/data/http";
 
 test("realistic fixture exercises density and text rules", () => {
   const data = round8Project();
@@ -94,5 +95,24 @@ test("active inboxes loaded at startup are not requested again for agent events"
   mock.push("swarmjet", { type: "agent", data: fixture.agents[0] });
   await new Promise((resolve) => setImmediate(resolve));
   expect(mock.calls.filter((call) => call.method === "listMessages")).toHaveLength(0);
+  store.stop();
+});
+
+test("an opened historical inbox preserves SSE messages arriving during pagination", async () => {
+  const fixture = round8Project();
+  let complete!: (value: MessagePage) => void;
+  const mock = createMockDataSource({ swarmjet: fixture }, {
+    listMessages: async () => new Promise((resolve) => { complete = resolve; }),
+  });
+  const store = createProjectStore("swarmjet", mock.source);
+  store.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  const historical = fixture.agents[4].id;
+  const pending = store.loadAgentMessages(historical);
+  const incoming = { id: "live-while-loading", hiveId: "swarmjet", from: "queen", to: `forager:${historical}`, kind: "report" as const, trust: "agent", chainId: "", createdAt: new Date().toISOString(), preview: "实时进展" };
+  mock.push("swarmjet", { type: "message", data: incoming });
+  complete({ messages: [], truncated: false, to: incoming.to });
+  await pending;
+  expect(store.getSnapshot().snapshot?.messages.some((message) => message.id === incoming.id)).toBe(true);
   store.stop();
 });
