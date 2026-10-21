@@ -62,37 +62,47 @@ test("375px 和快捷键可操作", async ({ page }) => {
   await expect(page.getByLabel("对话与命令")).toBeFocused();
 });
 
-test("真实 axe 对每种外围界面检查所有 violations", async ({ page }) => {
-  await preview(page);
-  for (const name of ["简报", "列表", "图例", "显示"] as const) {
-    if (name === "列表") await page.getByRole("button", { name: "进入星图" }).click();
-    if (name !== "简报") await page.getByRole("button", { name }).click();
-    const result = await new AxeBuilder({ page }).analyze();
-    expect(result.violations, `${name}: ${JSON.stringify(result.violations)}`).toEqual([]);
-    if (name !== "简报") await page.keyboard.press("Escape");
+test("明亮和夜空稳定画面逐层执行完整 axe", async ({ browser }) => {
+  for (const theme of ["bright", "night"] as const) {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+    const page = await context.newPage();
+    await preview(page, theme);
+    for (const name of ["简报", "列表", "图例", "显示"] as const) {
+      if (name === "列表") await page.getByRole("button", { name: "进入星图" }).click();
+      if (name !== "简报") await page.getByRole("button", { name }).click();
+      await expect(page.getByRole("dialog", { name })).toHaveCSS("opacity", "1");
+      const result = await new AxeBuilder({ page }).analyze();
+      expect(result.violations, `${theme} ${name}: ${JSON.stringify(result.violations)}`).toEqual([]);
+      if (name !== "简报") await page.keyboard.press("Escape");
+    }
+    await context.close();
   }
 });
 
 test("登录、命令和断线状态的 axe violations 为零", async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const login = await context.newPage();
-  await mockStarsHTTP(login, { unauthenticated: true });
-  await login.goto("/");
-  await expect(login.getByRole("heading", { name: "登录 SwarmJet" })).toBeVisible();
-  await expect(login.locator(".stars-login")).toHaveCSS("opacity", "1");
-  expect((await new AxeBuilder({ page: login }).analyze()).violations).toEqual([]);
-  await login.close();
-  const page = await context.newPage();
-  const mock = await mockStarsHTTP(page);
-  await page.goto("/");
-  await page.getByRole("button", { name: "进入星图" }).click();
-  await page.getByLabel("对话与命令").fill("列表");
-  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await page.getByLabel("对话与命令").fill("");
-  await mock.disconnect();
-  await expect(page.getByRole("alert").filter({ hasText: "连接已断开" })).toBeVisible();
-  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await context.close();
+  for (const theme of ["bright", "night"] as const) {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+    await context.addInitScript((choice) => { localStorage.setItem("sj-theme", choice); localStorage.setItem("sj-legend-seen", "1"); }, theme);
+    const login = await context.newPage();
+    await mockStarsHTTP(login, { unauthenticated: true });
+    await login.goto("/");
+    await expect(login.getByRole("heading", { name: "登录 SwarmJet" })).toBeVisible();
+    await expect(login.locator(".stars-login")).toHaveCSS("opacity", "1");
+    expect((await new AxeBuilder({ page: login }).analyze()).violations, `${theme} 登录`).toEqual([]);
+    await login.close();
+    const page = await context.newPage();
+    const mock = await mockStarsHTTP(page);
+    await page.goto("/");
+    await page.getByRole("button", { name: "进入星图" }).click();
+    await page.getByLabel("对话与命令").fill("列表");
+    expect((await new AxeBuilder({ page }).analyze()).violations, `${theme} 命令`).toEqual([]);
+    await page.getByLabel("对话与命令").fill("");
+    await mock.disconnect();
+    await expect(page.getByRole("alert").filter({ hasText: "连接已断开" })).toBeVisible();
+    await expect(page.locator(".stars-status")).toHaveCSS("opacity", "1");
+    expect((await new AxeBuilder({ page }).analyze()).violations, `${theme} 断线`).toEqual([]);
+    await context.close();
+  }
 });
 
 test("明亮与夜空逐界面保存 1440×900 证据", async ({ browser }) => {

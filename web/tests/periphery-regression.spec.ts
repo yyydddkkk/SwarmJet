@@ -23,6 +23,7 @@ async function selectProject(page: import("@playwright/test").Page, name = "Swar
 const row = (list: import("@playwright/test").Locator, text: string | RegExp) =>
   list.locator("tr.item").filter({ hasText: text });
 test("真实简报四组、正常快照、SSE断线与无障碍", async ({ page }, info) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   const mock = await mockStarsHTTP(page);
   await page.goto("/");
   const brief = page.getByRole("dialog", { name: "简报", exact: true });
@@ -70,6 +71,7 @@ test("真实简报四组、正常快照、SSE断线与无障碍", async ({ page 
   ).toBeVisible();
 });
 test("键盘列表搜索、详情插话取消、Issue派活与跳转", async ({ page }, info) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   const { state } = await mockStarsHTTP(page);
   await page.goto("/");
   await closeBrief(page);
@@ -87,6 +89,7 @@ test("键盘列表搜索、详情插话取消、Issue派活与跳转", async ({ 
   await detail.getByRole("textbox", { name: "插话" }).fill("请补充测试");
   await detail.getByRole("button", { name: "发送", exact: true }).click();
   await expect.poll(() => state.calls.some((c) => c.method === "POST" && (JSON.stringify(c.body) || "").includes("请补充测试"))).toBeTruthy();
+  await expect(detail.getByRole("status").filter({ hasText: "消息已发出" })).toBeVisible();
   await detail.getByRole("button", { name: "取消 Agent" }).click();
   await expect.poll(() => state.calls.some((c) => c.path.endsWith("/cancel"))).toBeTruthy();
   await page.getByRole("button", { name: "关闭对象详情" }).click();
@@ -118,7 +121,7 @@ test("命令精确跳转、长句发queen、所有快捷键与输入隔离", asy
   await expect.poll(() => state.calls.some((c) => (JSON.stringify(c.body) || "").includes("请检查模型设置和 PR #88"))).toBeTruthy();
   await say.fill("模型"); await say.press("Enter");
   await expect(page.getByRole("heading", { name: "平台设置" })).toBeVisible();
-  await page.getByRole("button", { name: "关闭平台设置" }).click();
+  await page.keyboard.press("Escape");
   for (const [key, name] of [["b", "简报"], ["c", "列表"], ["l", "图例"]] as const) {
     await page.mouse.click(5, 5); await page.keyboard.press(key);
     await expect(page.getByRole("dialog", { name, exact: true })).toBeVisible();
@@ -169,6 +172,7 @@ test("手机完成合并、详情问题答复kind与chainId、409提示", async 
   expect(mock.state.calls.filter((c) => c.path.endsWith("/merge")).every((c) => (c.body as { headSha: string }).headSha === "observed-head-88")).toBeTruthy();
 });
 test("登录失败原因可读且无严重无障碍问题", async ({ page }, info) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await mockStarsHTTP(page, {
     unauthenticated: true,
     loginFailure: { status: 401, message: "invalid" },
@@ -333,7 +337,7 @@ test("搜索框Esc退出、空白创建事件清层与焦点归还", async ({ pa
   await list.getByLabel("查找项目、Agent 或 PR").focus();
   await page.keyboard.press("Escape");
   await expect(list).toHaveCount(0);
-  await page.getByRole("button", { name: "平台设置", exact: true }).click();
+  await page.locator(".stars-brand").click();
   await page.evaluate(() =>
     window.dispatchEvent(new CustomEvent("swarmjet:create-project")),
   );
@@ -399,7 +403,9 @@ test("列表显示queue且检查结果不能派成Issue", async ({ page }) => {
   await expect(row(list, /等待处理 Issue #91.*排队第 1 位/)).toBeVisible();
   await expect(row(list, /检查 #92 CI结果/)).toBeVisible();
   await row(list, /检查 #92 CI结果/).click();
-  await expect(page.getByRole("button", { name: /请主 Agent 处理 Issue #92/ })).toHaveCount(0);
+  const detail = page.getByRole("region", { name: "对象详情" });
+  await expect(detail.getByRole("heading", { name: "CI结果" })).toBeVisible();
+  await expect(detail.getByRole("button", { name: /请主 Agent 处理 Issue #92/ })).toHaveCount(0);
 });
 
 test("简报偏好、首次图例自动关闭及受限存储", async ({ page }) => {

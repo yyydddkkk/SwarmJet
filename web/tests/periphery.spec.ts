@@ -97,6 +97,7 @@ test("同号 Issue 与 PR 命令消歧；发送期间的新草稿保留", async 
 });
 
 test("无障碍没有 violations", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await boot(page);
   for (const name of ["简报", "列表", "图例", "显示"]) {
     if (name === "列表") await page.getByRole("button", { name: "进入星图" }).click();
@@ -154,4 +155,19 @@ test("命令栏不显示额外按钮，Enter 仍执行命令", async ({ page }) 
   expect((await submit.boundingBox())?.width).toBeLessThanOrEqual(1);
   await say.press("Enter");
   await expect(page.getByRole("dialog", { name: "平台设置" })).toBeVisible();
+});
+
+test("面板首次打开后宿主保留，关闭立即不可聚焦", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "进入星图" }).click();
+  await expect(page.locator(".stars-panels-host")).toHaveCount(0);
+  await page.locator(".stars-cartouche").click();
+  const host = page.locator(".stars-panels-host");
+  await expect(host).toHaveCount(1);
+  await expect(host).not.toHaveAttribute("inert", "");
+  await expect(page.getByRole("region", { name: "项目面板" })).toBeVisible();
+  await page.getByRole("button", { name: "关闭项目面板" }).click();
+  await expect(host).toHaveCount(1);
+  await expect(host).toHaveAttribute("inert", "");
+  await expect(host).toHaveAttribute("aria-hidden", "true");
 });

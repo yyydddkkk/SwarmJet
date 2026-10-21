@@ -37,7 +37,7 @@ test("联合桌面入口连接真实详情、项目设置和平台账号", async
   await expect(page.getByTestId("reviewed-pr-head")).toHaveText("observed-head-88");
   await page.getByRole("button", { name: "关闭对象详情", exact: true }).click();
   await selectProject(page, state.hives[0].hive.name);
-  await page.getByRole("button", { name: "项目面板", exact: true }).click();
+  await page.locator(".stars-cartouche").click();
   const project = page.getByRole("region", { name: "项目面板", exact: true });
   await project.getByRole("button", { name: "设置", exact: true }).click();
   await project.getByLabel("并发上限", { exact: true }).fill("5");
@@ -47,7 +47,7 @@ test("联合桌面入口连接真实详情、项目设置和平台账号", async
   expect(patch.body).toMatchObject({ config: { maxConcurrentForagers: 5 } });
   expect(patch.headers["x-requested-with"]).toBe("swarmjet");
   await page.getByRole("button", { name: "关闭项目面板", exact: true }).click();
-  await page.getByRole("button", { name: "平台设置", exact: true }).click();
+  await page.keyboard.press(",");
   const platform = page.getByRole("dialog", { name: "平台设置", exact: true });
   await platform.getByRole("button", { name: "账簿", exact: true }).click();
   await expect(platform.getByRole("heading", { name: "账簿", exact: true })).toBeVisible();
@@ -97,7 +97,7 @@ test("时间控件可操作，断线提示在项目面板上可见并保持至�
   await page.getByRole("button", { name: "曝光", exact: true }).click();
   await expect(page.getByRole("button", { name: "暂停", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "关闭时间轴", exact: true }).click();
-  await page.getByRole("button", { name: "项目面板", exact: true }).click();
+  await page.locator(".stars-cartouche").click();
   await expect(page.getByTestId("methodology-version")).toBeVisible();
   await page.evaluate(() => (window as any).__starsStream.pauseReady());
   fixture.state.hives[0].hive.name = "恢复后的项目";
@@ -114,6 +114,7 @@ test("时间控件可操作，断线提示在项目面板上可见并保持至�
 });
 
 test("完整mock界面的主题截图及登录简报列表无障碍证据", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   mkdirSync(evidence, { recursive: true });
   const { state } = await mockStarsHTTP(page);
   for (const [index, agent] of state.agents.swarmjet.entries()) {
@@ -146,10 +147,10 @@ test("完整mock界面的主题截图及登录简报列表无障碍证据", asyn
     await settle(page);
     await page.screenshot({ path: resolve(evidence, `${theme}-${style}.png`) });
   }
-  await page.getByRole("button", { name: "项目面板", exact: true }).click();
+  await page.locator(".stars-cartouche").click();
   await expect(page.getByTestId("methodology-version")).toBeVisible();
   await page.screenshot({ path: resolve(evidence, "project-panel.png") });
-  await page.getByRole("button", { name: "平台设置", exact: true }).click();
+  await page.keyboard.press(",");
   const platform = page.getByRole("dialog", { name: "平台设置", exact: true });
   await expect(platform.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
   await expect(platform.getByRole("heading", { name: "平台设置", exact: true })).toHaveCSS("font-style", "normal");
@@ -160,7 +161,7 @@ test("完整mock界面的主题截图及登录简报列表无障碍证据", asyn
   await page.screenshot({ path: resolve(evidence, "list.png") });
   await page.getByRole("dialog", { name: "列表", exact: true })
     .getByRole("button", { name: "关闭", exact: true }).click();
-  await page.getByRole("button", { name: "平台设置", exact: true }).click();
+  await page.locator(".stars-brand").click();
   await platform.getByRole("button", { name: "账号", exact: true }).click();
   await platform.getByRole("button", { name: "退出登录", exact: true }).click();
   await expect(page.getByRole("heading", { name: "登录 SwarmJet", exact: true })).toBeVisible();

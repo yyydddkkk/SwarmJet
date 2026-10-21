@@ -14,4 +14,4 @@
 
 本轮列表中的“今天”按对象更新时间筛选，“历史”包括所有已结束对象，包含今天结束的对象；画布的历史星结束时间按 Agent `updatedAt` 近似。费用只显示 API 已提供的 Agent `costUsd`，未填的对象留空。
 
-验证：`cd web && npm ci && npm run build`；第七轮原用例恢复后详见 [覆盖映射](regression-coverage.md) 与 [恢复后构建日志](build-restored.log)。先前的 [93/93 日志](playwright.log) 在覆盖复核中被退回，**不作为最终全量结果**。恢复后的完整命令 `cd web && PLAYWRIGHT_PORT=5278 npx playwright test` 见 [playwright-restored.log](playwright-restored.log)：112/113 通过；E 单支唯一红项为 check 详情误显示 Issue 派活按钮，依赖 D 的 Issue-only 守卫提交 `4d3d204`，待 D→E 集成后联合验证。专项测试仍覆盖 375px、1440×900 简报需要项和留意项同屏、快捷键、确认后共享 store 即时重算、同号 Issue/PR 命令消歧、发送期间保留新草稿，以及各外围界面完整 axe violations 检查。
+验证：`cd web && npm ci && npm run build`；第七轮原用例恢复后详见 [覆盖映射](regression-coverage.md) 与 [恢复后构建日志](build-restored.log)。先前的 [93/93 日志](playwright.log) 在覆盖复核中被退回，**不作为最终全量结果**。恢复后的完整命令 `cd web && PLAYWRIGHT_PORT=5278 npx playwright test` 见 [playwright-restored.log](playwright-restored.log)；E 单支唯一预期红项为 check 详情误显示 Issue 派活按钮，依赖 D 的 Issue-only 守卫提交 `4d3d204`，待 D→E 集成后联合验证。专项测试仍覆盖 375px、1440×900 简报需要项和留意项同屏、快捷键、确认后共享 store 即时重算、同号 Issue/PR 命令消歧、发送期间保留新草稿。axe 在明亮与夜空两主题、减少动态效果下对简报、列表、图例、显示、登录、命令及断线提示执行全部规则，未禁用 `color-contrast`；只在界面稳定后取样。
