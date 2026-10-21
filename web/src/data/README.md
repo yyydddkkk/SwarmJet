@@ -1,6 +1,6 @@
-# 星图共享数据契约（任务 A）
+# 星图共享数据契约（第八轮任务 B）
 
-B/C/D 只能从 `src/data/index.ts` 读取数据或发操作。API JSON 依据 `internal/api/{events,prs,web_lists,hives,methodology,models,setup,queen}.go` 和 `internal/domain`；没有发明历史花费或 webhook 操作。底层 HTTP 客户端已迁入本目录 `http.ts`，旧页面及旧目录已在集成阶段删除。
+C/D/E 只能从 `src/data/index.ts` 读取数据或发操作。API JSON 依据 `internal/api/{events,prs,web_lists,hives,methodology,models,setup,queen}.go` 和 `internal/domain`；没有发明历史花费或 webhook 操作。底层 HTTP 客户端在本目录 `http.ts`。
 
 ## React、画布与面板
 
@@ -8,15 +8,21 @@ B/C/D 只能从 `src/data/index.ts` 读取数据或发操作。API JSON 依据 `
 
 shell 在 `StarsApp.tsx` 为每个项目创建且持有一个 `ProjectStore`，所有组件共享 `StarsSlotProps.stores` 中的同一实例。React 组件调用 `useProjectState(store)`；画布使用 `store.getSnapshot()` / `store.subscribe(draw)`；不要在每个面板重新创建 store 或 SSE。`useProjectStore(id)` 仅用于独立挂载、自己管理生命周期的组件，不能代替 shell 已共享的实例。
 
-`ProjectStore` / `createProjectStore(id, source?)`：`start()`、`stop()`、`getSnapshot()`、`subscribe(listener)`、`refresh()`、`mergePR(number, observedHeadSha)`、`acknowledgePulses()`。`getSnapshot()` 稳定返回 `ProjectState`：`snapshot`、`derived`、`connection`、`error`、`errorStatus`、`pulses`、`revision`、`retryDelay`。`stop` 清连接、计时器及异步提交；401 暴露 errorStatus，真实 REST 同时通知 shell 回登录。
+`ProjectStore` / `createProjectStore(id, source?)`：`start()`、`stop()`、`getSnapshot()`、`subscribe(listener)`、`refresh()`、`mergePR(number, observedHeadSha)`、`loadAgentMessages(agentId)`、`acknowledgePulses()`。`getSnapshot()` 返回 `ProjectState`：`snapshot`、`derived`、`resources`、`connection`、`error`、`errorStatus`、`pulses`、`revision`、`retryDelay`。`resources` 的每个 key（`hive/agents/queen/prs/queue/signals/methodology/methodologyEvents/messages`）都有 `status: loading|ready|error` 和可选 `error`；`resources.prs` 另有可选 `stale/unavailable`。后端没有新字段也可工作。PR 区域可在 `resources.prs.status === "loading"` 时显示“正在向 GitHub 读取 PR…”。
 
 - 浏览器只开一条不带 hive 参数的 `/api/events` 连接，按 hiveId（hive 事件按 id）分发，避免HTTP/1.1六连接上限。queue/methodology JSON没有hiveId，不能猜所属项目，收到时让所有项目重新拉快照；mock仍可精确推给指定项目。
-- 每次 ready（含重连）重新拉快照，拉取期间缓存增量，快照完成后按收到顺序重放；旧请求不能覆盖新快照。
+- 首次 ready 不重复拉快照，断线重连的 ready 才重拉。各资源独立请求，最慢 PR 不阻塞项目、Agent、简报；拉取期间缓存增量，快照完成后按收到顺序重放，PR SSE 不会被晚到的列表响应覆盖。
 - message 依据 ID 去重；只有实际事件产生脉冲（同一事件 ID 一次，快照不产生脉冲）。`pulses` 至多保留最新100条，画布消费后 acknowledge。
 - agent 按 id、pr 按 number 浅合并。PR 事件还会回拉 canonical 列表，补齐 title/attestations/ownerId，保留当前快照周期内已观察到的SSE head/state/merged/ready，防30秒后端缓存回退；后续快照会对已观察的PR使用无缓存 getPRStatus 校准再接续增量，因此断线期间真实的新head也会生效；signals 在 external message 或 agent 事件后回拉。
 - 重连 1、2、4、8、16、30 秒，之后最大30秒；ready 快照成功才重置。显示 `连接已断开，正在重连`。
-- `snapshot.messages` 是 `LiveMessage = Message | MessagePreview`。SSE 没有完整 body/state/hop，使用 `messagePreview()` 显示简短内容；完整对话通过 `api.listMessages` 分页读取。初始快照会遍历各 inbox 分页并去重，包含当前管理员地址。
-- `derived`：`nodes`、`decisions`、`needsAttention`、`agentStatuses`；`deriveProject` / `agentStatus` / `messageEndpoint` / `messagePreview` 可独立使用。verifier 判断 `roleName`，卫星 `parentId = hiveId:pr:number`；queen ID 为 `hiveId:queen`；Agent ID 保持原 id。
+- `snapshot.messages` 是 `LiveMessage = Message | MessagePreview`。SSE 没有完整 body/state/hop，使用 `messagePreview()` 显示简短内容；初始消息只读主 Agent、hive、当前管理员和活跃 Agent（creating/active/parked/hibernated）。已结束的 Agent 打开详情时调用 `store.loadAgentMessages(id)`；该方法分页、去重、缓存，保留请求期间新到的 SSE 消息。
+- `derived`：`nodes`、`history`、`prGroups`、`issueGroups`、`decisions`、`needsAttention`、`agentStatuses`。verifier 不单独生成历史星；历史结束时间用 Agent `updatedAt` **近似**。历史坐标使用设计稿 `histPos` 的同一哈希和参数。
+
+### 文本与可见性纯函数
+
+从 `src/data/index.ts` 直接导入：`weightedTruncate(text,width)`、`firstSentence(task)`、`oneLineSummary(agent,{prs?,issues?},width?)`、`agentSummary(agent,links?,width?)`、`prSummary(pr,width?)`、`nodeSummary(kind,item,links?)`、`shouldCollapseLongText(text,lines=4)`、`uniqueLongTexts(texts)`、`shortSha(sha)`、`shortAgentId(id)`、`relativeTime(iso,now?,locale?)`、`localizedReason(raw)`。未知英文原因返回 `{text:"其他原因",detail:raw}`，界面应在可展开详情中展示 `detail`。
+
+星图规则：`agentVisibility(agent,now?,acknowledged?)`、`prVisible(pr)`、`issueVisible(issue,agents,now?)`、`failedCIVisible(status)`、`historyPosition(id,center?)`、`historyStars(agents,prs,now?,acknowledged?,center?,issues?)`、`aggregatePRs(prs,agents,now?)`、`aggregateIssues(issues,agents,now?)`、`labelPriority(kind)`，常量 `SUMMARY_WIDTH`、`HISTORY_POSITION`、`LABEL_PRIORITY`。`historyStars` 每颗带 `result/endedAt/ageHours/fresh/brightness/dust/x/y`；500 颗后为星尘。聚合返回 `{visible,cluster,clusterPreview,clusterLabel}`，小簇预览最多 6 项。失败 Agent 的“知道了”用 `readAcknowledged(hiveId,agentId)`、`writeAcknowledged(hiveId,agentId)` 本地读写，两者已处理禁用存储的异常。
 
 ## 对外类型
 
